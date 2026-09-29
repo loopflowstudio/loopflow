@@ -3,23 +3,24 @@
 LOO-298 · 2026-09-28 · Consolidated for Jack Heart. This is the scope checklist,
 not evidence that each preceding implementation has passed.
 
-## Next: docs and README as the spec
+## Docs and README now supply the spec
 
 Jack requested this order on 2026-09-28: rewrite the docs and README for the
 accepted model before further executable owner conversion. The recovery
-checkpoint is now rebased and published at `26a0270af`; main has acknowledged
-the docs-first step. Cover the active user guides as well as architecture:
+checkpoint is rebased and published at `26a0270af`; local docs checkpoint
+`4bb44b999` completes the initial spec rewrite. It covers the active guides:
 `README.md`, `docs/index.md`, `docs/lf.md`, `docs/agent-api.md`, `docs/waves.md`,
 architecture/reference/data/execution, and other active pages that define these
-objects. Generate derived docs through the existing generator.
+objects. Derived docs were regenerated through the existing generator.
 
 Exec is the actual lf process; AgentSession is the continuable conversation;
 FlowSession is captured resumable Flow progress. Their relationships and history
 replace the separate Run product object. Keep one explicit implementation-status
 section so the target contract does not misrepresent unfinished behavior. Keep
 current command spellings and source inventories accurate during conversion.
-The reviewable checkpoint must map the spec to the remaining implementation;
-writing the spec does not complete the requirements below.
+Architecture Reference now maps the spec to the remaining implementation;
+writing the spec does not complete the requirements below. Next is completion
+of the metric-planning repair, then the execution-owner conversion below.
 
 Docs review also found active command guidance that must follow the Chapter
 conversion: builtin split-wave, wave_start-chapter, start-chapter, wave_operate,
@@ -61,6 +62,12 @@ one managed FlowSession pointer while allowing other attributed Flows.
   provider/account identity, artifacts and outcomes all need their final owners.
   Delete `runs`, `current_run_id`, old reader/writer paths and replacement wrappers
   only after preservation and callers converge. Renaming tables is intermediate.
+  Current dependency is concrete: `store/sqlite/flows.rs::FLOW_SELECT` still
+  reads Run publication/outcome, `select_flow_turn` joins the reserved Run,
+  `publish_attempt` writes it, and verdict/route writes use Run authority.
+  `lf/commands/flow.rs::run_op` records mechanical results through CaptureHandle.
+  Convert this complete boundary with TaskLauncher and saved-launch callers;
+  preserve exact selected native history and uncertain mechanical effects.
 - Finish Ask/keyed answer, review completion, helpers (rebase conflicts/landing
   repair), replay, usage, activity and Task worker paths. Recording and resumability
   apply to headless agents as well as interactive ones.

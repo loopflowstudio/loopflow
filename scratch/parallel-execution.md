@@ -72,13 +72,29 @@ in-place scan. Review corrected old Chapter commands/packet prose, failed-turn
 navigation authority and ambiguous bind confirmation. Supervisor's coherent
 scratch updates belong in this checkpoint.
 
-Next, before another publication, fix the hosted metric-portfolio counterexample:
+Docs-first checkpoint: `4bb44b999`. The following repair addresses the hosted
+metric-portfolio counterexample:
 26a027 CI36507832289 / job109213159143 has 882 passes, one failure, 13 skipped,
 1,050 unrun. `ops::flow::tests::telemetry_flow_persists_the_portfolio_reading`
 loses an observed Wave reading when current Project planning is unavailable.
-Preserve the reading and unknown target; never invent Untargeted to green it.
-Inspect the three neighboring metrics fixtures and use one focused metrics/Flow
-proof. Raw log: `.lf/tmp/execution-model/recovery-26a027-rust-ci.log`.
+Raw log: `.lf/tmp/execution-model/recovery-26a027-rust-ci.log`.
+
+Local RED reproduced all four affected metrics/Flow failures. The repair discovers
+Wave instruments and joins persisted readings even without an unambiguous Project.
+Optional target planning distinguishes unavailable from known empty. Fresh values
+with unknown targets retain their value/window in the coordinated Rust/Swift
+`target_unavailable` cause; stale/missing evidence stays intact. CLI/Desktop row
+targets use ChapterUnavailable for the row's Wave, including stale/never-observed
+rows; known empty remains unset. No target plan or KR is mutated.
+
+Proof: `metric-final-rust.log` passes 26 focused metrics/Flow/CLI/DTO checks;
+`metric-swift-2.log` passes 22 DTO and Wave presentation checks; `metric-clippy.log`
+passes all-target Clippy. Logs are under `.lf/tmp/cut-i/`. The first Rust compile
+caught the missing reason arm; the first Swift run passed 21/22 and caught its
+stale aggregate headline expectation. Both observations remain in their logs.
+The final tests cover missing, empty, targeted and ambiguous planning over one
+saved observation, plus per-Wave unavailable target rendering. This is fixture
+and presentation-model evidence, not a rendered Desktop or full hosted result.
 
 Then resume execution owners and the full remaining-work matrix: publication,
 decision membership and mechanical results to final Session owners; offline

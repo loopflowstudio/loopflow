@@ -50,9 +50,11 @@ consumers without their coordinated migration.
 The recovery checkpoint is based on main `d9632d833` and preserves PR1317's
 saved executable/Home/database handoff and launch-failure diagnostics. Its six
 native and five canonical checks are scoped recovery evidence; the reconciled
-Session launch/retry check passes. Hosted Rust on recovery head `26a0270af` reports 882 passed, one metric-portfolio
-failure, 13 skipped and 1,050 unrun. That reader must retain observed Wave
-metrics when target planning is unknown. No full-green hosted or code-complete
+Session launch/retry check passes. Hosted Rust on recovery head `26a0270af` reports
+882 passed, one metric-portfolio failure, 13 skipped and 1,050 unrun. The repaired
+reader retains observed Wave metrics with unknown targets when planning is absent
+or ambiguous; known empty targets remain untargeted. Its focused Rust/DTO and
+Swift presentation checks pass, including CLI text. No full-green hosted or code-complete
 result is asserted here. Detailed working receipts remain with the active Task until
 final delivery curation. Existing publication/stacking/cancellation reports remain
 part of that Task's remaining scope.

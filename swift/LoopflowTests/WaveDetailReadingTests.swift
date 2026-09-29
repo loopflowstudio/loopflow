@@ -71,7 +71,7 @@ struct WaveDetailReadingTests {
             from: loadFixtureData("wave_detail.json")
         )
         let met = try #require(detail.metricPortfolio.metrics.first)
-        let metRow = WaveMetricRowPresentation(metric: met, owner: "Loopflow API")
+        let metRow = WaveMetricRowPresentation(metric: met, owner: "Loopflow API", targetUnavailable: false)
 
         #expect(metRow.name == "Task loops earn trust")
         #expect(metRow.description == "Fraction of Tasks settled during the trailing seven days that either completed with every PR landed through Loopflow auto-merge or stopped with a non-resumable failure receipt. Open Tasks are excluded. A user-landed PR or manual Git repair inside the Task fails the metric.")
@@ -94,7 +94,7 @@ struct WaveDetailReadingTests {
         })
         let unavailableRow = WaveMetricRowPresentation(
             metric: unavailable,
-            owner: "Loopflow API"
+            owner: "Loopflow API", targetUnavailable: false
         )
         #expect(unavailableRow.state == "Unavailable")
         #expect(unavailableRow.instrumentState == "Instrumented")
@@ -112,18 +112,23 @@ struct WaveDetailReadingTests {
         let presentation = WaveMetricPortfolioPresentation(portfolio: portfolio)
 
         #expect(presentation.officialCount == 4)
-        #expect(presentation.candidateCount == 6)
+        #expect(presentation.candidateCount == 7)
         #expect(presentation.holdingCount == 1)
         #expect(presentation.requiresWorkCount == 2)
         #expect(presentation.contractIssueCount == 5)
-        #expect(presentation.headline == "1 of 3 chapter targets currently hold.")
+        #expect(presentation.headline == "Chapter targets unavailable.")
+        #expect(!presentation.targetUnavailable(for: try #require(portfolio.metrics.first)))
+        let known = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
+            metrics: portfolio.metrics, contractIssues: []
+        ))
+        #expect(known.headline == "1 of 3 chapter targets currently hold.")
     }
 
     @Test("an unset chapter target preserves the reading without failing the measure")
     func untargetedMetricIsNeutral() throws {
         let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: loadFixtureData("metric_portfolio.json"))
         let metric = try #require(portfolio.metrics.first { $0.target == nil })
-        let row = WaveMetricRowPresentation(metric: metric, owner: "Wave")
+        let row = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: false)
         #expect(row.state == "No target")
         #expect(row.target == "unset for this chapter")
         #expect(row.value != "—")
@@ -133,13 +138,22 @@ struct WaveDetailReadingTests {
         #expect(presentation.headline == "No targets set for this chapter.")
     }
 
-    @Test("unavailable chapter content is not presented as an empty plan")
-    func unavailableChapterIsExplicit() {
-        let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
-            metrics: [], contractIssues: [.chapterUnavailable(waveId: "wave", reason: "PM snapshot unavailable")]
-        ))
-        #expect(presentation.headline == "Chapter targets unavailable.")
-        #expect(presentation.requiresWorkCount == 0)
+    @Test("unavailable chapter planning retains the reading and never claims no target")
+    func unavailableChapterIsExplicit() throws {
+        let fixture = try JSONDecoder().decode(MetricPortfolio.self, from: loadFixtureData("metric_portfolio.json"))
+        let metric = try #require(fixture.metrics.first { $0.identity.metricId == "target-unavailable" })
+        for metrics in [[], [metric]] {
+            let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
+                metrics: metrics, contractIssues: [.chapterUnavailable(waveId: "wave-unavailable", reason: "PM snapshot unavailable")]
+            ))
+            #expect(presentation.headline == "Chapter targets unavailable.")
+            #expect(presentation.requiresWorkCount == 0)
+            let row = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: presentation.targetUnavailable(for: metric))
+            #expect(row.target == "unavailable for this chapter")
+            #expect(row.state == "Unknown")
+            #expect(row.value == "100%")
+            #expect(row.reason == "Chapter target planning is unavailable.")
+        }
     }
 
     // The populated detail-pane hierarchy can't be driven live in every

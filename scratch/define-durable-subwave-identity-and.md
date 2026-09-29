@@ -4,7 +4,8 @@ Shaped in review-design with Jack Heart on 2026-09-28. Stacked on
 [LOO-298](https://linear.app/loopflow/issue/LOO-298)
 ([#1296](https://github.com/loopflowstudio/loopflow/pull/1296)) at
 `ce97003cf`, which includes main through #1310.
-What Jack said, in order: [subwave-identity-review.md](subwave-identity-review.md).
+What Jack said, in order: `ded3dd02a:scratch/subwave-identity-review.md`
+(retained in Git; branch preparation removed the working copy).
 What is still open: [subwave-questions.md](subwave-questions.md).
 Companions: Product [LOO-330](https://linear.app/loopflow/issue/LOO-330),
 Intelligence [LOO-331](https://linear.app/loopflow/issue/LOO-331).

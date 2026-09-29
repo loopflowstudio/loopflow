@@ -5,10 +5,13 @@ LOO-298 owns `scratch/questions.md`; this file is LOO-329's.
 
 ## Gate scope (2026-09-28)
 
-Gate treats the delta from the recorded stack base `ce97003cf` as this work:
-design/evidence notes and two Wave memory files. It does not implement the
-accepted feature or claim the inherited LOO-298 code is verified. No decision
-on the open product questions is needed to review this documentation.
+The current gate reviews build step 1 against stack base `ce97003cf`: the
+checkout-local Wave reader, shared rendering, removed memory reader, tests,
+docs and decision notes. This supersedes the earlier documentation-only gate.
+Integrated verification is blocked by inherited compilation, formatting and
+architecture failures; the complete accepted feature is not ship-ready.
+See [the review](define-durable-subwave-identity-and-review.md) for current
+proof and scope. The open product questions do not block this read slice.
 
 ## For Jack Heart
 

@@ -565,8 +565,10 @@ if source definitions disappear. Completion grants no implicit merge or
 Task-completion authority. Before launch the Task page shows its Flow template;
 after launch it shows the expanded invocation.
 
-Composed templates expand before execution. Runtime nested loops have parent
-and child FlowSessions. Membership names a node and iteration tuple in the
+Composed templates expand before execution. Taking an Iterate edge starts a
+child FlowSession for that pass. Retry keeps that child; another Iterate starts
+the next pass. Resuming the root follows its current child, including a pending
+review. Membership names a node and iteration tuple in the
 captured graph; an independent conversation about the same Task does not become
 a Flow step. Graph keys, current/completed nodes, return edges and Session
 membership use captured numeric node IDs, local to that FlowSession. Authored

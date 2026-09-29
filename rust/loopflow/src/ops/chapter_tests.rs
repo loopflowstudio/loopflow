@@ -493,6 +493,7 @@ async fn local_started_task(
         .start_task_flow(
             &task.id,
             FlowSession {
+                parent_id: None,
                 invocation: QueuedInvocation::new(
                     "captured",
                     vec![ConcreteStep::Skill(ConcreteSkill {

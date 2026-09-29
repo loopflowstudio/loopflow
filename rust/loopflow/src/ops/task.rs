@@ -2507,10 +2507,17 @@ async fn stop_task_worker(
             .task_flow(&task.id)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        if current.as_ref().is_some_and(|current| {
-            current.invocation.id != claim.invocation_id
+        let replaced = if let Some(current) = &current {
+            store.sqlite.flow_root(current.id()).map_err(task_error)?
+                != store
+                    .sqlite
+                    .flow_root(&claim.invocation_id)
+                    .map_err(task_error)?
                 || current.claim.as_ref().is_some_and(|active| active != claim)
-        }) {
+        } else {
+            false
+        };
+        if replaced {
             return Err(task_error(format!(
                 "Task {} worker changed while stopping; retry `lf task restart {}`",
                 task.plan.identifier, task.plan.identifier
@@ -2528,7 +2535,7 @@ async fn stop_task_worker(
                 // rejected by the same transaction used by worker settlement.
                 return if let Some(current) = current.as_ref().filter(|flow| flow.claim.is_some()) {
                     store
-                        .release_flow(&claim.invocation_id, current.version, Some(claim))
+                        .release_flow(current.id(), current.version, Some(claim))
                         .await
                         .map(Some)
                         .map_err(task_error)
@@ -5303,6 +5310,7 @@ mod tests {
                 &fixture.task.id,
                 crate::durable::FlowSession {
                     task_id: Some(fixture.task.id.clone()),
+                    parent_id: None,
                     wave_id: Some(fixture.task.wave_id.clone()),
                     cwd: fixture.task.worktree.clone(),
                     message: None,
@@ -5764,6 +5772,7 @@ mod tests {
             .start_task_flow(
                 &task.id,
                 crate::durable::FlowSession {
+                    parent_id: None,
                     invocation: crate::durable::test_flow_invocation(
                         "task-design",
                         1,

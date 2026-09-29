@@ -1512,6 +1512,7 @@ mod tests {
         cursor: crate::engine::ExecutionCursor,
     ) -> FlowSession {
         FlowSession {
+            parent_id: None,
             invocation,
             cursor,
             version: 0,

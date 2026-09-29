@@ -1242,6 +1242,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let position = FlowSession {
+        parent_id: None,
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,

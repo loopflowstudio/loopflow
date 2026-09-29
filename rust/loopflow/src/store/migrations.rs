@@ -5059,6 +5059,86 @@ mod tests {
     }
 
     #[test]
+    fn runtime_children_upgrade_preserves_existing_flows_without_inventing_parents() {
+        let conn = open();
+        let name = "runtime_flow_children";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        let invocation = crate::engine::invocation::QueuedInvocation::new(
+            "saved-template",
+            vec![crate::engine::ConcreteStep::Skill(
+                crate::engine::ConcreteSkill {
+                    skill: crate::engine::Skill::named("saved-skill"),
+                    policy: Default::default(),
+                    flow_parents: vec![],
+                },
+            )],
+        )
+        .unwrap();
+        let capture = |id: &str| {
+            let mut saved = invocation.clone();
+            saved.id = id.into();
+            serde_json::to_string(&saved).unwrap()
+        };
+        let cursor = serde_json::to_string(&crate::engine::ExecutionCursor::default()).unwrap();
+        for (id, state, ended) in [
+            ("current", "current", None),
+            ("past", "completed", Some(8_i64)),
+        ] {
+            conn.execute("INSERT INTO flow_sessions(id,invocation_json,review_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,ended_at)
+                VALUES(?1,?2,?3,'/retained-checkout',0,0,7,3,4,?4,?5)", rusqlite::params![id,capture(id),cursor,state,ended]).unwrap();
+        }
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let rows = conn.prepare("SELECT id,parent_id,invocation_json,review_json,cwd,position_version,worker_generation,state,ended_at FROM flow_sessions ORDER BY id").unwrap()
+            .query_map([], |row| Ok((row.get::<_,String>(0)?, row.get::<_,Option<String>>(1)?,
+                row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,String>(4)?,
+                row.get::<_,i64>(5)?, row.get::<_,i64>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<i64>>(8)?)))
+            .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "current".into(),
+                    None,
+                    capture("current"),
+                    cursor.clone(),
+                    "/retained-checkout".into(),
+                    7,
+                    3,
+                    "current".into(),
+                    None
+                ),
+                (
+                    "past".into(),
+                    None,
+                    capture("past"),
+                    cursor,
+                    "/retained-checkout".into(),
+                    7,
+                    3,
+                    "completed".into(),
+                    Some(8)
+                ),
+            ]
+        );
+        assert!(conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query([])
+            .unwrap()
+            .next()
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn conversation_admission_upgrade_preserves_inputs_history_and_connection() {
         let conn = open();
         let name = "agent_session_admission";

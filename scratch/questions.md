@@ -78,3 +78,14 @@ relationships stay separate from the frozen historical payload. Migration proof
 must retain original foreign-key/ancestry constraints, Started, exact replay,
 unknowns and canonical rollback. This is an implementation assumption, not a new
 product decision attributed to Jack.
+
+## Runtime-pass entry assumption (2026-09-29)
+
+The captured graph has backward edges with overlapping ranges, rather than static
+loop blocks. Main implements each taken Iterate edge as entry into a child pass;
+initial forward execution stays in the root. The child returns at the deciding
+node; another Iterate there creates a sibling, while an inner edge creates a
+nested child. This preserves authored targets and counters and is an implementation
+interpretation of Jack's accepted child-per-pass contract, not a new Jack decision.
+Source/canonical/public fixtures cover this interpretation; final concept review
+must retain it explicitly.

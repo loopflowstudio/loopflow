@@ -19,11 +19,12 @@ Main owns executable edits, builds/tests, cleanup, Git and its handoff. Supervis
 owns this index, other assigned scratch and isolated nonbuilding inspection/proofs.
 Builds stay serialized. Never checkpoint another active contribution or introduce
 another executable writer. The wire/Desktop researcher finished with tool64028
-exit zero; its 106-line artifact and 73-file receipt were reviewed. A new bounded
-Codex researcher (tool77919) owns only `scratch/research-active-swift-fixture.md`:
-an unapplied patch proposal for the hosted Swift active-reader fixture failure.
-It performs no source edits, builds/tests, Git or shared-state mutations. Main
-retains integration and proof; do not checkpoint its artifact while still active.
+exit zero; its 106-line artifact and 73-file receipt were reviewed. The bounded
+Swift-fixture researcher (tool77919) also exited zero. Its artifact
+`scratch/research-active-swift-fixture.md` is released with an unapplied patch;
+all twelve source/log hashes match and five diff hunk counts were checked.
+It made no source edits or behavioral proof. Main owns integration and the focused
+transport test; no bounded contributor remains active.
 
 ## Active control
 

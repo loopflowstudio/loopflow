@@ -55,6 +55,34 @@ The [Product companion · LOO-330](https://linear.app/loopflow/issue/LOO-330) an
 [Intelligence companion · LOO-331](https://linear.app/loopflow/issue/LOO-331) still
 need their drafts reconciled with this model; no worker notification is recorded.
 
+### Read slice (branch evidence, 2026-09-28)
+
+The read is implemented at `91f51361b`; parent discovery and the release split
+remain to build. The
+[read and compression ledger](https://github.com/loopflowstudio/loopflow/blob/91f51361bd40266389953d0916b852769078ebd0/scratch/subwave-read-slice.md)
+retains local evidence and reproduction paths; remote availability is unchecked.
+
+The old memory reader selected the origin checkout and walked registry parents,
+so branch edits and nested files could disappear from prompts. The ordinary
+document collector now owns all Wave Markdown, with one shared renderer for
+assembled prompts and native skill seeds. Goal seeds no longer inject a second
+memory copy. Removing the separate reader must preserve context accounting:
+`MEMORY.md` remains `Memory` kind, Wave scope and Wave bucket. The ownership hint
+names the selected checkout's memory; its exact prose is an implementation
+assumption, not another Jack Heart decision.
+
+Exact-source component harnesses passed ancestor order, file inclusion and
+exclusion, single rendering, scratch recursion and checkout-local edits;
+compression comparison covered 128 context combinations and three flow lists.
+These used reduced surrounding types and do not prove an integrated launch.
+Inherited LOO-298 compilation errors blocked context tests and all-target Clippy;
+full formatting and architecture checks also reported inherited failures.
+Changed-file formatting and diff checks passed. Integrated context, goal/native
+seed, attribution and golden checks remain required after the build is repaired.
+Task-selected context, parent rename identity, nested cron execution and the
+disposable-Home proof remain unverified. No installed-Home conversion or live
+release schedule transfer is established by this slice.
+
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
 [Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)

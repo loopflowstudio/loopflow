@@ -864,3 +864,28 @@ Combined all-target Clippy passes in 16.67s (`inherited-provider-static.log`);
 formatting and diff whitespace pass. Review keeps process evidence in Session
 and source inference constrained by immutable ancestry and write-once assignment.
 No native outcome or new execution owner was added.
+
+
+## Remove obsolete Run CRUD
+
+Checkpoint 325e0e13e was published to PR1296 after a conflict-free pinned rebase.
+This next boundary deletes Run/RunEnd/ListedRun, their store writers/readers and
+unused captured-cursor lookup. Session/Flow constructors retain their shared
+Task-to-Wave lookup under the existing durable store module. Historical SQL and
+its import/trigger dependencies remain pending their preservation conversion.
+The old selector fixture now exercises Session input history, retaining all Task
+selector forms, renamed Project ancestry, scope rejection and 56 uncapped causal
+children. Causality alone no longer fabricates helper assignment; the existing
+public child-admission proof owns that behavior. Reservation/Started/racing-bind
+fixtures now exercise AgentSession writes and preserve atomicity assertions.
+Zero-Run assertions use a test-only row count rather than the deleted public API.
+Two compile diagnostics exposed a mistaken Wave accessor edit, remaining old
+reservation fixtures and the now-unused capture lookup; all are repaired in this
+boundary. Rust API removal is documented without claiming external migration.
+
+`remove-run-crud-proof.log` passes four ancestry/Started/selector cases;
+`remove-run-crud-cli.log` passes both converted inventory and multi-origin import
+fixtures. Final all-target Clippy passes in 15.83s; formatting and whitespace
+pass. No table is dropped and no historical migration bytes change. Next is the
+reported Linux interruption failure: capture its discarded child diagnostic
+before attributing the exit-code mismatch or changing production behavior.

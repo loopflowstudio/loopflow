@@ -1,5 +1,5 @@
 use crate::durable::{FlowSession, RunId, TaskId};
-use crate::session::{AgentSession, Run, TitleSource};
+use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -47,19 +47,6 @@ impl Store {
     pub async fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<AgentSession>> {
         let run_id = run_id.clone();
         run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
-    }
-
-    pub async fn run(&self, id: &RunId) -> StoreResult<Option<Run>> {
-        let id = id.clone();
-        run_sqlite(&self.sqlite, move |store| store.run(&id)).await
-    }
-
-    pub async fn create_run(&self, run: Run) -> StoreResult<Run> {
-        let caller = crate::journal::current_exec_id();
-        run_sqlite(&self.sqlite, move |store| {
-            store.create_run(run, caller.as_ref())
-        })
-        .await
     }
 
     pub async fn create_session(
@@ -142,28 +129,6 @@ impl Store {
     > {
         run_sqlite(&self.sqlite, move |store| {
             store.conversation_snapshots(None, None, None, None, since, true)
-        })
-        .await
-    }
-
-    pub async fn runs(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-        caller: Option<&str>,
-        since: i64,
-    ) -> StoreResult<Vec<super::sqlite::ListedRun>> {
-        let [wave, project, task, caller] =
-            [wave, project, task, caller].map(|name| name.map(str::to_string));
-        run_sqlite(&self.sqlite, move |store| {
-            store.runs(
-                wave.as_deref(),
-                project.as_deref(),
-                task.as_deref(),
-                caller.as_deref(),
-                since,
-            )
         })
         .await
     }

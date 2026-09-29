@@ -466,7 +466,7 @@ mod tests {
             3,
             "activity retains the older work that ended inside the window"
         );
-        assert!(store.runs(None, None, None, None, 0).unwrap().is_empty());
+        store.assert_no_historical_runs();
         // An excluded corrupt payload must not make the recent window fail.
         rusqlite::Connection::open(&database).unwrap().execute(
             "UPDATE session_events SET payload='{' WHERE session_id=(SELECT id FROM agent_sessions WHERE input_id=?1)",

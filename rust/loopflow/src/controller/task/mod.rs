@@ -1465,7 +1465,7 @@ mod planning_tests {
             let input = unresolved.current_attempt.as_ref().unwrap();
             assert_eq!(input.run_id, run);
             assert_eq!(input.outcome, None);
-            assert!(store.run(&run).await.unwrap().is_none());
+            store.sqlite.assert_no_historical_runs();
             let session = store.session_for_run(&run).await.unwrap().unwrap();
             assert!(store
                 .sqlite
@@ -1632,7 +1632,7 @@ mod planning_tests {
             &guard.ledger.home().join("loopflow.db"),
         ));
         crate::journal::with_runtime(&task.worktree, &["managed-native-retry-proof".into()], || {
-            let (flow, run, session, prior) = runtime.block_on(async {
+            let (flow, session, prior) = runtime.block_on(async {
                 let mut flow = super::start_task_flow(&task, "task-design").unwrap();
                 flow.invocation.steps.truncate(1);
                 let flow = store.start_task_flow(&task.id, flow).await.unwrap();
@@ -1655,7 +1655,7 @@ mod planning_tests {
                 engine.wait().unwrap();
                 store.sqlite.release_session_driver(&session.id, &driver).unwrap();
                 let prior = store.sqlite.session_history(&session.id, 0, 100).unwrap();
-                (flow, run, session, prior)
+                (flow, session, prior)
             });
             // Exercise the public managed dispatch. Its --retry must survive
             // delegation; normal Task adoption policy still refuses this branch.
@@ -1668,7 +1668,7 @@ mod planning_tests {
                 assert_eq!(retried.cursor, flow.cursor);
                 assert!(retried.current_attempt.is_none() && retried.claim.is_none() && retried.failure.is_none());
                 assert_eq!(store.sqlite.session_history(&session.id, 0, 100).unwrap(), prior);
-                assert!(store.sqlite.run(&run).unwrap().is_none());
+                store.sqlite.assert_no_historical_runs();
                 let owner = crate::journal::current_process_identity().unwrap();
                 let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(&task.id, retried.id(), retried.version, &owner, time::OffsetDateTime::now_utc()).await.unwrap() else { panic!("retry claim") };
                 let next = reserved_run(&store, &task).await;
@@ -1688,8 +1688,7 @@ mod planning_tests {
                 let consumed: Vec<i64> = conn.prepare("SELECT session_event FROM flow_events WHERE flow_id=?1 AND kind='consumed'").unwrap()
                     .query_map([flow.id()], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
                 assert_eq!(consumed, vec![completion]);
-                assert!(store.sqlite.run(&run).unwrap().is_none());
-                assert!(store.sqlite.run(&next).unwrap().is_none());
+                store.sqlite.assert_no_historical_runs();
             });
             Ok(())
         }).unwrap();
@@ -3020,11 +3019,7 @@ mod planning_tests {
         assert!(ended.finished);
         assert_eq!(ended.cursor.index, 2);
         assert_eq!(ended.cursor.iteration, 0);
-        let runs = store
-            .runs(None, None, Some(task.id.as_str()), None, 0)
-            .await
-            .unwrap();
-        assert!(runs.is_empty());
+        store.sqlite.assert_no_historical_runs();
         assert!(store.task_started(&task.id).await.unwrap());
         let conn = rusqlite::Connection::open(guard.ledger.home().join("loopflow.db")).unwrap();
         let results: Vec<(i64, String)> = conn

@@ -27,9 +27,7 @@ mod execs;
 mod flows;
 mod metrics;
 mod pr_landings;
-mod runs;
 mod session_events;
-pub use runs::ListedRun;
 pub(crate) mod sessions;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
@@ -365,6 +363,18 @@ fn development_open_error(conn: &Connection, error: StoreError) -> StoreError {
 }
 
 impl SqliteStore {
+    #[cfg(test)]
+    pub(crate) fn assert_no_historical_runs(&self) {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "current execution must not create historical Run rows"
+        );
+    }
+
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
     /// the migration frontier where the installed `lf` left it. Advancing the

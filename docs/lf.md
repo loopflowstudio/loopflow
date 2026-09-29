@@ -983,7 +983,12 @@ as `lf runs`; the table names the most specific Work on each row. JSON remains
 the filtered direct `RunSnapshot` array. Each row preserves provider-authored
 cumulative counters once per usage stream. Omitted counters stay unknown,
 provider final receipts are counted explicitly, and evidence gaps remain visible.
-Run settlement never invents provider finality.
+Command settlement never invents provider finality. Native Codex usage is matched
+by recorded thread and turn to recorder checkpoints, so the same work is counted
+once. A retained prior turn supplies the thread baseline after reconnect; otherwise
+only the observed request suffix is reported with a gap. Native completion alone
+supplies neither final usage nor a command outcome. Missing original start/input
+membership stays in Session history without borrowing the current input.
 
 Provider retries retain separate native starts, outcomes and usage in the same
 AgentSession. An Exec records the actual command result; a FlowSession consumes

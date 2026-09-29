@@ -710,6 +710,11 @@ def _public_connection_contract(
                     "WHERE session_id=? AND provider_turn=? AND kind='completed'",
                     (session, orphan_turn),
                 ).fetchone()[0]
+                absent_usage = database.execute(
+                    "SELECT count(*) FROM session_events "
+                    "WHERE session_id=? AND provider_turn=? AND kind='usage'",
+                    (session, orphan_turn),
+                ).fetchone()[0]
                 driver_outcome = database.execute(
                     "SELECT outcome,exit_code FROM execs WHERE id=?", (original_driver,)
                 ).fetchone()
@@ -719,9 +724,10 @@ def _public_connection_contract(
                 "driver_outcome": driver_outcome,
                 "departed": departed,
                 "recorded_completions": absent,
+                "recorded_usage": absent_usage,
                 "native_status": native_completion["params"]["turn"]["status"],
             }
-            assert absent == 0, "a Loopflow receiver unexpectedly remained"
+            assert absent == 0 and absent_usage == 0, "a Loopflow receiver unexpectedly remained"
             control = work.parent / f"{session}-recovery"
             control.mkdir()
             controls.append(control)
@@ -777,6 +783,21 @@ def _public_connection_contract(
             assert len(starts) == 1 and starts[0]["exec_id"] == original_driver, starts
             results["driverless_recovery"]["origin"] = starts[0]
             results["driverless_recovery"]["whole_history"] = recovered
+            usage_command = _command(
+                [str(binary), "usage", "--json", "--days", "0"], work, env, timeout=15
+            )
+            assert usage_command.returncode == 0, usage_command.stderr
+            with sqlite3.connect(env["LF_DB_PATH"]) as database:
+                input_id = database.execute(
+                    "SELECT input_id FROM agent_sessions WHERE id=?", (session,)
+                ).fetchone()[0]
+            summaries = [row for row in json.loads(usage_command.stdout) if row["id"] == input_id]
+            assert len(summaries) == 1, summaries
+            summary = summaries[0]["usage"]
+            results["driverless_recovery"]["public_usage"] = summary
+            assert summary["input_tokens"] == 120 and summary["output_tokens"] == 30, summary
+            assert summary["streams"] == 3 and summary["final_streams"] == 1, summary
+            assert summary["cost_usd"] is None, summary
         results["public_connect"] = dict(
             provider_generation=generation,
             driver=driver,

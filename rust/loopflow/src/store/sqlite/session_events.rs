@@ -94,20 +94,21 @@ impl SqliteStore {
         }
         // Attribution follows the observed start. A completion recovered without
         // that start retains missing attribution instead of borrowing today's bind.
-        let attribution: (Option<String>, Option<String>) = if kind == SessionEventKind::Started {
-            tx.query_row(
-                "SELECT task_id,wave_id FROM agent_sessions WHERE id=?1",
-                [session],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
-        } else {
-            (None, None)
-        };
+        let attribution: (Option<String>, Option<String>, Option<String>) =
+            if kind == SessionEventKind::Started {
+                tx.query_row(
+                    "SELECT task_id,wave_id,input_id FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?
+            } else {
+                (None, None, None)
+            };
         tx.execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload,input_id)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![session, thread, turn, kind.as_str(), receipt, attribution.0, attribution.1,
-                time::OffsetDateTime::now_utc().unix_timestamp(), payload],
+                time::OffsetDateTime::now_utc().unix_timestamp(), payload, attribution.2],
         )?;
         let seq = tx.last_insert_rowid();
         tx.commit()?;
@@ -181,7 +182,8 @@ impl SqliteStore {
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
              WHERE e.session_id=?1 AND e.seq>?2
-             AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':'))
+             AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
+                  OR (e.kind!='observed' AND origin.input_id=?4))
              AND (?4 IS NULL OR CASE WHEN json_valid(e.payload) THEN
                  COALESCE(json_extract(e.payload,'$.evidence.schema_version'),0)!=1 OR
                  COALESCE(json_extract(e.payload,'$.evidence.type'),'') NOT IN
@@ -393,6 +395,217 @@ mod tests {
         assert_eq!(summary[1].payload["evidence"], events[2]);
         assert_eq!(store.input_events(&input).unwrap(), events);
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn native_usage_survives_driver_and_input_replacement_without_double_counting() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_00000000000000000000000000000001','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_00000000000000000000000000000001','conversation');"
+        ).unwrap();
+        let first_input =
+            crate::durable::RunId::parse("run_00000000000000000000000000000001").unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        let first = crate::id::ExecId::new();
+        let second = crate::id::ExecId::new();
+        for exec in [&first, &second] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [exec.as_str()],
+                )
+                .unwrap();
+        }
+        let driver = store
+            .claim_session_driver(&session.id, None, &first, false)
+            .unwrap();
+        store
+            .record_session_turn_origin(&session.id, "thread", "turn", 1, &first)
+            .unwrap();
+        let counts = |input, output| {
+            json!({"inputTokens":input,"outputTokens":output,
+            "cachedInputTokens":2,"reasoningOutputTokens":1})
+        };
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Usage,
+                &json!({"total":counts(12,3),"last":counts(12,3)}),
+            )
+            .unwrap();
+        let mut replacement = session.clone();
+        replacement.input_id = crate::durable::RunId::new();
+        store
+            .replace_session_input(&first_input, replacement.clone())
+            .unwrap();
+        store
+            .claim_session_driver(&session.id, Some(&driver), &second, true)
+            .unwrap();
+        // Gen 2 observes the surviving Gen 1 turn. The recorder never saw its usage.
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Usage,
+                &json!({"total":counts(20,5),"last":counts(8,2)}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Completed,
+                &json!({"status":"completed"}),
+            )
+            .unwrap();
+        let history = store.summary_for_input(&session.id, &first_input).unwrap();
+        assert_eq!(history.len(), 4);
+        assert!(history
+            .iter()
+            .all(|event| event.exec_id.as_deref() == Some(first.as_str())
+                && event.provider_generation == Some(1)));
+        assert!(store
+            .summary_for_input(&session.id, &replacement.input_id)
+            .unwrap()
+            .is_empty());
+        let old = store.input_snapshot(first_input.as_str()).unwrap();
+        assert_eq!(old.usage.input_tokens, Some(18));
+        assert_eq!(old.usage.output_tokens, Some(5));
+        assert_eq!(old.usage.cost_usd, None);
+        assert_eq!(old.usage.final_streams, 0);
+        assert_eq!(
+            old.outcome, None,
+            "native completion cannot invent the command outcome"
+        );
+        // A later recovered checkpoint measures this same turn, not extra work.
+        for (seq, event) in [
+            json!({"type":"provider_session_observed","attempt_key":"attempt","provider_session_id":"thread"}),
+            json!({"type":"usage","provider":"codex","model":null,"attempt_key":"attempt","turn_key":"turn",
+                "usage_stream_id":"recorder","observation_seq":1,"counter_kind":"cumulative","start_known":true,
+                "final_receipt":true,"usage":{"input_tokens":18,"output_tokens":5,"cost_usd":0.2}})
+        ].into_iter().enumerate() {
+            let mut evidence = json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z"});
+            evidence.as_object_mut().unwrap().extend(event.as_object().unwrap().clone());
+            let source = format!("events.jsonl:{seq}");
+            store.retain_session_observation(&session, &crate::session::SessionObservation {
+                input_id:first_input.clone(), source:source.clone(), observed_at:1, task_id:None,wave_id:None,
+                payload:json!({"input_id":first_input,"source":source,"evidence":evidence})
+            }).unwrap();
+        }
+        let old = store.input_snapshot(first_input.as_str()).unwrap();
+        assert_eq!(old.usage.streams, 1);
+        assert_eq!(old.usage.input_tokens, Some(18));
+        assert_eq!(old.usage.output_tokens, Some(5));
+        assert_eq!(old.usage.cost_usd, Some(0.2));
+        assert_eq!(old.usage.final_streams, 1);
+        // An unobserved start cannot borrow the replacement's input or attribution.
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "unknown",
+                SessionEventKind::Usage,
+                &json!({"total":counts(100,50),"last":counts(10,5)}),
+            )
+            .unwrap();
+        assert!(store
+            .summary_for_input(&session.id, &replacement.input_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .session_history(&session.id, 0, 0)
+                .unwrap()
+                .last()
+                .unwrap()
+                .exec_id,
+            None
+        );
+        // Even with a start, a late first usage snapshot is a lower bound, not the thread total.
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "partial",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "partial",
+                SessionEventKind::Usage,
+                &json!({"total":counts(100,50),"last":counts(10,5)}),
+            )
+            .unwrap();
+        let partial = store.input_snapshot(replacement.input_id.as_str()).unwrap();
+        assert_eq!(partial.usage.total_input_tokens, Some(10));
+        assert_eq!(partial.usage.output_tokens, Some(5));
+        assert!(partial.usage.gaps > 0);
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "decrease",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        for (total, last) in [(20, 20), (40, 20), (30, 10)] {
+            store.record_session_event(&session.id,"thread","decrease",SessionEventKind::Usage,
+                &json!({"total":{"inputTokens":total,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
+                    "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
+        }
+        let decreased = store.input_snapshot(replacement.input_id.as_str()).unwrap();
+        assert_eq!(
+            decreased.usage.total_input_tokens,
+            Some(50),
+            "retain 40 observed tokens plus the separate 10-token partial turn"
+        );
+        assert!(decreased.usage.gaps > partial.usage.gaps);
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "decrease",
+                SessionEventKind::Completed,
+                &json!({"status":"completed"}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "next",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        // Reconnect missed one request: 60 lifetime minus the retained 40 peak,
+        // not merely this final request's 10 tokens or the regressed 30 baseline.
+        store.record_session_event(&session.id,"thread","next",SessionEventKind::Usage,
+            &json!({"total":{"inputTokens":60,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0},
+                "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
+        assert_eq!(
+            store
+                .input_snapshot(replacement.input_id.as_str())
+                .unwrap()
+                .usage
+                .total_input_tokens,
+            Some(70)
+        );
     }
 
     #[test]

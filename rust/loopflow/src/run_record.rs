@@ -551,6 +551,193 @@ impl RunRecorder {
     }
 }
 
+/// Native notifications and recorder checkpoints describe the same turn. Prefer
+/// a final recorder receipt; otherwise supplement its stream instead of adding
+/// the provider's thread lifetime total as another measurement.
+fn recover_native_usage(
+    events: &mut Vec<EventEnvelope>,
+    history: &[crate::session::SessionEvent],
+) -> usize {
+    use crate::session::SessionEventKind;
+
+    let mut turns = BTreeMap::<(&str, &str), Vec<&crate::session::SessionEvent>>::new();
+    for event in history {
+        if event.kind != SessionEventKind::Observed {
+            if let (Some(thread), Some(turn)) = (
+                event.provider_thread.as_deref(),
+                event.provider_turn.as_deref(),
+            ) {
+                turns.entry((thread, turn)).or_default().push(event);
+            }
+        }
+    }
+    let threads: HashMap<_, _> = events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::ProviderSessionObserved {
+                attempt_key,
+                provider_session_id,
+            } => Some((attempt_key.clone(), provider_session_id.clone())),
+            _ => None,
+        })
+        .collect();
+    let recorder_len = events.len();
+    let mut gaps = 0;
+    for ((thread, turn), native) in turns {
+        let receipts: Vec<_> = native
+            .iter()
+            .filter(|event| event.kind == SessionEventKind::Usage)
+            .collect();
+        let Some(first) = receipts.first() else {
+            continue;
+        };
+        let matching: Vec<_> = events[..recorder_len]
+            .iter()
+            .filter_map(|event| match &event.event {
+                RunEvent::Usage {
+                    provider,
+                    attempt_key,
+                    turn_key,
+                    usage_stream_id,
+                    observation_seq,
+                    final_receipt,
+                    ..
+                } if provider == "codex"
+                    && turn_key == turn
+                    && threads.get(attempt_key).is_none_or(|known| known == thread) =>
+                {
+                    Some((
+                        usage_stream_id.clone(),
+                        *observation_seq,
+                        *final_receipt,
+                        threads.get(attempt_key).map(String::as_str) == Some(thread),
+                    ))
+                }
+                _ => None,
+            })
+            .collect();
+        // A turn label alone cannot correlate a different or unknown thread.
+        if matching.iter().any(|receipt| !receipt.3)
+            || matching.iter().any(|receipt| receipt.0 != matching[0].0)
+        {
+            gaps += 1;
+            continue;
+        }
+        if matching.iter().any(|receipt| receipt.2) {
+            continue;
+        }
+        let field = |value: &serde_json::Value, part: &str, key: &str| value[part][key].as_u64();
+        // `last` is one request, not a complete turn. Without earlier snapshots,
+        // retain that lower bound and its following deltas, explicitly partial.
+        let start = native
+            .iter()
+            .find(|event| event.kind == SessionEventKind::Started);
+        let previous = start
+            .and_then(|start| {
+                history.iter().rev().find(|event| {
+                    event.kind == SessionEventKind::Usage
+                        && event.provider_thread.as_deref() == Some(thread)
+                        && event.provider_turn.as_deref() != Some(turn)
+                        && event.seq < start.seq
+                })
+            })
+            .filter(|previous| {
+                history.iter().any(|event| {
+                    event.kind == SessionEventKind::Completed
+                        && event.provider_thread.as_deref() == Some(thread)
+                        && event.provider_turn == previous.provider_turn
+                        && event.seq > previous.seq
+                        && event.seq < start.expect("previous receipt requires a start").seq
+                })
+            });
+        // A retained predecessor receipt supplies the baseline when reconnect
+        // misses the first request. Otherwise only the observed suffix is known.
+        let prior_total = |key: &str| {
+            previous.and_then(|previous| {
+                history
+                    .iter()
+                    .filter(|event| {
+                        event.kind == SessionEventKind::Usage
+                            && event.provider_thread == previous.provider_thread
+                            && event.provider_turn == previous.provider_turn
+                            && event.seq <= previous.seq
+                    })
+                    .filter_map(|event| field(&event.payload, "total", key))
+                    .max()
+            })
+        };
+        let baseline = |key: &str| {
+            prior_total(key).or_else(|| {
+                field(&first.payload, "total", key)?.checked_sub(field(
+                    &first.payload,
+                    "last",
+                    key,
+                )?)
+            })
+        };
+        let known = start.is_some()
+            && [
+                "inputTokens",
+                "outputTokens",
+                "cachedInputTokens",
+                "reasoningOutputTokens",
+            ]
+            .iter()
+            .all(|key| prior_total(key).is_some() || baseline(key) == Some(0));
+        let (stream, seq) = matching
+            .iter()
+            .max_by_key(|receipt| receipt.1)
+            .map(|receipt| (receipt.0.clone(), receipt.1 + 1))
+            .unwrap_or_else(|| (format!("native:{thread}:{turn}"), 0));
+        for (index, last) in receipts.iter().enumerate() {
+            let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(last.observed_at) else {
+                gaps += 1;
+                continue;
+            };
+            let delta = |key: &str| field(&last.payload, "total", key)?.checked_sub(baseline(key)?);
+            let gross = delta("inputTokens");
+            let cached = delta("cachedInputTokens");
+            let usage = TurnUsage {
+                input_tokens: gross
+                    .zip(cached)
+                    .and_then(|(gross, cached)| gross.checked_sub(cached)),
+                output_tokens: delta("outputTokens"),
+                total_input_tokens: gross,
+                peak_input_tokens: field(&last.payload, "last", "inputTokens"),
+                context_window_tokens: last.payload["modelContextWindow"].as_u64(),
+                reasoning_tokens: delta("reasoningOutputTokens"),
+                cache_read_tokens: cached,
+                cache_write_tokens: delta("cacheWriteInputTokens"),
+                model: None,
+                cost_usd: None,
+            };
+            events.push(EventEnvelope {
+                schema_version: SCHEMA_VERSION,
+                seq: events
+                    .iter()
+                    .map(|event| event.seq)
+                    .max()
+                    .map_or(0, |seq| seq + 1),
+                observed_at,
+                event: RunEvent::Usage {
+                    usage_stream_id: stream.clone(),
+                    provider: "codex".into(),
+                    model: None,
+                    attempt_key: String::new(),
+                    turn_key: turn.into(),
+                    observation_seq: seq + index as u64,
+                    counter_kind: "cumulative".into(),
+                    start_known: known,
+                    // Completion does not include a final usage receipt in the native schema.
+                    final_receipt: false,
+                    usage: Box::new(usage),
+                },
+            });
+        }
+    }
+    gaps
+}
+
 /// The compatibility Runs/Usage projection of retained conversation input history.
 /// No current assignment, provider or completion can rewrite an earlier input.
 pub(crate) fn conversation_snapshot(
@@ -586,14 +773,19 @@ pub(crate) fn conversation_snapshot(
         } else if source.starts_with("events.jsonl:") {
             match serde_json::from_value::<EventEnvelope>(evidence.clone()) {
                 Ok(envelope) => {
-                    serde_json::to_writer(&mut events, &envelope)?;
-                    events.push(b'\n');
+                    events.push(envelope);
                 }
                 Err(_) => gaps += 1,
             }
         }
     }
-    let evidence = reduce_usage_reader(events.as_slice())?;
+    gaps += recover_native_usage(&mut events, history);
+    let mut encoded = Vec::new();
+    for event in events {
+        serde_json::to_writer(&mut encoded, &event)?;
+        encoded.push(b'\n');
+    }
+    let evidence = reduce_usage_reader(encoded.as_slice())?;
     gaps += evidence.gaps + usize::from(manifest.is_none());
     let current = session.input_id == *input_id;
     let stored_text = |field: &str| {

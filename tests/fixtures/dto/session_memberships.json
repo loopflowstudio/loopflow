@@ -36,7 +36,6 @@
         "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
-    "run_id": "run_00000000000000000000000000000001",
     "flow_membership": {
       "kind": "step",
       "flow": "task-design",
@@ -87,7 +86,6 @@
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000002",
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
@@ -150,7 +148,6 @@
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000003",
     "flow_membership": {
       "kind": "independent"
     },
@@ -193,7 +190,6 @@
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000004",
     "flow_membership": {
       "kind": "unknown",
       "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
@@ -237,7 +233,6 @@
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000006",
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
@@ -291,7 +286,6 @@
         "unavailable_reason": null
       }
     ],
-    "run_id": "run_00000000000000000000000000000007",
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
@@ -342,7 +336,6 @@
         "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
-    "run_id": "run_00000000000000000000000000000005",
     "flow_membership": {
       "kind": "step",
       "flow": "feature",

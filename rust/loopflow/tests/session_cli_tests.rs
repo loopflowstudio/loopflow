@@ -184,7 +184,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
         String::from_utf8_lossy(&opened.stderr)
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    assert_eq!(opened["run_id"], run_id.as_str());
+    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["state"], "waiting");
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
@@ -206,7 +206,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert_eq!(listed[0]["run_id"], run_id.as_str());
+    assert!(listed[0].get("run_id").is_none());
     assert!(!dir.join("events.jsonl").exists());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
@@ -220,7 +220,7 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     );
     assert_eq!(
         db.query_row(
-            "SELECT count(*) FROM agent_session_inputs WHERE session_id=?1",
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND session_id=?1",
             [&id],
             |row| row.get::<_, i64>(0)
         )
@@ -330,7 +330,11 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let selector = if resume { &run_id[4..16] } else { id };
+        let selector = if resume {
+            &run_id.strip_prefix("run_").unwrap_or(run_id)[..12]
+        } else {
+            id
+        };
         let mut second = command(home.path(), &["session", "open", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -357,7 +361,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         );
         assert!(reopened.status.success(), "{:?}", reopened);
         let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
-        assert_eq!(reopened["run_id"], run_id);
+        assert!(reopened.get("run_id").is_none());
         assert_eq!(std::fs::read_to_string(evidence).unwrap(), run_id);
         assert_eq!(reopened["state"], "active");
         assert!(active.status.success(), "{:?}", active);
@@ -460,7 +464,7 @@ fn prepare_ask(
             let ready: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions')", [], |row| row.get(0))?;
             if !ready { return Err(rusqlite::Error::QueryReturnedNoRows); }
             db.query_row(
-                "SELECT id, input_id FROM agent_sessions WHERE kind='ask' AND request=?1",
+                "SELECT id, (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture) FROM agent_sessions WHERE kind='ask' AND input_published=1 AND request=?1",
                 [question],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
@@ -489,7 +493,10 @@ fn prepare_ask(
     };
     asking.kill().unwrap();
     asking.wait().unwrap();
-    let dir = home.join("runs").join(&stored.1[4..6]).join(&stored.1);
+    let dir = home
+        .join("runs")
+        .join(&stored.1.strip_prefix("run_").unwrap_or(&stored.1)[..2])
+        .join(&stored.1);
     (stored.0, stored.1, dir)
 }
 
@@ -515,7 +522,7 @@ fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
 #[test]
 fn session_names_are_shared_and_human_names_win() {
     let home = tempfile::tempdir().unwrap();
-    let (id, run_id, dir) = prepare_ask(
+    let (id, _run_id, dir) = prepare_ask(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
         "codex",
@@ -532,7 +539,7 @@ fn session_names_are_shared_and_human_names_win() {
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title"], "Launch notes");
     assert_eq!(named["title_source"], "human");
-    assert_eq!(named["run_id"], run_id.as_str());
+    assert!(named.get("run_id").is_none());
 
     let later = run(
         home.path(),
@@ -654,12 +661,12 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
     assert_eq!(inside["kind"], "ask");
-    assert_eq!(inside["run_id"], replacement.as_str());
+    assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");
 
     let readback = listed(home.path(), id);
-    assert_eq!(readback["run_id"], replacement.as_str());
+    assert!(readback.get("run_id").is_none());
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // The boundary's Run never appears as a second, interactive Session.

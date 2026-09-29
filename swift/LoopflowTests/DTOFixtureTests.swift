@@ -129,7 +129,7 @@ struct DTOFixtureTests {
             Issue.record("expected a typed PR merge request")
         }
         #expect(snapshot.items[3].work.kind == .wave)
-        if case .steerIssued(_, .run(let id)) = snapshot.items[3].fact {
+        if case .steerIssued(_, .imported(let id)) = snapshot.items[3].fact {
             #expect(id == "run_00000000000000000000000000000001")
         } else {
             Issue.record("expected a Run-authored Steer")
@@ -354,25 +354,17 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
-    @Test("Every Session kind has a required Run reference independent of its boundary ID")
-    func sessionRequiresRun() throws {
+    @Test("Every Session kind retains its identity without a Run field")
+    func sessionIdentityHasNoRun() throws {
         let data = try loadFixtureData("session.json")
         for kind in ["conversation", "ask", "flow"] {
             var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             value["kind"] = kind
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            #expect(session.runId == "run_00000000000000000000000000000001")
-            #expect(session.runId != session.id)
-            var untitled = value
-            untitled.removeValue(forKey: "title_source")
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: untitled))
-            }
-            value.removeValue(forKey: "run_id")
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            }
-            value["run_id"] = NSNull()
+            let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session)) as? [String: Any])
+            #expect(encoded["run_id"] == nil)
+            #expect(encoded["id"] as? String == session.id)
+            value.removeValue(forKey: "title_source")
             #expect(throws: DecodingError.self) {
                 try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
             }

@@ -600,7 +600,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 store
-                    .session_for_run(&capture.run_id())
+                    .session_for_artifact(&capture.run_id())
                     .await
                     .unwrap()
                     .unwrap()
@@ -697,12 +697,13 @@ mod tests {
         // Input ancestry names its Task by id, so Project renaming preserves history.
         project.plan.slug = "desktop-renamed".into();
         store.update_project(&project).await.unwrap();
-        let session = |task_id: Option<TaskId>, caller: Option<crate::durable::RunId>| {
+        let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
             crate::session::AgentSession {
+                captured: None,
                 id: uuid::Uuid::new_v4().to_string(),
-                input_id: crate::durable::RunId::new(),
-                caller_input_id: caller,
+                artifact_key: crate::run_record::new_artifact_key(),
+                caller_artifact_key: caller,
                 input_published: true,
                 cwd: directory.path().to_path_buf(),
                 skill: Some("implement".into()),
@@ -740,7 +741,7 @@ mod tests {
         // child commands. A causal input reference does not itself assign Work.
         let helper = store
             .create_session(
-                session(Some(task.id.clone()), Some(worker.input_id.clone())),
+                session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
                 None,
             )
             .await
@@ -786,13 +787,20 @@ mod tests {
         }
         let children = store
             .sqlite
-            .conversation_snapshots(None, None, None, Some(worker.input_id.as_str()), 0, false)
+            .conversation_snapshots(
+                None,
+                None,
+                None,
+                Some(worker.artifact_key.as_str()),
+                0,
+                false,
+            )
             .unwrap();
-        assert_eq!(children[0].1.id, helper.input_id.as_str());
+        assert_eq!(children[0].1.id, helper.artifact_key.as_str());
         for _ in 0..55 {
             store
                 .create_session(
-                    session(Some(task.id.clone()), Some(worker.input_id.clone())),
+                    session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
                     None,
                 )
                 .await
@@ -800,7 +808,14 @@ mod tests {
         }
         let children = store
             .sqlite
-            .conversation_snapshots(None, None, None, Some(worker.input_id.as_str()), 0, false)
+            .conversation_snapshots(
+                None,
+                None,
+                None,
+                Some(worker.artifact_key.as_str()),
+                0,
+                false,
+            )
             .unwrap();
         assert_eq!(
             children.len(),
@@ -810,7 +825,7 @@ mod tests {
         assert!(children
             .iter()
             .all(|(work, snapshot)| snapshot.parent_run_id.as_deref()
-                == Some(worker.input_id.as_str())
+                == Some(worker.artifact_key.as_str())
                 && work.as_ref() == Some(&WorkRef::Task(task.id.clone()))
                 && snapshot
                     .subjects

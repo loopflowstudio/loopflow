@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{RunId, TaskId};
+use crate::durable::TaskId;
 use crate::id::WaveId;
 
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
@@ -24,6 +24,7 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEventKind {
+    Captured,
     Started,
     Usage,
     Completed,
@@ -36,7 +37,7 @@ pub enum SessionEventKind {
 /// Captured or imported evidence; no execution identity or authority.
 #[derive(Debug)]
 pub(crate) struct SessionObservation {
-    pub input_id: RunId,
+    pub artifact_key: String,
     pub source: String,
     pub observed_at: i64,
     pub task_id: Option<TaskId>,
@@ -47,6 +48,7 @@ pub(crate) struct SessionObservation {
 impl SessionEventKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Captured => "captured",
             Self::Started => "started",
             Self::Usage => "usage",
             Self::Completed => "completed",
@@ -58,11 +60,12 @@ impl SessionEventKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSession {
+    pub captured: Option<i64>,
     pub id: String,
     /// Immutable captured input, not a resumable execution identity.
-    pub input_id: RunId,
+    pub artifact_key: String,
     /// Causal input reference; grants neither driver nor Flow authority.
-    pub caller_input_id: Option<RunId>,
+    pub caller_artifact_key: Option<String>,
     pub input_published: bool,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
@@ -152,8 +155,9 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub captured: Option<i64>,
     pub id: String,
-    pub input_id: RunId,
+    pub artifact_key: String,
     pub title: String,
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,
@@ -184,7 +188,7 @@ pub(crate) struct FlowSummary {
     pub id: String,
     pub name: Option<String>,
     pub state: FlowSummaryState,
-    pub current_input: Option<RunId>,
+    pub current_capture: Option<i64>,
     pub pending_session: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,

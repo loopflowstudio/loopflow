@@ -2,28 +2,30 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowSession, RunId, TaskId};
+use crate::durable::{FlowSession, TaskId};
 use crate::engine::ExecutionCursor;
 use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-const SESSION_SELECT: &str = "SELECT s.id,s.input_id,s.title,s.title_source,
+const SESSION_SELECT: &str = "SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
     s.ready_summary,s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,i.caller_input_id FROM agent_sessions s LEFT JOIN agent_session_inputs i ON i.input_id=s.input_id";
+    s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
     Ok((|| {
         Ok(AgentSession {
-            caller_input_id: row
+            captured: row.get(24)?,
+            caller_artifact_key: row
                 .get::<_, Option<String>>(23)?
-                .map(|id| RunId::parse(&id))
+                .map(|id| crate::run_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
             id: row.get(0)?,
-            input_id: RunId::parse(&row.get::<_, String>(1)?).map_err(invalid)?,
+            artifact_key: crate::run_record::parse_artifact_key(&row.get::<_, String>(1)?)
+                .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
             ready_summary: row.get(4)?,
@@ -140,10 +142,10 @@ fn inventory_query(
 
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Flow/Work labels; no request or historical payload is selected.
-const SUMMARY_SELECT: &str = "SELECT s.id,s.input_id,s.title,s.title_source,
+const SUMMARY_SELECT: &str = "SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     s.ready_summary,s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
-    s.flow_session_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations
-    FROM agent_sessions s";
+    s.flow_session_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture
+    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.run_id')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
@@ -153,11 +155,11 @@ fn summary_query(page: &str) -> String {
     format!("WITH page AS MATERIALIZED ({page}),
         flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
             WHERE f.id IN (SELECT flow_session_id FROM page))
-        SELECT s.*,f.id,f.name,f.state,f.current_run_id,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
+        SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
         w.name,t.issue_identifier,
         EXISTS(SELECT 1 FROM managed_flows m WHERE m.task_id=t.id AND m.flow_id=s.flow_session_id),h.id,h.route,
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
-         WHERE session_id=s.id AND receipt_key=s.input_id||':manifest.json'
+         WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
         FROM page s
         LEFT JOIN flows f ON f.id=s.flow_session_id
@@ -173,8 +175,10 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
+            captured: row.get(17)?,
             id: row.get(0)?,
-            input_id: RunId::parse(&row.get::<_, String>(1)?).map_err(invalid)?,
+            artifact_key: crate::run_record::parse_artifact_key(&row.get::<_, String>(1)?)
+                .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
             ready_summary: row.get(4)?,
@@ -201,17 +205,17 @@ fn read_summary(
                 .get::<_, Option<String>>(16)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
-            flow: super::flows::read_flow_summary(row, 17)?,
-            wave_name: row.get(25)?,
-            task_identifier: row.get(26)?,
-            managed: row.get(27)?,
+            flow: super::flows::read_flow_summary(row, 18)?,
+            wave_name: row.get(26)?,
+            task_identifier: row.get(27)?,
+            managed: row.get(28)?,
             home_id: row
-                .get::<_, Option<String>>(28)?
+                .get::<_, Option<String>>(29)?
                 .map(|id| crate::durable::HomeId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            home_route: row.get(29)?,
-            independent: row.get::<_, Option<bool>>(30)?.unwrap_or(false),
+            home_route: row.get(30)?,
+            independent: row.get::<_, Option<bool>>(31)?.unwrap_or(false),
         })
     })())
 }
@@ -248,13 +252,15 @@ impl SqliteStore {
         &self,
     ) -> StoreResult<Vec<(Option<AgentSession>, crate::session::SessionObservation)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT coalesce(session_id,historical_session_id,input_id),input_id,
-            json_extract(imported_sql,'$.created_at'),historical_task_id,historical_wave_id,imported_sql
-            FROM agent_session_inputs WHERE imported_sql IS NOT NULL
-            ORDER BY json_extract(imported_sql,'$.created_at'),input_id")?;
+        let mut query = conn.prepare(
+            "SELECT json_extract(payload,'$.session_id'),selector,
+            json_extract(payload,'$.created_at'),historical_task_id,historical_wave_id,payload
+            FROM import_evidence WHERE source='runs'
+            ORDER BY json_extract(payload,'$.created_at'),selector",
+        )?;
         let rows = query.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, Option<String>>(3)?,
@@ -266,18 +272,14 @@ impl SqliteStore {
         for row in rows {
             let (session, input, observed_at, task, wave, raw) = row?;
             let evidence: serde_json::Value = serde_json::from_str(&raw)?;
-            let agent = historical_agent_input(&conn, &evidence)?;
-            if !agent && historical_operation_retained(&conn, &evidence)? {
+            if historical_operation_retained(&conn, &evidence)? {
                 continue;
             }
-            let session = if agent {
-                Some(match session_in(&conn, &session)? {
-                    Some(session) => session,
-                    None => historical_conversation(&evidence)?,
-                })
-            } else {
-                None
-            };
+            let session = session
+                .as_deref()
+                .map(|id| session_in(&conn, id))
+                .transpose()?
+                .flatten();
             if session.as_ref().is_some_and(|session| {
                 evidence["session_id"]
                     .as_str()
@@ -288,7 +290,7 @@ impl SqliteStore {
                 )));
             }
             inputs.push((session, crate::session::SessionObservation {
-                input_id: RunId::parse(&input).map_err(invalid)?, source: "runs".into(), observed_at,
+                artifact_key: crate::run_record::parse_artifact_key(&input).map_err(invalid)?, source: "runs".into(), observed_at,
                 task_id: task.map(|task| TaskId::parse(&task)).transpose().map_err(invalid)?,
                 wave_id: wave.map(|wave| crate::id::WaveId::parse(&wave)).transpose().map_err(invalid)?,
                 payload: serde_json::json!({"input_id":input,"source":"runs","evidence":evidence}),
@@ -308,7 +310,7 @@ impl SqliteStore {
             return Ok(selector.to_string());
         }
         let mut query = conn.prepare("SELECT id FROM (
-            SELECT input_id AS id FROM agent_session_inputs UNION SELECT caller_input_id FROM agent_session_inputs)
+            SELECT receipt_key AS id FROM session_events WHERE kind='captured' UNION SELECT json_extract(payload,'$.caller_key') FROM session_events WHERE kind='captured' UNION SELECT selector FROM import_evidence WHERE source IN ('runs','agent_session_inputs'))
             WHERE substr(id,1,length(?1))=?1 OR (substr(id,1,4)='run_' AND substr(id,5,length(?1))=?1)
             ORDER BY id LIMIT 2")?;
         let ids = query
@@ -347,7 +349,7 @@ impl SqliteStore {
         let selected = self.resolve_history_input(selector)?;
         let input = self
             .session(&selected)?
-            .map(|session| session.input_id.to_string())
+            .map(|session| session.artifact_key.to_string())
             .unwrap_or(selected);
         self.conversation_inputs(None, None, None, None, (0, false), Some(&input))?
             .pop()
@@ -377,7 +379,7 @@ impl SqliteStore {
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id WHEN r.seq IS NOT NULL THEN r.task_id ELSE s.task_id END AS task_id,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id WHEN r.seq IS NOT NULL THEN r.wave_id ELSE s.wave_id END AS wave_id,
                     COALESCE(terminal.observed_at,json_extract(r.payload,'$.evidence.ended_at')) AS ended
-                FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id
+                FROM (SELECT receipt_key AS input_id,session_id,json_extract(payload,'$.caller_key') AS caller_input_id FROM session_events WHERE kind='captured') i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.input_id||':manifest.json'
                 LEFT JOIN session_events r ON r.session_id=s.id AND r.kind='observed'
@@ -386,7 +388,7 @@ impl SqliteStore {
                     AND terminal.receipt_key=i.input_id||':terminal.json'
                 WHERE (?7 IS NULL OR i.input_id=?7) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL OR json_extract(r.payload,'$.evidence.published')=1
-                    OR (i.input_id=s.input_id AND s.input_published=1)))
+                    OR (i.input_id=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)))
                 SELECT session_id,input_id,caller_input_id,started,task_id,wave_id,
                     (SELECT name FROM waves WHERE id=inputs.wave_id),
                     (SELECT p.project_slug FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=inputs.task_id),
@@ -396,7 +398,7 @@ impl SqliteStore {
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
                     WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2))
                 AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3))
-                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT input_id FROM agent_session_inputs WHERE session_id=?4))
+                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?4))
                 AND (started>=?5 OR (?6 AND ended>=?5))
                 ORDER BY started DESC,input_id DESC")?;
             let rows = query.query_map(
@@ -422,7 +424,7 @@ impl SqliteStore {
         inputs
             .into_iter()
             .map(|(session_id, input, caller, started, task, wave, names)| {
-                let input = RunId::parse(&input).map_err(invalid)?;
+                let input = crate::run_record::parse_artifact_key(&input).map_err(invalid)?;
                 let session = self.session(&session_id)?.ok_or(StoreError::NotFound)?;
                 let history = self.summary_for_input(&session_id, &input)?;
                 let mut snapshot =
@@ -458,6 +460,7 @@ impl SqliteStore {
         }
         resolve_ancestry_in(&tx, &mut session)?;
         if let Some(mut saved) = session_in(&tx, &session.id)? {
+            session.captured = saved.captured;
             // A later rename or closure is conversation state, never overwritten by import.
             if saved.title_source == TitleSource::Human {
                 session.title = saved.title.clone();
@@ -494,7 +497,7 @@ impl SqliteStore {
             }
             return Ok(changed);
         }
-        insert_session_in(&tx, &session)?;
+        insert_session_in(&tx, &mut session, None)?;
         retain_history_in(&tx, &session, history)?;
         let pending = review.filter(|flow| flow.pending_session_id.as_deref() == Some(&session.id));
         if let Some(flow) = pending {
@@ -504,12 +507,8 @@ impl SqliteStore {
                 && current.pending_session_id.is_none()
             {
                 tx.execute(
-                    "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
-                    params![
-                        session.flow_session_id,
-                        session.id,
-                        session.input_id.as_str()
-                    ],
+                    "UPDATE flow_sessions SET pending_session_id=?2,current_capture=?3 WHERE id=?1",
+                    params![session.flow_session_id, session.id, session.captured],
                 )?;
             }
         }
@@ -537,9 +536,9 @@ impl SqliteStore {
             return Err(StoreError::InvalidAuthority("review is complete".into()));
         }
         if session.input_published {
-            session.input_id = RunId::new();
+            session.artifact_key = crate::run_record::new_artifact_key();
             session.input_published = false;
-            replace_input_in(&tx, &session)?;
+            replace_input_in(&tx, &mut session)?;
             tx.execute(
                 "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
                 [expected.id()],
@@ -555,7 +554,7 @@ impl SqliteStore {
     pub(crate) fn publish_review_run(
         &self,
         session_id: &str,
-        run_id: &RunId,
+        captured: i64,
         version: u64,
         provider: &str,
         model: Option<&str>,
@@ -564,13 +563,13 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute("UPDATE flow_sessions SET position_version=position_version+1
             WHERE state='current' AND pending_session_id=?1 AND position_version=?3
-            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.input_id=?2 AND s.input_published=0 AND s.completed_at IS NULL)",
-            params![session_id, run_id.as_str(), i64::try_from(version).map_err(invalid)?])? != 1 {
+            AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.current_capture=?2 AND s.input_published=0 AND s.completed_at IS NULL)",
+            params![session_id, captured, i64::try_from(version).map_err(invalid)?])? != 1 {
             return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
         }
         tx.execute(
-            "UPDATE agent_sessions SET input_published=1, provider=?2, model=?3 WHERE input_id=?1",
-            params![run_id.as_str(), provider, model],
+            "UPDATE agent_sessions SET input_published=1, provider=?2, model=?3 WHERE current_capture=?1",
+            params![captured, provider, model],
         )?;
         tx.commit()?;
         Ok(())
@@ -581,11 +580,34 @@ impl SqliteStore {
         session_in(&conn, id)
     }
 
-    pub fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<AgentSession>> {
+    /// Resolve an artifact alias to its immutable captured-event sequence.
+    pub fn captured_sequence(&self, artifact: &str) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1",
+                [artifact],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn captured_artifact(&self, captured: i64) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT receipt_key FROM session_events WHERE seq=?1 AND kind='captured'",
+                [captured],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM agent_session_inputs WHERE input_id=?1)"),
-            [run_id.as_str()],
+            &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)"),
+            [run_id],
             read_session,
         )
         .optional()?
@@ -610,29 +632,40 @@ impl SqliteStore {
         let session = reserve_session_in(&tx, session, caller_exec)?;
         if session.kind == SessionKind::FlowReview {
             tx.execute(
-                "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
-                params![
-                    session.flow_session_id,
-                    session.id,
-                    session.input_id.as_str()
-                ],
+                "UPDATE flow_sessions SET pending_session_id=?2,current_capture=?3 WHERE id=?1",
+                params![session.flow_session_id, session.id, session.captured],
             )?;
         }
         tx.commit()?;
         Ok(session)
     }
 
+    pub(crate) fn publish_capture(&self, id: &str, captured: Option<i64>) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE agent_sessions SET input_published=1 WHERE id=?1 AND current_capture=?2
+             AND input_published=0 AND completed_at IS NULL AND (flow_session_id IS NULL OR kind='flow_review')",
+            params![id, captured],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(
+                "conversation capture changed before publication".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Replace captured input under the existing conversation. Native history,
     /// title, feedback and assignment remain on their owners.
     pub fn replace_session_input(
         &self,
-        expected_input: &RunId,
-        session: AgentSession,
+        expected_input: Option<i64>,
+        mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
-        if previous.input_id != *expected_input
+        if previous.captured != expected_input
             || previous.completed_at.is_some()
             || previous.task_id != session.task_id
             || previous.wave_id != session.wave_id
@@ -642,9 +675,9 @@ impl SqliteStore {
                 "conversation changed before input replacement".into(),
             ));
         }
-        replace_input_in(&tx, &session)?;
-        tx.execute("UPDATE flow_sessions SET current_run_id=?2 WHERE current_run_id=?1 AND state='current'",
-            params![expected_input.as_str(),session.input_id.as_str()])?;
+        replace_input_in(&tx, &mut session)?;
+        tx.execute("UPDATE flow_sessions SET current_capture=?2 WHERE current_capture=?1 AND state='current'",
+            params![previous.captured,session.captured])?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(session)
@@ -653,14 +686,14 @@ impl SqliteStore {
     /// A review Run stored before providers were: take it from launch evidence.
     pub fn fill_run_provider(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE input_id=?1 AND provider IS NULL",
-            params![run.as_str(), provider, model],
+            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND provider IS NULL",
+            params![capture_seq_in(&conn,run)?, provider, model],
         )?;
         Ok(())
     }
@@ -669,14 +702,14 @@ impl SqliteStore {
     /// the provider it launched with.
     pub fn retarget_unpublished_run(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE input_id=?1 AND input_published=0",
-            params![run.as_str(), provider, model],
+            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND input_published=0",
+            params![capture_seq_in(&conn,run)?, provider, model],
         )?;
         Ok(())
     }
@@ -685,13 +718,13 @@ impl SqliteStore {
     pub fn bind_session(
         &self,
         id: &str,
-        expected_run: &RunId,
+        expected_capture: Option<i64>,
         task: &TaskId,
     ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if session.input_id != *expected_run {
+        if session.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
             ));
@@ -774,14 +807,14 @@ impl SqliteStore {
     /// Completion closes the Session; its Runs and provider history remain.
     /// An Ask or review closes only with the feedback its caller waits for.
     /// A Task review closes inside its invocation's transaction instead.
-    pub fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
+    pub fn complete_session(&self, id: &str, expected_capture: Option<i64>) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND input_id=?2
+            "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
              AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM managed_flows m WHERE m.task_id=agent_sessions.task_id
                  AND m.flow_id=agent_sessions.flow_session_id)",
-            params![id, expected_run.as_str(), crate::store::rows::now_unix()],
+            params![id, expected_capture, crate::store::rows::now_unix()],
         )? != 1
         {
             return Err(StoreError::InvalidAuthority(
@@ -791,20 +824,20 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<RunId>> {
+    pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT input_id FROM agent_session_inputs WHERE session_id=?1 ORDER BY input_id",
+            "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
         )?;
         let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
-        rows.map(|row| RunId::parse(&row?).map_err(invalid))
+        rows.map(|row| crate::run_record::parse_artifact_key(&row?).map_err(invalid))
             .collect()
     }
 
     pub fn rename_session(
         &self,
         id: &str,
-        expected_run: Option<&RunId>,
+        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
@@ -814,7 +847,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if expected_run.is_some_and(|run| *run != session.input_id) {
+        if expected_capture.is_some_and(|event| Some(event) != session.captured) {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before rename".into(),
             ));
@@ -828,18 +861,23 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn ready_session(&self, id: &str, expected_run: &RunId, summary: &str) -> StoreResult<()> {
+    pub fn ready_session(
+        &self,
+        id: &str,
+        expected_capture: Option<i64>,
+        summary: &str,
+    ) -> StoreResult<()> {
         if summary.trim().is_empty() {
             return Err(invalid("ready summary cannot be empty"));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tx.execute(
-            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND input_id=?2
+            "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_capture=?2
              AND completed_at IS NULL AND (kind='ask' OR EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
                  AND agent_sessions.input_published=1 AND f.pending_session_id=?1 AND f.state='current'
                  AND f.claim_json IS NULL))",
-            params![id, expected_run.as_str(), summary.trim()],
+            params![id, expected_capture, summary.trim()],
         )? != 1
         {
             return Err(StoreError::InvalidAuthority("Session is stale".into()));
@@ -853,32 +891,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-}
-
-fn historical_agent_input(conn: &Connection, row: &serde_json::Value) -> StoreResult<bool> {
-    match row["provider"].as_str() {
-        Some("loopflow") => return Ok(false),
-        Some(_) => return Ok(true),
-        None if row["session_id"].is_string() => return Ok(true),
-        None => {}
-    }
-    let (Some(flow), Some(node)) = (row["invocation_id"].as_str(), row["node"].as_u64()) else {
-        return Ok(false);
-    };
-    let Some(flow) = super::flows::flow_in(conn, flow)? else {
-        return Ok(false);
-    };
-    let graph =
-        crate::engine::flow_graph::FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
-    Ok(graph
-        .node_at(u32::try_from(node).map_err(invalid)?)
-        .is_some_and(|node| {
-            matches!(
-                node.kind,
-                crate::engine::flow_graph::FlowNodeKind::Skill
-                    | crate::engine::flow_graph::FlowNodeKind::Xor
-            )
-        }))
 }
 
 fn historical_operation_retained(conn: &Connection, row: &serde_json::Value) -> StoreResult<bool> {
@@ -898,61 +910,6 @@ fn historical_operation_retained(conn: &Connection, row: &serde_json::Value) -> 
         .unwrap_or(Ok(false))
 }
 
-/// Sessionless agent rows used the input ID as their conversation selector.
-/// Mechanical or unclassified inputs retain their original SQL payload with
-/// unknown conversation attachment; they never manufacture agent conversations.
-fn historical_conversation(row: &serde_json::Value) -> StoreResult<AgentSession> {
-    let input: String = serde_json::from_value(row["id"].clone())?;
-    if !row["session_id"].is_null() {
-        return Err(invalid(format!(
-            "historical input {input} names an unavailable Session"
-        )));
-    }
-    let skill: Option<String> = serde_json::from_value(row["skill"].clone())?;
-    let iterations = row["iterations"]
-        .as_str()
-        .map(serde_json::from_str)
-        .transpose()?;
-    Ok(AgentSession {
-        id: input.clone(),
-        input_id: RunId::parse(&input).map_err(invalid)?,
-        caller_input_id: row["caller_run_id"]
-            .as_str()
-            .map(RunId::parse)
-            .transpose()
-            .map_err(invalid)?,
-        input_published: row["published"] == 1,
-        cwd: serde_json::from_value(row["cwd"].clone())?,
-        title: skill.clone().unwrap_or(input),
-        title_source: TitleSource::Generated,
-        skill,
-        provider: serde_json::from_value(row["provider"].clone())?,
-        model: serde_json::from_value(row["model"].clone())?,
-        node: serde_json::from_value(row["node"].clone())?,
-        iterations,
-        task_id: row["task_id"]
-            .as_str()
-            .map(TaskId::parse)
-            .transpose()
-            .map_err(invalid)?,
-        wave_id: row["wave_id"]
-            .as_str()
-            .map(crate::id::WaveId::parse)
-            .transpose()
-            .map_err(invalid)?,
-        flow_session_id: serde_json::from_value(row["invocation_id"].clone())?,
-        work_source: serde_json::from_value(row["work_source"].clone())?,
-        bound_at: None,
-        kind: SessionKind::Conversation,
-        interactive: false,
-        repo: None,
-        request: None,
-        ready_summary: None,
-        completed_at: None,
-        created_at: serde_json::from_value(row["created_at"].clone())?,
-    })
-}
-
 pub(super) fn retain_history_in(
     conn: &Connection,
     session: &AgentSession,
@@ -960,11 +917,26 @@ pub(super) fn retain_history_in(
 ) -> StoreResult<bool> {
     let mut changed = false;
     for observation in history {
-        if observation.source == "runs" {
-            let caller = observation.payload["evidence"]["caller_run_id"].as_str();
-            changed |= attach_input_in(conn, &observation.input_id, &session.id, caller)?;
-        }
-        let key = format!("{}:{}", observation.input_id, observation.source);
+        let captured: Option<(i64,String)> = conn.query_row(
+            "SELECT seq,session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [&observation.artifact_key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
+        let captured = if let Some((seq, owner)) = captured {
+            if owner != session.id {
+                return Err(invalid("artifact belongs to another conversation"));
+            }
+            seq
+        } else {
+            let mut historical = session.clone();
+            historical.artifact_key = observation.artifact_key.clone();
+            historical.caller_artifact_key = observation.payload["evidence"]["caller_run_id"]
+                .as_str()
+                .or(observation.payload["evidence"]["parent_run_id"].as_str())
+                .map(str::to_owned);
+            historical.task_id = observation.task_id.clone();
+            historical.wave_id = observation.wave_id.clone();
+            capture_in(conn, &historical, observation.observed_at, None)?
+        };
+        let key = format!("{}:{}", observation.artifact_key, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
         let saved: Option<String> = conn.query_row(
             "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
@@ -973,15 +945,15 @@ pub(super) fn retain_history_in(
             if saved != payload {
                 return Err(invalid(format!(
                     "input {} has conflicting {} evidence",
-                    observation.input_id, observation.source
+                    observation.artifact_key, observation.source
                 )));
             }
             continue;
         }
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload)
-            VALUES(?1,'observed',?2,?3,?4,?5,?6)",
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
+            VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",
             params![session.id,key,observation.task_id.as_ref().map(TaskId::as_str),
-                observation.wave_id.as_ref().map(crate::id::WaveId::as_str),observation.observed_at,payload])?;
+                observation.wave_id.as_ref().map(crate::id::WaveId::as_str),observation.observed_at,payload,captured])?;
         changed = true;
     }
     Ok(changed)
@@ -1051,9 +1023,10 @@ pub(super) fn reserve_flow_conversation_in(
     reserve_session_in(
         conn,
         AgentSession {
-            caller_input_id: None,
+            captured: None,
+            caller_artifact_key: None,
             id,
-            input_id: RunId::new(),
+            artifact_key: crate::run_record::new_artifact_key(),
             input_published: false,
             cwd: flow.cwd.clone(),
             skill: Some(flow.current().step),
@@ -1088,13 +1061,13 @@ pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> S
         .filter(|summary| !summary.trim().is_empty())
         .ok_or_else(|| StoreError::InvalidAuthority("review is not ready".into()))?;
     let run_id = expected
-        .session_run_id()
+        .review_artifact_key()
         .ok_or_else(|| StoreError::InvalidAuthority("review has no published input".into()))?;
     if conn.execute(
-        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND input_id=?2
+        "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
         AND completed_at IS NULL AND ready_summary IS ?4
-        AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?5 AND current_run_id=?2 AND state='current')",
-        params![id, run_id.as_str(), crate::store::rows::now_unix(), summary, expected.id()],
+        AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?5 AND current_capture=?2 AND state='current')",
+        params![id, capture_seq_in(conn,run_id)?, crate::store::rows::now_unix(), summary, expected.id()],
     )? != 1
     {
         return Err(StoreError::InvalidAuthority(
@@ -1148,7 +1121,7 @@ pub(super) fn reserve_session_in(
         session.iterations = Some(iterations);
     }
     resolve_ancestry_in(conn, &mut session)?;
-    insert_session_in(conn, &session)?;
+    insert_session_in(conn, &mut session, caller)?;
     Ok(session)
 }
 
@@ -1172,77 +1145,97 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
     Ok(())
 }
 
-/// Attach an immutable input once; import can resolve an unknown attachment.
-fn attach_input_in(
-    conn: &Connection,
-    input: &RunId,
-    session: &str,
-    caller: Option<&str>,
-) -> StoreResult<bool> {
-    let saved: Option<(Option<String>, Option<String>)> = conn
-        .query_row(
-            "SELECT session_id,caller_input_id FROM agent_session_inputs WHERE input_id=?1",
-            [input.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    match saved {
-        Some((owner, original_caller)) => {
-            if owner.as_deref().is_some_and(|owner| owner != session)
-                || original_caller.as_deref() != caller
-            {
-                return Err(invalid(format!(
-                    "input {input} has conflicting Session or caller evidence"
-                )));
-            }
-            if owner.is_some() {
-                return Ok(false);
-            }
-            conn.execute(
-                "UPDATE agent_session_inputs SET session_id=?2 WHERE input_id=?1",
-                params![input.as_str(), session],
-            )?;
-        }
-        None => {
-            conn.execute("INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",params![input.as_str(),session,caller])?;
-        }
-    }
-    Ok(true)
+/// Append capture evidence before publication; an existing artifact key must
+/// retain its original conversation and caller.
+pub(super) fn capture_seq_in(conn: &Connection, artifact: &str) -> StoreResult<i64> {
+    conn.query_row(
+        "SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1",
+        [artifact],
+        |row| row.get(0),
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
 }
 
-fn insert_session_in(conn: &Connection, session: &AgentSession) -> StoreResult<()> {
-    conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,ready_summary,completed_at,
+fn capture_in(
+    conn: &Connection,
+    session: &AgentSession,
+    observed_at: i64,
+    exec: Option<&crate::id::ExecId>,
+) -> StoreResult<i64> {
+    let saved: Option<(i64, String, Option<String>)> = conn
+        .query_row(
+            "SELECT seq,session_id,json_extract(payload,'$.caller_key') FROM session_events
+         WHERE kind='captured' AND receipt_key=?1",
+            [&session.artifact_key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    if let Some((seq, owner, caller)) = saved {
+        if owner != session.id || caller != session.caller_artifact_key {
+            return Err(invalid(
+                "captured artifact has conflicting Session or caller evidence",
+            ));
+        }
+        return Ok(seq);
+    }
+    let payload = serde_json::json!({"artifact_key":session.artifact_key,
+        "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
+        "provider":session.provider,"model":session.model,"flow_session_id":session.flow_session_id,
+        "node":session.node,"iterations":session.iterations,"work_source":session.work_source});
+    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+        VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
+        params![session.id,session.artifact_key,exec,session.task_id.as_ref().map(TaskId::as_str),
+            session.wave_id.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn insert_session_in(
+    conn: &Connection,
+    session: &mut AgentSession,
+    exec: Option<&crate::id::ExecId>,
+) -> StoreResult<()> {
+    conn.execute("INSERT INTO agent_sessions(id,title,title_source,ready_summary,completed_at,
         created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
         input_published,cwd,skill,provider,model,node,iterations)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
-        params![session.id,session.input_id.as_str(),session.title,title_source(session.title_source),
-            session.ready_summary,session.completed_at,session.created_at,
-            serde_json::to_value(session.kind)?.as_str(),session.request,session.interactive,session.repo,
-            session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(crate::id::WaveId::as_str),
-            session.flow_session_id,session.work_source.map(serde_json::to_value).transpose()?.as_ref().and_then(serde_json::Value::as_str),
-            session.bound_at,session.input_published,session.cwd.to_string_lossy(),session.skill,session.provider,session.model,
-            session.node,session.iterations.as_ref().map(serde_json::to_string).transpose()?])?;
-    attach_input_in(
-        conn,
-        &session.input_id,
-        &session.id,
-        session.caller_input_id.as_ref().map(RunId::as_str),
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+        params![session.id,session.title,title_source(session.title_source),session.ready_summary,
+            session.completed_at,session.created_at,serde_json::to_value(session.kind)?.as_str(),
+            session.request,session.interactive,session.repo,session.task_id.as_ref().map(TaskId::as_str),
+            session.wave_id.as_ref().map(crate::id::WaveId::as_str),session.flow_session_id,
+            session.work_source.map(serde_json::to_value).transpose()?.as_ref().and_then(serde_json::Value::as_str),
+            session.bound_at,session.input_published,session.cwd.to_string_lossy(),session.skill,
+            session.provider,session.model,session.node,session.iterations.as_ref().map(serde_json::to_string).transpose()?])?;
+    session.captured = Some(capture_in(conn, session, session.created_at, exec)?);
+    conn.execute(
+        "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
+        params![session.id, session.captured],
     )?;
     Ok(())
 }
 
-pub(super) fn replace_input_in(conn: &Transaction<'_>, session: &AgentSession) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
-        params![
-            session.input_id.as_str(),
-            session.id,
-            session.caller_input_id.as_ref().map(RunId::as_str)
-        ],
-    )?;
-    conn.execute("UPDATE agent_sessions SET input_id=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
+pub(super) fn replace_input_in(
+    conn: &Transaction<'_>,
+    session: &mut AgentSession,
+) -> StoreResult<()> {
+    if conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_events WHERE kind='captured' AND receipt_key=?1)",
+        [&session.artifact_key],
+        |row| row.get::<_, bool>(0),
+    )? {
+        return Err(StoreError::InvalidAuthority(
+            "replacement must append a new captured event".into(),
+        ));
+    }
+    session.captured = Some(capture_in(
+        conn,
+        session,
+        crate::store::rows::now_unix(),
+        crate::journal::current_exec_id().as_ref(),
+    )?);
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
         WHERE id=?1 AND completed_at IS NULL",
-        params![session.id,session.input_id.as_str(),session.input_published,session.cwd.to_string_lossy(),
+        params![session.id,session.captured,session.input_published,session.cwd.to_string_lossy(),
             session.skill,session.provider,session.model])?;
     Ok(())
 }
@@ -1261,12 +1254,65 @@ pub(super) fn select_input_in(
             "conversation does not belong to this captured Flow boundary".into(),
         ));
     }
-    if conn.execute("UPDATE flow_sessions SET current_run_id=?3 WHERE id=?1 AND position_version=?2 AND state='current'",
-        params![flow.id(),i64::try_from(flow.version).map_err(invalid)?,session.input_id.as_str()])? != 1
+    if conn.execute("UPDATE flow_sessions SET current_capture=?3 WHERE id=?1 AND position_version=?2 AND state='current'",
+        params![flow.id(),i64::try_from(flow.version).map_err(invalid)?,session.captured])? != 1
     {
         return Err(StoreError::InvalidAuthority("Flow changed before conversation selection".into()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn test_capture(conn: &Connection, session: &str, artifact: &str) {
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+        VALUES(?1,'captured',?2,1,json_object('artifact_key',?2))",
+        params![session, artifact],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
+        params![session, conn.last_insert_rowid()],
+    )
+    .unwrap();
+}
+
+#[cfg(test)]
+impl SqliteStore {
+    pub(crate) fn test_session(&self, id: &str, artifact: &str) -> AgentSession {
+        self.create_session(
+            AgentSession {
+                captured: None,
+                id: id.into(),
+                artifact_key: artifact.into(),
+                caller_artifact_key: None,
+                input_published: true,
+                cwd: "/fixture".into(),
+                skill: None,
+                provider: None,
+                model: None,
+                node: None,
+                iterations: None,
+                task_id: None,
+                wave_id: None,
+                flow_session_id: None,
+                work_source: None,
+                bound_at: None,
+                kind: SessionKind::Conversation,
+                interactive: true,
+                repo: None,
+                title: "Retained".into(),
+                title_source: TitleSource::Human,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            None,
+            None,
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -1275,8 +1321,59 @@ mod metadata_tests {
     use serde_json::json;
 
     use super::SqliteStore;
-    use crate::durable::RunId;
+
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn captured_reservation_survives_interruption_and_fences_replacement() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let old_key = "run_00000000000000000000000000000001";
+        let first = store.test_session("conversation", old_key);
+        let history = store.session_history("conversation", 0, 100).unwrap();
+        assert_eq!(
+            history.first().unwrap().kind,
+            crate::session::SessionEventKind::Captured
+        );
+        assert_eq!(history.first().unwrap().seq, first.captured.unwrap());
+        let mut next = first.clone();
+        next.artifact_key = crate::run_record::new_artifact_key();
+        next.input_published = false;
+        let next = store.replace_session_input(first.captured, next).unwrap();
+        assert_ne!(next.captured, first.captured);
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let retained = store.session("conversation").unwrap().unwrap();
+        assert_eq!(retained, next);
+        assert!(!retained.input_published);
+        assert_eq!(store.captured_sequence(old_key).unwrap(), first.captured);
+        assert_eq!(
+            store.session_for_artifact(old_key).unwrap().unwrap().id,
+            first.id
+        );
+        assert!(store.publish_capture(&first.id, first.captured).is_err());
+        assert!(store
+            .replace_session_input(first.captured, first.clone())
+            .is_err());
+        store
+            .publish_capture(&retained.id, retained.captured)
+            .unwrap();
+        assert!(store
+            .publish_capture(&retained.id, retained.captured)
+            .is_err());
+        assert_eq!(
+            store.session_history("conversation", 0, 100).unwrap().len(),
+            2
+        );
+        assert!(
+            store
+                .session("conversation")
+                .unwrap()
+                .unwrap()
+                .input_published
+        );
+    }
 
     #[test]
     fn session_metadata_dense_review_pages_use_indexed_membership() {
@@ -1306,10 +1403,13 @@ mod metadata_tests {
             SELECT printf('f%05d',i),json_object('id',printf('f%05d',i),'flow','review','steps',hex(zeroblob(1024))),
                 '/repo',0,0,1,0,1,'current',NULL FROM n;
             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
-            INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
+            INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
                 interactive,input_published,cwd,repo,flow_session_id)
-            SELECT printf('s%05d',i),printf('run_%032x',i),printf('Review %05d',i),
+            SELECT printf('s%05d',i),printf('Review %05d',i),
                 'human',1,'flow_review',1,1,'/repo','/repo',printf('f%05d',(i-1)%5000+1) FROM n;
+            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            SELECT id,'captured',printf('run_%032x',cast(substr(id,2) AS integer)),1,'{}' FROM agent_sessions;
+            UPDATE agent_sessions SET current_capture=(SELECT seq FROM session_events WHERE session_id=agent_sessions.id);
             UPDATE flow_sessions SET pending_session_id='s'||substr(id,2);
             COMMIT;").unwrap();
         for sql in indexes {
@@ -1398,31 +1498,30 @@ mod metadata_tests {
     fn session_metadata_survives_unreadable_detail_without_weakening_exact_reads() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = RunId::new();
+        let input = crate::run_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-                position_version,worker_generation,updated_at,state,current_run_id)
-                VALUES('flow',?1,'/unavailable',0,0,1,0,1,'current',?2)",
+                position_version,worker_generation,updated_at,state,current_capture)
+                VALUES('flow',?1,'/unavailable',0,0,1,0,1,'current',NULL)",
                 params![
-                    json!({"id":"flow","flow":"retained","steps":"invalid capture"}).to_string(),
-                    input.as_str()
+                    json!({"id":"flow","flow":"retained","steps":"invalid capture"}).to_string()
                 ],
             )
             .unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
-                interactive,input_published,cwd,flow_session_id,request)
-                VALUES('session',?1,'Session','human',1,'conversation',1,1,'/unavailable','flow',?2)",
-                params![input.as_str(), "large request".repeat(1000)]).unwrap();
             conn.execute(
-                "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'session')",
-                [input.as_str()],
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
+                interactive,input_published,cwd,flow_session_id,request)
+                VALUES('session','Session','human',1,'conversation',1,1,'/unavailable','flow',?1)",
+                params!["large request".repeat(1000)],
             )
             .unwrap();
+            super::test_capture(&conn, "session", &input);
+            conn.execute("UPDATE flow_sessions SET current_capture=(SELECT current_capture FROM agent_sessions WHERE id='session') WHERE id='flow'", []).unwrap();
             conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                VALUES('session','observed',?1,1,'not JSON')",
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                VALUES('session','observed',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
                 [format!("{input}:events.jsonl:0")],
             )
             .unwrap();
@@ -1461,21 +1560,11 @@ mod metadata_tests {
     fn session_metadata_import_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = RunId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO agent_sessions(id,input_id,title,title_source,
-            created_at,kind,interactive,input_published,cwd)
-            VALUES('imported',?1,'Imported','human',1,'conversation',1,1,'/unavailable')",
-                [input.as_str()],
-            )
-            .unwrap();
+        let input = crate::run_record::new_artifact_key();
+        store.test_session("imported", &input);
         let session = store.session("imported").unwrap().unwrap();
         let mut observation = crate::session::SessionObservation {
-            input_id: input.clone(),
+            artifact_key: input.clone(),
             source: "manifest.json".into(),
             observed_at: 1,
             task_id: None,
@@ -1502,7 +1591,7 @@ mod metadata_tests {
                 .unwrap()
                 .independent
         );
-        assert_eq!(store.session_history("imported", 0, 0).unwrap().len(), 1);
+        assert_eq!(store.session_history("imported", 0, 0).unwrap().len(), 2);
         observation.payload["evidence"]["flow"] = serde_json::Value::Null;
         assert!(store
             .retain_session_observation(&session, &observation)
@@ -1536,19 +1625,20 @@ mod metadata_tests {
                 ),
                 ("later", "Zulu", true, "/repo", Some("bad metadata"), None),
             ] {
-                let input = RunId::new();
+                let input = crate::run_record::new_artifact_key();
                 conn.execute(
-                    "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
+                    "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
                     interactive,input_published,cwd,repo,iterations)
-                    VALUES(?1,?2,?3,'human',1,'conversation',?4,1,'/unavailable',?5,?6)",
-                    params![id, input.as_str(), title, interactive, repo, iterations],
+                    VALUES(?1,?2,'human',1,'conversation',?3,1,'/unavailable',?4,?5)",
+                    params![id, title, interactive, repo, iterations],
                 )
                 .unwrap();
+                super::test_capture(&conn, id, &input);
                 if let Some(kind) = membership {
                     let payload = json!({"input_id":input.as_str(),"source":"manifest.json", "evidence":{
                         "run_id":input.as_str(),"schema_version":1,"flow":{"kind":kind}}});
-                    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                        VALUES(?1,'observed',?2,1,?3)",
+                    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                        VALUES(?1,'observed',?2,1,?3,(SELECT current_capture FROM agent_sessions WHERE id=?1))",
                         params![id,format!("{input}:manifest.json"),payload.to_string()]).unwrap();
                 }
             }

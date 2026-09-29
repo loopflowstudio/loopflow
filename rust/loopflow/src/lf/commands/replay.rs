@@ -15,8 +15,23 @@ pub fn run(selector: &str) -> Result<()> {
     Ok(())
 }
 
-fn replay_at(home: &std::path::Path, selector: &str) -> Result<crate::durable::RunId> {
-    let (_, source) = crate::run_record::resolve_manifest(home, selector)
+fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
+    let database = crate::store::database_path_from_env()?;
+    let artifact = if database.is_file() {
+        let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+        match store.resolve_history_input(selector) {
+            Ok(selected) => store
+                .session(&selected)?
+                .map(|session| session.artifact_key)
+                .unwrap_or(selected),
+            Err(crate::store::StoreError::NotFound) => selector.to_owned(),
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        // Retained pre-import artifacts remain replayable without a catalog.
+        selector.to_owned()
+    };
+    let (_, source) = crate::run_record::resolve_manifest(home, &artifact)
         .with_context(|| format!("cannot read Run {selector}"))?;
     let launch = source.launch.clone().ok_or_else(|| {
         anyhow!(
@@ -225,7 +240,13 @@ mod tests {
         let source_id = source.run_id();
         source.finish("completed").unwrap();
 
-        let child_id = replay_at(home.path(), source_id.as_str()).unwrap();
+        let session = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&registry)
+            .unwrap()
+            .session_for_artifact(&source_id)
+            .unwrap()
+            .unwrap();
+        assert_ne!(session.id, source_id);
+        let child_id = replay_at(home.path(), &session.id).unwrap();
 
         let evidence = std::fs::read_to_string(&evidence).unwrap();
         assert!(evidence.contains(child_id.as_str()));

@@ -638,10 +638,7 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<crate::run_rec
         let capture = begin_run_capture(built, surface, &built.agent_config)?;
         let provider_session_id = if target == LaunchTarget::Tui && built.harness == "claude" {
             let run_id = capture.run_id();
-            let raw_id = run_id
-                .as_str()
-                .strip_prefix("run_")
-                .expect("Run IDs always carry the run_ prefix");
+            let raw_id = run_id.as_str().strip_prefix("run_").unwrap_or(&run_id);
             Some(
                 uuid::Uuid::parse_str(raw_id)
                     .expect("Run IDs always carry a UUID")
@@ -821,7 +818,7 @@ fn begin_run_capture(
         flow: step.membership,
         work: built.work.clone(),
     };
-    let capture = if let Some((token, run_id)) = step.reserved {
+    let capture = if let Some((token, captured, run_id)) = step.reserved {
         // The Flow driver reserved this step's Run; the launch publishes it.
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
         crate::run_record::CaptureHandle::begin_reserved_with_context(
@@ -829,13 +826,13 @@ fn begin_run_capture(
             run_id,
             None,
             &built.context,
-            |run_id| {
+            |_artifact| {
                 let path = crate::store::observability_database_path()
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
                 crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
                     &token.invocation,
                     token.version,
-                    run_id,
+                    captured,
                     None,
                     &provider,
                     model.as_deref(),
@@ -1179,7 +1176,7 @@ mod tests {
         prepare_harness_turn_from_skill_at, should_launch_via_skill, skill_launch_seed,
         split_skill_args, PromptBuild, PromptLaunchContext,
     };
-    use crate::durable::RunId;
+
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
     use crate::engine::{Config, Skill, Surface};
@@ -1391,12 +1388,18 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("LF_DB_PATH", &registry);
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
-        std::env::set_var(crate::durable::RUN_ID_ENV, RunId::new().as_str());
+        std::env::set_var(
+            crate::durable::RUN_ID_ENV,
+            crate::run_record::new_artifact_key().as_str(),
+        );
         std::env::set_var(
             crate::run_record::RUN_DIR_ENV,
             home.path().join("stale-run"),
         );
-        std::env::set_var(crate::run_record::PARENT_RUN_ID_ENV, RunId::new().as_str());
+        std::env::set_var(
+            crate::run_record::PARENT_RUN_ID_ENV,
+            crate::run_record::new_artifact_key().as_str(),
+        );
         std::env::remove_var(crate::store::CONTROL_HOME_ENV);
         std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
 
@@ -1481,7 +1484,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert_eq!(identities[0], identities[1], "retry must stay in one Run");
         let fields = identities[0].split('|').collect::<Vec<_>>();
         assert_eq!(&fields[2..], ["unset", "unset", "unset"]);
-        let implicit_run_id = RunId::parse(fields[0]).unwrap();
+        let implicit_run_id = crate::run_record::parse_artifact_key(fields[0]).unwrap();
         let implicit_run_dir = std::path::Path::new(fields[1]);
         assert_eq!(
             implicit_run_dir.file_name().and_then(|name| name.to_str()),

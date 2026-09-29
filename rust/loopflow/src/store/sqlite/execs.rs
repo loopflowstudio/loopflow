@@ -439,7 +439,7 @@ impl SqliteStore {
     /// No captured input, history body, endpoint or command outcome establishes liveness.
     pub(crate) fn session_process_ownership(
         &self,
-        inputs: &[crate::durable::RunId],
+        inputs: &[String],
         execs: &[String],
         pids: &[u32],
     ) -> StoreResult<crate::exec::SessionProcessOwnership> {
@@ -458,8 +458,8 @@ impl SqliteStore {
                     UNION SELECT id FROM agent_sessions WHERE provider_pid IN (SELECT value FROM json_each(?3))
                     UNION SELECT id FROM agent_sessions WHERE provider_pid IS NULL
                         AND provider_exec_id IN (SELECT value FROM json_each(?2))
-                    UNION SELECT session_id FROM agent_session_inputs
-                        WHERE input_id IN (SELECT value FROM json_each(?1)))
+                    UNION SELECT session_id FROM session_events
+                        WHERE kind='captured' AND receipt_key IN (SELECT value FROM json_each(?1)))
                  ORDER BY s.id",
             )?;
             let mut rows = statement.query(params![input_json, exec_json, pid_json])?;
@@ -490,9 +490,9 @@ impl SqliteStore {
         };
         let inputs = {
             let mut statement = tx.prepare(
-                "SELECT input_id,session_id FROM agent_session_inputs
-                 WHERE input_id IN (SELECT value FROM json_each(?1))
-                    AND session_id IS NOT NULL ORDER BY input_id",
+                "SELECT receipt_key,session_id FROM session_events
+                 WHERE kind='captured' AND receipt_key IN (SELECT value FROM json_each(?1))
+                    AND session_id IS NOT NULL ORDER BY receipt_key",
             )?;
             let rows = statement
                 .query_map([&input_json], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -636,14 +636,14 @@ mod discovery_tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let old = insert_exec(&store, 1, 1);
         let live = insert_exec(&store, 2, 2);
-        let input = crate::durable::RunId::new();
+        let input = crate::run_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
-                INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,completed_at,
+                INSERT INTO agent_sessions(id,title,title_source,created_at,completed_at,
                     input_published,cwd,provider_exec_id,provider_pid,provider_started_at)
-                SELECT 'retained-'||x,'input-'||x,'Retained','human',1,2,1,'/fixture',?1,
+                SELECT 'retained-'||x,'Retained','human',1,2,1,'/fixture',?1,
                     CASE WHEN x%2=0 THEN x+100000 END,1 FROM n",
                 [&old],
             )
@@ -654,11 +654,7 @@ mod discovery_tests {
                 [&live],
             )
             .unwrap();
-            conn.execute(
-                "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'retained-5')",
-                [input.as_str()],
-            )
-            .unwrap();
+            super::super::sessions::test_capture(&conn, "retained-5", &input);
         }
         for (execs, pids, inputs, expected) in [
             (vec![], vec![], vec![], vec![]),
@@ -943,9 +939,14 @@ mod discovery_tests {
                     params![task.as_str(), project.as_str(), format!("PROOF-{index}")],
                 )
                 .unwrap();
-                conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-                    VALUES(?1,?2,'Now bound','human',1,1,'/missing',?3,?4)",
-                    params![format!("session-{index}"),format!("run_{index:032x}"),task.as_str(),wave]).unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+                    VALUES(?1,'Now bound','human',1,1,'/missing',?2,?3)",
+                    params![format!("session-{index}"),task.as_str(),wave]).unwrap();
+                super::super::sessions::test_capture(
+                    &conn,
+                    &format!("session-{index}"),
+                    &format!("run_{index:032x}"),
+                );
                 conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
                     VALUES(?1,'thread','work','started','',?2,?3,?4,1,'unreadable payload')",
                     params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();

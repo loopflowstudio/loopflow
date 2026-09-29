@@ -989,9 +989,14 @@ mod tests {
         ) -> anyhow::Result<Option<String>> {
             assert!(claim.is_none());
             let run = &flow.current_attempt.as_ref().unwrap().run_id;
-            self.store
-                .sqlite
-                .publish_attempt(flow.id(), flow.version, run, None, "proof", None)?;
+            self.store.sqlite.publish_attempt(
+                flow.id(),
+                flow.version,
+                self.store.sqlite.captured_sequence(run).unwrap().unwrap(),
+                None,
+                "proof",
+                None,
+            )?;
             let actor = self.store.sqlite.test_flow_turn(run);
             self.visits
                 .lock()

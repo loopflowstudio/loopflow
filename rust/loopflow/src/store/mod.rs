@@ -2449,7 +2449,7 @@ mod tests {
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
         let failure = TaskFlowBlocker {
-            run_id: None,
+            captured: None,
             reason: "late old failure".to_string(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),

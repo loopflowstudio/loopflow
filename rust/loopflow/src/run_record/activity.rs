@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use super::{record_dir, EventEnvelope, RunEvent, RunId, SCHEMA_VERSION};
+use super::{record_dir, EventEnvelope, RunEvent, SCHEMA_VERSION};
 
 pub(crate) const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SAMPLE_GAP: i64 = 45;
@@ -100,7 +100,7 @@ pub(crate) enum Activity {
     Unknown,
 }
 
-pub(crate) async fn read(home: &Path, run: &RunId) -> Activity {
+pub(crate) async fn read(home: &Path, run: &str) -> Activity {
     let Some(dir) = record_dir(home, run) else {
         return Activity::Unknown;
     };

@@ -233,15 +233,7 @@ mod tests {
         let first = ExecId::new();
         let second = ExecId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch(
-            "BEGIN;
-             INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
-             VALUES('conversation','run_fixture','Retained','human',1,'conversation',1,1,'/fixture');
-             INSERT INTO agent_session_inputs(input_id,session_id)
-             VALUES('run_fixture','conversation');
-             COMMIT;",
-        )
-        .unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
         for exec in [&first, &second] {
             conn.execute(
                 "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",

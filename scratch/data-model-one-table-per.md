@@ -273,6 +273,35 @@ cases. The real Codex/local Responses proof now passes the formerly failing legi
 retry, exhaustion and delayed-command cases. Current proof and limits are kept in
 [the execution handoff](parallel-execution.md); configured acceptance remains open.
 
+### Captured-event implementation boundary · 2026-09-29
+
+The reader inventory at `.lf/tmp/captured-event/readers.md` is the starting audit.
+Reservation writes a `captured` Session event and selects its sequence in the
+same transaction. AgentSession and FlowSession current-capture references use
+that sequence; publication, replacement, readiness and completion compare it.
+Native start and artifact observations reference the captured event. Capture has
+no outcome or resumable lifecycle; native completion remains separate history.
+
+Artifact directory keys are plain strings in captured evidence, not a new ID
+type. Keep old directory bytes, prepared→launching rename and byte-identical
+publication recovery. New history selectors resolve through SQL; replay must use
+that resolution before opening artifacts. Preserve old `run_` selectors and
+unknown caller keys without assigning a current conversation to them.
+
+`import_evidence` is the named destination for original historical SQL payloads,
+including rows with no established conversation. It is an immutable, migration-only
+archive (`source`, original selector, exact payload), never written by reservation
+or continuation and never used as a live input catalog. It preserves unknown
+membership, foreign-key ancestry constraints and Started evidence. Known
+conversations receive captured events; mechanical evidence remains in Flow
+history. Do not manufacture an AgentSession merely to attach unknown SQL.
+
+Delete RunId and the live input catalog in this cut. Move Rust/Swift/fixtures
+for SessionRecord, Task execution/blockers and Steer authors together. Keep old
+serialized import evidence readable; command journal TraceId/run_events stays
+separate. Prove interrupted reservation/publication, replacement, old selectors,
+unknown SQL, exact original payloads and populated source/materialized upgrades.
+
 ### Whole-design proof
 
 | Requirement | Evidence needed on integrated bytes |

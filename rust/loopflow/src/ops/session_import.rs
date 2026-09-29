@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::durable::{FlowSession, RunId, TaskId, WorkRef};
+use crate::durable::{FlowSession, TaskId, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
@@ -70,14 +70,14 @@ struct ResolutionFile {
 #[derive(Deserialize)]
 struct AskFile {
     id: String,
-    parent_run_id: RunId,
+    parent_run_id: String,
     work: Option<WorkRef>,
     title: String,
     prompt: String,
     skill: Option<String>,
     cwd: PathBuf,
     model: String,
-    session_run_id: Option<RunId>,
+    session_run_id: Option<String>,
     ready_summary: Option<String>,
     status: AskStatus,
 }
@@ -111,7 +111,7 @@ struct FlowFile {
 #[derive(Deserialize)]
 struct FlowFileBoundary {
     id: String,
-    run_id: Option<RunId>,
+    run_id: Option<String>,
     completed: bool,
     ready_summary: Option<String>,
 }
@@ -187,7 +187,7 @@ struct Import<'a> {
     home: PathBuf,
     report: ImportReport,
     /// Runs the Ask and Flow files name; the Run scan leaves them alone.
-    claimed: HashSet<RunId>,
+    claimed: HashSet<String>,
     captures: HashMap<String, FlowSession>,
 }
 
@@ -234,7 +234,7 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
         let Some(session) = session else {
             import.count(&database, Err(anyhow!(
                 "SQL input {} has no established AgentSession or matching Flow operation history; its original row remains retained",
-                observation.input_id
+                observation.artifact_key
             )));
             continue;
         };
@@ -361,9 +361,9 @@ impl Import<'_> {
         session: AgentSession,
         review: Option<FlowSession>,
     ) -> Result<Option<Stored>> {
-        let input = session.input_id.clone();
+        let input = session.artifact_key.clone();
         let starts = self.first_assignment(session.task_id.as_ref()).await?;
-        let history = self.history(&session.input_id).await?;
+        let history = self.history(&session.artifact_key).await?;
         let changed = self
             .store
             .import_session(session, review, history, self.report.dry_run)
@@ -375,7 +375,7 @@ impl Import<'_> {
         Ok(Some(if changed { kind } else { Stored::Unchanged }))
     }
 
-    async fn history(&self, input: &RunId) -> Result<Vec<SessionObservation>> {
+    async fn history(&self, input: &String) -> Result<Vec<SessionObservation>> {
         let dir = self.run_dir(input)?;
         let mut history = Vec::new();
         let (task_id, wave_id, _) = match crate::run_record::read_manifest(&dir) {
@@ -394,7 +394,7 @@ impl Import<'_> {
                     OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
                 });
             history.push(SessionObservation {
-                input_id: input.clone(),
+                artifact_key: input.clone(),
                 source: source.clone(),
                 observed_at: at.unwrap_or_else(OffsetDateTime::now_utc).unix_timestamp(),
                 task_id: task_id.clone(),
@@ -452,7 +452,7 @@ impl Import<'_> {
         if self.claimed.contains(&manifest.run_id) {
             return Ok(None);
         }
-        if let Some(session) = self.store.session_for_run(&manifest.run_id).await? {
+        if let Some(session) = self.store.session_for_artifact(&manifest.run_id).await? {
             return self.review_evidence(dir, &manifest, session).await;
         }
         let interactive = manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
@@ -504,9 +504,10 @@ impl Import<'_> {
                 .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
         )?;
         let session = AgentSession {
+            captured: None,
             id: manifest.run_id.to_string(),
-            input_id: manifest.run_id,
-            caller_input_id: manifest.parent_run_id,
+            artifact_key: manifest.run_id,
+            caller_artifact_key: manifest.parent_run_id,
             input_published: true,
             cwd: manifest.cwd,
             skill: manifest.skill,
@@ -539,7 +540,7 @@ impl Import<'_> {
         self.store(kind, session, capture).await
     }
 
-    fn run_dir(&self, run: &RunId) -> Result<PathBuf> {
+    fn run_dir(&self, run: &String) -> Result<PathBuf> {
         crate::run_record::record_dir(&self.home, run)
             .ok_or_else(|| anyhow!("Run {run} has an invalid id"))
     }
@@ -578,14 +579,15 @@ impl Import<'_> {
         let (provider, model) = crate::engine::config::parse_agent(&file.model);
         let work_source = (task_id.is_some() || wave_id.is_some()).then_some(WorkSource::Inherited);
         let session = AgentSession {
-            caller_input_id: Some(file.parent_run_id),
+            captured: None,
+            caller_artifact_key: Some(file.parent_run_id),
             task_id,
             wave_id,
             flow_session_id: None,
             work_source,
             bound_at: None,
             id: file.id,
-            input_id: run_id,
+            artifact_key: run_id,
             input_published: published,
             cwd: file.cwd,
             skill: file.skill,
@@ -628,11 +630,11 @@ impl Import<'_> {
             _ => None,
         };
         let id = format!("flow:{}:{}", file.id, active.id);
-        let input_id = match &active.run_id {
+        let artifact_key = match &active.run_id {
             Some(input) => input.clone(),
             None => imported_input_id(&id)?,
         };
-        let dir = self.run_dir(&input_id)?;
+        let dir = self.run_dir(&artifact_key)?;
         let manifest = active
             .run_id
             .as_ref()
@@ -705,7 +707,8 @@ impl Import<'_> {
                 .unwrap_or((None, None)),
         };
         let session = AgentSession {
-            caller_input_id: manifest
+            captured: None,
+            caller_artifact_key: manifest
                 .as_ref()
                 .and_then(|input| input.parent_run_id.clone()),
             task_id: flow.task_id.clone(),
@@ -714,7 +717,7 @@ impl Import<'_> {
             work_source: work.as_ref().map(|_| WorkSource::Declared),
             bound_at: None,
             id,
-            input_id,
+            artifact_key,
             input_published: manifest.is_some(),
             cwd: manifest
                 .as_ref()
@@ -791,7 +794,7 @@ impl Import<'_> {
         manifest: &RunManifest,
         session: AgentSession,
     ) -> Result<Option<Stored>> {
-        if session.input_id != manifest.run_id {
+        if session.artifact_key != manifest.run_id {
             let history = self.history(&manifest.run_id).await?;
             let changed = self
                 .store
@@ -806,7 +809,7 @@ impl Import<'_> {
         let (title, source) = name(dir, session.title.clone())?;
         let renamed = title != session.title && session.title_source == TitleSource::Generated;
         let unnamed = session.provider.is_none();
-        let history = self.history(&session.input_id).await?;
+        let history = self.history(&session.artifact_key).await?;
         let imported = self
             .store
             .import_session(session.clone(), None, history, self.report.dry_run)
@@ -821,12 +824,12 @@ impl Import<'_> {
         if !self.report.dry_run {
             if renamed {
                 self.store
-                    .rename_session(&session.id, Some(&session.input_id), &title, source)
+                    .rename_session(&session.id, session.captured, &title, source)
                     .await?;
             }
             self.store
                 .fill_run_provider(
-                    &session.input_id,
+                    &session.artifact_key,
                     &manifest.harness,
                     manifest.model.as_deref(),
                 )
@@ -837,9 +840,9 @@ impl Import<'_> {
 }
 
 // Unopened historical conversations have identity, but no observed process.
-fn imported_input_id(session: &str) -> Result<RunId> {
+fn imported_input_id(session: &str) -> Result<String> {
     let digest = Sha256::digest(session.as_bytes());
-    Ok(RunId::parse(&format!(
+    Ok(crate::run_record::parse_artifact_key(&format!(
         "run_{}",
         hex::encode(&digest[..16])
     ))?)

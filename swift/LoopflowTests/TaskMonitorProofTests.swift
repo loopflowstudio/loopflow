@@ -130,7 +130,7 @@ struct TaskMonitorProofTests {
         #expect(multiplexer.layout.pane(for: sessionPane)?.content == .session(id: "monitor-review"))
         #expect(multiplexer.layout.pane(for: shellPane)?.content == .shell)
         #expect(!terminals.contains { window.firstResponder === $0 })
-        let sessionRun = model.sessions.value?.first?.runId
+        let sessionID = model.sessions.value?.first?.id
         let taskWork = model.task(id: "issue-review")?.task.runtime?.workId
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -156,7 +156,7 @@ struct TaskMonitorProofTests {
             #expect(model.selection == .task(id: "issue-review"))
             #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)
             if !transferring { #expect(model.task(id: "issue-review")?.wave.currentProject?.workId == "successor-work") }
-            #expect(model.sessions.value?.first?.runId == sessionRun)
+            #expect(model.sessions.value?.first?.id == sessionID)
             #expect(multiplexer.focusedPaneId == monitorPane)
             #expect(terminals[0].surface == surfaces[0])
             #expect(terminals[1].surface == surfaces[1])

@@ -292,7 +292,7 @@ mod tests {
                 state: crate::ops::task_execution::TaskExecutionState::Idle,
                 reason: "simulated installed operation".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             },
             runs: vec![],
             runs_truncated: false,

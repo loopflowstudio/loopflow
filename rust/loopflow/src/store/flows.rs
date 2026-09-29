@@ -1,8 +1,7 @@
 use time::OffsetDateTime;
 
 use crate::durable::{
-    FlowSession, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
-    TaskWorkerOwner,
+    FlowSession, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner,
 };
 use crate::engine::ExecutionCursor;
 
@@ -70,13 +69,12 @@ impl Store {
         &self,
         id: &str,
         version: u64,
-        run: &RunId,
+        captured: i64,
         claim: Option<&TaskWorkerClaim>,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let run = run.clone();
         let claim = claim.cloned();
         let provider = provider.to_string();
         let model = model.map(str::to_owned);
@@ -84,7 +82,7 @@ impl Store {
             store.publish_attempt(
                 &id,
                 version,
-                &run,
+                captured,
                 claim.as_ref(),
                 &provider,
                 model.as_deref(),

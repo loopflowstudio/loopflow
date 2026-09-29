@@ -694,80 +694,113 @@ mod tests {
         let mut project = project(&wave, "desktop", "project-desktop");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // A Run names its Task by id, so a renamed Project keeps its Runs.
+        // Input ancestry names its Task by id, so Project renaming preserves history.
         project.plan.slug = "desktop-renamed".into();
         store.update_project(&project).await.unwrap();
-        let run =
-            |task_id: Option<TaskId>, caller: Option<crate::durable::RunId>| crate::session::Run {
-                id: crate::durable::RunId::new(),
-                session_id: None,
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
-                work_source: task_id
-                    .as_ref()
-                    .map(|_| crate::session::WorkSource::Declared),
-                task_id,
-                wave_id: None,
-                created_at: 1,
-                published: true,
+        let session = |task_id: Option<TaskId>, caller: Option<crate::durable::RunId>| {
+            let inherited = caller.is_some();
+            crate::session::AgentSession {
+                id: uuid::Uuid::new_v4().to_string(),
+                input_id: crate::durable::RunId::new(),
+                caller_input_id: caller,
+                input_published: true,
                 cwd: directory.path().to_path_buf(),
                 skill: Some("implement".into()),
                 provider: Some("codex".into()),
                 model: None,
-                caller_run_id: caller,
-                ended: None,
-            };
+                node: None,
+                iterations: None,
+                work_source: task_id.as_ref().map(|_| {
+                    if inherited {
+                        crate::session::WorkSource::Inherited
+                    } else {
+                        crate::session::WorkSource::Declared
+                    }
+                }),
+                task_id,
+                wave_id: None,
+                flow_session_id: None,
+                bound_at: None,
+                kind: crate::session::SessionKind::Conversation,
+                interactive: false,
+                repo: None,
+                title: "Investigation".into(),
+                title_source: crate::session::TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            }
+        };
         let worker = store
-            .create_run(run(Some(task.id.clone()), None))
+            .create_session(session(Some(task.id.clone()), None), None)
             .await
             .unwrap();
-        // A helper names no Work and takes its caller's.
+        // Reader fixture: inherited admission is separately proved through public
+        // child commands. A causal input reference does not itself assign Work.
         let helper = store
-            .create_run(run(None, Some(worker.id.clone())))
+            .create_session(
+                session(Some(task.id.clone()), Some(worker.input_id.clone())),
+                None,
+            )
             .await
             .unwrap();
-        assert_eq!(helper.task_id, Some(task.id.clone()));
+        assert_eq!(helper.wave_id, Some(wave.id().clone()));
         assert_eq!(
             helper.work_source,
             Some(crate::session::WorkSource::Inherited)
         );
-        store.create_run(run(None, None)).await.unwrap();
+        store
+            .create_session(session(None, None), None)
+            .await
+            .unwrap();
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
             task.plan.id.as_str(),
         ] {
-            let runs = store
-                .runs(
+            let rows = store
+                .sqlite
+                .conversation_snapshots(
                     Some(wave.name()),
                     Some(project.id.as_str()),
                     Some(selector),
                     None,
                     0,
+                    false,
                 )
-                .await
                 .unwrap();
-            assert_eq!(runs.len(), 2);
-            for listed in &runs {
-                assert_eq!(listed.run.task_id, Some(task.id.clone()));
-                assert_eq!(listed.project.as_deref(), Some("desktop-renamed"));
+            assert_eq!(rows.len(), 2);
+            for (work, snapshot) in &rows {
+                assert_eq!(work.as_ref(), Some(&WorkRef::Task(task.id.clone())));
+                assert!(snapshot
+                    .subjects
+                    .iter()
+                    .any(|subject| subject.selector == "project:desktop-renamed"));
             }
-            let other = store.runs(None, Some("other"), Some(selector), None, 0);
-            assert!(other.await.unwrap().is_empty());
+            assert!(store
+                .sqlite
+                .conversation_snapshots(None, Some("other"), Some(selector), None, 0, false)
+                .unwrap()
+                .is_empty());
         }
-        let children = store.runs(None, None, None, Some(worker.id.as_str()), 0);
-        assert_eq!(children.await.unwrap()[0].run.id, helper.id);
+        let children = store
+            .sqlite
+            .conversation_snapshots(None, None, None, Some(worker.input_id.as_str()), 0, false)
+            .unwrap();
+        assert_eq!(children[0].1.id, helper.input_id.as_str());
         for _ in 0..55 {
             store
-                .create_run(run(None, Some(worker.id.clone())))
+                .create_session(
+                    session(Some(task.id.clone()), Some(worker.input_id.clone())),
+                    None,
+                )
                 .await
                 .unwrap();
         }
         let children = store
-            .runs(None, None, None, Some(worker.id.as_str()), 0)
-            .await
+            .sqlite
+            .conversation_snapshots(None, None, None, Some(worker.input_id.as_str()), 0, false)
             .unwrap();
         assert_eq!(
             children.len(),
@@ -776,9 +809,14 @@ mod tests {
         );
         assert!(children
             .iter()
-            .all(|child| child.run.caller_run_id.as_ref() == Some(&worker.id)
-                && child.run.task_id.as_ref() == Some(&task.id)
-                && child.project.as_deref() == Some("desktop-renamed")));
+            .all(|(work, snapshot)| snapshot.parent_run_id.as_deref()
+                == Some(worker.input_id.as_str())
+                && work.as_ref() == Some(&WorkRef::Task(task.id.clone()))
+                && snapshot
+                    .subjects
+                    .iter()
+                    .any(|subject| subject.selector == "project:desktop-renamed")));
+        store.sqlite.assert_no_historical_runs();
     }
 
     #[tokio::test]

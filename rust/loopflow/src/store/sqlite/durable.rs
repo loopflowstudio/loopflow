@@ -573,6 +573,18 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
+pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
+    let wave: String = conn
+        .query_row(
+            "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| invalid_durable(format!("Task {task} does not exist")))?;
+    WaveId::parse(&wave).map_err(invalid_durable)
+}
+
 fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
@@ -707,7 +719,7 @@ mod durable_store_tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    use super::super::runs::insert_run_in;
+    use super::super::sessions::reserve_session_in;
     use crate::durable::{
         FlowSession, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
         TaskWorkerClaimOutcome, TaskWorkerOwner,
@@ -718,11 +730,44 @@ mod durable_store_tests {
     use crate::engine::{ConcreteStep, ExecutionCursor, Skill};
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::session::{Run, WorkSource};
+    use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreResult;
     use crate::work::project::Project;
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
+
+    fn unpublished_conversation(
+        task_id: Option<TaskId>,
+        wave_id: Option<WaveId>,
+        created_at: i64,
+    ) -> AgentSession {
+        AgentSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            input_id: RunId::new(),
+            caller_input_id: None,
+            input_published: false,
+            cwd: "/repo".into(),
+            skill: None,
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id,
+            wave_id,
+            flow_session_id: None,
+            work_source: Some(WorkSource::Declared),
+            bound_at: None,
+            kind: SessionKind::Conversation,
+            interactive: false,
+            repo: None,
+            title: "Investigation".into(),
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at,
+        }
+    }
 
     fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
         let dir = tempfile::tempdir().unwrap();
@@ -1133,7 +1178,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn run_reservation_serializes_with_project_ancestry_changes() {
+    fn session_reservation_serializes_with_project_ancestry_changes() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let other_wave = WaveId::new();
@@ -1162,37 +1207,17 @@ mod durable_store_tests {
             )
         });
         barrier.wait();
-        let saved = insert_run_in(
-            &tx,
-            Run {
-                id: RunId::new(),
-                session_id: None,
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
-                task_id: Some(task_id),
-                wave_id: None,
-                work_source: Some(WorkSource::Checkout),
-                created_at: 100,
-                published: false,
-                cwd: "/repo".into(),
-                skill: None,
-                provider: None,
-                model: None,
-                caller_run_id: None,
-                ended: None,
-            },
-        )
-        .unwrap();
+        let mut input = unpublished_conversation(Some(task_id), None, 100);
+        input.work_source = Some(WorkSource::Checkout);
+        let saved = reserve_session_in(&tx, input, None).unwrap();
         tx.commit().unwrap();
         let error = writer.join().unwrap().unwrap_err();
         assert!(error
             .to_string()
-            .contains("Project would change Run ancestry"));
+            .contains("Project would change AgentSession ancestry"));
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
-                "SELECT r.wave_id,p.wave_id FROM runs r JOIN tasks t ON t.id=r.task_id
+                "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id
              JOIN projects p ON p.id=t.project_id WHERE r.id=?1",
                 [saved.id.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1203,7 +1228,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn run_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
+    fn session_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let mut conn = store.conn.lock().unwrap();
@@ -1226,33 +1251,30 @@ mod durable_store_tests {
             [other_wave.as_str()],
         )
         .unwrap();
-        let make_run = |task_id, wave_id, created_at| Run {
-            id: RunId::new(),
-            session_id: None,
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id,
-            wave_id,
-            work_source: Some(WorkSource::Declared),
-            created_at,
-            published: false,
-            cwd: "/repo".into(),
-            skill: None,
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
-        };
         let before = crate::store::rows::now_unix();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
-        let reserved = insert_run_in(&tx, make_run(Some(task_id.clone()), None, 1)).unwrap();
-        let orphan = insert_run_in(&tx, make_run(None, None, 2)).unwrap();
-        let wave_only = insert_run_in(&tx, make_run(None, Some(task.wave_id.clone()), 3)).unwrap();
-        let conflicting = insert_run_in(&tx, make_run(None, Some(other_wave.clone()), 4)).unwrap();
+        let reserved = reserve_session_in(
+            &tx,
+            unpublished_conversation(Some(task_id.clone()), None, 1),
+            None,
+        )
+        .unwrap();
+        let orphan =
+            reserve_session_in(&tx, unpublished_conversation(None, None, 2), None).unwrap();
+        let wave_only = reserve_session_in(
+            &tx,
+            unpublished_conversation(None, Some(task.wave_id.clone()), 3),
+            None,
+        )
+        .unwrap();
+        let conflicting = reserve_session_in(
+            &tx,
+            unpublished_conversation(None, Some(other_wave.clone()), 4),
+            None,
+        )
+        .unwrap();
         tx.commit().unwrap();
         let started = |conn: &rusqlite::Connection, id: &TaskId| -> Option<i64> {
             conn.query_row(
@@ -1268,7 +1290,7 @@ mod durable_store_tests {
         assert_eq!(started(&conn, &bound_task), None);
         let before_bind = crate::store::rows::now_unix();
         conn.execute(
-            "UPDATE runs SET task_id=?2,wave_id=?3,work_source='bound' WHERE id=?1",
+            "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound' WHERE id=?1",
             rusqlite::params![
                 orphan.id.as_str(),
                 bound_task.as_str(),
@@ -1280,7 +1302,7 @@ mod durable_store_tests {
         assert!((before_bind..=crate::store::rows::now_unix()).contains(&bound_at));
         assert_ne!(bound_at, orphan.created_at);
         conn.execute(
-            "UPDATE runs SET task_id=?2,work_source='bound' WHERE id=?1",
+            "UPDATE agent_sessions SET task_id=?2,work_source='bound' WHERE id=?1",
             rusqlite::params![wave_only.id.as_str(), bound_task.as_str()],
         )
         .unwrap();
@@ -1288,10 +1310,17 @@ mod durable_store_tests {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .unwrap();
-            insert_run_in(&tx, make_run(Some(bound_task.clone()), None, created_at)).unwrap();
-            let later_bind = insert_run_in(&tx, make_run(None, None, created_at)).unwrap();
+            reserve_session_in(
+                &tx,
+                unpublished_conversation(Some(bound_task.clone()), None, created_at),
+                None,
+            )
+            .unwrap();
+            let later_bind =
+                reserve_session_in(&tx, unpublished_conversation(None, None, created_at), None)
+                    .unwrap();
             tx.execute(
-                "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
                 rusqlite::params![
                     later_bind.id.as_str(),
                     bound_task.as_str(),
@@ -1318,7 +1347,7 @@ mod durable_store_tests {
         ] {
             assert!(conn
                 .execute(
-                    "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
+                    "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
                     rusqlite::params![id.as_str(), new_task, new_wave]
                 )
                 .is_err());
@@ -1340,21 +1369,29 @@ mod durable_store_tests {
             )
             .is_err());
         assert!(conn
-            .execute("DELETE FROM runs WHERE id=?1", [reserved.id.as_str()])
+            .execute(
+                "DELETE FROM agent_sessions WHERE id=?1",
+                [reserved.id.as_str()]
+            )
             .is_err());
         // Failed enclosing writes roll back both the reservation and Started.
         {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .unwrap();
-            insert_run_in(&tx, make_run(Some(losing_task.clone()), None, 5)).unwrap();
+            reserve_session_in(
+                &tx,
+                unpublished_conversation(Some(losing_task.clone()), None, 5),
+                None,
+            )
+            .unwrap();
             assert!(started(&tx, &losing_task).is_some());
         }
         assert_eq!(started(&conn, &losing_task), None);
         assert_eq!(
             conn.query_row(
                 "SELECT count(*) FROM tasks t WHERE
-            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM runs WHERE task_id=t.id)",
+            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=t.id)",
                 [],
                 |row| row.get::<_, i64>(0)
             )
@@ -1626,28 +1663,25 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn competing_run_assignments_start_only_the_winning_task() {
+    fn competing_session_assignments_start_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
-        let run = RunId::new();
+        let session = store
+            .create_session(unpublished_conversation(None, None, 1), None, None)
+            .unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
                 SELECT ?1,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
                 rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
-            conn.execute(
-                "INSERT INTO runs(id,created_at,cwd,published) VALUES(?1,1,'/repo',0)",
-                [run.as_str()],
-            )
-            .unwrap();
         }
         let barrier = Arc::new(Barrier::new(2));
         let writers = [task_id, other_task].map(|target| {
             let path = dir.path().join("loopflow.db");
             let barrier = barrier.clone();
             let wave = wave.clone();
-            let run = run.clone();
+            let session = session.id.clone();
             thread::spawn(move || {
                 let conn = rusqlite::Connection::open(path).unwrap();
                 conn.busy_timeout(std::time::Duration::from_secs(5))
@@ -1655,8 +1689,8 @@ mod durable_store_tests {
                 conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
                 barrier.wait();
                 let result = conn.execute(
-                    "UPDATE runs SET task_id=?2,wave_id=?3 WHERE id=?1",
-                    rusqlite::params![run.as_str(), target.as_str(), wave.as_str()],
+                    "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+                    rusqlite::params![session.as_str(), target.as_str(), wave.as_str()],
                 );
                 (target, result)
             })
@@ -1668,18 +1702,18 @@ mod durable_store_tests {
         );
         let conn = store.conn.lock().unwrap();
         for (target, result) in results {
-            let (has_run, started): (bool, bool) = conn
+            let (has_session, started): (bool, bool) = conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=?1),started_at IS NOT NULL
+                    "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1),started_at IS NOT NULL
                  FROM tasks WHERE id=?1",
                     [target.as_str()],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!(has_run, result.is_ok());
+            assert_eq!(has_session, result.is_ok());
             assert_eq!(started, result.is_ok());
             if let Err(error) = result {
-                assert!(error.to_string().contains("assignment cannot change"));
+                assert!(error.to_string().contains("binding is permanent"));
             }
         }
     }
@@ -2605,7 +2639,7 @@ mod durable_store_tests {
         let retained = store.session_history(&session.id, 0, 0).unwrap();
         assert_eq!(&retained[..history.len()], history.as_slice());
         assert_eq!(retained.last().unwrap().payload["status"], "completed");
-        assert!(store.run(&first).unwrap().is_none() && store.run(&second).unwrap().is_none());
+        store.assert_no_historical_runs();
     }
 
     #[test]

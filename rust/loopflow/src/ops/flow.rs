@@ -452,7 +452,7 @@ mod tests {
             &ledger.home().join("loopflow.db"),
         )
         .unwrap();
-        assert!(store.runs(None, None, None, None, 0).unwrap().is_empty());
+        store.assert_no_historical_runs();
         std::fs::remove_dir_all(capture.artifact_dir()).unwrap();
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");

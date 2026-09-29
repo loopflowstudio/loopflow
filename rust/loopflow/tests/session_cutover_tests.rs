@@ -478,18 +478,16 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     for index in 0..113 {
         let id = format!("inventory-{index:03}");
         let foreign_row = index < 110;
-        let run = loopflow::session::Run {
-            id: loopflow::durable::RunId::new(),
-            session_id: Some(id.clone()),
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
+        let session = loopflow::session::AgentSession {
+            caller_input_id: None,
             task_id: (index == 112).then(|| task.task.id.clone()),
             wave_id: None,
+            flow_session_id: None,
             work_source: (index == 112).then_some(loopflow::session::WorkSource::Declared),
-            created_at: 1,
-            published: true,
+            bound_at: None,
+            id: id.clone(),
+            input_id: loopflow::durable::RunId::new(),
+            input_published: true,
             cwd: if foreign_row {
                 foreign.path().to_path_buf()
             } else {
@@ -498,25 +496,8 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             skill: None,
             provider: Some("opencode".into()),
             model: None,
-            caller_run_id: None,
-            ended: None,
-        };
-        let session = loopflow::session::AgentSession {
-            caller_input_id: run.caller_run_id.clone(),
-            task_id: run.task_id.clone(),
-            wave_id: run.wave_id.clone(),
-            flow_session_id: run.invocation_id.clone(),
-            work_source: run.work_source,
-            bound_at: None,
-            id: id.clone(),
-            input_id: run.id.clone(),
-            input_published: run.published,
-            cwd: run.cwd.clone(),
-            skill: run.skill.clone(),
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-            node: run.node,
-            iterations: run.iterations.clone(),
+            node: None,
+            iterations: None,
             kind: loopflow::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
@@ -535,7 +516,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             created_at: 1,
         };
         if foreign_row {
-            let dir = fixture.run_dir(run.id.as_str());
+            let dir = fixture.run_dir(session.input_id.as_str());
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 dir.join("provider-session.json"),
@@ -2342,41 +2323,22 @@ fn import_stores_each_old_session_once_with_its_name() {
             .unwrap();
         // The review Session the old Home kept, with the Run it launched.
         let review_id = format!("{}:{}:captured:review:0", task.task.id, parked.id());
-        let run = loopflow::session::Run {
-            id: RunId::parse(&task_review).unwrap(),
-            session_id: Some(review_id.clone()),
-            invocation_id: Some(parked.id().to_owned()),
-            node: None,
-            iterations: None,
-            attempt: None,
+        let session = loopflow::session::AgentSession {
+            caller_input_id: None,
             task_id: Some(task.task.id.clone()),
             wave_id: Some(task.task.wave_id.clone()),
+            flow_session_id: Some(parked.id().to_owned()),
             work_source: Some(loopflow::session::WorkSource::Inherited),
-            created_at: 1,
-            published: true,
+            bound_at: None,
+            id: review_id,
+            input_id: RunId::parse(&task_review).unwrap(),
+            input_published: true,
             cwd: task.task.worktree.clone(),
             skill: Some("review-design".into()),
             provider: Some("opencode".into()),
             model: None,
-            caller_run_id: None,
-            ended: None,
-        };
-        let session = loopflow::session::AgentSession {
-            caller_input_id: run.caller_run_id.clone(),
-            task_id: run.task_id.clone(),
-            wave_id: run.wave_id.clone(),
-            flow_session_id: run.invocation_id.clone(),
-            work_source: run.work_source,
-            bound_at: None,
-            id: review_id,
-            input_id: run.id.clone(),
-            input_published: run.published,
-            cwd: run.cwd.clone(),
-            skill: run.skill.clone(),
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-            node: run.node,
-            iterations: run.iterations.clone(),
+            node: None,
+            iterations: None,
             kind: loopflow::session::SessionKind::FlowReview,
             interactive: true,
             repo: None,

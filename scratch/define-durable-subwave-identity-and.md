@@ -9,9 +9,10 @@ What is still open: [subwave-questions.md](subwave-questions.md).
 Companions: Product [LOO-330](https://linear.app/loopflow/issue/LOO-330),
 Intelligence [LOO-331](https://linear.app/loopflow/issue/LOO-331).
 
-This branch records the accepted design and preserves it in Wave memory.
-It has not implemented the build steps below or run their disposable-Home
-proof. The inherited LOO-298 implementation is outside this branch's changes.
+Build step 1 is coded but integrated verification is blocked by inherited
+LOO-298 compilation errors. Parent discovery and the release split remain to
+build; the disposable-Home proof has not run. The inherited LOO-298
+implementation is outside this branch's changes.
 
 ## The dream
 
@@ -21,8 +22,8 @@ release has learned, and nothing about auth or growth. A big memory splits
 into smaller ones as naturally as a big directory does. It works in any
 checkout, including a fresh clone.
 
-Today none of that is true. `wave/infrastructure/release/MEMORY.md` exists
-and reaches no prompt.
+Before this slice, `wave/infrastructure/release/MEMORY.md` existed
+and reached no prompt.
 
 ## The model
 
@@ -160,9 +161,7 @@ this page are in those commits and in `11ff4121c`.
 
 ## This slice
 
-2026-09-28: build step 1 is coded but integrated verification is blocked by
-inherited LOO-298 compilation errors. This supersedes the opening paragraph’s
-pre-implementation status. The checkout-local ancestor read uses the existing
+2026-09-28: the checkout-local ancestor read uses the existing
 prompt document pipeline for every Wave Markdown file, including memory.
 The separate Work-layer memory registry walk and preassembled memory input
 are removed. Native skill launch context and context attribution use that same

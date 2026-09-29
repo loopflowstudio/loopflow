@@ -159,11 +159,6 @@ pub struct Goal {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GoalRenderContext {
-    pub flows: Vec<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteSkill {
     pub skill: Skill,
@@ -251,11 +246,11 @@ pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
 }
 
 /// Render the goal and available flows; authored Wave files enter through prompt gathering.
-pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
-    let flows = if ctx.flows.is_empty() {
+pub fn render_goal(goal: &Goal, flows: &[String]) -> String {
+    let flows = if flows.is_empty() {
         "No flows are available.".to_string()
     } else {
-        ctx.flows
+        flows
             .iter()
             .map(|flow| format!("- {flow}"))
             .collect::<Vec<_>>()
@@ -1149,8 +1144,7 @@ mod tests {
     use super::{
         build_xor_routing_suffix, expand_branch_def, expand_flow, find_skill_source_path,
         human_occurrence_ids, load_flow, load_goal, load_skill, parse_flow_items, render_goal,
-        ConcretePath, ConcreteStep, ConcreteXor, Flow, Goal, GoalRenderContext, SkillStep, Step,
-        XorDef, XorPath,
+        ConcretePath, ConcreteStep, ConcreteXor, Flow, Goal, SkillStep, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use tempfile::TempDir;
@@ -1359,12 +1353,7 @@ mod tests {
         let goal = Goal {
             prompt: "Drive the work.".to_string(),
         };
-        let rendered = render_goal(
-            &goal,
-            &GoalRenderContext {
-                flows: vec!["build".to_string(), "qa".to_string()],
-            },
-        );
+        let rendered = render_goal(&goal, &["build".to_string(), "qa".to_string()]);
 
         assert!(rendered.contains("Drive the work."));
         assert!(rendered.contains("- build"));
@@ -1376,7 +1365,7 @@ mod tests {
         let goal = Goal {
             prompt: "Drive the work.".to_string(),
         };
-        let rendered = render_goal(&goal, &GoalRenderContext { flows: Vec::new() });
+        let rendered = render_goal(&goal, &[]);
 
         assert!(rendered.contains("No flows are available."));
     }

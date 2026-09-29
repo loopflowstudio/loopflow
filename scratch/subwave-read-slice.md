@@ -80,3 +80,11 @@ seed/attribution unit tests and prompt goldens, plus formatting and all-target
 Clippy on final bytes. Parent identity/discovery, Task-bound prompt selection,
 rename identity, cron execution and installed release split are not proved here.
 No publication, Task completion, installation or live schedule mutation occurred.
+
+Compression removed the single-field goal context and document copies during
+rendering. Exact-source component comparison passed 128 context combinations
+and three flow lists (reduced types, user-context stub); artifacts:
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-subwave-compress-hd4is3i1`.
+Changed-file rustfmt and diff checks passed. All-target Clippy remains blocked
+by inherited compilation errors; full fmt reports the same three inherited
+files. Logs: `/tmp/subwave-compress-{clippy,fmt}.log`. Integrated proof remains open.

@@ -61,12 +61,7 @@ pub(crate) fn render_task_context(
 
 pub(crate) fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     let goal = match crate::engine::load_goal(wave, repo) {
-        Ok(goal) => {
-            let context = crate::engine::GoalRenderContext {
-                flows: crate::engine::available_flow_names(repo),
-            };
-            crate::engine::render_goal(&goal, &context)
-        }
+        Ok(goal) => crate::engine::render_goal(&goal, &crate::engine::available_flow_names(repo)),
         Err(_) => format!("You are the agent of the '{wave}' wave. Drive the wave's goal forward."),
     };
     format!(

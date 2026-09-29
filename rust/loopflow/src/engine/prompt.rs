@@ -1422,10 +1422,9 @@ pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
         .docs
         .iter()
         .filter(|doc| doc.source == DocumentSource::Wave)
-        .cloned()
         .collect();
     if !docs.is_empty() {
-        parts.push(format_files(&docs));
+        parts.push(format_files(docs));
     }
     parts
 }
@@ -1444,22 +1443,18 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
 
     parts.extend(format_wave_sections(components));
 
-    let scratch_docs: Vec<Document> = components
+    let scratch_body: Vec<String> = components
         .docs
         .iter()
         .filter(|doc| doc.source == DocumentSource::Scratch)
-        .cloned()
+        .map(|doc| {
+            format!(
+                "<lf:file path=\"{}\">\n{}\n</lf:file>",
+                doc.path, doc.content
+            )
+        })
         .collect();
-    if !scratch_docs.is_empty() {
-        let scratch_body: Vec<String> = scratch_docs
-            .iter()
-            .map(|doc| {
-                format!(
-                    "<lf:file path=\"{}\">\n{}\n</lf:file>",
-                    doc.path, doc.content
-                )
-            })
-            .collect();
+    if !scratch_body.is_empty() {
         parts.push(format!(
             "Scratch design artifacts and working notes.\n\n<lf:scratch>\n{}\n</lf:scratch>",
             scratch_body.join("\n\n")
@@ -1467,14 +1462,13 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     // Explicit docs.
-    let reference_docs: Vec<Document> = components
+    let reference_docs: Vec<_> = components
         .docs
         .iter()
         .filter(|doc| !matches!(doc.source, DocumentSource::Scratch | DocumentSource::Wave))
-        .cloned()
         .collect();
     if !reference_docs.is_empty() {
-        parts.push(format_files(&reference_docs));
+        parts.push(format_files(reference_docs));
     }
 
     if !components.summaries.is_empty() {
@@ -1693,7 +1687,7 @@ pub fn write_prompt_log(
 }
 
 /// Format file documents for inclusion in prompt.
-fn format_files(docs: &[Document]) -> String {
+fn format_files<'a>(docs: impl IntoIterator<Item = &'a Document>) -> String {
     let mut parts = Vec::new();
     parts.push(
         "Reference files for this task. Includes parent documentation for context.".to_string(),
@@ -1952,10 +1946,7 @@ mod tests {
         let goal = crate::engine::flow::Goal {
             prompt: "Ship the roadmap.".into(),
         };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext { flows: vec![] },
-        );
+        let seed = crate::engine::flow::render_goal(&goal, &[]);
         let components = PromptComponents {
             wave: Some("goals".into()),
             docs: vec![Document {
@@ -1979,10 +1970,7 @@ mod tests {
         let goal = crate::engine::flow::Goal {
             prompt: "Ship the roadmap.".to_string(),
         };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext { flows: vec![] },
-        );
+        let seed = crate::engine::flow::render_goal(&goal, &[]);
         assert!(
             !seed.contains("<lf:loopflow>"),
             "the seed itself carries no loopflow section"

@@ -1835,3 +1835,32 @@ traces. All-target Clippy passes in `desktop-conformance-clippy-final.log` (16.0
 after removing a needless test clone flagged in the retained first log. Formatting
 and architecture pass. No native production bytes changed after their preceding
 public/actual-provider proofs; only the stale trace representation was replaced.
+
+
+## Remove the bypassing history-resume entry (working, 2026-09-29)
+
+Supervisor's native-consumer audit identified `lf runs INPUT --resume` scanning
+old manifests and calling native resume without the Session connect owner.
+Main selected the authorized removal option: delete the flag, dispatch and helper;
+retain immutable-input replay and the existing `session connect`/`open` operation.
+Repository caller search found only CLI dispatch/parser tests, no Desktop or
+script callers. Public command documentation names the replacement. A focused
+public CLI proof now checks the removed flag and common connect resolution;
+this deletion does not claim that every provider's internal connect path is done.
+No second admission guard, claim writer or resume implementation is added.
+
+
+`session-connect-entry.log` passes three focused CLI/history/review checks
+(9.227s); `session-connect-entry-clippy.log` passes all-target Clippy (16.23s).
+The production deletion is two dispatch lines, seven flag/declaration lines and
+21 helper lines, with two conflict-list edits; the test removes obsolete parser
+expectations and extends public resolution. No new lifecycle code was added.
+A separate native rehost discriminator failed with an active-writer response;
+see native-turn-retry-tradeoff.md. It authorizes no production handoff expansion.
+
+Supervisor's next source finding names lost historical interactive/closure facts
+on the fallback importer. Main will first reproduce independent TUI/no-native-ID
+and old TUI Flow-member cases through the public CLI. Production importer edits
+wait for coordination with the private metadata-summary proposal; its active
+contribution has no publication hold. Preserve the existing NULL-title synthetic
+counterexample as unproven released reachability, not a real-Home defect.

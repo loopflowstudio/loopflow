@@ -37,3 +37,13 @@ Unresolved, Jack's to choose:
 - The replacement name for the type and fields.
 - Whether newly minted identifiers keep the `run_` prefix.
 - Whether `SessionRecord.run_id` is renamed or removed from the wire.
+
+### Resolution direction (2026-09-29)
+
+Jack decided the identifier names no object. A captured input becomes an event
+in AgentSession history, referenced by its `session_events` sequence. `RunId`
+and `agent_session_inputs` are deleted; `flow_sessions.current_run_id` becomes a
+Session event reference; `SessionRecord.run_id` leaves the wire. Stored `run_…`
+selectors keep resolving. `run_events.run_id` remains a separate trace-naming
+change. This finding stays unresolved until main implements it and Jack accepts
+the result.

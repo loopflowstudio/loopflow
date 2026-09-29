@@ -78,7 +78,7 @@
         "kind": "steer_issued",
         "id": 1,
         "author": {
-          "kind": "run",
+          "kind": "imported",
           "id": "run_00000000000000000000000000000001"
         }
       }

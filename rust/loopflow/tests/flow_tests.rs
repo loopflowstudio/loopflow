@@ -466,7 +466,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.publish_attempt(
                 claimed.id(),
                 claimed.version,
-                &reviewer,
+                claimed.current_attempt.as_ref().unwrap().captured,
                 Some(&claim),
                 "codex",
                 None,
@@ -490,7 +490,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         .unwrap();
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        let session = store.session_for_run(&reviewer).unwrap().unwrap();
+        let session = store.session_for_artifact(&reviewer).unwrap().unwrap();
         let driver = store
             .claim_session_driver(&session.id, None, &owner.exec_id, true)
             .unwrap();
@@ -1323,7 +1323,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
             retry.version,
             None,
             &loopflow::durable::TaskFlowBlocker {
-                run_id: None,
+                captured: None,
                 reason: "explicit restart required".into(),
                 restart_required: true,
                 observed_at: time::OffsetDateTime::now_utc(),
@@ -1980,7 +1980,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             after.version,
             None,
             &TaskFlowBlocker {
-                run_id: None,
+                captured: None,
                 reason: "Release target is unavailable".into(),
                 restart_required: true,
                 observed_at: time::OffsetDateTime::now_utc(),

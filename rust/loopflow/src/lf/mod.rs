@@ -786,10 +786,10 @@ pub enum SessionCommand {
     },
     /// Run one ad-hoc request in its durable terminal
     #[command(name = "serve-ask", hide = true)]
-    ServeAsk { run_id: crate::durable::RunId },
+    ServeAsk { run_id: String },
     /// Stop one exact native provider Run after its review completes
     #[command(name = "stop-run", hide = true)]
-    StopRun { run_id: crate::durable::RunId },
+    StopRun { run_id: String },
 }
 
 /// Name the surviving spelling for each retired `lf op` verb. Prompts, `.lf/`

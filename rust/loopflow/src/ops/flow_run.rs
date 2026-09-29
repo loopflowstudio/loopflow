@@ -59,7 +59,7 @@ pub(crate) fn token() -> Result<Option<ActiveStep>> {
 /// both are independent.
 pub(crate) struct StepLaunch {
     pub membership: crate::run_record::RunFlowMembership,
-    pub reserved: Option<(ActiveStep, crate::durable::RunId)>,
+    pub reserved: Option<(ActiveStep, i64, String)>,
 }
 
 pub(crate) fn capture_membership() -> Result<StepLaunch> {
@@ -82,13 +82,13 @@ pub(crate) fn capture_membership() -> Result<StepLaunch> {
     );
     let reserved = match &flow.current_attempt {
         Some(attempt) if !attempt.published && flow.pending_session_id.is_none() => {
-            attempt.run_id.clone()
+            (attempt.captured, attempt.run_id.clone())
         }
         _ => return Ok(independent),
     };
     Ok(StepLaunch {
         membership: RunFlowMembership::Step(RunFlowStep::of(&flow)?),
-        reserved: Some((token, reserved)),
+        reserved: Some((token, reserved.0, reserved.1)),
     })
 }
 

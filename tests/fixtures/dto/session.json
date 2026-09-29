@@ -35,7 +35,6 @@
       "unavailable_reason": null
     }
   ],
-  "run_id": "run_00000000000000000000000000000001",
   "flow_membership": {
     "kind": "step",
     "flow": "task-design",

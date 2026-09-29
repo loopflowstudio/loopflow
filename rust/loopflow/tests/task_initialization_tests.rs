@@ -408,8 +408,8 @@ fn task_review_completion_consumes_only_installed_readiness() {
         Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET input_published=1, provider='claude', model='sonnet' WHERE input_id=?1",
-                [review.input_id.as_str()],
+                "UPDATE agent_sessions SET input_published=1, provider='claude', model='sonnet' WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
+                [review.artifact_key.as_str()],
             )
             .unwrap(),
         1
@@ -457,7 +457,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
         .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
-    assert!(position.session_run_id().is_some());
+    assert!(position.review_artifact_key().is_some());
     let repeated = command(branch, home.path(), &["task", "run", "INF-123", "--json"])
         .output()
         .unwrap();
@@ -472,7 +472,10 @@ fn task_review_completion_consumes_only_installed_readiness() {
         .unwrap();
     assert_eq!(resumed.invocation, position.invocation);
     assert_eq!(resumed.cursor, position.cursor);
-    assert_eq!(resumed.session_run_id(), position.session_run_id());
+    assert_eq!(
+        resumed.review_artifact_key(),
+        position.review_artifact_key()
+    );
     for (cli, expected) in [
         (
             installation.cli.as_path(),
@@ -505,7 +508,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     runtime
         .block_on(branch_store.ready_session(
             &session.id,
-            &session.input_id,
+            session.captured,
             "Branch-only feedback must stay private",
         ))
         .unwrap();
@@ -583,7 +586,10 @@ fn task_review_completion_consumes_only_installed_readiness() {
             home.path(),
             &["session", "ready", "Installed feedback"],
         )
-        .env("LF_RUN_ID", position.session_run_id().unwrap().as_str())
+        .env(
+            "LF_RUN_ID",
+            position.review_artifact_key().unwrap().as_str(),
+        )
         .env("LF_HUMAN_SESSION", token.to_string())
         .output()
         .unwrap()
@@ -610,7 +616,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
         String::from_utf8_lossy(&ready.stderr)
     );
     // Both public selectors must resolve the same installed review boundary.
-    let accepted = complete(position.session_run_id().unwrap().as_str());
+    let accepted = complete(position.review_artifact_key().unwrap().as_str());
     assert!(
         accepted.status.success(),
         "{}",
@@ -681,7 +687,7 @@ fn direct_open_preserves_another_installations_development_store() {
 
 #[test]
 fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
-    use loopflow::durable::{FlowSession, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use sha2::{Digest, Sha256};
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -768,7 +774,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                 .publish_attempt(
                     &position.invocation.id,
                     reserved.version,
-                    &run,
+                reserved.current_attempt.as_ref().unwrap().captured,
                     Some(&claim),
                     "claude",
                     Some("sonnet"),
@@ -783,7 +789,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                 .unwrap();
             (before, run)
         });
-        let run_dir = home.path().join("runs").join(&run.as_str()[4..6]).join(run.as_str());
+        let run_dir = home.path().join("runs").join(&run.strip_prefix("run_").unwrap_or(&run)[..2]).join(run.as_str());
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("events.jsonl"), format!("{}\n", serde_json::json!({
             "schema_version": 1, "seq": 0,
@@ -798,8 +804,9 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             )
         };
         let session = keyed(&before);
-        let ask_session = |session: &str, caller: RunId| loopflow::session::AgentSession {
-            id: session.to_string(), input_id: RunId::new(), caller_input_id: Some(caller),
+        let ask_session = |session: &str, caller: String| loopflow::session::AgentSession {
+            captured: None,
+            id: session.to_string(), artifact_key: uuid::Uuid::new_v4().simple().to_string(), caller_artifact_key: Some(caller),
             input_published: true, cwd: repo.path().into(), skill: Some("unblock".into()),
             provider: Some("claude".into()), model: Some("sonnet".into()), node: None, iterations: None,
             task_id: Some(task.task.id.clone()), wave_id: Some(task.task.wave_id.clone()),
@@ -825,21 +832,21 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         };
         let status_args = ["task", "status", "INF-123", "--json"];
         // A waiting Ask from an earlier Run cannot repaint this worker.
-        let stale = ask_session(&session, RunId::new());
-        runtime
-            .block_on(task.store.create_session(stale.clone(), None))
+        let stale = ask_session(&session, uuid::Uuid::new_v4().simple().to_string());
+        let stale = runtime
+            .block_on(task.store.create_session(stale, None))
             .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
         let current = runtime
             .block_on(
                 task.store
-                    .replace_session_input(&stale.input_id, ask_session(&session, run.clone())),
+                    .replace_session_input(stale.captured, ask_session(&session, run.clone())),
             )
             .unwrap();
         let status = read(&status_args);
         assert_eq!(status["execution"]["state"], "blocked");
-        assert_eq!(status["execution"]["run_id"], run.as_str());
+        assert_eq!(status["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         assert!(status["execution"]["reason"]
             .as_str()
             .unwrap()
@@ -861,11 +868,11 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         runtime
             .block_on(
                 task.store
-                    .ready_session(&session, &current.input_id, "Switch the reader"),
+                    .ready_session(&session, current.captured, "Switch the reader"),
             )
             .unwrap();
         runtime
-            .block_on(task.store.complete_session(&session, &current.input_id))
+            .block_on(task.store.complete_session(&session, current.captured))
             .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         assert_eq!(
@@ -915,7 +922,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let desktop = read(&["roadmap", "--json"]);
         drop(body);
         assert_eq!(stalled["execution"]["state"], "stalled");
-        assert_eq!(stalled["execution"]["run_id"], run.as_str());
+        assert_eq!(stalled["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         let flow = &desktop["waves"][0]["tasks"]["items"][0]["flow"];
         assert_eq!(flow["record"]["execution"], "stalled");
         assert_eq!(flow["record"]["reason"], stalled["execution"]["reason"]);

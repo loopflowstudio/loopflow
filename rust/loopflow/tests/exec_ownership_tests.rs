@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use loopflow::durable::RunId;
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
 use loopflow::session::{AgentSession, SessionKind, TitleSource};
@@ -159,8 +158,8 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
-    connection.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-        VALUES('caller-session','run_00000000000000000000000000000001','Historical','human',1,1,'/missing',?1,?2)",
+    connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+        VALUES('caller-session','Historical','human',1,1,'/missing',?1,?2)",
         rusqlite::params![task.as_str(),wave]).unwrap();
     connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
         VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
@@ -211,8 +210,8 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
             rusqlite::params![ids[0], paths[1]],
         )
         .unwrap();
-    connection.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,wave_id)
-        VALUES('other-session','run_00000000000000000000000000000002','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
+    connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,wave_id)
+        VALUES('other-session','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
     connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,wave_id,observed_at,payload)
         VALUES('other-session','thread','turn','started','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
     for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
@@ -909,18 +908,19 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
 }
 
 fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
-    let run_id = RunId::new();
+    let run_id = uuid::Uuid::new_v4().simple().to_string();
     store
         .create_session(
             AgentSession {
+                captured: None,
                 task_id: None,
                 wave_id: None,
                 flow_session_id: None,
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
-                input_id: run_id,
-                caller_input_id: None,
+                artifact_key: run_id,
+                caller_artifact_key: None,
                 input_published: false,
                 cwd: repo.into(),
                 skill: None,

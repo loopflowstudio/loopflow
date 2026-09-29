@@ -5059,6 +5059,154 @@ mod tests {
     }
 
     #[test]
+    fn captured_event_upgrade_retains_unknown_sql_and_selected_history() {
+        let conn = open();
+        let name = "capture_session_events";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        let original = r#"{ "id":"run_unknown", "created_at":9, "task_id":"task", "wave_id":"wave", "invocation_id":"flow", "outcome":"failed", "opaque":{"retained":true} }"#;
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','infra','/repo',1),('other-wave','other','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','linear',1),('other-project','other-wave','linear-other',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','issue','INF-1','/repo',1);
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id,current_run_id)
+                VALUES('flow','{"id":"flow","capture":"retained"}',NULL,0,0,4,0,1,'current','task','wave','run_unknown');
+            INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+                VALUES('conversation','run_known','Saved name','human',1,'conversation',0,0,'/repo');
+            INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_known','conversation');
+            INSERT INTO session_events(seq,session_id,kind,receipt_key,observed_at,payload,input_id)
+                VALUES(12,'conversation','observed','run_known:manifest.json',1,'{"source":"manifest.json","input_id":"run_known","evidence":{"retained":true}}','run_known');
+        "#).unwrap();
+        conn.execute(
+            "INSERT INTO agent_session_inputs(input_id,imported_sql) VALUES('run_unknown',?1)",
+            [original],
+        )
+        .unwrap();
+        conn.execute("UPDATE tasks SET started_at=9 WHERE id='task'", [])
+            .unwrap();
+        let failure = r#"{ "run_id":"run_unknown", "reason":"retained failure", "restart_required":false, "observed_at":"2026-09-20T20:00:00Z" }"#;
+        conn.execute(
+            "UPDATE flow_sessions SET failure_json=?1 WHERE id='flow'",
+            [failure],
+        )
+        .unwrap();
+        super::_migration_transaction(&conn, |conn| {
+            conn.execute_batch(&current_draft_sql(name))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        assert_eq!(conn.query_row("SELECT json_extract(payload,'$.current_run_id') FROM import_evidence WHERE source='flow_capture' AND selector='flow'", [], |row| row.get::<_,String>(0)).unwrap(), "run_unknown");
+        assert!(conn
+            .query_row(
+                "SELECT current_capture FROM flow_sessions WHERE id='flow'",
+                [],
+                |row| row.get::<_, Option<i64>>(0)
+            )
+            .unwrap()
+            .is_none());
+        let capture: i64 = conn
+            .query_row(
+                "SELECT current_capture FROM agent_sessions WHERE id='conversation'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT captured_event FROM session_events WHERE seq=12",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            capture
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT receipt_key FROM session_events WHERE seq=?1 AND kind='captured'",
+                [capture],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "run_known"
+        );
+        assert_eq!(conn.query_row("SELECT payload FROM import_evidence WHERE source='runs' AND selector='run_unknown'", [], |row| row.get::<_,String>(0)).unwrap(), original);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='agent_session_inputs'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(conn
+            .execute("UPDATE import_evidence SET payload='{}'", [])
+            .is_err());
+        assert!(conn.execute("DELETE FROM import_evidence", []).is_err());
+        assert!(conn
+            .execute(
+                "UPDATE session_events SET payload='{}' WHERE seq=?1",
+                [capture]
+            )
+            .is_err());
+        assert!(conn
+            .execute("DELETE FROM session_events WHERE seq=?1", [capture])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE agent_sessions SET current_capture=12", [])
+            .is_err());
+        assert_eq!(
+            conn.query_row("SELECT started_at FROM tasks WHERE id='task'", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            9
+        );
+        assert_eq!(conn.query_row("SELECT payload FROM import_evidence WHERE source='flow_failure' AND selector='flow'", [], |row| row.get::<_,String>(0)).unwrap(), failure);
+        assert!(conn
+            .query_row(
+                "SELECT json_extract(failure_json,'$.captured') FROM flow_sessions WHERE id='flow'",
+                [],
+                |row| row.get::<_, Option<i64>>(0)
+            )
+            .unwrap()
+            .is_none());
+        assert!(conn
+            .execute("UPDATE tasks SET started_at=NULL WHERE id='task'", [])
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE tasks SET project_id='other-project' WHERE id='task'",
+                []
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE projects SET wave_id='other-wave' WHERE id='project'",
+                []
+            )
+            .is_err());
+        assert!(conn
+            .execute("UPDATE flow_sessions SET task_id=NULL WHERE id='flow'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn native_output_upgrade_preserves_selected_history_and_started() {
         let conn = open();
         let name = "record_session_output";
@@ -5716,10 +5864,10 @@ mod tests {
                 .unwrap();
             apply_installed_development_sqlite(&conn, &drafts[..index]).unwrap();
         }
-        let prior = crate::durable::RunId::new();
-        let current = crate::durable::RunId::new();
-        let caller = crate::durable::RunId::new();
-        let standalone = crate::durable::RunId::new();
+        let prior = crate::run_record::new_artifact_key();
+        let current = crate::run_record::new_artifact_key();
+        let caller = crate::run_record::new_artifact_key();
+        let standalone = crate::run_record::new_artifact_key();
         let capture =
             crate::durable::test_flow_invocation("retained", 0, "review", Some("review"), true);
         conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
@@ -5776,7 +5924,7 @@ mod tests {
         conn.execute("INSERT INTO runs(id,task_id,wave_id,created_at,published,cwd,skill,provider,caller_run_id,work_source,outcome,ended_at)
             VALUES(?1,?2,?3,20,1,'/missing-original-checkout','research','claude',?4,'inherited','failed',21)",
             rusqlite::params![standalone.as_str(),task.as_str(),wave,caller.as_str()]).unwrap();
-        let mechanical = crate::durable::RunId::new();
+        let mechanical = crate::run_record::new_artifact_key();
         let mut operation =
             crate::durable::test_flow_invocation("old-operation", 0, "publish", None, false);
         operation.steps = vec![crate::engine::ConcreteStep::Op(crate::engine::ConcreteOp {
@@ -5841,7 +5989,7 @@ mod tests {
         );
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM agent_session_inputs WHERE imported_sql IS NOT NULL",
+                "SELECT count(*) FROM import_evidence WHERE source='runs'",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -5850,7 +5998,7 @@ mod tests {
         );
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM session_events WHERE input_id IS NOT NULL",
+                "SELECT count(*) FROM session_events WHERE captured_event IS NOT NULL",
                 [],
                 |row| row.get::<_, i64>(0)
             )
@@ -5858,9 +6006,13 @@ mod tests {
             0,
             "historical native starts cannot borrow the current input during upgrade"
         );
-        let retained_sql: Vec<serde_json::Value> = conn.prepare("SELECT imported_sql FROM agent_session_inputs WHERE imported_sql IS NOT NULL ORDER BY input_id").unwrap()
-            .query_map([], |r| r.get::<_,String>(0)).unwrap()
-            .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();
+        let retained_sql: Vec<serde_json::Value> = conn
+            .prepare("SELECT payload FROM import_evidence WHERE source='runs' ORDER BY selector")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|row| serde_json::from_str(&row.unwrap()).unwrap())
+            .collect();
         assert_eq!(
             retained_sql, original_sql,
             "every old column survives without a lifecycle table"
@@ -5912,7 +6064,7 @@ mod tests {
             .is_err());
         assert!(conn
             .execute(
-                "DELETE FROM agent_session_inputs WHERE input_id=?1",
+                "DELETE FROM import_evidence WHERE source='runs' AND selector=?1",
                 [caller.as_str()]
             )
             .is_err());
@@ -5925,24 +6077,24 @@ mod tests {
                 .is_err());
         }
         let saved = store.session("retained").unwrap().unwrap();
-        assert_eq!(saved.input_id, current);
-        assert_eq!(saved.caller_input_id.as_ref(), Some(&caller));
+        assert_eq!(saved.artifact_key, current);
+        assert_eq!(saved.caller_artifact_key.as_ref(), Some(&caller));
         assert_eq!(saved.ready_summary.as_deref(), Some("Saved feedback"));
         assert_eq!(
             store.flow(&capture.id).unwrap().unwrap().invocation,
             capture
         );
         let native = store.session_history("retained", 0, 100).unwrap();
-        assert_eq!(native.len(), 5);
+        assert_eq!(native.len(), 7);
         for dry_run in [true, false, false] {
             let members = store.historical_session_inputs().unwrap();
             assert_eq!(members.len(), 4);
             for (session, observation) in members {
-                if observation.input_id == caller {
+                if observation.artifact_key == caller || observation.artifact_key == standalone {
                     assert!(session.is_none());
                     continue;
                 }
-                if observation.input_id != standalone {
+                if observation.artifact_key != standalone {
                     assert_eq!(observation.payload["evidence"]["invocation_id"], capture.id);
                     assert_eq!(observation.payload["evidence"]["node"], 0);
                     assert_eq!(observation.payload["evidence"]["iterations"], "[[2]]");
@@ -5952,36 +6104,17 @@ mod tests {
                     .unwrap();
             }
             let history = store.session_history("retained", 0, 100).unwrap();
-            assert_eq!(&history[..5], native);
-            assert_eq!(history.len(), if dry_run { 5 } else { 7 });
+            assert_eq!(&history[..7], native);
+            assert_eq!(history.len(), if dry_run { 7 } else { 9 });
             assert_eq!(store.session("retained").unwrap().unwrap(), saved);
-            if dry_run {
-                assert!(store.session(standalone.as_str()).unwrap().is_none());
-                assert!(store.session_for_run(&standalone).unwrap().is_none());
-            } else {
-                let session = store.session_for_run(&standalone).unwrap().unwrap();
-                assert_eq!(session.id, standalone.as_str());
-                assert_eq!(session.task_id.as_ref(), Some(&task));
-                assert_eq!(session.wave_id.as_ref(), Some(&wave));
-                assert_eq!(
-                    session.work_source,
-                    Some(crate::session::WorkSource::Inherited)
-                );
-                assert_eq!(session.caller_input_id.as_ref(), Some(&caller));
-                assert_eq!(session.completed_at, None);
-                let history = store.session_history(&session.id, 0, 100).unwrap();
-                assert_eq!(history.len(), 1);
-                assert_eq!(history[0].kind, crate::session::SessionEventKind::Observed);
-                assert_eq!(history[0].payload["evidence"]["outcome"], "failed");
-                assert_eq!(history[0].provider_turn, None);
-                assert_eq!(history[0].exec_id, None);
-            }
+            assert!(store.session(standalone.as_str()).unwrap().is_none());
+            assert!(store.session_for_artifact(&standalone).unwrap().is_none());
             // The caller row lacks agent/mechanical classification. Preserve
             // it as unresolved SQL evidence; it does not justify a Session.
-            assert!(store.session_for_run(&caller).unwrap().is_none());
+            assert!(store.session_for_artifact(&caller).unwrap().is_none());
             assert_eq!(
                 conn.query_row(
-                    "SELECT count(*) FROM agent_session_inputs WHERE input_id=?1 AND imported_sql IS NOT NULL AND session_id IS NULL",
+                    "SELECT count(*) FROM import_evidence WHERE source='runs' AND selector=?1 AND historical_session_id IS NULL",
                     [caller.as_str()],
                     |row| row.get::<_, i64>(0)
                 )
@@ -6014,7 +6147,7 @@ mod tests {
             let rows = store.historical_session_inputs().unwrap();
             assert!(
                 rows.iter()
-                    .any(|(session, input)| session.is_none() && input.input_id == mechanical),
+                    .any(|(session, input)| session.is_none() && input.artifact_key == mechanical),
                 "{edit}"
             );
             conn.execute("UPDATE flow_events SET payload=?2,node=0 WHERE flow_id=?1 AND kind='operation_started'",
@@ -6029,7 +6162,7 @@ mod tests {
             .historical_session_inputs()
             .unwrap()
             .iter()
-            .any(|(session, input)| session.is_none() && input.input_id == mechanical));
+            .any(|(session, input)| session.is_none() && input.artifact_key == mechanical));
         conn.execute(
             "UPDATE flow_events SET observed_at=23 WHERE flow_id=?1 AND kind='operation_completed'",
             [&operation.id],
@@ -6043,14 +6176,14 @@ mod tests {
             .historical_session_inputs()
             .unwrap()
             .iter()
-            .any(|(session, input)| session.is_none() && input.input_id == mechanical));
+            .any(|(session, input)| session.is_none() && input.artifact_key == mechanical));
         conn.execute("UPDATE flow_events SET kind='operation_completed',operation_start=?2,outcome='completed' WHERE seq=?1",
             [completion,start]).unwrap();
         assert!(!store
             .historical_session_inputs()
             .unwrap()
             .iter()
-            .any(|(_, input)| input.input_id == mechanical));
+            .any(|(_, input)| input.artifact_key == mechanical));
         assert_eq!(
             conn.query_row(
                 "SELECT selected_start FROM flow_sessions WHERE id=?1",
@@ -6074,20 +6207,20 @@ mod tests {
             0
         );
         assert!(conn.execute(
-            "UPDATE agent_session_inputs SET imported_sql=json_set(imported_sql,'$.outcome','interrupted') WHERE input_id=?1",
+            "UPDATE import_evidence SET payload=json_set(payload,'$.outcome','interrupted') WHERE source='runs' AND selector=?1",
             [prior.as_str()],
         ).is_err(), "retained source is immutable");
         let (session, mut changed) = store
             .historical_session_inputs()
             .unwrap()
             .into_iter()
-            .find(|(_, input)| input.input_id == prior)
+            .find(|(_, input)| input.artifact_key == prior)
             .unwrap();
         changed.payload["evidence"]["outcome"] = serde_json::json!("interrupted");
         assert!(store
             .import_session(session.unwrap(), None, &[changed], false)
             .is_err());
-        assert_eq!(store.session_history("retained", 0, 100).unwrap().len(), 7);
+        assert_eq!(store.session_history("retained", 0, 100).unwrap().len(), 9);
         assert_eq!(
             conn.query_row(
                 "SELECT started_at FROM tasks WHERE id=?1",
@@ -6097,7 +6230,7 @@ mod tests {
             .unwrap(),
             17
         );
-        assert!(store.session_for_run(&mechanical).unwrap().is_none());
+        assert!(store.session_for_artifact(&mechanical).unwrap().is_none());
         let operation_history: Vec<(String,Option<i64>,Option<String>,String)> = conn.prepare(
             "SELECT kind,observed_at,exec_id,payload FROM flow_events WHERE flow_id=?1 ORDER BY seq").unwrap()
             .query_map([&operation.id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap()
@@ -6114,9 +6247,9 @@ mod tests {
             assert_eq!(payload["sql"]["skill"], "publish");
             assert_eq!(payload["sql"]["provider"], "loopflow");
         }
-        let (input, operation_start): (Option<String>, Option<i64>) = conn
+        let (input, operation_start): (Option<i64>, Option<i64>) = conn
             .query_row(
-                "SELECT current_run_id,operation_start FROM flow_sessions WHERE id=?1",
+                "SELECT current_capture,operation_start FROM flow_sessions WHERE id=?1",
                 [&operation.id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -6148,7 +6281,7 @@ mod tests {
         let mut captures = Vec::new();
         for human in [true, false] {
             let task = crate::durable::TaskId::new();
-            let input = crate::durable::RunId::new();
+            let input = crate::run_record::new_artifact_key();
             let invocation = crate::durable::test_flow_invocation(
                 "retained",
                 0,
@@ -6227,7 +6360,7 @@ mod tests {
                 )
                 .is_err());
             if human {
-                let session = store.session_for_run(&input).unwrap().unwrap();
+                let session = store.session_for_artifact(&input).unwrap().unwrap();
                 assert_eq!(session.ready_summary.as_deref(), Some("Saved answer"));
                 assert_eq!(session.task_id.as_ref(), Some(&task));
                 assert_eq!(
@@ -6237,7 +6370,7 @@ mod tests {
                 assert_eq!(store.session_inputs(&session.id).unwrap(), vec![input]);
             } else {
                 assert!(
-                    store.session_for_run(&input).unwrap().is_none(),
+                    store.session_for_artifact(&input).unwrap().is_none(),
                     "an autonomous legacy boundary is not an invented interactive review"
                 );
             }
@@ -6375,7 +6508,7 @@ mod tests {
                 Some("review"),
                 human,
             );
-            let run = crate::durable::RunId::new();
+            let run = crate::run_record::new_artifact_key();
             let claim = (!human).then(|| crate::durable::TaskWorkerClaim {
                 invocation_id: invocation.id.clone(),
                 generation: 4,
@@ -6489,8 +6622,8 @@ mod tests {
         let cursor = serde_json::to_string(&crate::engine::ExecutionCursor::default()).unwrap();
         conn.execute("INSERT INTO flow_invocations(id,invocation_json,review_json,step_index,iteration,position_version,worker_generation,updated_at,state)
             VALUES(?1,?2,?3,0,0,3,0,1,'current')", rusqlite::params![capture.id, serde_json::to_string(&capture).unwrap(), cursor]).unwrap();
-        let first = crate::durable::RunId::new();
-        let second = crate::durable::RunId::new();
+        let first = crate::run_record::new_artifact_key();
+        let second = crate::run_record::new_artifact_key();
         conn.execute_batch("BEGIN").unwrap();
         conn.execute(
             "INSERT INTO sessions(id,current_run_id,title,title_source,ready_summary,created_at)
@@ -6582,7 +6715,7 @@ mod tests {
         // Position identity intentionally permits multiple Runs; only Run identity is unique.
         for attempt in 1..=2 {
             conn.execute("INSERT INTO runs(id,invocation_id,node,iterations,attempt,created_at,cwd,published)
-                VALUES(?1,?2,0,'[[]]',?3,3,'/repo',0)", rusqlite::params![crate::durable::RunId::new().as_str(),capture.id,attempt]).unwrap();
+                VALUES(?1,?2,0,'[[]]',?3,3,'/repo',0)", rusqlite::params![crate::run_record::new_artifact_key().as_str(),capture.id,attempt]).unwrap();
         }
         assert!(conn
             .execute("UPDATE runs SET node=5 WHERE id=?1", [first.as_str()])
@@ -6860,7 +6993,7 @@ mod tests {
                     cursor: crate::engine::ExecutionCursor::default(),
                 }));
             }
-            let run = crate::durable::RunId::new();
+            let run = crate::run_record::new_artifact_key();
             let capture = serde_json::to_string(&invocation).unwrap();
             let cursor = serde_json::to_string(&cursor).unwrap();
             conn.execute("INSERT INTO flow_invocations(id,task_id,invocation_json,session_run_id,ready_summary,
@@ -6990,7 +7123,7 @@ mod tests {
         .unwrap();
         assert!(conn.execute_batch("COMMIT").is_err());
         conn.execute_batch("ROLLBACK").unwrap();
-        let independent = crate::durable::RunId::new();
+        let independent = crate::run_record::new_artifact_key();
         conn.execute(
             "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
             position_version,worker_generation,updated_at,state)

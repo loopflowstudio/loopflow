@@ -65,7 +65,6 @@ pub enum DurableDataError {
 
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
-durable_id!(RunId, "run_");
 durable_id!(HomeId, "home_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
@@ -174,7 +173,7 @@ pub struct TaskWorkerClaim {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskFlowBlocker {
-    pub run_id: Option<RunId>,
+    pub captured: Option<i64>,
     pub reason: String,
     pub restart_required: bool,
     #[serde(with = "time::serde::rfc3339")]
@@ -184,7 +183,7 @@ pub struct TaskFlowBlocker {
 impl TaskFlowBlocker {
     pub fn now(reason: impl Into<String>) -> Self {
         Self {
-            run_id: None,
+            captured: None,
             reason: reason.into(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),
@@ -192,12 +191,12 @@ impl TaskFlowBlocker {
     }
 }
 
-/// The current attempt at an invocation's cursor: its Run, whether the launch
-/// published it, and once the Run settled, its outcome. A reserved attempt
-/// is a row with `published=0`.
+/// Read projection of the Flow's selected capture and its Session publication.
+/// The recorder outcome is historical evidence, not native turn settlement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowAttempt {
-    pub run_id: RunId,
+    pub captured: i64,
+    pub run_id: String,
     pub published: bool,
     pub outcome: Option<String>,
 }
@@ -337,7 +336,7 @@ impl FlowSession {
     }
 
     /// The Run a pending review's agent is running in, once launched.
-    pub fn session_run_id(&self) -> Option<&RunId> {
+    pub fn review_artifact_key(&self) -> Option<&String> {
         self.current_attempt
             .as_ref()
             .filter(|attempt| attempt.published)
@@ -369,7 +368,10 @@ pub enum TaskWorkerClaimOutcome {
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
     User,
-    Run(RunId),
+    Captured(i64),
+    /// Historical selector preserved from pre-event attribution.
+    #[serde(alias = "run")]
+    Imported(String),
 }
 
 /// A steer projected from a Work's durable comment stream

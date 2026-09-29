@@ -644,8 +644,7 @@ mod tests {
         let mut harnesses = Vec::new();
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
-            conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd)
-                VALUES(?1,?1,?1,'human',1,1,'/fixture')", [id]).unwrap();
+            store.test_session(id, &crate::run_record::new_artifact_key());
             let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);

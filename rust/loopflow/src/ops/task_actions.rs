@@ -252,7 +252,7 @@ mod tests {
                 state,
                 reason: "Inspect the existing worker".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             };
             let mut evidence = evidence(PrPhase::Open, None, None);
             evidence.execution = Some(&execution);

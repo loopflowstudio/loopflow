@@ -17,7 +17,7 @@ use super::{ActiveSessionsSnapshot, DiscoveryState};
 
 type Observation = (
     ProcessSnapshot,
-    Vec<(crate::durable::RunId, ProviderClientRef)>,
+    Vec<(String, ProviderClientRef)>,
     Vec<String>,
 );
 

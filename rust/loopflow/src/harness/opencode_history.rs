@@ -287,7 +287,7 @@ pub(super) async fn post(
 #[cfg(test)]
 mod tests {
     use super::{native_receipts, record_receipts, History};
-    use crate::durable::RunId;
+
     use crate::id::ExecId;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -297,7 +297,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let input = RunId::new();
+        let input = crate::run_record::new_artifact_key();
         let exec = ExecId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
@@ -305,12 +305,7 @@ mod tests {
             [exec.as_str()],
         )
         .unwrap();
-        sql.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd) VALUES('session',?1,'Fixture','human',1,'conversation',0,1,'/fixture')", [input.as_str()]).unwrap();
-        sql.execute(
-            "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'session')",
-            [input.as_str()],
-        )
-        .unwrap();
+        store.test_session("session", &input);
         let driver = store
             .claim_session_driver("session", None, &exec, false)
             .unwrap();
@@ -337,9 +332,9 @@ mod tests {
         }
         let session = store.session("session").unwrap().unwrap();
         let mut replacement = session.clone();
-        replacement.input_id = RunId::new();
+        replacement.artifact_key = crate::run_record::new_artifact_key();
         store
-            .replace_session_input(&input, replacement.clone())
+            .replace_session_input(session.captured, replacement.clone())
             .unwrap();
         let second = ExecId::new();
         sql.execute(
@@ -372,7 +367,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .input_snapshot(replacement.input_id.as_str())
+                .input_snapshot(replacement.artifact_key.as_str())
                 .unwrap()
                 .usage
                 .input_tokens,
@@ -387,6 +382,7 @@ mod tests {
         );
         assert!(rows
             .iter()
+            .filter(|row| row.kind != crate::session::SessionEventKind::Captured)
             .all(|row| row.exec_id.as_deref() == Some(exec.as_str())));
     }
 }

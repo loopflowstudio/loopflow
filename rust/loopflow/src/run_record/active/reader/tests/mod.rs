@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 use super::ActiveSessionReader;
-use crate::durable::RunId;
+
 use crate::run_record::active::DiscoveryState;
 use crate::run_record::{resolve_manifest, write_provider_client, CaptureHandle, RunSpec};
 use crate::store::{open_store, SharedStore, StorageConfig};
@@ -42,7 +42,7 @@ async fn store(home: &Path) -> SharedStore {
     )
 }
 
-fn prepare(home: &Path) -> RunId {
+fn prepare(home: &Path) -> String {
     CaptureHandle::begin_at(
         home,
         RunSpec {
@@ -62,7 +62,7 @@ fn prepare(home: &Path) -> RunId {
     .run_id()
 }
 
-async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[RunId]) {
+async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[String]) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let snapshot = reader.observe(store, None).await;
@@ -73,7 +73,7 @@ async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[R
             .collect::<Vec<_>>();
         let session_ids = ids
             .iter()
-            .map(|id| store.sqlite.session_for_run(id).unwrap().unwrap().id)
+            .map(|id| store.sqlite.session_for_artifact(id).unwrap().unwrap().id)
             .collect::<Vec<_>>();
         let mut expected = session_ids.iter().map(String::as_str).collect::<Vec<_>>();
         actual.sort();
@@ -202,7 +202,7 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     let home = parent.path().join("observed-home");
     let store = store(parent.path()).await;
     let base = prepare(&home);
-    let input = RunId::new();
+    let input = crate::run_record::new_artifact_key();
     let dir = crate::run_record::record_dir(&home, &input).unwrap();
     fs::create_dir_all(&dir).unwrap();
     let client = Client::start();
@@ -227,9 +227,9 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
         .gaps
         .iter()
         .any(|gap| gap.contains("no known Session")));
-    let mut session = store.sqlite.session_for_run(&base).unwrap().unwrap();
+    let mut session = store.sqlite.session_for_artifact(&base).unwrap().unwrap();
     session.id = "sql-only-conversation".into();
-    session.input_id = input.clone();
+    session.artifact_key = input.clone();
     session.title = "Before rename".into();
     store.create_session(session, None).await.unwrap();
     // No invalidation/refresh: this is the same observe call used by the watch tick.
@@ -329,15 +329,20 @@ async fn discovery_cost_matrix() {
     fs::create_dir_all(home.path().join("runtime/exec-processes")).unwrap();
     // Only the two historical conversations revived below need admitted rows.
     for index in 0..2 {
-        let mut historical = store.sqlite.session_for_run(&live_id).unwrap().unwrap();
+        let mut historical = store
+            .sqlite
+            .session_for_artifact(&live_id)
+            .unwrap()
+            .unwrap();
         historical.id = format!("historical-{index}");
-        historical.input_id = RunId::parse(&format!("run_{index:032x}")).unwrap();
+        historical.artifact_key =
+            crate::run_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
         store.create_session(historical, None).await.unwrap();
     }
     let mut previous = 0;
     for population in [100, 10_000, 100_000] {
         for index in previous..population {
-            let id = RunId::parse(&format!("run_{index:032x}")).unwrap();
+            let id = crate::run_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
             let dir = crate::run_record::record_dir(home.path(), &id).unwrap();
             fs::create_dir_all(dir.join("provider-clients")).unwrap();
             manifest.run_id = id.clone();
@@ -376,7 +381,12 @@ async fn discovery_cost_matrix() {
                 assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
                 assert_eq!(
                     snapshot.sessions[0].id,
-                    store.sqlite.session_for_run(&live_id).unwrap().unwrap().id
+                    store
+                        .sqlite
+                        .session_for_artifact(&live_id)
+                        .unwrap()
+                        .unwrap()
+                        .id
                 );
                 assert_eq!(reader.cost.directories, 0);
                 assert_eq!(reader.cost.rescans, 0);
@@ -386,7 +396,8 @@ async fn discovery_cost_matrix() {
                 );
                 assert_eq!(reader.cost.retained, 1);
             }
-            let old = RunId::parse("run_00000000000000000000000000000000").unwrap();
+            let old = crate::run_record::parse_artifact_key("run_00000000000000000000000000000000")
+                .unwrap();
             let dir = crate::run_record::record_dir(home.path(), &old).unwrap();
             let resumed = Client::start();
             let start = Measurement::start();
@@ -419,7 +430,9 @@ async fn discovery_cost_matrix() {
                 // Publish after process sampling while a real long scan is
                 // in flight. Preserve the timing so this cannot pass merely
                 // by publishing before subscription or after enumeration.
-                let racing_id = RunId::parse("run_00000000000000000000000000000001").unwrap();
+                let racing_id =
+                    crate::run_record::parse_artifact_key("run_00000000000000000000000000000001")
+                        .unwrap();
                 let racing_dir = crate::run_record::record_dir(home.path(), &racing_id).unwrap();
                 reader.invalidate();
                 let start = Measurement::start();

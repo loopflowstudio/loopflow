@@ -10,7 +10,7 @@ mod events;
 mod reader;
 pub(crate) use reader::ActiveSessionReader;
 
-use crate::durable::{RunId, WorkRef};
+use crate::durable::WorkRef;
 use crate::exec::SessionProcessOwnership;
 use crate::lf::commands::top::{exact_provider_process, live_exec_providers, LiveProviderProcess};
 use crate::store::SharedStore;
@@ -63,7 +63,7 @@ pub async fn snapshot(
 fn project(
     ownership: &SessionProcessOwnership,
     processes: &crate::lf::commands::top::ProcessSnapshot,
-    clients: &[(RunId, crate::run_record::ProviderClientRef)],
+    clients: &[(String, crate::run_record::ProviderClientRef)],
     snapshot: &mut ActiveSessionsSnapshot,
 ) {
     let live = live_exec_providers(processes, clients);
@@ -225,7 +225,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{project, ActiveSessionsSnapshot, DiscoveryState};
-    use crate::durable::RunId;
+
     use crate::exec::{SessionProcessObservation, SessionProcessOwnership};
     use crate::id::ExecId;
     use crate::journal::ExecProcessReceipt;
@@ -272,7 +272,7 @@ mod tests {
         )
         .unwrap();
         let id = capture.run_id();
-        let session_id = store.sqlite.session_for_run(&id).unwrap().unwrap().id;
+        let session_id = store.sqlite.session_for_artifact(&id).unwrap().unwrap().id;
         let (dir, _) = crate::run_record::resolve_manifest(home.path(), id.as_str()).unwrap();
         let client = OwnedClient(
             std::process::Command::new("/bin/cat")
@@ -293,12 +293,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             [session_id.as_str()]
         );
-        let mut replacement = store.sqlite.session_for_run(&id).unwrap().unwrap();
-        replacement.input_id = RunId::new();
+        let mut replacement = store.sqlite.session_for_artifact(&id).unwrap().unwrap();
+        replacement.artifact_key = crate::run_record::new_artifact_key();
         replacement.provider = Some("different-provider".into());
         store
             .sqlite
-            .replace_session_input(&id, replacement)
+            .replace_session_input(replacement.captured, replacement)
             .unwrap();
         store
             .sqlite
@@ -436,7 +436,7 @@ mod tests {
             snapshot.sessions[0].id,
             store
                 .sqlite
-                .session_for_run(&captures[0].run_id())
+                .session_for_artifact(&captures[0].run_id())
                 .unwrap()
                 .unwrap()
                 .id
@@ -649,8 +649,8 @@ mod tests {
         second.driver_trace_id = None;
         processes.receipts.clear();
         processes.processes.remove(0);
-        let old = RunId::new();
-        let sibling = RunId::new();
+        let old = crate::run_record::new_artifact_key();
+        let sibling = crate::run_record::new_artifact_key();
         let ownership = SessionProcessOwnership {
             sessions: vec![first, second],
             inputs: BTreeMap::from([

@@ -18,9 +18,21 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
-use crate::durable::{RunId, RUN_ID_ENV};
+use crate::durable::RUN_ID_ENV;
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
+
+/// An opaque artifact directory key; it grants no conversation or Flow authority.
+pub(crate) fn new_artifact_key() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
+/// Historical run-prefixed paths retain their spelling as imported evidence.
+pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::DurableDataError> {
+    Uuid::parse_str(value.strip_prefix("run_").unwrap_or(value))
+        .map_err(|error| crate::durable::DurableDataError::InvalidId(error.to_string()))?;
+    Ok(value.to_owned())
+}
 
 pub const RUN_DIR_ENV: &str = "LF_RUN_DIR";
 pub const PARENT_RUN_ID_ENV: &str = "LF_PARENT_RUN_ID";
@@ -196,8 +208,8 @@ pub struct RunContextRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunManifest {
     pub schema_version: u32,
-    pub run_id: RunId,
-    pub parent_run_id: Option<RunId>,
+    pub run_id: String,
+    pub parent_run_id: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     pub harness: String,
@@ -453,7 +465,7 @@ impl RunRecorder {
             Ok(None)
         } else {
             row_store(dir).and_then(|store| {
-                let session = store.session_for_run(run_id)?;
+                let session = store.session_for_artifact(run_id)?;
                 Ok(session.map(|session| (store, session)))
             })
         };
@@ -475,7 +487,7 @@ impl RunRecorder {
                 let observe = |source: String, at: OffsetDateTime, evidence: serde_json::Value| {
                     let Some((store, session)) = &history else { return Ok(()) };
                     store.retain_session_observation(session, &crate::session::SessionObservation {
-                        input_id: writer_run_id.clone(), source: source.clone(),
+                        artifact_key: writer_run_id.clone(), source: source.clone(),
                         observed_at: at.unix_timestamp(), task_id: session.task_id.clone(),
                         wave_id: session.wave_id.clone(),
                         payload: serde_json::json!({"input_id": writer_run_id, "source": source, "evidence": evidence}),
@@ -818,7 +830,7 @@ fn recover_native_usage(
 /// No current assignment, provider or completion can rewrite an earlier input.
 pub(crate) fn conversation_snapshot(
     session: &crate::session::AgentSession,
-    input_id: &RunId,
+    artifact_key: &String,
     history: &[crate::session::SessionEvent],
     names: (Option<String>, Option<String>, Option<String>),
 ) -> std::io::Result<RunSnapshot> {
@@ -834,17 +846,17 @@ pub(crate) fn conversation_snapshot(
         let input = event.payload["input_id"].as_str();
         let source = event.payload["source"].as_str().unwrap_or("");
         let evidence = &event.payload["evidence"];
-        if source == "terminal.json" && input == Some(input_id.as_str()) {
+        if source == "terminal.json" && input == Some(artifact_key.as_str()) {
             match serde_json::from_value(evidence.clone()) {
                 Ok(receipt) => terminal = Some(receipt),
                 Err(_) => gaps += 1,
             }
-        } else if source == "manifest.json" && input == Some(input_id.as_str()) {
+        } else if source == "manifest.json" && input == Some(artifact_key.as_str()) {
             match serde_json::from_value(evidence.clone()) {
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
-        } else if source == "runs" && input == Some(input_id.as_str()) {
+        } else if source == "runs" && input == Some(artifact_key.as_str()) {
             stored = Some(evidence);
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             match (
@@ -868,7 +880,7 @@ pub(crate) fn conversation_snapshot(
     }
     let evidence = reduce_usage_reader(encoded.as_slice())?;
     gaps += evidence.gaps + usize::from(manifest.is_none());
-    let current = session.input_id == *input_id;
+    let current = session.artifact_key == *artifact_key;
     let stored_text = |field: &str| {
         stored
             .and_then(|row| row[field].as_str())
@@ -888,7 +900,7 @@ pub(crate) fn conversation_snapshot(
         && (current
             || history.iter().any(|event| {
                 event.kind == crate::session::SessionEventKind::Observed
-                    && event.payload["input_id"].as_str() == Some(input_id.as_str())
+                    && event.payload["input_id"].as_str() == Some(artifact_key.as_str())
                     && event.payload["source"] == "manifest.json"
                     && event.task_id.as_deref() == session.task_id.as_ref().map(|id| id.as_str())
                     && event.wave_id.as_deref() == session.wave_id.as_ref().map(|id| id.as_str())
@@ -916,7 +928,7 @@ pub(crate) fn conversation_snapshot(
         })
         .collect();
     Ok(RunSnapshot {
-        id: input_id.to_string(),
+        id: artifact_key.to_string(),
         parent_run_id: None, // Selected from the immutable input relation by the SQL reader.
         task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
             Some(RunFlowMembership::Step(step)) => step.task_pr_id.clone(),
@@ -1065,12 +1077,12 @@ pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<Provid
     .map_err(std::io::Error::other)
 }
 
-pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<RunId> {
+pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<String> {
     let id = dir
         .file_name()
         .and_then(|id| id.to_str())
         .ok_or_else(|| std::io::Error::other("input path has no identifier"))?;
-    RunId::parse(id).map_err(std::io::Error::other)
+    crate::run_record::parse_artifact_key(id).map_err(std::io::Error::other)
 }
 
 /// Fresh publications supersede the imported sidecar, whose import time says
@@ -1232,12 +1244,12 @@ pub(crate) fn write_provider_session(
     let input = input_id_from_dir(dir)?;
     let store = row_store(dir).map_err(std::io::Error::other)?;
     let session = store
-        .session_for_run(&input)
+        .session_for_artifact(&input)
         .map_err(std::io::Error::other)?
         .ok_or_else(|| std::io::Error::other("provider history has no admitted Session"))?;
     let source = format!("provider-session:{}", Uuid::new_v4());
     store.retain_session_observation(&session, &crate::session::SessionObservation {
-        input_id: input.clone(), source: source.clone(),
+        artifact_key: input.clone(), source: source.clone(),
         observed_at: OffsetDateTime::now_utc().unix_timestamp(),
         task_id: session.task_id.clone(), wave_id: session.wave_id.clone(),
         payload: serde_json::json!({"input_id":input,"source":source,"evidence":ProviderSessionRef {
@@ -1284,7 +1296,7 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
     let input = input_id_from_dir(dir)?;
     if row_store(dir)
         .map_err(std::io::Error::other)?
-        .session_for_run(&input)
+        .session_for_artifact(&input)
         .map_err(std::io::Error::other)?
         .is_none()
     {
@@ -1451,7 +1463,8 @@ pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
 }
 
 fn validate_manifest_path(dir: &Path, manifest: &RunManifest) -> std::io::Result<()> {
-    RunId::parse(manifest.run_id.as_str()).map_err(std::io::Error::other)?;
+    crate::run_record::parse_artifact_key(manifest.run_id.as_str())
+        .map_err(std::io::Error::other)?;
     if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.run_id.as_str())
         || dir
             .parent()
@@ -1461,7 +1474,8 @@ fn validate_manifest_path(dir: &Path, manifest: &RunManifest) -> std::io::Result
                 .run_id
                 .as_str()
                 .strip_prefix("run_")
-                .and_then(|id| id.get(..2))
+                .unwrap_or(&manifest.run_id)
+                .get(..2)
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -1748,7 +1762,11 @@ pub(crate) struct CaptureHandle(Arc<Mutex<RunCapture>>);
 impl CaptureHandle {
     /// Publish identity before a human boundary becomes visible. No provider or
     /// terminal receipt exists until this prepared Run is launched.
-    pub(crate) fn prepare(spec: RunSpec, parent: Option<RunId>) -> StoreResult<RunId> {
+    pub(crate) fn prepare(
+        spec: RunSpec,
+        parent: Option<String>,
+        id: String,
+    ) -> StoreResult<String> {
         #[cfg(test)]
         let home = std::env::var_os("LF_HOME")
             .map(PathBuf::from)
@@ -1757,19 +1775,33 @@ impl CaptureHandle {
             });
         #[cfg(not(test))]
         let home = crate::store::lf_home_dir();
-        Self::prepare_at(&home, spec, parent)
+        Self::prepare_at_with_key(&home, spec, parent, id)
     }
 
+    #[cfg(test)]
     pub(crate) fn prepare_at(
         home: &Path,
         spec: RunSpec,
-        parent: Option<RunId>,
-    ) -> StoreResult<RunId> {
-        let id = RunId::new();
+        parent: Option<String>,
+    ) -> StoreResult<String> {
+        Self::prepare_at_with_key(home, spec, parent, new_artifact_key())
+    }
+
+    fn prepare_at_with_key(
+        home: &Path,
+        spec: RunSpec,
+        parent: Option<String>,
+        id: String,
+    ) -> StoreResult<String> {
         let (manifest, _) =
             prepare_manifest(spec, id.clone(), parent, None, None).map_err(record_error)?;
-        let dir = publish_manifest(home, &manifest, None).map_err(record_error)?;
-        write_private_exclusive(&dir.join("prepared"), b"").map_err(record_error)?;
+        let (_, dir) = reconcile_reserved_manifest(home, manifest, None).map_err(record_error)?;
+        if dir.join("launching").try_exists().map_err(record_error)? {
+            return Err(record_error(std::io::Error::other(
+                "prepared input was already claimed",
+            )));
+        }
+        reconcile_private_file(&dir.join("prepared"), b"").map_err(record_error)?;
         sync_dir(&dir).map_err(record_error)?;
         // This is not a CaptureHandle: dropping preparation must not settle a
         // Run whose provider has never been launched.
@@ -1778,11 +1810,11 @@ impl CaptureHandle {
 
     pub(crate) fn start_prepared(
         home: &Path,
-        id: &RunId,
+        id: &str,
         spec: RunSpec,
         context: &crate::trace::PreparedTurnContext,
     ) -> StoreResult<Self> {
-        let (dir, mut manifest) = resolve_manifest(home, id.as_str()).map_err(record_error)?;
+        let (dir, mut manifest) = resolve_manifest(home, id).map_err(record_error)?;
         // Atomically claim this preparation. A second launcher cannot record
         // another provider attempt into the same Run.
         fs::rename(dir.join("prepared"), dir.join("launching")).map_err(record_error)?;
@@ -1827,7 +1859,14 @@ impl CaptureHandle {
             &launch.system_prompt,
             &launch.task_prompt,
         );
-        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, Some(launch), Some(&context))
+        Self::begin_with_id_and_parent(
+            spec,
+            crate::run_record::new_artifact_key(),
+            None,
+            true,
+            Some(launch),
+            Some(&context),
+        )
     }
 
     pub(crate) fn begin_with_context(
@@ -1835,15 +1874,22 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         launch: Option<RunLaunchRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(spec, RunId::new(), None, true, launch, Some(context))
+        Self::begin_with_id_and_parent(
+            spec,
+            crate::run_record::new_artifact_key(),
+            None,
+            true,
+            launch,
+            Some(context),
+        )
     }
 
     pub(crate) fn begin_reserved_with_context(
         spec: RunSpec,
-        run_id: RunId,
+        run_id: String,
         launch: Option<RunLaunchRequest>,
         context: &crate::trace::PreparedTurnContext,
-        publish: impl FnOnce(&RunId) -> StoreResult<()>,
+        publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::authority_home_dir();
         let parent = inherited_parent().and_then(|id| verified_parent(&home, id));
@@ -1853,11 +1899,11 @@ impl CaptureHandle {
     fn begin_reserved_at(
         home: &Path,
         spec: RunSpec,
-        run_id: RunId,
-        parent: Option<RunId>,
+        run_id: String,
+        parent: Option<String>,
         launch: Option<RunLaunchRequest>,
         context: &crate::trace::PreparedTurnContext,
-        publish: impl FnOnce(&RunId) -> StoreResult<()>,
+        publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let (manifest, context) =
             prepare_manifest(spec, run_id, parent, launch, Some(context)).map_err(record_error)?;
@@ -1875,7 +1921,7 @@ impl CaptureHandle {
         lf_home: &Path,
         spec: RunSpec,
         launch: RunLaunchRequest,
-        parent_run_id: RunId,
+        parent_run_id: String,
     ) -> StoreResult<Self> {
         let parent_run_id = verified_parent(lf_home, parent_run_id);
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1885,7 +1931,7 @@ impl CaptureHandle {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            RunId::new(),
+            crate::run_record::new_artifact_key(),
             parent_run_id,
             Some(launch),
             Some(&context),
@@ -1894,8 +1940,8 @@ impl CaptureHandle {
 
     fn begin_with_id_and_parent(
         spec: RunSpec,
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
+        run_id: String,
+        parent_run_id: Option<String>,
         inherit_parent: bool,
         launch: Option<RunLaunchRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
@@ -1918,7 +1964,14 @@ impl CaptureHandle {
 
     #[cfg(test)]
     pub(crate) fn begin_at(lf_home: &Path, spec: RunSpec) -> StoreResult<Self> {
-        Self::begin_at_with_id(lf_home, spec, RunId::new(), inherited_parent(), None, None)
+        Self::begin_at_with_id(
+            lf_home,
+            spec,
+            crate::run_record::new_artifact_key(),
+            inherited_parent(),
+            None,
+            None,
+        )
     }
 
     #[cfg(test)]
@@ -1934,7 +1987,7 @@ impl CaptureHandle {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            RunId::new(),
+            crate::run_record::new_artifact_key(),
             inherited_parent(),
             Some(launch),
             Some(&context),
@@ -1944,23 +1997,26 @@ impl CaptureHandle {
     fn begin_at_with_id(
         lf_home: &Path,
         spec: RunSpec,
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
+        run_id: String,
+        parent_run_id: Option<String>,
         launch: Option<RunLaunchRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         let work = spec.work.clone();
         let (manifest, context_bytes) =
             prepare_manifest(spec, run_id, parent_run_id, launch, context).map_err(record_error)?;
-        let dir =
-            publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
-        RunCapture::record_row(&manifest, &dir, work)?;
+        let dir = record_dir(lf_home, &manifest.run_id).expect("artifact key is a UUID");
+        let reserved = RunCapture::record_row(&manifest, &dir, work)?;
+        publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
+        if let Some(session) = reserved {
+            row_store(&dir)?.publish_capture(&session.id, session.captured)?;
+        }
         Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
             manifest, dir,
         )))))
     }
 
-    pub(crate) fn run_id(&self) -> RunId {
+    pub(crate) fn run_id(&self) -> String {
         self.0
             .lock()
             .expect("Run capture mutex poisoned")
@@ -1994,7 +2050,7 @@ impl CaptureHandle {
             return Ok(());
         }
         let store = row_store(&capture.dir)?;
-        let Some(session) = store.session_for_run(&capture.manifest.run_id)? else {
+        let Some(session) = store.session_for_artifact(&capture.manifest.run_id)? else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
                     "agent launch requires an admitted conversation".into(),
@@ -2241,7 +2297,7 @@ impl RunCapture {
         manifest: &RunManifest,
         dir: &Path,
         work: Option<crate::session::RunWork>,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<Option<crate::session::AgentSession>> {
         let invocation_id = match &manifest.flow {
             Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
             Some(RunFlowMembership::Independent) | None => None,
@@ -2249,7 +2305,7 @@ impl RunCapture {
         // Mechanical commands have an Exec and, in a Flow, operation history.
         // Capturing their diagnostics does not create an agent conversation.
         if manifest.harness == "loopflow" {
-            return Ok(());
+            return Ok(None);
         }
         let store = row_store(dir)?;
         if invocation_id.is_some() {
@@ -2257,12 +2313,13 @@ impl RunCapture {
                 "Flow agent input must be published through its reservation".into(),
             ));
         }
-        store.create_session(
+        let session = store.create_session(
             crate::session::AgentSession {
-                caller_input_id: manifest.parent_run_id.clone(),
+                captured: None,
+                caller_artifact_key: manifest.parent_run_id.clone(),
                 id: format!("session_{}", Uuid::new_v4().simple()),
-                input_id: manifest.run_id.clone(),
-                input_published: true,
+                artifact_key: manifest.run_id.clone(),
+                input_published: false,
                 cwd: manifest.cwd.clone(),
                 skill: manifest.skill.clone(),
                 provider: Some(manifest.harness.clone()),
@@ -2290,7 +2347,7 @@ impl RunCapture {
             None,
             crate::journal::current_exec_id().as_ref(),
         )?;
-        Ok(())
+        Ok(Some(session))
     }
 
     fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
@@ -2595,7 +2652,7 @@ fn row_database(dir: &Path) -> StoreResult<PathBuf> {
     Ok(path)
 }
 
-pub(crate) fn inherited_parent() -> Option<RunId> {
+pub(crate) fn inherited_parent() -> Option<String> {
     let run_id = std::env::var(RUN_ID_ENV).ok()?;
     let run_dir = PathBuf::from(std::env::var_os(RUN_DIR_ENV)?);
     let manifest = fs::read(run_dir.join("manifest.json")).ok()?;
@@ -2603,22 +2660,23 @@ pub(crate) fn inherited_parent() -> Option<RunId> {
     (manifest.run_id.as_str() == run_id).then_some(manifest.run_id)
 }
 
-fn verified_parent(lf_home: &Path, run_id: RunId) -> Option<RunId> {
+fn verified_parent(lf_home: &Path, run_id: String) -> Option<String> {
     let dir = record_dir(lf_home, &run_id)?;
     let manifest = fs::read(dir.join("manifest.json")).ok()?;
     let manifest = serde_json::from_slice::<RunManifest>(&manifest).ok()?;
     (manifest.run_id == run_id).then_some(run_id)
 }
 
-pub(crate) fn record_dir(lf_home: &Path, run_id: &RunId) -> Option<PathBuf> {
-    let prefix = run_id.as_str().strip_prefix("run_")?.get(..2)?;
-    Some(lf_home.join("runs").join(prefix).join(run_id.as_str()))
+pub(crate) fn record_dir(lf_home: &Path, run_id: &str) -> Option<PathBuf> {
+    parse_artifact_key(run_id).ok()?;
+    let prefix = run_id.strip_prefix("run_").unwrap_or(run_id).get(..2)?;
+    Some(lf_home.join("runs").join(prefix).join(run_id))
 }
 
 fn prepare_manifest(
     spec: RunSpec,
-    run_id: RunId,
-    parent_run_id: Option<RunId>,
+    run_id: String,
+    parent_run_id: Option<String>,
     launch: Option<RunLaunchRequest>,
     context: Option<&crate::trace::PreparedTurnContext>,
 ) -> std::io::Result<(RunManifest, Option<Vec<u8>>)> {
@@ -3132,7 +3190,10 @@ mod tests {
         let capture =
             CaptureHandle::begin_at_with_launch(home.path(), spec(home.path()), launch).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
-        let session = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        let session = store
+            .session_for_artifact(&capture.run_id())
+            .unwrap()
+            .unwrap();
         let run = session.clone();
         assert!(!session.interactive);
         assert_eq!(session.kind, crate::session::SessionKind::Conversation);
@@ -3147,7 +3208,10 @@ mod tests {
             "repair the failed operation"
         );
         capture.finish("failed").unwrap();
-        let after = store.session_for_run(&capture.run_id()).unwrap().unwrap();
+        let after = store
+            .session_for_artifact(&capture.run_id())
+            .unwrap()
+            .unwrap();
 
         assert_eq!(after.id, session.id);
         assert_eq!(
@@ -3171,7 +3235,7 @@ mod tests {
             "artifacts_published",
         ] {
             let home = tempfile::tempdir().unwrap();
-            let id = crate::durable::RunId::new();
+            let id = crate::run_record::new_artifact_key();
             let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
             let (manifest, bytes) =
                 super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
@@ -3260,7 +3324,7 @@ mod tests {
     #[test]
     fn reserved_publication_retains_conflicting_inputs() {
         let home = tempfile::tempdir().unwrap();
-        let id = crate::durable::RunId::new();
+        let id = crate::run_record::new_artifact_key();
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let (manifest, bytes) =
             super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
@@ -3308,12 +3372,38 @@ mod tests {
     #[test]
     fn prepared_session_run_is_resolvable_and_consumed_once() {
         let home = tempfile::tempdir().unwrap();
-        let parent = crate::durable::RunId::new();
+        let parent = crate::run_record::new_artifact_key();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(parent.clone()))
             .unwrap();
         let (dir, prepared) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
         assert_eq!(prepared.run_id, id);
         assert_eq!(prepared.parent_run_id.as_ref(), Some(&parent));
+        // Recover a crash after the manifest was published but before the prepared marker.
+        fs::remove_file(dir.join("prepared")).unwrap();
+        assert_eq!(
+            CaptureHandle::prepare_at_with_key(
+                home.path(),
+                spec(home.path()),
+                Some(parent.clone()),
+                id.clone()
+            )
+            .unwrap(),
+            id
+        );
+        assert_eq!(
+            super::read_manifest(&dir).unwrap().created_at,
+            prepared.created_at
+        );
+        assert_eq!(
+            CaptureHandle::prepare_at_with_key(
+                home.path(),
+                spec(home.path()),
+                Some(parent.clone()),
+                id.clone()
+            )
+            .unwrap(),
+            id
+        );
         assert!(!dir.join("terminal.json").exists());
         assert!(!dir.join("provider-clients").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "human prompt");
@@ -3321,6 +3411,17 @@ mod tests {
             CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
         let launched = super::read_manifest(&dir).unwrap();
         assert_eq!(capture.run_id(), id);
+        assert!(CaptureHandle::prepare_at_with_key(
+            home.path(),
+            spec(home.path()),
+            Some(parent.clone()),
+            id.clone()
+        )
+        .is_err());
+        assert!(
+            !dir.join("prepared").exists(),
+            "recovery cannot rearm an already claimed launch"
+        );
         assert_eq!(launched.created_at, prepared.created_at);
         assert_eq!(launched.parent_run_id, Some(parent));
         let context_ref = launched.context.as_ref().unwrap();
@@ -3416,7 +3517,9 @@ mod tests {
         assert!(dir.join("manifest.json").is_file());
         assert_eq!(
             dir.parent().and_then(|path| path.file_name()),
-            Some(std::ffi::OsStr::new(&run_id[4..6]))
+            Some(std::ffi::OsStr::new(
+                &run_id.strip_prefix("run_").unwrap_or(&run_id)[..2]
+            ))
         );
         assert!(!dir.join("inbox").exists());
         assert!(!dir.join("observations").exists());

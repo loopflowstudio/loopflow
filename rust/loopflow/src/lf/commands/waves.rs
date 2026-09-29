@@ -2482,7 +2482,7 @@ mod tests {
                 state,
                 reason: "worker evidence".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,

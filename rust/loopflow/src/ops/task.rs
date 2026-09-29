@@ -2654,7 +2654,7 @@ pub(crate) async fn launch_task_process(
             Err(error) => {
                 let reason = error.to_string();
                 let failure = crate::durable::TaskFlowBlocker {
-                    run_id: None,
+                    captured: None,
                     reason: reason.clone(),
                     restart_required: false,
                     observed_at: time::OffsetDateTime::now_utc(),
@@ -2738,7 +2738,7 @@ async fn wait_until_running(
         if position.is_none()
             || position.as_ref().is_some_and(|position| {
                 position.is_human()
-                    || (position.claim.is_some() && position.session_run_id().is_some())
+                    || (position.claim.is_some() && position.review_artifact_key().is_some())
             })
         {
             return Ok(task);
@@ -5145,7 +5145,7 @@ pub(crate) async fn continue_task_async(
                 failure.reason, task.plan.identifier
             )));
         }
-        let feedback = if failure.run_id.is_some() && position.is_decision() {
+        let feedback = if failure.captured.is_some() && position.is_decision() {
             let (session, summary) = super::human_session::task_unblock(&store, &task, &position)
                 .await
                 .map_err(task_error)?;
@@ -5821,7 +5821,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].task_id, Some(task.id.clone()));
         assert!(!sessions[0].input_published);
-        assert_eq!(stored.session_run_id(), None);
+        assert_eq!(stored.review_artifact_key(), None);
         assert_eq!(stored, position);
         assert_eq!(
             store.task_events_after(&task.id, 0).await.unwrap().len(),
@@ -5834,7 +5834,7 @@ mod tests {
                 stored.version,
                 None,
                 &crate::durable::TaskFlowBlocker {
-                    run_id: None,
+                    captured: None,
                     reason: "Saved instructions are unavailable; explicitly restart this Task"
                         .to_string(),
                     restart_required: true,
@@ -6175,7 +6175,7 @@ mod tests {
         repository.push_new_branch("test/task-recovery-fixture");
         let TaskFixture { store, task, .. } =
             task_fixture_at("TEST-PARENT", repository.path().to_path_buf()).await;
-        let parent_run_id = crate::durable::RunId::new();
+        let parent_run_id = crate::run_record::new_artifact_key();
         std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
         std::env::remove_var(crate::run_record::RUN_DIR_ENV);
         std::env::remove_var(crate::run_record::PARENT_RUN_ID_ENV);

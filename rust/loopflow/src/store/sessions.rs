@@ -1,4 +1,4 @@
-use crate::durable::{FlowSession, RunId, TaskId};
+use crate::durable::{FlowSession, TaskId};
 use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -14,9 +14,9 @@ impl Store {
 
     pub(crate) async fn input_final_answer(
         &self,
-        input: &RunId,
+        input: &str,
     ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
-        let input = input.clone();
+        let input = input.to_owned();
         run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
     }
 
@@ -60,9 +60,12 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
-    pub async fn session_for_run(&self, run_id: &RunId) -> StoreResult<Option<AgentSession>> {
-        let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.session_for_run(&run_id)).await
+    pub async fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
+        let run_id = run_id.to_owned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.session_for_artifact(&run_id)
+        })
+        .await
     }
 
     pub async fn create_session(
@@ -79,23 +82,22 @@ impl Store {
 
     pub async fn replace_session_input(
         &self,
-        expected_run: &RunId,
+        expected_capture: Option<i64>,
         session: AgentSession,
     ) -> StoreResult<AgentSession> {
-        let expected_run = expected_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.replace_session_input(&expected_run, session)
+            store.replace_session_input(expected_capture, session)
         })
         .await
     }
 
     pub async fn fill_run_provider(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.clone();
+        let run = run.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
@@ -106,11 +108,11 @@ impl Store {
 
     pub async fn retarget_unpublished_run(
         &self,
-        run: &RunId,
+        run: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.clone();
+        let run = run.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
@@ -122,14 +124,13 @@ impl Store {
     pub async fn bind_session(
         &self,
         id: &str,
-        expected_run: &RunId,
+        expected_capture: Option<i64>,
         task: &TaskId,
     ) -> StoreResult<AgentSession> {
         let id = id.to_string();
-        let expected_run = expected_run.clone();
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.bind_session(&id, &expected_run, &task)
+            store.bind_session(&id, expected_capture, &task)
         })
         .await
     }
@@ -162,16 +163,19 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
     }
 
-    pub async fn complete_session(&self, id: &str, expected_run: &RunId) -> StoreResult<()> {
+    pub async fn complete_session(
+        &self,
+        id: &str,
+        expected_capture: Option<i64>,
+    ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_session(&id, &expected_run)
+            store.complete_session(&id, expected_capture)
         })
         .await
     }
 
-    pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<RunId>> {
+    pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await
     }
@@ -179,15 +183,14 @@ impl Store {
     pub async fn rename_session(
         &self,
         id: &str,
-        expected_run: Option<&RunId>,
+        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.cloned();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, expected_run.as_ref(), &title, source)
+            store.rename_session(&id, expected_capture, &title, source)
         })
         .await
     }
@@ -195,14 +198,13 @@ impl Store {
     pub async fn ready_session(
         &self,
         id: &str,
-        expected_run: &RunId,
+        expected_capture: Option<i64>,
         summary: &str,
     ) -> StoreResult<()> {
         let id = id.to_string();
-        let expected_run = expected_run.clone();
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.ready_session(&id, &expected_run, &summary)
+            store.ready_session(&id, expected_capture, &summary)
         })
         .await
     }

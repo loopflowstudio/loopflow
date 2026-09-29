@@ -1004,7 +1004,8 @@ async fn repair_conclusions(
         if shown.contains(run.id.as_str()) {
             continue;
         }
-        let input = crate::durable::RunId::parse(&run.id).map_err(|source| error(&source))?;
+        let input =
+            crate::run_record::parse_artifact_key(&run.id).map_err(|source| error(&source))?;
         let conclusion = store
             .input_final_answer(&input)
             .await

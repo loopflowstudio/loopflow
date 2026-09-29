@@ -3800,6 +3800,7 @@ pub struct TaskStatus {
     pub planning: Option<crate::store::PmTaskRecord>,
     pub planning_error: Option<String>,
     pub planning_stale: bool,
+    pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
 }
 
@@ -3816,15 +3817,29 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         .map(|task| task.plan.id.as_str())
         .or(issue)
         .ok_or_else(|| task_error("this checkout has no Task"))?;
-    let (planning, planning_error, planning_stale) =
-        match crate::ops::pm::read_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto) {
-            Ok(read) => {
-                let stale = read.is_stale();
-                (Some(read.record), read.refresh_error, stale)
-            }
-            Err(error) if task.is_some() => (None, Some(error.to_string()), true),
-            Err(error) => return Err(error),
-        };
+    let read = match crate::ops::pm::inspect_task_planning(
+        repo,
+        selector,
+        crate::ops::pm::PmRefresh::Auto,
+    ) {
+        Ok(read) => read,
+        Err(error) if task.is_some() => crate::ops::pm::TaskPlanningInspection {
+            observation: crate::store::PmTaskObservation {
+                record: None,
+                state: crate::store::PlanningState::Unavailable,
+            },
+            refresh_error: Some(error.to_string()),
+        },
+        Err(error) => return Err(error),
+    };
+    let planning_state = read.observation.state;
+    let planning = read.observation.record;
+    let planning_error = read.refresh_error;
+    let planning_stale = planning_state != crate::store::PlanningState::Available
+        || planning.as_ref().is_some_and(|record| {
+            time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at
+                >= crate::ops::pm::PM_SOFT_STALE_SECS
+        });
     let execution = task
         .as_ref()
         .map(|task| {
@@ -3836,6 +3851,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         planning,
         planning_error,
         planning_stale,
+        planning_state,
         execution,
     })
 }
@@ -6665,6 +6681,7 @@ mod tests {
 
     fn preparation_project() -> crate::pm::PmProject {
         crate::pm::PmProject {
+            revision: None,
             id: "project-1".into(),
             slug: "runtime".into(),
             name: "Runtime".into(),
@@ -7053,6 +7070,7 @@ mod tests {
     fn task_worker_selects_explicit_or_project_recommended_flow() {
         let repo = tempfile::tempdir().expect("temp repo");
         let project = crate::pm::PmProject {
+            revision: None,
             id: "project-1".to_string(),
             slug: "runtime".to_string(),
             name: "Runtime".to_string(),

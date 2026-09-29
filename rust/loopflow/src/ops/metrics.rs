@@ -380,6 +380,7 @@ mod tests {
 
     fn project(id: &str, slug: &str) -> PmProject {
         PmProject {
+            revision: None,
             id: id.to_string(),
             slug: slug.to_string(),
             name: slug.replace('-', " "),

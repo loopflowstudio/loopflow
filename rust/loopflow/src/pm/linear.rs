@@ -85,6 +85,7 @@ const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($in
       nodes {
         id
         name
+        updatedAt
         description
         content
         archivedAt
@@ -207,6 +208,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
     project {
       id
       name
+      updatedAt
       description
       content
       status { type }
@@ -220,6 +222,7 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   project(id: $id) {
     id
     name
+    updatedAt
     archivedAt
     description
     content
@@ -1944,17 +1947,17 @@ struct ProjectStatusesConnection {
 #[derive(Deserialize)]
 struct ProjectNode {
     id: String,
+    #[serde(rename = "updatedAt")]
+    revision: Option<String>,
     name: String,
     #[serde(rename = "archivedAt")]
     archived_at: Option<String>,
     status: ProjectStatusNode,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     content: Option<String>,
-    #[serde(default)]
     initiatives: IdConnection,
-    #[serde(default)]
     teams: IdConnection,
 }
 
@@ -1994,6 +1997,7 @@ impl ProjectNode {
         let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
         Ok(PmProject {
             id: self.id,
+            revision: self.revision,
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),

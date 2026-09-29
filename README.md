@@ -80,7 +80,7 @@ lf task comment INF-123 "take the smaller approach"   # post a Linear comment fo
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
-lf task status INF-123 --json                         # inspect durable state
+lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf pr arm -c                                          # request exact-head auto-merge and return
 lf pr land -c                                         # watch, repair CI, merge, then complete the Task
 ```

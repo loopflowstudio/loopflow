@@ -324,6 +324,23 @@ fn task_status_preserves_planning_freshness_without_execution() {
     use loopflow::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
     let states: Vec<TaskStatus> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        states
+            .iter()
+            .map(|state| state.planning_state)
+            .collect::<Vec<_>>(),
+        vec![
+            loopflow::store::PlanningState::Available,
+            loopflow::store::PlanningState::Unavailable,
+            loopflow::store::PlanningState::Unavailable,
+            loopflow::store::PlanningState::Invalid,
+            loopflow::store::PlanningState::Removed,
+            loopflow::store::PlanningState::Absent,
+        ]
+    );
+    for state in &states[3..] {
+        assert_eq!(state.planning, states[0].planning);
+    }
     assert!(!states[0].planning_stale);
     assert!(states[0].planning_error.is_none());
     assert!(states[0].execution.is_none());

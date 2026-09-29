@@ -671,7 +671,7 @@ mod task_comments_tests;
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
-const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+pub(crate) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
 /// Past this age a failed refresh is an error, not a silent cache fallback.
 const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
@@ -1684,7 +1684,7 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
     Ok(identifier)
 }
 
-/// Inspect planning without requiring or allocating execution.
+/// Read planning under the existing managed freshness policy.
 pub fn read_task_planning(
     repo: &Path,
     issue: &str,
@@ -1712,35 +1712,81 @@ pub(crate) async fn read_task_planning_async(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<TaskPlanningRead> {
+    let read = inspect_task_planning_async(repo, issue, refresh).await?;
+    let age = read
+        .observation
+        .record
+        .as_ref()
+        .map(|record| time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at);
+    let soft_failure = read.observation.state == crate::store::PlanningState::Unavailable
+        && matches!(
+            plan_snapshot_read(refresh, age),
+            SnapshotPlan::Refresh { hard: false }
+        );
+    if read.observation.state == crate::store::PlanningState::Available || soft_failure {
+        if let Some(record) = read.observation.record {
+            return Ok(TaskPlanningRead {
+                record,
+                refresh_error: read.refresh_error,
+            });
+        }
+    }
+    Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
+        format!(
+            "Task {issue:?} planning is {:?}; refresh planning",
+            read.observation.state
+        )
+    })))
+}
+
+#[derive(Debug)]
+pub struct TaskPlanningInspection {
+    pub observation: crate::store::PmTaskObservation,
+    pub refresh_error: Option<String>,
+}
+
+pub fn inspect_task_planning(
+    repo: &Path,
+    issue: &str,
+    refresh: PmRefresh,
+) -> OpsResult<TaskPlanningInspection> {
+    block_on_pm(inspect_task_planning_async(repo, issue, refresh))
+}
+
+async fn inspect_task_planning_async(
+    repo: &Path,
+    issue: &str,
+    refresh: PmRefresh,
+) -> OpsResult<TaskPlanningInspection> {
+    use crate::store::PlanningState;
     let scope = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();
     let provider = resolve_provider(repo)?;
     let store = pm_store().await?;
     let existing = store
-        .pm_task(&scope, provider.as_str(), issue)
+        .pm_task_observation(&scope, provider.as_str(), issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let hard = match plan_snapshot_read(
-        refresh,
-        existing.as_ref().map(|record| now - record.observed_at),
-    ) {
-        SnapshotPlan::ServeCache => {
-            return existing
-                .map(|record| TaskPlanningRead {
-                    record,
-                    refresh_error: None,
-                })
-                .ok_or_else(|| {
-                    OpsError::Message(format!("task {issue:?} has no cached planning observation"))
-                })
-        }
-        SnapshotPlan::Refresh { hard } => hard,
-    };
+    let age = existing
+        .record
+        .as_ref()
+        .map(|record| now - record.observed_at);
+    if existing.state == PlanningState::Removed
+        || refresh == PmRefresh::Never
+        || (existing.state == PlanningState::Available
+            && matches!(plan_snapshot_read(refresh, age), SnapshotPlan::ServeCache))
+    {
+        return Ok(TaskPlanningInspection {
+            observation: existing,
+            refresh_error: None,
+        });
+    }
     let fetch = async {
         let repository = resolve_repository_context(repo).await?;
         let selector = existing
+            .record
             .as_ref()
             .map_or(issue, |record| record.item.id.as_str());
         let observation = repository
@@ -1753,7 +1799,7 @@ pub(crate) async fn read_task_planning_async(
                 .invalidate_pm_task(&scope, provider.as_str(), selector)
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?;
-            return Ok(None);
+            return Ok(false);
         };
         if item.team_id != repository.team_id {
             return Err(OpsError::Message(format!(
@@ -1773,14 +1819,7 @@ pub(crate) async fn read_task_planning_async(
             )
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        store
-            .pm_task(&scope, provider.as_str(), selector)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .map(Some)
-            .ok_or_else(|| OpsError::Message(format!(
-                "Task {selector:?} observation cannot repair newer invalidation or confirmed removal; refresh planning"
-            )))
+        Ok(true)
     };
     let result = match tokio::time::timeout(PM_REFRESH_TIMEOUT, fetch).await {
         Ok(result) => result,
@@ -1789,27 +1828,31 @@ pub(crate) async fn read_task_planning_async(
             PM_REFRESH_TIMEOUT.as_secs()
         ))),
     };
-    match result {
-        Ok(Some(record)) => Ok(TaskPlanningRead {
-            record,
-            refresh_error: None,
-        }),
-        Ok(None) => Err(OpsError::Message(format!(
-            "task {issue:?} is absent from repository planning"
-        ))),
-        Err(error) => match existing {
-            Some(record) if !hard => {
-                tracing::warn!(%error, observed_at=record.observed_at, "Task planning refresh failed; retaining dated observation");
-                Ok(TaskPlanningRead {
-                    record,
-                    refresh_error: Some(error.to_string()),
-                })
+    // Read again: an event may have invalidated the record while acquisition ran.
+    let mut observation = store
+        .pm_task_observation(&scope, provider.as_str(), issue)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let refresh_error = match result {
+        Ok(false) => {
+            observation.state = PlanningState::Absent;
+            Some(format!("task {issue:?} is absent from repository planning"))
+        }
+        Ok(true) if observation.state != PlanningState::Available => Some(format!(
+            "Task {issue:?} observation cannot repair stored invalidation, unresolved Project ownership or confirmed removal"
+        )),
+        Ok(true) => None,
+        Err(error) => {
+            if observation.state == PlanningState::Available {
+                observation.state = PlanningState::Unavailable;
             }
-            _ => Err(OpsError::Message(format!(
-                "unable to resolve task {issue:?}: {error}"
-            ))),
-        },
-    }
+            Some(format!("unable to resolve task {issue:?}: {error}"))
+        }
+    };
+    Ok(TaskPlanningInspection {
+        observation,
+        refresh_error,
+    })
 }
 
 pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
@@ -3554,6 +3597,7 @@ mod tests {
     #[test]
     fn duplicate_linear_project_slugs_are_drift() {
         let project = |id: &str, name: &str| PmProject {
+            revision: None,
             id: id.to_string(),
             slug: crate::pm::project_slug(name),
             name: name.to_string(),

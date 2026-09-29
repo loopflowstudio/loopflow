@@ -1016,6 +1016,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             if *json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
+                println!(
+                    "Planning evidence: {}",
+                    serde_json::to_value(status.planning_state)?
+                        .as_str()
+                        .expect("planning state is a string")
+                );
                 if let Some(planning) = &status.planning {
                     println!("{} · {}", planning.item.identifier, planning.item.name);
                     println!(
@@ -1033,7 +1039,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                     }
                 }
                 if let Some(error) = &status.planning_error {
-                    println!("Planning unavailable: {error}");
+                    println!("Planning: {error}");
                 }
                 if let Some(execution) = &status.execution {
                     print_task_snapshot(execution, false)?;

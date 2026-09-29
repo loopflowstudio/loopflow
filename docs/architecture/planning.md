@@ -43,7 +43,8 @@ for adoption, default Flow and disposition details.
 lf task status INF-124 --json
 ```
 
-Status returns `planning`, `planning_error`, `planning_stale`, and optional `execution`. An issue
+Status returns `planning`, `planning_state`, `planning_error`, `planning_stale`,
+and optional `execution`. An issue
 without a Project stays inspectable; operations requiring ownership report the
 missing relationship. Status may refresh planning and observe a PR, but never
 completes a Task. Reading an issue allocates no Task execution or worktree.
@@ -57,11 +58,18 @@ A null detail response invalidates cached admission until a complete detail
 read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
-Status marks retained planning stale and includes the automatic-refresh failure
-in `planning_error`; `planning.observed_at` remains the last successful acquisition.
-An invalidated record remains stored but is excluded from detail and Wave readers.
-Wave `synced_at` dates membership refresh; joined entities may have newer detail
-observations. Freshness does not authorize managed work during an outage.
+Status preserves dated facts even after hard-stale or forced acquisition fails.
+`planning_state` distinguishes `available`, `unavailable` acquisition, `invalid`
+evidence, confirmed `removed` planning, and an `absent` detail response. A null
+provider response observes absence for that acquisition; the stored record stays
+invalid until complete detail repairs it. This creates no deletion receipt.
+`planning.observed_at` remains the last successful acquisition. An unresolved
+selector returns an unavailable envelope even without execution.
+
+Invalid and removed facts remain inspectable through status. Managed readers
+exclude them, and retain their existing hard/forced-refresh refusal. Inspection
+does not select an outage-admission policy. Wave `synced_at` dates its last
+successful list acquisition; joined entities may have newer detail observations.
 
 Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
 mutation refreshes share one writer: older provider revisions cannot overwrite
@@ -70,9 +78,23 @@ Complete responses must include nullable fields; omission cannot clear known dat
 Signed issue webhooks invalidate planning even without execution. A complete read
 at or beyond the event's revision repairs the invalidation. Removal receipts fence
 later reads, including when the event arrived before the issue was cached.
-Webhook payloads do not replace complete planning entities. Project facts and list
-membership still use acquisition timestamps; issue ordering does not establish a
-transactional provider snapshot.
+Webhook payloads do not replace complete planning entities. Project facts also
+carry `revision`; a newer Project observation updates independently of the issue's
+revision. Older observations cannot overwrite it. Project responses must include
+nullable content fields and relationship sets.
+
+List coverage never removes a Project merely because a later response omits it.
+Without removal evidence, refresh fails and retains the previous observation.
+Project revisions do not establish ordering for separate Initiative/Team
+relationships. A contradictory relationship set stays unresolved, retains its
+last-good facts, and blocks managed readers. Replaying a list or detail does not
+clear that uncertainty; acquiring ordered relationship evidence remains future work.
+
+Chapter rollover records the provider's successful archive acknowledgement before
+refreshing the current plan. Archived predecessors leave current views, retain
+history, and cannot return through a delayed list. Completed chapter receipts
+preserve this evidence on migration. This does not implement provider Project
+completion or restoration semantics.
 
 ## Capture a Flow once
 

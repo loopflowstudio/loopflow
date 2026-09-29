@@ -900,6 +900,7 @@ mod tests {
             .unwrap();
         let snapshot = PmSnapshot {
             projects: vec![PmProject {
+                revision: None,
                 id: "project-api".to_string(),
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),

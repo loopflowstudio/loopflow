@@ -71,6 +71,24 @@ pub struct PmTaskRecord {
     pub observed_at: i64,
 }
 
+/// Availability of retained planning facts, independent of execution permission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PlanningState {
+    Available,
+    Invalid,
+    Removed,
+    Absent,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PmTaskObservation {
+    pub record: Option<PmTaskRecord>,
+    pub state: PlanningState,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct WaveLocatorUpdate {
     pub wave_id: WaveId,
@@ -482,11 +500,38 @@ impl Store {
         provider: &str,
         selector: &str,
     ) -> StoreResult<Option<PmTaskRecord>> {
+        let observation = self.pm_task_observation(repo, provider, selector).await?;
+        Ok(observation
+            .record
+            .filter(|_| observation.state == PlanningState::Available))
+    }
+
+    pub async fn pm_task_observation(
+        &self,
+        repo: &str,
+        provider: &str,
+        selector: &str,
+    ) -> StoreResult<PmTaskObservation> {
         let repo = repo.to_string();
         let provider = provider.to_string();
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.pm_task(&repo, &provider, &selector)
+            store.pm_task_observation(&repo, &provider, &selector)
+        })
+        .await
+    }
+
+    pub async fn confirm_pm_project_archival(
+        &self,
+        repo: &str,
+        provider: &str,
+        project: crate::pm::PmProject,
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.confirm_pm_project_archival(&repo, &provider, &project, observed_at)
         })
         .await
     }

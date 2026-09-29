@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 use super::test_fixture::{now, Fixture};
-use super::{read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
+use super::{inspect_task_planning_async, read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
 use crate::pm::test_server::{json_response, spawn, QueuedResponse};
 use crate::pm::PmSnapshot;
 use crate::store::PmSnapshotRow;
@@ -27,7 +27,7 @@ fn team_response() -> QueuedResponse {
 }
 
 fn project() -> serde_json::Value {
-    json!({"id":"project-1", "name":"Chapter", "description":"", "content":"",
+    json!({"id":"project-1", "name":"Chapter", "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
         "initiatives":{"nodes":[{"id":"initiative-1"}]},
         "teams":{"nodes":[{"id":"team-1"}]}})
 }
@@ -209,6 +209,11 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
             StatusCode::OK,
             json!({"errors":[{"message":"provider unavailable"}]}),
         ),
+        team_response(),
+        json_response(
+            StatusCode::OK,
+            json!({"errors":[{"message":"provider unavailable"}]}),
+        ),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -217,6 +222,18 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
                 .await
                 .unwrap()
                 .record;
+            let inspection = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                .await
+                .unwrap();
+            assert_eq!(
+                inspection.observation.state,
+                crate::store::PlanningState::Unavailable
+            );
+            assert_eq!(inspection.observation.record.as_ref(), Some(&original));
+            assert!(inspection
+                .refresh_error
+                .unwrap()
+                .contains("provider unavailable"));
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .is_err());
@@ -236,17 +253,26 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     let fixture = Fixture::new().await;
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
-    let missing_fields = ["project", "description"];
+    let missing_fields = [
+        "project",
+        "description",
+        "project.initiatives",
+        "project.teams",
+        "project.content",
+        "project.description",
+    ];
     let mut responses = vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
     ];
     for field in missing_fields {
         let mut incomplete = issue(project());
-        incomplete["data"]["issue"]
-            .as_object_mut()
-            .unwrap()
-            .remove(field);
+        let object = &mut incomplete["data"]["issue"];
+        if let Some(field) = field.strip_prefix("project.") {
+            object["project"].as_object_mut().unwrap().remove(field);
+        } else {
+            object.as_object_mut().unwrap().remove(field);
+        }
         responses.extend([team_response(), json_response(StatusCode::OK, incomplete)]);
     }
     let (url, _) = spawn(responses).await;
@@ -257,6 +283,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
                 .unwrap()
                 .record;
             for field in missing_fields {
+                let field = field.strip_prefix("project.").unwrap_or(field);
                 let error = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
                     .await
                     .unwrap_err();
@@ -612,6 +639,207 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .await
                 .unwrap()
                 .is_none());
+            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_work() {
+    let fixture = Fixture::new().await;
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+        team_response(),
+        json_response(StatusCode::OK, json!({"data":{"issue":null}})),
+    ])
+    .await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap()
+                .record;
+            fixture
+                .store
+                .invalidate_pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                .await
+                .unwrap();
+            let invalid = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                .await
+                .unwrap();
+            assert_eq!(
+                invalid.observation.state,
+                crate::store::PlanningState::Invalid
+            );
+            assert_eq!(invalid.observation.record.as_ref(), Some(&original));
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                .await
+                .is_err());
+            let absent = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                .await
+                .unwrap();
+            assert_eq!(
+                absent.observation.state,
+                crate::store::PlanningState::Absent
+            );
+            assert_eq!(absent.observation.record.as_ref(), Some(&original));
+            // Null is an absence observation, not a confirmed deletion receipt.
+            fixture
+                .store
+                .observe_pm_issue_change("issue-1", None, true)
+                .await
+                .unwrap();
+            let removed = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                .await
+                .unwrap();
+            assert_eq!(
+                removed.observation.state,
+                crate::store::PlanningState::Removed
+            );
+            assert_eq!(removed.observation.record.as_ref(), Some(&original));
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                .await
+                .is_err());
+            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unresolved() {
+    let fixture = Fixture::new().await;
+    let (repo, wave) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+    ])
+    .await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap()
+                .record;
+            let mut list = PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative-1".into(),
+                synced_at: original.observed_at,
+                snapshot: PmSnapshot {
+                    projects: vec![original.project.clone().unwrap()],
+                    items: vec![original.item.clone()],
+                },
+            };
+            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            let mut newer = original.clone();
+            let project = newer.project.as_mut().unwrap();
+            project.revision = Some("2026-09-29T11:00:00.000000001Z".into());
+            project.summary = "New Project facts, unchanged issue revision".into();
+            newer.observed_at -= 1;
+            fixture
+                .store
+                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone())
+                .await
+                .unwrap();
+            // The list arrived later but its provider revision is older.
+            list.synced_at += 60;
+            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            let stored = fixture
+                .store
+                .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.project, newer.project);
+            assert_eq!(stored.observed_at, list.synced_at);
+            let snapshot = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+            assert_eq!(
+                snapshot.snapshot.projects[0],
+                newer.project.clone().unwrap()
+            );
+            assert_eq!(snapshot.snapshot.items.len(), 1);
+            let mut omitted = list.clone();
+            omitted.snapshot.projects.clear();
+            omitted.snapshot.items.clear();
+            assert!(fixture
+                .store
+                .put_pm_snapshot(omitted)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("omitted"));
+            assert_eq!(
+                fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap(),
+                snapshot
+            );
+            for revision in [
+                Some("2026-09-29T11:00:00Z"),
+                None,
+                Some("2026-09-29T11:00:00.000000001Z"),
+                Some("2026-09-29T12:00:00Z"),
+            ] {
+                let mut conflicting = newer.clone();
+                let project = conflicting.project.as_mut().unwrap();
+                project.revision = revision.map(str::to_string);
+                project.initiative_ids = vec!["different-wave".into()];
+                let result = fixture
+                    .store
+                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting)
+                    .await;
+                if revision != Some("2026-09-29T11:00:00Z") {
+                    assert!(result.is_err());
+                } else {
+                    result.unwrap();
+                }
+                let evidence = fixture
+                    .store
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .await
+                    .unwrap();
+                assert_eq!(evidence.record, Some(stored.clone()));
+                assert_eq!(
+                    evidence.state,
+                    if revision != Some("2026-09-29T11:00:00Z") {
+                        crate::store::PlanningState::Invalid
+                    } else {
+                        crate::store::PlanningState::Available
+                    }
+                );
+            }
+            // Replaying old membership cannot clear the explicit uncertainty.
+            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            assert!(fixture
+                .store
+                .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                .await
+                .unwrap()
+                .is_none());
+            assert!(fixture
+                .store
+                .pm_snapshot(wave.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .snapshot
+                .projects
+                .is_empty());
+            fixture
+                .store
+                .confirm_pm_project_archival(
+                    &repo.to_string_lossy(),
+                    "linear",
+                    newer.project.unwrap(),
+                    original.observed_at,
+                )
+                .await
+                .unwrap();
+            list.snapshot.projects.clear();
+            list.snapshot.items.clear();
+            fixture.store.put_pm_snapshot(list).await.unwrap();
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;

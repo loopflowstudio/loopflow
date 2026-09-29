@@ -113,7 +113,7 @@ No Run launched or owner reply established the latest execution schema. Retry
 coordination before shared migrations; do not edit that branch, copy stores,
 repair auth or treat prior Wave memory as current agreement.
 
-## Current implementation evidence — 2026-09-29
+## Earlier implementation evidence at b8e0e1d60 — 2026-09-29
 
 At `b8e0e1d60`, issue revisions, UUID-scoped webhook invalidation/removal receipts,
 soft-refresh errors with unchanged observation age, and Rust/Swift planning
@@ -123,7 +123,7 @@ Project/membership ordering still uses acquisition timestamps. Invalidated facts
 remain stored but hidden from both planning readers. Full execution/action
 fixtures, local lifecycle and contextual Wave definitions remain unimplemented.
 
-The current source still refuses failed hard-stale/forced inspection. When no
+At that earlier checkpoint, source still refused failed hard-stale/forced inspection. When no
 execution exists and planning cannot resolve, status returns an error rather than
 the unavailable JSON fixture. Every new status fixture has null execution. Keep
 fixture shape, public command behavior and managed-admission policy separate.
@@ -142,3 +142,28 @@ mutation or installation promotion. The recorded LOO-298 unregistered response
 remains a blocker only for dependent execution migrations. Reuse local planning
 proofs without claiming live provider or full command-story acceptance. Resolve
 outage and transition policy before dependent work; the saved Flow owns navigation.
+
+## Planning-evidence follow-through — 2026-09-29
+
+The current implementation now retains invalid/removed facts publicly, returns
+unavailable status without execution, and preserves last-good facts/age after
+hard-stale or forced inspection failure. `planning_state` and Project `revision`
+are mirrored in Rust/Swift fixtures. These replace the corresponding gaps in the
+older checkpoint above; execution/action fixtures and the full story remain open.
+
+Safe implementation choice: a later list cannot establish Project removal, and
+Project `updatedAt` alone cannot order separate Initiative/Team relationships.
+Known Project facts use provider revisions; contradictory relationship sets stay
+explicitly unresolved and block managed readers. Ordered association acquisition
+and repair are still needed. Replaying older/same facts cannot clear the recorded
+uncertainty. No outage-admission or connection-transition policy is inferred.
+
+Confirmed chapter archive acknowledgements supply positive retirement evidence,
+so rollover does not get stuck on its own predecessor's list omission. The forward
+migration preserves completed chapter archive receipts. This is local planning
+evidence, not an execution-schema change or the still-required provider Project
+completion behavior. External archive acquisition/restoration remain unimplemented.
+
+The working design owns the focused proof receipts and remaining acceptance work.
+No live-provider, full command-story, coordination reply, publication, promotion or
+Flow-navigation claim follows from these local changes.

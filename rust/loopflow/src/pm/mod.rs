@@ -104,6 +104,7 @@ pub struct ProjectContent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PmProject {
     pub id: String,
+    pub revision: Option<String>,
     pub slug: String,
     pub name: String,
     pub summary: String,

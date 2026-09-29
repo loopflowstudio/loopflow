@@ -17,7 +17,8 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
-Reconciled against `b8e0e1d60` and the bounded webhook repair below. The connected
+Baseline reconciled against `b8e0e1d60` and the bounded webhook repair below;
+the following planning-evidence follow-through updates that baseline. The connected
 planning slice is implemented; the full approved single-PR outcome remains open.
 The last-fetched `origin/main` is still `a3820bf7e`. No new integrated LOO-298
 execution contract or owner reply was found; no fetch or coordination retry ran
@@ -42,18 +43,94 @@ in this reconciliation. Shared execution migrations remain blocked.
   repairs invalidation; partial events never replace complete entities. Removal
   receipts fence later ingestion, including events received before caching.
   Existing steering/inbox owners remain unchanged. No execution schema changed.
-- Task status returns planning, optional execution, `planning_stale` and
-  `planning_error`. Soft automatic-refresh failure preserves the prior observation
-  age and exposes the failure. Status observes PRs without completing Tasks.
+- Task status returns planning, optional execution, `planning_state`,
+  `planning_stale` and `planning_error`. Inspection preserves the prior observation
+  age through soft/hard/forced refresh failure and exposes invalid/removed facts.
+  Status observes PRs without completing Tasks.
   Rust/Swift planning fixtures and `RegistryQuery.taskStatus` cover the envelope;
   Swift has a typed execution projection, not complete action/runtime parity.
 
+### Planning-evidence follow-through — 2026-09-29
+
+Task status now uses the shared observation reader and returns `planning_state`
+(`available`, `invalid`, `removed`, `absent`, `unavailable`) with optional retained
+facts. Hard-stale and forced inspection failures retain last-good facts and their
+original acquisition date. Uncached resolution failures produce an unavailable
+status envelope without execution. A null detail response reports scoped absence;
+only confirmed removal receipts establish removed state. Managed readers filter
+invalid/removed observations and retain the existing hard/forced refresh refusal.
+This does not select cached-Task outage admission.
+
+Project list/detail queries now acquire `updatedAt`. Shared writes order Project
+facts separately from issue revisions, so a newer Project observation can win
+when its enclosing issue request began earlier. Missing Project content or
+relationship fields fail acquisition instead of clearing known data. Unknown or
+older revisions cannot overwrite known facts. Equal-revision contradictions fail.
+
+Membership no longer uses list acquisition time as replacement authority. A list
+omission without removal evidence is unresolved. Initiative/Team relationship
+changes cannot be ordered by Project `updatedAt` alone: the writer retains known
+facts and persists unresolved ownership, excluding it from managed readers. List
+and detail replays cannot clear that state. Acquiring relationship-specific
+revision/removal evidence and its repair remains outstanding; this implementation
+intentionally does not guess a winner or silently reconcile ownership.
+
+Review caught two concrete integration hazards and fixed them: Project writes
+were conditional on accepting the enclosing issue, and treating every Project
+omission as unresolved would also break confirmed chapter archival. Project
+writes now have independent revisions. The existing chapter archive operation
+records its successful provider acknowledgement in the planning store; current
+views exclude the predecessor even after delayed lists. A forward planning-only
+migration carries completed chapter archival receipts into that evidence.
+Historical facts remain. Provider completion (distinct from archive), external
+archive acquisition and restoration semantics remain separate unfinished work.
+
+The self-review also preserved execution inspection when the owning checkout is
+missing; planning-context failure cannot hide already-recorded execution.
+No execution schema, runtime selection, execution ownership, account or live
+provider state was changed by this follow-through. No LOO-298 coordination retry was needed for this
+planning-only schema change. Its execution-contract blocker remains unchanged.
+
+Focused local proof receipts:
+
+- `cargo test -p loopflow --lib ops::pm::planning_lookup_tests`: all ten cases
+  passed, including forced failure, retained invalid/removed/absent facts,
+  partial Project fields and independent Project revisions. The ordering case
+  was rerun after distinguishing unknown revisions from known older revisions.
+- `cargo test -p loopflow --test planning_lookup_tests --test dto_fixtures`:
+  public CLI matrix passed; all eleven DTO tests passed. CLI cases include
+  identifier/UUID, more-than-seven-day-old planning, invalidation, cached and
+  uncached removal, and unavailable planning without execution. No execution,
+  execution Project or extra worktree was allocated. Forced inspection is a
+  shared-reader proof; Task status has no new refresh flag.
+- Swift `ContractTests.taskStatusPlanningFixture`: passed for the six evidence
+  states and Project revision. Existing Ghostty missing-symbol and macOS
+  CVDisplayLink deprecation warnings remain outside this change.
+- `chapter_rotation_previews_retries_and_preserves_dated_history`: passed with
+  acknowledged archival excluded from the active view. Its old delayed-list
+  assertion now expects unresolved omission while preserving current membership.
+- `migration_preserves_planning_identity_and_removes_snapshot_storage`: passed,
+  including populated chapter archival receipts and delayed predecessor ingestion.
+- `missing_worktree_status_is_actionable_and_read_only` and
+  `repeated_status_of_merged_task_never_completes_work`: passed.
+- `uv run python scripts/check_migrations.py`, `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed.
+  Scratch links resolve and the full acceptance matrix is unchanged.
+
+These are simulated-provider and disposable local CLI proofs. The complete
+acceptance matrix remains required and unproven. No affected-suite/repository
+gate, live provider demonstration, installation promotion or Flow navigation is
+claimed here.
+
 ### Remaining implementation
 
-1. Finish planning evidence: publicly retain invalid observations, distinguish
-   invalid/unavailable/absent outcomes, and order Project facts and membership
-   using provider evidence. Current Project/membership writes use acquisition
-   timestamps. Wave `synced_at` does not date newer joined issue facts.
+1. Acquire ordered Initiative/Team relationship evidence and an explicit repair
+   for unresolved Project ownership. The current writer retains uncertainty
+   instead of replacing membership by acquisition time. External Project archive
+   observations also need acquisition; known chapter archive acknowledgements are
+   integrated. Wave `synced_at` still does not date newer joined issue facts.
+   Public invalid/unavailable/absent inspection and Project fact revision ordering
+   are implemented in the follow-through above.
 2. Implement genuine local Task/Project identities and lifecycle through the same
    store. The current reader acquires Linear observations; it does not supply the
    approved local-only lifecycle. Resolve connection migration controls before
@@ -76,7 +153,8 @@ in this reconciliation. Shared execution migrations remain blocked.
 
 ### Proof and counterexamples
 
-Recorded proofs at `2976e1d34` and `b8e0e1d60` are reused, not newly rerun:
+Recorded proofs at `2976e1d34` and `b8e0e1d60` remain baseline evidence. The
+follow-through above names the reruns; unrelated proofs were not rerun:
 
 - Eight planning-lookup cases cover detail/list/shared-writer convergence,
   equal-revision conflicts, webhook invalidation, uncached removal, incomplete
@@ -90,7 +168,8 @@ Recorded proofs at `2976e1d34` and `b8e0e1d60` are reused, not newly rerun:
   all 17 receiver tests, four parser/signature tests and the chapter-history
   proof passed. Every new status fixture has `execution: null`; these fixtures
   do not prove execution/actions or CLI success when both planning and execution
-  are unavailable. Source still returns an error in that latter case.
+  are unavailable. Source still returned an error at that earlier boundary; the
+  follow-through's public CLI proof now covers it.
 - All 15 active OAuth tests passed together after the logging proof moved into
   an isolated process/subscriber. The ignored child entry is invoked by the
   normal test. This resolves the earlier grouped capture failure; no production
@@ -112,9 +191,9 @@ been acquired as normalized Task entities. It was not evidence of lost history.
 The earlier ownership matrix reached Git authentication with an obsolete fixture;
 its corrected conflicting Initiative ownership now fails before checkout.
 
-Source review still finds hard-stale/forced reads refuse failed refresh; invalidated
-bytes remain stored but hidden by both planning readers. Full retained-invalid
-inspection remains work. No restore/recreation semantics are inferred from the
+At that earlier boundary, hard-stale/forced inspection refused failed refresh and
+both planning readers hid invalidated bytes. The planning-evidence follow-through
+above replaces those inspection limitations while preserving managed refusal. No restore/recreation semantics are inferred from the
 permanent removal fence. Existing installation/Session continuity mechanisms are
 useful discovery inputs, not LOO-298 agreement or independent runtime/store routing.
 
@@ -627,8 +706,9 @@ a second design or Task to make the story appear continuous.
    Wave lists and PM operations. Payload storage and its consumers are removed;
    incomplete ownership is representable and lookup refreshes before resolving
    membership. Issue webhooks now feed shared invalidation and provider revisions
-   order Task facts. Finish Project/membership ordering and public invalid-state
-   evidence; acquisition timestamps cannot settle provider revisions. Preserve
+   order Task facts. Project fact ordering and public invalid-state evidence now
+   follow the same owner. Finish relationship-specific revision acquisition and
+   repair of unresolved membership; acquisition timestamps cannot settle it. Preserve
    migration history and the existing deletion receipts. No second planning copy.
 2. Adapt Task/Project identities and planning writes for local operation. Preserve
    IDs and execution through forward migration; coordinate with LOO-298 first.

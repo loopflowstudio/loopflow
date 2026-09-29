@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use loopflow::ops::task::TaskStatus;
-use loopflow::store::{open_ephemeral_store, PmTaskRecord, StorageConfig};
+use loopflow::store::{open_ephemeral_store, PlanningState, PmTaskRecord, StorageConfig};
 use loopflow_test_support::TestRepo;
 use serde_json::json;
 
@@ -31,14 +31,39 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     let mut stale = record.clone();
     stale.item.id = "issue-2".into();
     stale.item.identifier = "FIX-2".into();
-    stale.observed_at -= 3601;
+    stale.observed_at -= 7 * 86400 + 1;
     runtime
         .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", stale.clone()))
         .unwrap();
-    for (selector, expected, unavailable) in [
-        ("FIX-1", &record, false),
-        ("issue-1", &record, false),
-        ("FIX-2", &stale, true),
+    let mut invalid = record.clone();
+    invalid.item.id = "issue-3".into();
+    invalid.item.identifier = "FIX-3".into();
+    runtime
+        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", invalid.clone()))
+        .unwrap();
+    runtime
+        .block_on(store.invalidate_pm_task(&scope.to_string_lossy(), "linear", "FIX-3"))
+        .unwrap();
+    let mut removed = record.clone();
+    removed.item.id = "issue-4".into();
+    removed.item.identifier = "FIX-4".into();
+    runtime
+        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", removed.clone()))
+        .unwrap();
+    runtime
+        .block_on(store.observe_pm_issue_change("issue-4", None, true))
+        .unwrap();
+    runtime
+        .block_on(store.observe_pm_issue_change("uncached-removal", None, true))
+        .unwrap();
+    for (selector, expected, state, error) in [
+        ("FIX-1", Some(&record), PlanningState::Available, false),
+        ("issue-1", Some(&record), PlanningState::Available, false),
+        ("FIX-2", Some(&stale), PlanningState::Unavailable, true),
+        ("FIX-3", Some(&invalid), PlanningState::Invalid, true),
+        ("FIX-4", Some(&removed), PlanningState::Removed, false),
+        ("uncached-removal", None, PlanningState::Removed, false),
+        ("UNKNOWN", None, PlanningState::Unavailable, true),
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in std::env::vars_os() {
@@ -59,10 +84,17 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             String::from_utf8_lossy(&output.stderr)
         );
         let status: TaskStatus = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(status.planning.as_ref(), Some(expected));
+        assert_eq!(status.planning.as_ref(), expected);
+        assert_eq!(status.planning_state, state);
         assert!(status.execution.is_none());
-        assert_eq!(status.planning_error.is_some(), unavailable);
-        assert_eq!(status.planning_stale, unavailable);
+        assert_eq!(status.planning_error.is_some(), error);
+        assert_eq!(status.planning_stale, state != PlanningState::Available);
+    }
+    for selector in ["FIX-3", "FIX-4"] {
+        assert!(runtime
+            .block_on(store.pm_task(&scope.to_string_lossy(), "linear", selector))
+            .unwrap()
+            .is_none());
     }
     assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
     assert!(runtime

@@ -4,14 +4,20 @@ import Foundation
 public struct TaskStatus: Decodable, Sendable {
     public let planning: TaskPlanningRecord?
     public let planningError: String?
+    public let planningState: PlanningState
     public let planningStale: Bool
     public let execution: TaskStatusExecution?
 
     enum CodingKeys: String, CodingKey {
         case planning, execution
         case planningError = "planning_error"
+        case planningState = "planning_state"
         case planningStale = "planning_stale"
     }
+}
+
+public enum PlanningState: String, Decodable, Sendable {
+    case available, invalid, removed, absent, unavailable
 }
 
 public struct TaskPlanningRecord: Decodable, Sendable {
@@ -49,6 +55,7 @@ public struct PlanningItem: Decodable, Sendable {
 
 public struct PlanningProject: Decodable, Sendable {
     public let id: String
+    public let revision: String?
     public let slug: String
     public let name: String
     public let summary: String
@@ -59,7 +66,7 @@ public struct PlanningProject: Decodable, Sendable {
     public let teamIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, summary, flows, krs
+        case id, revision, slug, name, summary, flows, krs
         case metricTargets = "metric_targets"
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"

@@ -87,9 +87,10 @@ That cache supplied the refresh policy reused by the implementation. At
 `PmSnapshotRow` is a typed assembled view. Exact lookup acquires planning before
 resolving ownership, and status needs no execution allocation. The current
 [checkpoint](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
-records implemented issue revision/webhook ordering and soft-refresh status
-evidence, alongside remaining Project/membership ordering and retained-invalid
-inspection gaps.
+records issue and Project revision ordering, webhook evidence and retained-invalid
+inspection. Relationship-specific ordering/repair remains unresolved; later list
+acquisition cannot replace membership. The checkpoint separates these local proofs
+from the unfinished full acceptance matrix.
 The baseline observations above explain the change; they are no longer a
 description of the current reader.
 

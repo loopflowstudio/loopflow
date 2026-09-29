@@ -185,9 +185,19 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
         manifest_dir.join("src").display()
     );
     if let Some(root) = git_root {
-        for git_path in ["HEAD", "refs/heads", "refs/tags", "packed-refs"] {
+        let mut git_paths = vec!["HEAD".to_string(), "refs/tags".into(), "packed-refs".into()];
+        if let Ok(output) = Command::new("git")
+            .args(["symbolic-ref", "--quiet", "HEAD"])
+            .current_dir(root)
+            .output()
+        {
+            if output.status.success() {
+                git_paths.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
+            }
+        }
+        for git_path in git_paths {
             if let Ok(output) = Command::new("git")
-                .args(["rev-parse", "--git-path", git_path])
+                .args(["rev-parse", "--git-path", &git_path])
                 .current_dir(root)
                 .output()
             {
@@ -199,9 +209,12 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
                     } else {
                         root.join(path)
                     };
-                    // An absent packed-refs makes every build dirty. Packing
-                    // loose refs is covered by the refs directories above.
-                    if git_path != "packed-refs" || path.exists() {
+                    // Missing inputs make every build dirty. A packed branch
+                    // needs its parent watched until a commit creates a loose ref.
+                    if git_path == "packed-refs" && !path.exists() {
+                        continue;
+                    }
+                    if let Some(path) = path.ancestors().find(|path| path.exists()) {
                         println!("cargo:rerun-if-changed={}", path.display());
                     }
                 }

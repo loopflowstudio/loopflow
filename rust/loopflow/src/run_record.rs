@@ -603,15 +603,25 @@ pub(crate) fn conversation_snapshot(
                 || stored_end.is_some_and(|at| at != terminal.ended_at.unix_timestamp()),
         );
     }
+    // Replacement preserves admission ancestry/source; binding changes source
+    // to Bound. Matching immutable ancestry can therefore retain Inherited on
+    // prior inputs too, without lending a later assignment to earlier history.
+    let inherited_admission = session.work_source == Some(crate::session::WorkSource::Inherited)
+        && (current
+            || history.iter().any(|event| {
+                event.kind == crate::session::SessionEventKind::Observed
+                    && event.payload["input_id"].as_str() == Some(input_id.as_str())
+                    && event.payload["source"] == "manifest.json"
+                    && event.task_id.as_deref() == session.task_id.as_ref().map(|id| id.as_str())
+                    && event.wave_id.as_deref() == session.wave_id.as_ref().map(|id| id.as_str())
+            }));
     let source = manifest
         .as_ref()
         .and_then(|m| m.subjects.first())
         .map(|s| s.source)
         .unwrap_or_else(|| {
             if stored_text("work_source").as_deref() == Some("inherited")
-                || (stored.is_none()
-                    && current
-                    && session.work_source == Some(crate::session::WorkSource::Inherited))
+                || (stored.is_none() && inherited_admission)
             {
                 AttributionSource::Inherited
             } else {
@@ -1797,6 +1807,17 @@ impl CaptureHandle {
             return Ok(None);
         };
         row_store(&capture.dir)?.session_thread(session)
+    }
+
+    pub(crate) fn record_provider_process(&self, pid: u32) -> StoreResult<()> {
+        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        if let Some((session, driver)) = &capture.driver {
+            if let Some(started) = crate::journal::process_started_at(pid).map_err(record_error)? {
+                row_store(&capture.dir)?
+                    .record_session_provider_process(session, driver, pid, started)?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn flow_turn_selection(

@@ -1838,7 +1838,7 @@ fn _launch_agent_once(
         launch_batch(&mut cmd, process.timeout, capture)
     } else {
         // Interactive mode: inherit stdio
-        launch_interactive(&mut cmd, process.timeout)
+        launch_interactive(&mut cmd, process.timeout, capture)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -1876,6 +1876,21 @@ fn _launch_agent_once(
     })
 }
 
+fn spawn_agent_child(
+    cmd: &mut Command,
+    capture: Option<&CaptureHandle>,
+) -> Result<Child, CoreError> {
+    let mut child = cmd.spawn()?;
+    if let Some(capture) = capture {
+        if let Err(error) = capture.record_provider_process(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CoreError::ExecutionFailed(error.to_string()));
+        }
+    }
+    Ok(child)
+}
+
 fn launch_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
@@ -1884,7 +1899,7 @@ fn launch_batch(
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let mut child = cmd.spawn()?;
+    let mut child = spawn_agent_child(cmd, capture)?;
     let _pid_guard = ChildPidGuard::new(child.id());
 
     let stdout = child
@@ -1958,9 +1973,10 @@ fn launch_batch(
 fn launch_interactive(
     cmd: &mut Command,
     timeout: Option<Duration>,
+    capture: Option<&CaptureHandle>,
 ) -> Result<LaunchResult, CoreError> {
     let start = Instant::now();
-    let mut child = cmd.spawn()?;
+    let mut child = spawn_agent_child(cmd, capture)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -1996,7 +2012,7 @@ fn launch_streaming(
     cmd.stderr(Stdio::piped());
 
     let start = Instant::now();
-    let mut child = cmd.spawn()?;
+    let mut child = spawn_agent_child(cmd, capture)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 

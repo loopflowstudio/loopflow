@@ -40,3 +40,13 @@ Flow success selection continues to require exact native completion evidence.
 Original source/input keys namespace replay comparison; no imported input gains
 an ordinal, mutable outcome, or resumable lifecycle. Retain original artifacts
 until the complete preservation obligations pass.
+
+2026-09-29 · **Decision interface — asked, unanswered.** Supervisor asked Jack
+in the existing control conversation whether a Flow decision should be returned
+by the selected successful agent turn and consumed from AgentSession history, or
+remain an in-turn `lf flow decide` call. The result-based option is supervisor's
+recommendation, not Jack's decision. The retained research compares its interface,
+history/recovery and provider costs with native tools and upstream reload repair:
+[native retry options](research-native-retry-options.md). No alternative transport,
+upstream action or retry-contract change is selected. Existing decision failures
+remain requirements, and independent Run removal, import and reader work continues.

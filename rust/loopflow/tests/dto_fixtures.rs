@@ -272,3 +272,22 @@ fn session_history_retains_receipts_and_unknown_driver() {
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
 }
+
+#[test]
+fn exec_page_retains_outcomes_unknowns_and_continuation() {
+    let json = include_str!("../../../tests/fixtures/dto/exec_page.json");
+    let page: loopflow::exec::ExecPage = serde_json::from_str(json).unwrap();
+    assert_eq!(page.entries[0].exit_code, Some(42));
+    assert_eq!(page.entries[0].via_agent, None);
+    assert_eq!(
+        page.entries[1].parent_exec_id.as_ref(),
+        Some(&page.entries[0].id)
+    );
+    assert_eq!(page.entries[1].outcome, None);
+    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert!(serde_json::from_str::<loopflow::exec::ExecPage>("{}").is_err());
+}

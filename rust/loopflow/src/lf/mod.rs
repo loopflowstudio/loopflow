@@ -220,6 +220,11 @@ pub enum UserCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Inspect recorded lf processes and their command outcomes
+    Exec {
+        #[command(subcommand)]
+        cmd: commands::exec::ExecCommand,
+    },
     /// Inspect the current user
     User {
         #[command(subcommand)]

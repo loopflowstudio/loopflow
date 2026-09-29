@@ -1,10 +1,129 @@
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use std::num::NonZeroU32;
 
-use crate::exec::{AgentCaller, SessionDriver};
+use rusqlite::types::Value;
+use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
+
+use crate::exec::{
+    AgentCaller, Exec, ExecCursor, ExecFilter, ExecOutcomeFilter, ExecPage, ExecWorkFilter,
+    SessionDriver,
+};
 use crate::id::ExecId;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
+
+const EXEC_SELECT: &str = "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
+    e.caller_provider_generation,e.caller_flow_turn,e.command,e.repo,e.cwd,
+    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,
+    (SELECT wave FROM run_events WHERE process_id=e.id AND node='run' AND wave IS NOT NULL
+     ORDER BY seq LIMIT 1) FROM execs e";
+
+fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
+    Ok(Exec {
+        id: row.get(0)?,
+        trace_id: row.get(1)?,
+        parent_exec_id: row.get(2)?,
+        via_agent: row.get(3)?,
+        caller_session_id: row.get(4)?,
+        caller_provider_generation: row.get(5)?,
+        caller_flow_turn: row.get(6)?,
+        command: row.get(7)?,
+        repo: row.get(8)?,
+        cwd: row.get(9)?,
+        started_at: row.get(10)?,
+        completed_at: row.get(11)?,
+        outcome: row.get(12)?,
+        exit_code: row.get(13)?,
+        signal: row.get(14)?,
+        wave: row.get(15)?,
+    })
+}
+
+fn exec_query(
+    filter: &ExecFilter,
+    after: Option<&ExecCursor>,
+    limit: NonZeroU32,
+) -> (String, Vec<Value>) {
+    let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.id FROM execs e WHERE 1");
+    let mut values = Vec::new();
+    let mut bind = |value| {
+        values.push(value);
+        format!("?{}", values.len())
+    };
+    for (column, value) in [
+        ("id", filter.id.as_ref().map(ExecId::as_str)),
+        ("repo", filter.repo.as_deref()),
+        (
+            "parent_exec_id",
+            filter.parent_exec_id.as_ref().map(ExecId::as_str),
+        ),
+        ("caller_session_id", filter.caller_session_id.as_deref()),
+    ] {
+        if let Some(value) = value {
+            sql.push_str(&format!(
+                " AND e.{column}={}",
+                bind(Value::Text(value.into()))
+            ));
+        }
+    }
+    if let Some(value) = &filter.command_contains {
+        sql.push_str(&format!(
+            " AND instr(lower(CASE WHEN json_valid(e.command) THEN
+                CASE WHEN json_type(e.command)='array'
+                    AND NOT EXISTS(SELECT 1 FROM json_each(e.command) WHERE type!='text')
+                THEN (SELECT group_concat(value,' ') FROM json_each(e.command))
+                ELSE e.command END
+             ELSE e.command END),lower({}))>0",
+            bind(Value::Text(value.clone()))
+        ));
+    }
+    if let Some(value) = &filter.identity_contains {
+        sql.push_str(&format!(
+            " AND instr(e.id,{})>0",
+            bind(Value::Text(value.clone()))
+        ));
+    }
+    if let Some(outcome) = filter.outcome {
+        sql.push_str(match outcome {
+            ExecOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
+            ExecOutcomeFilter::Failed => " AND e.outcome='failed'",
+            ExecOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
+            ExecOutcomeFilter::Unknown => " AND e.outcome IS NULL",
+        });
+    }
+    if let Some(work) = &filter.performed_work {
+        let (column, value) = match work {
+            ExecWorkFilter::Task(id) => ("task_id", id.as_str()),
+            ExecWorkFilter::Wave(id) => ("wave_id", id.as_str()),
+        };
+        let value = bind(Value::Text(value.into()));
+        // Native starts retain their original assignment. Mechanical starts
+        // reference their owning captured Flow. Neither a current Session bind
+        // nor an Exec's command context establishes performed work.
+        sql.push_str(&format!(
+            " AND e.id IN (
+            SELECT exec_id FROM session_events
+            WHERE kind='started' AND {column}={value} AND exec_id IS NOT NULL
+            UNION
+            SELECT h.exec_id FROM flow_events h JOIN flow_sessions f ON f.id=h.flow_id
+            WHERE h.kind='operation_started' AND f.{column}={value} AND h.exec_id IS NOT NULL
+        )"
+        ));
+    }
+    if let Some(after) = after {
+        let time = bind(Value::Integer(after.started_at));
+        let id = bind(Value::Text(after.id.to_string()));
+        sql.push_str(&format!(
+            " AND e.started_at<={time} AND (e.started_at<{time} OR e.id>{id})"
+        ));
+    }
+    let limit = bind(Value::Integer(i64::from(limit.get()) + 1));
+    sql.push_str(&format!(
+        " ORDER BY e.started_at DESC,e.id ASC LIMIT {limit})
+         {EXEC_SELECT} JOIN page ON page.id=e.id ORDER BY e.started_at DESC,e.id ASC"
+    ));
+    (sql, values)
+}
 
 pub(super) fn agent_work_in(
     conn: &rusqlite::Connection,
@@ -72,40 +191,125 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    /// Resolve retained identity without loading plans, captures or launch eligibility.
+    pub(crate) fn resolve_task_id(
+        &self,
+        selector: &str,
+        repo: Option<&str>,
+    ) -> StoreResult<Option<crate::durable::TaskId>> {
+        self.resolve_work_id("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+            WHERE t.id=?1 OR ((t.issue_identifier=?1 OR t.external_issue_id=?1) AND (?2 IS NULL OR w.repo=?2))
+            ORDER BY (t.id=?1) DESC,t.id LIMIT 2", selector, repo)
+            .map(|id| id.map(crate::durable::TaskId::from_raw))
+    }
+
+    pub(crate) fn resolve_wave_id(
+        &self,
+        selector: &str,
+        repo: Option<&str>,
+    ) -> StoreResult<Option<crate::id::WaveId>> {
+        self.resolve_work_id(
+            "SELECT id FROM waves WHERE id=?1 OR (name=?1 AND (?2 IS NULL OR repo=?2))
+            ORDER BY (id=?1) DESC,id LIMIT 2",
+            selector,
+            repo,
+        )?
+        .map(|id| {
+            crate::id::WaveId::parse(&id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))
+        })
+        .transpose()
+    }
+
+    fn resolve_work_id(
+        &self,
+        sql: &str,
+        selector: &str,
+        repo: Option<&str>,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(sql)?;
+        let ids = query
+            .query_map(params![selector, repo], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if ids.first().is_some_and(|id| id == selector) {
+            return Ok(ids.into_iter().next());
+        }
+        match ids.as_slice() {
+            [] => Ok(None),
+            [id] => Ok(Some(id.clone())),
+            _ => Err(StoreError::InvalidData(format!(
+                "Ambiguous Work selector {selector:?}"
+            ))),
+        }
+    }
+
     /// Read one command without decoding its event history or provider payloads.
-    pub fn exec(&self, id: &ExecId) -> StoreResult<Option<crate::exec::Exec>> {
+    pub fn exec(&self, id: &ExecId) -> StoreResult<Option<Exec>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
-            .query_row(
-                "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
-                e.caller_provider_generation,e.caller_flow_turn,e.command,e.repo,e.cwd,
-                e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,
-                (SELECT wave FROM run_events WHERE process_id=e.id AND node='run' AND wave IS NOT NULL
-                 ORDER BY seq LIMIT 1)
-             FROM execs e WHERE e.id=?1",
-                [id],
-                |row| {
-                    Ok(crate::exec::Exec {
-                        id: row.get(0)?,
-                        trace_id: row.get(1)?,
-                        parent_exec_id: row.get(2)?,
-                        via_agent: row.get(3)?,
-                        caller_session_id: row.get(4)?,
-                        caller_provider_generation: row.get(5)?,
-                        caller_flow_turn: row.get(6)?,
-                        command: row.get(7)?,
-                        repo: row.get(8)?,
-                        cwd: row.get(9)?,
-                        started_at: row.get(10)?,
-                        completed_at: row.get(11)?,
-                        outcome: row.get(12)?,
-                        exit_code: row.get(13)?,
-                        signal: row.get(14)?,
-                        wave: row.get(15)?,
-                    })
-                },
-            )
+            .query_row(&format!("{EXEC_SELECT} WHERE e.id=?1"), [id], read_exec)
             .optional()?)
+    }
+
+    /// Exact identity wins; otherwise require a unique literal, case-sensitive prefix.
+    pub fn resolve_exec(&self, selector: &str) -> StoreResult<Option<Exec>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if let Some(exec) = conn
+            .query_row(
+                &format!("{EXEC_SELECT} WHERE e.id=?1"),
+                [selector],
+                read_exec,
+            )
+            .optional()?
+        {
+            return Ok(Some(exec));
+        }
+        // Exec IDs are UUID text. This range seeks the existing identity index;
+        // '%' and '_' have no wildcard meaning, unlike LIKE/GLOB.
+        let upper = format!("{selector}\u{10ffff}");
+        let mut query =
+            conn.prepare("SELECT id FROM execs WHERE id>=?1 AND id<?2 ORDER BY id LIMIT 2")?;
+        let ids = query
+            .query_map(params![selector, upper], |row| row.get::<_, ExecId>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        match ids.as_slice() {
+            [] => Ok(None),
+            [id] => Ok(Some(conn.query_row(
+                &format!("{EXEC_SELECT} WHERE e.id=?1"),
+                [id],
+                read_exec,
+            )?)),
+            _ => Err(StoreError::InvalidData(format!(
+                "Ambiguous Exec prefix {selector:?}"
+            ))),
+        }
+    }
+
+    /// Filter/deduplicate in SQL; decode only a bounded page plus one lookahead.
+    /// Missing payloads do not remove rows. No history body is read for discovery.
+    pub fn execs(
+        &self,
+        filter: &ExecFilter,
+        after: Option<&ExecCursor>,
+        limit: NonZeroU32,
+    ) -> StoreResult<ExecPage> {
+        let (sql, values) = exec_query(filter, after, limit);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&sql)?;
+        let mut entries = query
+            .query_map(params_from_iter(values), read_exec)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let next = if entries.len() > limit.get() as usize {
+            entries.pop();
+            entries.last().map(|exec| ExecCursor {
+                started_at: exec.started_at,
+                id: exec.id.clone(),
+            })
+        } else {
+            None
+        };
+        Ok(ExecPage { entries, next })
     }
 
     pub fn agent_work(&self, exec: &ExecId) -> StoreResult<Option<crate::session::RunWork>> {
@@ -323,5 +527,376 @@ impl SqliteStore {
         .optional()
         .map(|trace| trace.map(|trace| (parent.clone(), trace)))
         .map_err(StoreError::from)
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use std::num::NonZeroU32;
+
+    use rusqlite::params;
+
+    use crate::durable::{ProjectId, TaskId};
+    use crate::exec::{ExecFilter, ExecOutcomeFilter, ExecWorkFilter};
+    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::StoreError;
+
+    fn insert_exec(store: &SqliteStore, number: u32, started_at: i64) -> ExecId {
+        let id = ExecId::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO execs(id,trace_id,started_at,command,repo,cwd)
+             VALUES(?1,?2,?3,?4,'/repo','/missing-checkout')",
+                params![
+                    id,
+                    TraceId::new(),
+                    started_at,
+                    serde_json::to_string(&["lf", "inspect"]).unwrap()
+                ],
+            )
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn exec_discovery_retains_command_evidence_without_payloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let parent = insert_exec(&store, 1, 1);
+        let direct = insert_exec(&store, 2, 2);
+        let agent = insert_exec(&store, 3, 3);
+        let interrupted = insert_exec(&store, 4, 4);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE execs SET parent_exec_id=?2,via_agent=0,outcome='failed',
+                completed_at=5,exit_code=42 WHERE id=?1",
+                params![direct, parent],
+            )
+            .unwrap();
+            conn.execute("UPDATE execs SET parent_exec_id=?2,via_agent=1,caller_session_id='retained-caller',
+                caller_provider_generation=7,caller_flow_turn='original-token',outcome='succeeded',
+                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct]).unwrap();
+            conn.execute(
+                "UPDATE execs SET outcome='interrupted',completed_at=7,exit_code=130
+                WHERE id=?1",
+                [&interrupted],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
+                SELECT trace_id,id,0,started_at,'run','started','command-context' FROM execs WHERE id=?1",
+                [&direct]).unwrap();
+            conn.execute("INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
+                SELECT trace_id,id,1,started_at,'skill','started','different-work' FROM execs WHERE id=?1",
+                [&direct]).unwrap();
+        }
+        let page = store
+            .execs(&ExecFilter::default(), None, NonZeroU32::new(10).unwrap())
+            .unwrap();
+        assert_eq!(
+            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            vec![&interrupted, &agent, &direct, &parent]
+        );
+        assert_eq!(page.next, None);
+        for entry in &page.entries {
+            assert_eq!(store.exec(&entry.id).unwrap().as_ref(), Some(entry));
+        }
+        let old = &page.entries[3];
+        assert_eq!(
+            (old.via_agent, old.completed_at, old.exit_code),
+            (None, None, None)
+        );
+        assert_eq!(old.outcome, None);
+        assert_eq!(old.signal, None);
+        let failed = &page.entries[2];
+        assert_eq!(failed.parent_exec_id.as_ref(), Some(&parent));
+        assert_eq!(failed.via_agent, Some(false));
+        assert_eq!(failed.exit_code, Some(42));
+        assert_eq!(failed.wave.as_deref(), Some("command-context"));
+        let success = &page.entries[1];
+        assert_eq!(
+            success.caller_session_id.as_deref(),
+            Some("retained-caller")
+        );
+        assert_eq!(success.caller_provider_generation, Some(7));
+        assert_eq!(success.caller_flow_turn.as_deref(), Some("original-token"));
+        assert_eq!(success.via_agent, Some(true));
+        assert_eq!(page.entries[0].signal, None);
+        for (outcome, expected) in [
+            (ExecOutcomeFilter::Unknown, &parent),
+            (ExecOutcomeFilter::Failed, &direct),
+            (ExecOutcomeFilter::Succeeded, &agent),
+            (ExecOutcomeFilter::Interrupted, &interrupted),
+        ] {
+            let filter = ExecFilter {
+                outcome: Some(outcome),
+                ..Default::default()
+            };
+            let selected = store
+                .execs(&filter, None, NonZeroU32::new(1).unwrap())
+                .unwrap();
+            assert_eq!(&selected.entries[0].id, expected);
+            assert_eq!(selected.next, None);
+        }
+        assert!(!dir.path().join("runs").exists());
+    }
+
+    #[test]
+    fn exec_discovery_separates_literal_search_from_identity_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let first = insert_exec(&store, 1, 1);
+        let second = insert_exec(&store, 16, 2);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE execs SET command=?3,parent_exec_id=?2,
+                caller_session_id='caller' WHERE id=?1",
+                params![
+                    first,
+                    second,
+                    serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ bytes"]).unwrap()
+                ],
+            )
+            .unwrap();
+        let filter = ExecFilter {
+            repo: Some("/repo".into()),
+            parent_exec_id: Some(second.clone()),
+            caller_session_id: Some("caller".into()),
+            command_contains: Some("PR LAND --strict %_".into()),
+            identity_contains: Some("000000000001".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            store
+                .execs(&filter, None, NonZeroU32::new(1).unwrap())
+                .unwrap()
+                .entries[0]
+                .id,
+            first
+        );
+        assert_eq!(
+            store.resolve_exec(first.as_str()).unwrap().unwrap().id,
+            first
+        );
+        assert_eq!(
+            store
+                .resolve_exec(&second.as_str()[..35])
+                .unwrap()
+                .unwrap()
+                .id,
+            second
+        );
+        assert!(matches!(
+            store.resolve_exec("00000000"),
+            Err(StoreError::InvalidData(_))
+        ));
+        assert_eq!(store.resolve_exec("%_").unwrap(), None);
+        assert_eq!(store.exec(&ExecId::new()).unwrap(), None);
+        let miss = ExecFilter {
+            command_contains: Some("%_".into()),
+            id: Some(second),
+            ..Default::default()
+        };
+        assert!(store
+            .execs(&miss, None, NonZeroU32::new(1).unwrap())
+            .unwrap()
+            .entries
+            .is_empty());
+        for command in [Some("[old pr land"), Some("{\"note\":\"pr land\"}"), None] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE execs SET command=?2 WHERE id=?1",
+                    params![first, command],
+                )
+                .unwrap();
+            let page = store
+                .execs(
+                    &ExecFilter {
+                        id: Some(first.clone()),
+                        command_contains: Some("pr land".into()),
+                        ..Default::default()
+                    },
+                    None,
+                    NonZeroU32::new(1).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(page.entries.len(), usize::from(command.is_some()));
+            assert_eq!(
+                store.exec(&first).unwrap().unwrap().command.as_deref(),
+                command
+            );
+        }
+    }
+
+    #[test]
+    fn exec_discovery_pages_fixed_data_after_filtering_with_timestamp_ties() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let mut expected = Vec::new();
+        for number in 1..=12 {
+            let id = insert_exec(&store, number, i64::from(number / 5));
+            if number % 2 == 0 {
+                expected.push((i64::from(number / 5), id));
+            } else {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute("UPDATE execs SET repo='/other' WHERE id=?1", [id])
+                    .unwrap();
+            }
+        }
+        expected.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
+        let filter = ExecFilter {
+            repo: Some("/repo".into()),
+            ..Default::default()
+        };
+        let mut after = None;
+        let mut found = Vec::new();
+        loop {
+            let page = store
+                .execs(&filter, after.as_ref(), NonZeroU32::new(2).unwrap())
+                .unwrap();
+            assert!(page.entries.len() <= 2);
+            found.extend(page.entries.into_iter().map(|entry| entry.id));
+            after = page.next;
+            if after.is_none() {
+                break;
+            }
+            assert!(found.len() <= expected.len(), "cursor must make progress");
+        }
+        assert_eq!(
+            found,
+            expected.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn exec_discovery_deduplicates_performed_work_without_rebinding_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let first = TaskId::new();
+        let second = TaskId::new();
+        let shared = insert_exec(&store, 1, 3);
+        let mechanical = insert_exec(&store, 2, 2);
+        let unbound = insert_exec(&store, 3, 1);
+        let observer = insert_exec(&store, 4, 4);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,external_project_id,created_at)
+                VALUES(?1,?2,'project-proof',1)",
+                params![project.as_str(), wave],
+            )
+            .unwrap();
+            for (index, task) in [&first, &second].into_iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+                    VALUES(?1,?2,?3,?3,1)",
+                    params![task.as_str(), project.as_str(), format!("PROOF-{index}")],
+                )
+                .unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+                    VALUES(?1,?2,'Now bound','human',1,1,'/missing',?3,?4)",
+                    params![format!("session-{index}"),format!("run_{index:032x}"),task.as_str(),wave]).unwrap();
+                conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+                    VALUES(?1,'thread','work','started','',?2,?3,?4,1,'unreadable payload')",
+                    params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
+            }
+            // Same Exec drove both Tasks, two turns and a mechanical boundary.
+            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+                VALUES('session-0','thread','retry','started','',?1,?2,?3,2,'{}')",params![shared,first.as_str(),wave]).unwrap();
+            // Session is bound now; the earlier turn remains unassigned.
+            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,observed_at,payload)
+                VALUES('session-0','thread','before-bind','started','',?1,1,'{}')",[&unbound]).unwrap();
+            // Known Task, unknown original process: neither current driver nor observer is its owner.
+            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+                VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
+            conn.execute("UPDATE agent_sessions SET driver_exec_id=?1,provider_exec_id=?1 WHERE id='session-0'",[&observer]).unwrap();
+            conn.execute(
+                "UPDATE execs SET caller_session_id='session-0',via_agent=1 WHERE id=?1",
+                [&observer],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,
+                worker_generation,updated_at,state,ended_at) VALUES('mechanical',?1,?2,'{\"id\":\"mechanical\"}',0,0,1,0,1,'completed',2)",params![first.as_str(),wave]).unwrap();
+            for exec in [&shared, &mechanical] {
+                conn.execute(
+                    "INSERT INTO flow_events(flow_id,node,iterations,kind,exec_id,payload)
+                    VALUES('mechanical',0,'[]','operation_started',?1,'unreadable payload')",
+                    [exec],
+                )
+                .unwrap();
+            }
+        }
+        let filter = ExecFilter {
+            performed_work: Some(ExecWorkFilter::Task(first.clone())),
+            ..Default::default()
+        };
+        let page = store
+            .execs(&filter, None, NonZeroU32::new(1).unwrap())
+            .unwrap();
+        assert_eq!(
+            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            vec![&shared]
+        );
+        let page = store
+            .execs(&filter, page.next.as_ref(), NonZeroU32::new(1).unwrap())
+            .unwrap();
+        assert_eq!(page.entries[0].id, mechanical);
+        assert_eq!(page.next, None);
+        let second_filter = ExecFilter {
+            performed_work: Some(ExecWorkFilter::Task(second)),
+            ..Default::default()
+        };
+        let page = store
+            .execs(&second_filter, None, NonZeroU32::new(10).unwrap())
+            .unwrap();
+        assert_eq!(
+            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            vec![&shared]
+        );
+        let wave_filter = ExecFilter {
+            performed_work: Some(ExecWorkFilter::Wave(wave)),
+            ..Default::default()
+        };
+        let page = store
+            .execs(&wave_filter, None, NonZeroU32::new(10).unwrap())
+            .unwrap();
+        assert_eq!(
+            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            vec![&shared, &mechanical]
+        );
+        assert_eq!(store.exec(&unbound).unwrap().unwrap().outcome, None);
+        assert_eq!(store.exec(&observer).unwrap().unwrap().outcome, None);
+        assert!(store
+            .conn
+            .lock()
+            .unwrap()
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query([])
+            .unwrap()
+            .next()
+            .unwrap()
+            .is_none());
+        assert!(!dir.path().join("runs").exists());
     }
 }

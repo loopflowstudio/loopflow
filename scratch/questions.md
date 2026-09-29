@@ -26,6 +26,14 @@ removal, complete import, indexed discovery or coordinated Desktop conversion.
 Historical questions, superseded exceptions and unattributed early approvals are
 preserved in the [archive](parallel-work.md), not reattributed to Jack.
 
+2026-09-29 · Exec discovery implementation choice: `lf exec list` and `show`
+expose the existing process owner. List defaults to 100 rows in the current
+repository; `--all` spans repositories. `--after` consumes the prior JSON `next`
+object with unchanged filters. This is bounded continuation, not snapshot
+isolation or a new lifecycle. Literal search renders stored argv elements with
+spaces while returning unchanged raw command evidence. Desktop paging remains
+separate unfinished work; a query/model fixture does not establish that consumer.
+
 2026-09-28 · Iteration 10 implementation choice: AgentSession owns its current
 captured input and publication. `agent_session_inputs` retains only the immutable
 input-to-conversation references required for earlier-input lookup after retry;

@@ -92,3 +92,24 @@ cannot release live work. Durable interrupts remain the first provider request.
 Implement process ownership first, then attribution reduction, then the separate
 Exec/Session naming commit. No installed-Home access. Proof uses isolated stores,
 scripted providers and real lf subprocesses; configured acceptance stays explicit.
+
+## Current boundary
+
+Discovery is published at `dbad495f4` (Rust 2,029 passed/16 skipped; Swift 291
+passed). The first publish attempt made a preparation commit and then returned
+a mutation-lock conflict; the clean retry succeeded and GitHub reports that head.
+No concurrent writer or lock cause was established.
+
+Worker-claim handoff is implemented locally before the child-executor conversion.
+The actual worker atomically adopts the exact startup claim; the launch caller
+waits for that handoff. Seven focused ownership/stop tests pass in
+`.lf/tmp/cut-i/exec-worker-focused.log`, including two actual sleep processes:
+startup cannot acknowledge the launcher, stop targets the adopted worker, and
+the launcher survives. The store proof preserves capture/cursor/generation and
+rejects writes with the old claim. These fixtures do not prove public Task worker
+startup, a surviving step after driver death, or the complete parent tree.
+
+Next: replace the in-process Task/Saved launchers with the common child executor,
+move reservation into that child, and preserve live Task steers/attachment through
+the common provider path. Recover the selected step Exec before replacing its
+driver claim. Then run the full isolated Rust matrix before the next publication.

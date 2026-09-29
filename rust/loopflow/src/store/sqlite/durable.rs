@@ -2284,6 +2284,37 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn worker_handoff_moves_process_ownership_without_replacing_progress() {
+        let (_dir, store, task_id) = store_with_task();
+        let position = store
+            .start_task_flow(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        let launcher = claim(&store, &task_id, &position, 301);
+        let before = store.task_flow(&task_id).unwrap().unwrap();
+        let worker = owner(302);
+        let handed = store
+            .handoff_task_worker(&task_id, &launcher, &worker)
+            .unwrap();
+        let mut expected = before;
+        expected.claim = Some(handed.clone());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
+        assert_eq!(handed.owner, worker);
+        assert_eq!(handed.generation, launcher.generation);
+        assert_eq!(handed.claimed_at, launcher.claimed_at);
+        assert!(store
+            .handoff_task_worker(&task_id, &launcher, &owner(303))
+            .is_err());
+        assert!(store
+            .release_flow(position.id(), position.version, Some(&launcher))
+            .is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
+        store
+            .release_flow(position.id(), position.version, Some(&handed))
+            .unwrap();
+        assert!(store.task_flow(&task_id).unwrap().unwrap().claim.is_none());
+    }
+
+    #[test]
     fn loop_verdict_survives_recovery_and_rejects_unrelated_runs() {
         let (_dir, store, task_id) = store_with_task();
         let mut position = autonomous_position(&task_id);

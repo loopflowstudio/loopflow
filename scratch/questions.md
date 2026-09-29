@@ -58,9 +58,11 @@ the claim and spawns one child `lf` per step; mechanical steps that are already
 lf commands run as child Execs too. No new object: a step is an ordinary Exec.
 The operator had filed LOO-335 for this minutes earlier, before Jack's
 direction; it is superseded by LOO-298 and awaits Jack's word on deletion.
-Open for the design: whether the launch event in Session history collapses into
-the Exec, given that imported launches have no Exec and that a reserved launch
-can outlive the process that reserved it.
+Implementation choice in [the Exec design](exec-per-step.md): process start/exit
+belong only to Exec. Retain captured instructions as a Session history event,
+not a second launch lifecycle; capture belongs to the executing child when a
+process is known. Imported missing Exec stays unknown. Jack has not reviewed
+this implementation choice yet.
 
 2026-09-29 · **Vocabulary: prefer Exec.** Jack Heart: "if a launch is an exec,
 we should also try to use the word exec instead of launch (or run etc) where

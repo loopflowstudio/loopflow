@@ -153,6 +153,12 @@
       "p95": null,
       "maximum": null
     },
+    "recorded_attempt_to_merge_seconds": {
+      "unit": "seconds",
+      "p50": null,
+      "p95": null,
+      "maximum": null
+    },
     "run_cost_usd": {
       "unit": "usd",
       "p50": null,

@@ -96,6 +96,15 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 #[test]
 fn wave_detail_preserves_home_and_plan() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
+        panic!("fixture contains recorded Runs");
+    };
+    assert_eq!(runs[0].first_provider_attempt_at, Some(1784052010));
+    assert_eq!(
+        runs[0].task_pr_id.as_ref().map(|id| id.as_str()),
+        Some("pr_33333333333333333333333333333333")
+    );
+
     assert_eq!(
         snapshot
             .chapter

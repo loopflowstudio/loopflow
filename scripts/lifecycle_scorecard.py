@@ -98,16 +98,9 @@ def belongs_to_repo(value: str, repo: Path) -> bool:
     return candidate.parent == repo.parent and candidate.name.startswith(f"{repo.name}.")
 
 
-def load_runs(path: Path, repo: Path, since: int, until: int) -> list[dict[str, Any]]:
+def load_runs(path: Path, repo: Path) -> list[dict[str, Any]]:
     runs = json.loads(path.read_text(encoding="utf-8"))
-    return [
-        run
-        for run in runs
-        if run["repo"] is not None
-        and belongs_to_repo(run["repo"], repo)
-        and run["ended"] is not None
-        and since <= run["ended"] <= until
-    ]
+    return [run for run in runs if run["repo"] is not None and belongs_to_repo(run["repo"], repo)]
 
 
 def fresh_github_observation(value: str | None) -> bool:
@@ -126,7 +119,7 @@ def load_lifecycle(
     prs = []
     for row in connection.execute(
         """
-        SELECT wave.repo, pr.created_at, pr.publication_requested_at,
+        SELECT pr.id, wave.repo, pr.created_at, pr.publication_requested_at,
                pr.merge_requested_at AS requested_at, pr.merged_at,
                pr.merge_tracking_complete, pr.repair_tracking_complete,
                pr.github_observation,
@@ -396,6 +389,12 @@ def build_report(
 ) -> dict[str, Any]:
     since_time = generated_at - timedelta(days=int(policy["window_days"]))
     minimum = int(policy["minimum_p95_samples"])
+    window_runs = [
+        run
+        for run in runs
+        if run["ended"] is not None
+        and int(since_time.timestamp()) <= run["ended"] <= int(generated_at.timestamp())
+    ]
     rows = [
         unknown_row(
             policy,
@@ -434,6 +433,36 @@ def build_report(
                 minimum,
             )
         )
+    first_attempts: dict[str, int] = {}
+    for run in runs:
+        pr_id = run["task_pr_id"]
+        started = run["first_provider_attempt_at"]
+        if pr_id is not None and started is not None:
+            first_attempts[pr_id] = min(first_attempts.get(pr_id, started), started)
+    attempt_row = measured_row(
+        "recorded_attempt_to_merge_seconds",
+        "Recorded agent attempt → merge",
+        None,
+        [
+            pr["merged_at"] - first_attempts[pr["id"]]
+            for pr in prs
+            if pr["id"] in first_attempts
+            and pr["merge_tracking_complete"]
+            and pr["merge_observation_complete"]
+            and pr["created_at"] is not None
+            and pr["merged_at"] is not None
+            and pr["created_at"] <= first_attempts[pr["id"]] <= pr["merged_at"]
+        ],
+        len(prs),
+        metric_budget(policy, "recorded_attempt_to_merge_seconds"),
+        minimum,
+    )
+    limitation = (
+        "Observed lower bound from retained, explicitly attributed managed attempts; "
+        "earlier missing, pruned, uninstrumented or standalone work may be absent"
+    )
+    attempt_row["reason"] = "; ".join(filter(None, (attempt_row["reason"], limitation)))
+    rows.append(attempt_row)
     for metric, label, field in [
         ("avoidable_repairs", "Avoidable repair", "avoidable_rebase_agent"),
         ("manual_git_repairs", "Manual git repair", "manual_git_repair"),
@@ -480,11 +509,11 @@ def build_report(
                 "cpu_seconds",
                 since_time,
             ),
-            *usage_rows(policy, runs, None),
+            *usage_rows(policy, window_runs, None),
         ]
     )
-    for provider in sorted({str(run["harness"]) for run in runs}):
-        rows.extend(usage_rows(policy, runs, provider))
+    for provider in sorted({str(run["harness"]) for run in window_runs}):
+        rows.extend(usage_rows(policy, window_runs, provider))
     return {
         "schema_version": SCHEMA_VERSION,
         "repo": repo.name,
@@ -560,7 +589,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         generated_at = datetime.now(timezone.utc)
         since = int((generated_at - timedelta(days=policy["window_days"])).timestamp())
         until = int(generated_at.timestamp())
-        runs = load_runs(args.runs, repo, since, until)
+        runs = load_runs(args.runs, repo)
         with open_read_only(database) as connection:
             prs = load_lifecycle(connection, repo, since, until)
         metric_observation = task_loop_trust_observation(generated_at)

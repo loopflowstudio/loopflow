@@ -567,6 +567,7 @@ mod tests {
         let run = RunSnapshot {
             id: "run_00000000000000000000000000000001".to_string(),
             parent_run_id: None,
+            task_pr_id: None,
             repo: Some("/repo".to_string()),
             worktree: Some("/repo.task".to_string()),
             subjects: vec![crate::run_record::SubjectAttribution::declared(
@@ -575,6 +576,7 @@ mod tests {
             skill: Some("implement".to_string()),
             outcome: Some("completed".to_string()),
             started: 10,
+            first_provider_attempt_at: None,
             ended: Some(20),
             usage: crate::run_record::RunUsage::empty(),
             evidence_gaps: 0,

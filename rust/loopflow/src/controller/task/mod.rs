@@ -13,7 +13,7 @@ use crate::harness::{drain_turn_failure_reason, ApprovalPolicy, Harness};
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
 use crate::work::project::Project;
-use crate::work::task::{Task, TaskId};
+use crate::work::task::{Task, TaskId, TaskPrId};
 use crate::work::wave::Wave;
 
 /// How often a live Task run checks its comment stream for new steers to inject
@@ -31,6 +31,7 @@ impl Drop for CommentRefresh {
 
 #[derive(Debug)]
 struct PreparedTaskStep {
+    task_pr_id: TaskPrId,
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     seeded_steer_id: i64,
     interrupt_id: i64,
@@ -212,10 +213,9 @@ fn task_run_spec(
     harness: String,
     model: Option<String>,
     surface: &str,
-    position: &FlowPosition,
+    flow: crate::run_record::RunFlowStep,
 ) -> crate::run_record::RunSpec {
-    let step = position.current();
-    let skill = (step.kind != StepKind::Op).then_some(step.step);
+    let skill = (surface != "operation").then(|| flow.step.clone());
     crate::run_record::RunSpec {
         harness,
         model,
@@ -235,9 +235,7 @@ fn task_run_spec(
                 task.plan.identifier
             )),
         ],
-        flow: crate::run_record::RunFlowMembership::Step(crate::run_record::RunFlowStep::of(
-            position,
-        )),
+        flow: crate::run_record::RunFlowMembership::Step(flow),
     }
 }
 
@@ -282,7 +280,7 @@ async fn run_task_with(
             prepared.turn.harness.clone(),
             prepared.turn.model.clone(),
             "headless",
-            &flow,
+            crate::run_record::RunFlowStep::of(&flow, Some(prepared.task_pr_id.clone())),
         ),
         &prepared.turn.context,
     )?;
@@ -536,6 +534,7 @@ async fn run_task_op_boundary(
         "Loopflow mechanical Task boundary",
         &step.step,
     );
+    let task_pr_id = store.active_task_pr(&task.id).await?.map(|pr| pr.id);
     let capture = crate::run_record::CaptureHandle::begin_with_context(
         task_run_spec(
             &task,
@@ -544,7 +543,7 @@ async fn run_task_op_boundary(
             "loopflow".to_string(),
             None,
             "operation",
-            &flow,
+            crate::run_record::RunFlowStep::of(&flow, task_pr_id),
         ),
         &context,
     )?;
@@ -680,7 +679,7 @@ async fn settle_claimed_task_position(
     next.ready_summary = None;
     next.updated_at = time::OffsetDateTime::now_utc();
     task.agent = load_task(store, &task.id).await?.agent;
-    crate::ops::human_session::prepare_flow_run(task, &mut next)?;
+    crate::ops::human_session::prepare_flow_run(store, task, &mut next).await?;
     let summary = progress_summary(text);
     let next = store
         .settle_task_worker(
@@ -775,6 +774,7 @@ async fn prepare_task_flow_step(
     );
     prepared.config.skip_permissions = true;
     Ok(PreparedTaskStep {
+        task_pr_id: pr.id,
         turn: prepared,
         seeded_steer_id,
         interrupt_id,
@@ -826,7 +826,7 @@ pub(crate) async fn complete_human_flow_step(
     position.session_run_id = None;
     position.ready_summary = None;
     position.updated_at = time::OffsetDateTime::now_utc();
-    crate::ops::human_session::prepare_flow_run(&task, &mut position)?;
+    crate::ops::human_session::prepare_flow_run(store, &task, &mut position).await?;
     store
         .complete_human_task_boundary(&task, &expected, &position, text)
         .await?;
@@ -849,7 +849,7 @@ pub(crate) async fn ensure_flow_position(
             crate::ops::human_session::task_unblock(store, &task, &current).await?;
         }
         if current.is_human() && current.session_run_id.is_none() {
-            crate::ops::human_session::prepare_flow_run(&task, &mut current)?;
+            crate::ops::human_session::prepare_flow_run(store, &task, &mut current).await?;
             return Ok(store.set_flow_position(&task.id, current).await?);
         }
         return Ok(current);
@@ -862,7 +862,7 @@ pub(crate) async fn ensure_flow_position(
         )
     })?;
     let mut candidate = start_task_flow(&task, selected_flow)?;
-    crate::ops::human_session::prepare_flow_run(&task, &mut candidate)?;
+    crate::ops::human_session::prepare_flow_run(store, &task, &mut candidate).await?;
     let candidate = store.set_flow_position(&task.id, candidate).await?;
     if candidate.is_human() {
         let node_id = candidate
@@ -3012,7 +3012,13 @@ mod planning_tests {
         assert_eq!(prepared.turn.config.agent.as_deref(), Some("claude:sonnet"));
         assert_eq!(prepared.turn.harness, "claude");
         assert_eq!(prepared.turn.model.as_deref(), Some("sonnet"));
-        crate::ops::human_session::prepare_flow_run(&resumed, &mut flow).unwrap();
+        assert_eq!(
+            prepared.task_pr_id,
+            store.active_task_pr(&task.id).await.unwrap().unwrap().id
+        );
+        crate::ops::human_session::prepare_flow_run(&store, &resumed, &mut flow)
+            .await
+            .unwrap();
         let (_, manifest) = crate::run_record::resolve_manifest(
             guard.ledger.home(),
             flow.session_run_id.as_ref().unwrap().as_str(),
@@ -3333,7 +3339,9 @@ mod planning_tests {
         use crate::run_record::{RunFlowMembership, RunFlowStep, SessionTitleSource};
         let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, mut flow) = human_task_fixture().await;
-        human_session::prepare_flow_run(&task, &mut flow).unwrap();
+        human_session::prepare_flow_run(&store, &task, &mut flow)
+            .await
+            .unwrap();
         let flow = store.set_flow_position(&task.id, flow).await.unwrap();
         let run_id = flow.session_run_id.clone().unwrap();
         let step = flow.current().step;
@@ -3342,9 +3350,10 @@ mod planning_tests {
             run_id.as_str(),
         )
         .unwrap();
+        let pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(
             manifest.flow,
-            Some(RunFlowMembership::Step(RunFlowStep::of(&flow)))
+            Some(RunFlowMembership::Step(RunFlowStep::of(&flow, Some(pr.id))))
         );
 
         let listed = |sessions: Vec<human_session::SessionRecord>| {

@@ -169,6 +169,9 @@ prints aggregate values and coverage only—never commands, prompts, output, or
 task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.
 
+“Recorded agent attempt → merge” includes earlier and unfinished Runs attributed
+to the exact PR. See [metric definitions and coverage limits](performance/README.md).
+
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real
 run is a separately named **required host gate**—it never runs under `--all`

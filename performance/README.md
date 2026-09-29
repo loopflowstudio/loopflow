@@ -76,6 +76,7 @@ receipts. It does not query retired SQL Runs/Turns or reduce provider streams.
 | `task_pr_to_merge_seconds` | Requested-and-merged Task PR in the window | GitHub merge time minus Task PR creation |
 | `publication_to_merge_seconds` | Same Task PR | GitHub merge time minus publication request |
 | `land_to_merge_seconds` | Same Task PR | GitHub merge time minus merge request |
+| `recorded_attempt_to_merge_seconds` | Same Task PR | GitHub merge time minus earliest retained, explicitly attributed managed provider attempt |
 | `avoidable_repairs`, `manual_git_repairs` | Same Task PR | Typed incident is `1`; tracked absence is `0` |
 
 Run values are per Run, not per Turn. Their budgets start unset because Turn
@@ -90,9 +91,19 @@ as a substitute endpoint. Repository ownership comes from the Task's Wave, so
 removing its worktree does not discard its history. These rows cover locally
 recorded requested Task PRs, not standalone PRs or every GitHub diff.
 
-Task PR creation is not implementation start. Current Run Flow membership does
-not identify a specific PR, so implementation-to-merge remains unmeasured.
-First material progress and complete Task-loop intervals also lack current owner
+“Recorded agent attempt → merge” uses the PR identity captured in managed Flow
+membership. Attempts from earlier and unfinished Runs contribute; unstarted
+prepared Sessions do not. Historical or standalone Runs without that identity
+remain unknown rather than borrowing a Task's current PR. The first attempt
+timestamp survives provider retries and must fall between PR creation and merge.
+Token-usage gaps do not erase an independently recorded attempt.
+
+This interval is an **observed lower bound**, not first-ever implementation start:
+missing, pruned, uninstrumented or standalone work can hide an earlier attempt.
+An attempt records the request to invoke the provider, not successful execution.
+The row reports measured/eligible coverage and this limitation; it has no guessed
+budget. Task PR creation → merge remains the durable lifecycle baseline.
+First material progress and complete Task-loop intervals still lack current owner
 facts: first-progress stays `UNKNOWN`, and the Task-loop trust instrument emits
 `unavailable`. No Epoch-based history is recreated or inferred from Work state.
 

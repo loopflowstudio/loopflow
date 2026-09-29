@@ -82,7 +82,7 @@ struct TaskMonitorProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
-        let feed = ActiveRunsTestFeed()
+        let feed = ActiveSessionsTestFeed()
         let query = try query(feed: feed)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
@@ -117,10 +117,10 @@ struct TaskMonitorProofTests {
         try view.inspect().find(ViewType.Button.self, where: {
             try $0.accessibilityIdentifier() == "task-show-monitor-issue-review"
         }).tap()
-        try await waitForActiveRuns {
-            model.activeRuns.value?.runs.contains {
+        try await waitForActiveSessions {
+            model.activeSessions.value?.sessions.contains {
                 $0.work == .task(id: "ts_review00000000000000000000000000")
-                    && $0.label == "Retained Task Run"
+                    && $0.title == "Retained Task Session"
             } == true
         }
         try await settle(window)
@@ -160,27 +160,37 @@ struct TaskMonitorProofTests {
             #expect(multiplexer.focusedPaneId == monitorPane)
             #expect(terminals[0].surface == surfaces[0])
             #expect(terminals[1].surface == surfaces[1])
-            #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Run") }
+            #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Session") }
         }
         // Automatic delivery and recovery occur while the original unfinished input
         // and companion are retained. No Refresh or pane reopening drives these frames.
-        let original = try #require(model.activeRuns.value)
-        let scanning = ActiveRunsSnapshot(discovery: .scanning, home: original.home,
-            observedAt: original.observedAt, task: nil, runs: [], gaps: ["Recovering coverage"])
+        let original = try #require(model.activeSessions.value)
+        let scanning = ActiveSessionsSnapshot(discovery: .scanning, home: original.home,
+            observedAt: original.observedAt, task: nil, sessions: [], gaps: ["Recovering coverage"])
         try await feed.send(String(decoding: JSONEncoder().encode(scanning), as: UTF8.self))
-        try await waitForActiveRuns { model.isRefreshingActiveRuns }
-        #expect(model.activeRuns.value == original)
+        try await waitForActiveSessions { model.isRefreshingActiveSessions }
+        #expect(model.activeSessions.value == original)
         #expect(!terminals.contains { window.firstResponder === $0 })
-        let empty = ActiveRunsSnapshot(discovery: .ready, home: original.home,
-            observedAt: original.observedAt + 1, task: nil, runs: [], gaps: [])
+        let empty = ActiveSessionsSnapshot(discovery: .ready, home: original.home,
+            observedAt: original.observedAt + 1, task: nil, sessions: [], gaps: [])
         try await feed.send(String(decoding: JSONEncoder().encode(empty), as: UTF8.self))
-        try await waitForActiveRuns { model.activeRuns.value?.runs.isEmpty == true }
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.isEmpty == true }
         try await settle(window)
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
         #expect(!terminals.contains { window.firstResponder === $0 })
         try await feed.send(String(decoding: JSONEncoder().encode(original), as: UTF8.self))
-        try await waitForActiveRuns { model.activeRuns.value?.runs.count == original.runs.count }
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.count == original.sessions.count }
+        let prior = try #require(original.sessions.first)
+        let renamed = ActiveSession(id: prior.id, work: prior.work, title: "Renamed conversation", processes: prior.processes)
+        let renameFrame = ActiveSessionsSnapshot(discovery: .ready, home: original.home,
+            observedAt: original.observedAt + 2, task: original.task, sessions: [renamed], gaps: [])
+        try await feed.send(String(decoding: JSONEncoder().encode(renameFrame), as: UTF8.self))
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.first?.title == "Renamed conversation" }
+        #expect(model.activeSessions.value?.sessions.first?.id == prior.id)
+        #expect(multiplexer.focusedPaneId == monitorPane)
+        #expect(terminals[0].surface == surfaces[0])
+        #expect(terminals[1].surface == surfaces[1])
         let stray = "monitor-only-input"
         for character in stray {
             let event = try #require(NSEvent.keyEvent(
@@ -240,7 +250,7 @@ struct TaskMonitorProofTests {
         try await Task.sleep(for: .milliseconds(100))
     }
 
-    private func query(feed: ActiveRunsTestFeed = ActiveRunsTestFeed()) throws -> RegistryQuery {
+    private func query(feed: ActiveSessionsTestFeed = ActiveSessionsTestFeed()) throws -> RegistryQuery {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow"), as: UTF8.self)
@@ -255,14 +265,14 @@ struct TaskMonitorProofTests {
           "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
-        var run = try #require((active["runs"] as? [[String: Any]])?.first)
+        var run = try #require((active["sessions"] as? [[String: Any]])?.first)
         run["id"] = "monitor-review"
         run["work"] = ["kind": "task", "id": "ts_review00000000000000000000000000"]
-        run["label"] = "Retained Task Run"
-        active["runs"] = [run]
+        run["title"] = "Retained Task Session"
+        active["sessions"] = [run]
         active["gaps"] = []
         let activeJSON = String(decoding: try JSONSerialization.data(withJSONObject: active), as: UTF8.self)
-        return RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
+        return RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"

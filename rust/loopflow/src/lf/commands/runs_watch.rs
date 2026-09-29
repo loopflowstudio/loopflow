@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::durable::WorkRef;
-use crate::run_record::active::{ActiveRunReader, ActiveRunsSnapshot, DiscoveryState};
+use crate::run_record::active::{ActiveSessionReader, ActiveSessionsSnapshot, DiscoveryState};
 use crate::store::SharedStore;
 
 const PERIOD: Duration = Duration::from_secs(2);
@@ -34,12 +34,12 @@ struct Delivery {
 
 type Mailbox = Arc<(Mutex<Delivery>, Condvar)>;
 
-fn frame(mut snapshot: ActiveRunsSnapshot) -> Result<Vec<u8>> {
+fn frame(mut snapshot: ActiveSessionsSnapshot) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(&snapshot)?;
     if bytes.len() > MAX_FRAME {
-        snapshot.runs.clear();
+        snapshot.sessions.clear();
         snapshot.discovery = DiscoveryState::Unavailable;
-        snapshot.gaps = vec!["active Run snapshot exceeds the 16 MiB transport limit".into()];
+        snapshot.gaps = vec!["active Session snapshot exceeds the 16 MiB transport limit".into()];
         bytes = serde_json::to_vec(&snapshot)?;
     }
     bytes.push(b'\n');
@@ -53,15 +53,15 @@ pub(super) fn run(
     runtime: &tokio::runtime::Runtime,
 ) -> Result<()> {
     let cancel = CancellationToken::new();
-    let mut reader = ActiveRunReader::start(home, true, cancel.clone())?;
+    let mut reader = ActiveSessionReader::start(home, true, cancel.clone())?;
     let mailbox: Mailbox = Arc::new((Mutex::new(Delivery::default()), Condvar::new()));
-    let pending = ActiveRunsSnapshot {
+    let pending = ActiveSessionsSnapshot {
         home: reader.home().to_owned(),
         observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
         task: task.clone(),
         discovery: DiscoveryState::Scanning,
-        runs: Vec::new(),
-        gaps: vec!["Discovering active Run ownership".into()],
+        sessions: Vec::new(),
+        gaps: vec!["Discovering active Session ownership".into()],
     };
 
     // These pipe threads belong to the foreground command. They never own or
@@ -205,21 +205,21 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::{frame, MAX_FRAME};
-    use crate::run_record::active::{ActiveRunsSnapshot, DiscoveryState};
+    use crate::run_record::active::{ActiveSessionsSnapshot, DiscoveryState};
 
     #[test]
     fn oversized_frame_reports_unavailable_instead_of_truncating_to_empty() {
-        let snapshot = ActiveRunsSnapshot {
+        let snapshot = ActiveSessionsSnapshot {
             home: "/fixture".into(),
             observed_at: 1,
             task: None,
             discovery: DiscoveryState::Ready,
-            runs: Vec::new(),
+            sessions: Vec::new(),
             gaps: vec!["x".repeat(MAX_FRAME)],
         };
         let bytes = frame(snapshot).unwrap();
         assert!(bytes.len() < MAX_FRAME);
-        let received: ActiveRunsSnapshot = serde_json::from_slice(&bytes).unwrap();
+        let received: ActiveSessionsSnapshot = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(received.discovery, DiscoveryState::Unavailable);
         assert!(!received.gaps.is_empty());
     }

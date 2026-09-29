@@ -2,16 +2,28 @@
   "discovery": "ready",
   "home": "/fixture/home",
   "observed_at": 1790270400,
-  "task": {"kind": "task", "id": "task_00000000000000000000000000000001"},
-  "runs": [{
-    "id": "run_00000000000000000000000000000002",
-    "work": {"kind": "task", "id": "task_00000000000000000000000000000001"},
-    "subjects": [{"selector": "task:task_00000000000000000000000000000001", "source": "declared"}],
-    "label": "implement",
-    "harness": "claude",
-    "model": null,
-    "repo": "/fixture/repo",
-    "processes": [{"pid": 345, "provider": "claude", "state": "waiting"}]
-  }],
-  "gaps": ["Another Exec has live providers without a current Run binding"]
+  "task": {
+    "kind": "task",
+    "id": "task_00000000000000000000000000000001"
+  },
+  "gaps": [
+    "Another Exec has live providers without an unambiguous current Session"
+  ],
+  "sessions": [
+    {
+      "id": "conversation-parser",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "processes": [
+        {
+          "pid": 345,
+          "provider": "claude",
+          "state": "waiting"
+        }
+      ],
+      "title": "implement"
+    }
+  ]
 }

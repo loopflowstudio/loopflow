@@ -363,12 +363,12 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         assert!(active.status.success(), "{:?}", active);
         let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
         assert_eq!(active["gaps"], serde_json::json!([]), "{active}");
-        assert_eq!(active["runs"].as_array().unwrap().len(), 1, "{active}");
-        assert_eq!(active["runs"][0]["id"], run_id);
-        assert_eq!(active["runs"][0]["processes"][0]["state"], "waiting");
+        assert_eq!(active["sessions"].as_array().unwrap().len(), 1, "{active}");
+        assert_eq!(active["sessions"][0]["id"], id);
+        assert_eq!(active["sessions"][0]["processes"][0]["state"], "waiting");
         let ended = run(home.path(), &["runs", "--active", "--json"]);
         let ended: serde_json::Value = serde_json::from_slice(&ended.stdout).unwrap();
-        assert_eq!(ended["runs"], serde_json::json!([]));
+        assert_eq!(ended["sessions"], serde_json::json!([]));
         if !resume {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();

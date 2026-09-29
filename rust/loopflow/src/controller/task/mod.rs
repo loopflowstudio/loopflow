@@ -3742,12 +3742,15 @@ mod planning_tests {
                     .find(|record| &record.id == broken_id)
                     .unwrap();
                 assert!(
-                    matches!(&record.flow_membership, SessionFlowMembership::Unknown { reason } if reason.contains("saved Invocation is unreadable"))
+                    matches!(&record.flow_membership, SessionFlowMembership::Step { flow, .. } if flow == "broken")
                 );
-                assert!(record
-                    .actions
-                    .iter()
-                    .all(|action| action.unavailable_reason.is_some()));
+                // Inventory exposes recorded metadata; exact open validates the capture.
+                assert!(record.actions.iter().any(|action| action.kind
+                    == human_session::SessionActionKind::Open
+                    && action.unavailable_reason.is_none()));
+                assert!(record.actions.iter().any(|action| action.kind
+                    == human_session::SessionActionKind::Complete
+                    && action.unavailable_reason.is_some()));
                 assert!(human_session::open(
                     &store,
                     broken_id,

@@ -201,8 +201,8 @@ struct DesktopPerformanceTests {
                 // Monitor control reveals observation alongside it.
                 try monitorButton.tap()
             }, ready: {
-                !model.isRefreshingActiveRuns && hasRendered(window, "monitor-run-perf-run-0")
-                    && !hasRendered(window, "monitor-run-perf-run-2")
+                !model.isRefreshingActiveSessions && hasRendered(window, "monitor-session-perf-session-0")
+                    && !hasRendered(window, "monitor-session-perf-session-2")
                     && !terminals.contains { window.firstResponder === $0 }
                     && multiplexer.focusedPane.content == .monitor(taskId: "perf-task-0")
             })
@@ -213,7 +213,7 @@ struct DesktopPerformanceTests {
                 try view.inspect().find(ViewType.Button.self, where: {
                     try $0.accessibilityIdentifier() == "task-show-monitor-perf-task-1"
                 }).tap()
-            }, ready: { !model.isRefreshingActiveRuns && hasRendered(window, "monitor-empty-perf-task-1") })
+            }, ready: { !model.isRefreshingActiveSessions && hasRendered(window, "monitor-empty-perf-task-1") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
             }, ready: {
@@ -236,14 +236,14 @@ struct DesktopPerformanceTests {
             try await sample("combined_zoom", population, attempt, journal, window, action: {
                 multiplexer.setFocusedPane(monitorPane)
                 multiplexer.toggleZoom(monitorPane)
-            }, ready: { hasRendered(window, "monitor-run-perf-run-0") && terminals[0].window == nil })
+            }, ready: { hasRendered(window, "monitor-session-perf-session-0") && terminals[0].window == nil })
             try await sample("combined_restore", population, attempt, journal, window, action: {
                 multiplexer.toggleZoom(monitorPane)
                 multiplexer.updateRatio(between: sessionPane, and: monitorPane, ratio: 0.6)
                 navigator.onOpenSession(first)
             }, ready: {
                 window.firstResponder === terminals[0] && terminals.allSatisfy { $0.window === window }
-                    && hasRendered(window, "monitor-run-perf-run-0")
+                    && hasRendered(window, "monitor-session-perf-session-0")
             })
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
                   multiplexer.layout.pane(for: companionPane)?.content == .shell,
@@ -328,11 +328,11 @@ struct DesktopPerformanceTests {
         if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Conversation %03d", index)) }
         }
-        if id.hasPrefix("monitor-run-") {
-            return window.contentText.contains { $0.contains(String(id.dropFirst("monitor-run-".count))) }
+        if id.hasPrefix("monitor-session-") {
+            return window.contentText.contains { $0.contains(String(id.dropFirst("monitor-session-".count))) }
         }
         if id.hasPrefix("monitor-empty-") {
-            return window.contentText.joined(separator: " ").contains("No active Runs in this observation")
+            return window.contentText.joined(separator: " ").contains("No active Sessions in this observation")
         }
         return false
     }
@@ -400,16 +400,15 @@ struct DesktopPerformanceTests {
         })
         let active = try JSONSerialization.data(withJSONObject: [
             "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
-            "runs": [0, 2].map { index in
-                ["id": "perf-run-\(index)", "work": ["kind": "task", "id": "perf-work-\(index)"],
-                 "subjects": [], "label": "Fixture Run \(index)", "harness": "fixture", "model": NSNull(),
-                 "repo": "/src/loopflow", "processes": [["pid": index + 1, "provider": "fixture", "state": "waiting"]]] as [String: Any]
+            "sessions": [0, 2].map { index in
+                ["id": "perf-session-\(index)", "work": ["kind": "task", "id": "perf-work-\(index)"],
+                 "title": "Fixture Session \(index)", "processes": [["pid": index + 1, "provider": "fixture", "state": "waiting"]]] as [String: Any]
             }
         ])
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let activeJSON = String(decoding: active, as: UTF8.self)
-        let feed = ActiveRunsTestFeed()
-        let query = RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
+        let feed = ActiveSessionsTestFeed()
+        let query = RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return await planning.read()
             case "wave" where args.dropFirst().first == "list": return "[]"

@@ -50,7 +50,7 @@ mod tests {
     }
 }
 
-// Keep directory events: an older Run can acquire its first native client.
+// Keep directory events: an older input can acquire its first native client.
 #[cfg(target_os = "macos")]
 fn relevant(home: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(home) else {
@@ -67,11 +67,9 @@ fn relevant(home: &Path, path: &Path) -> bool {
         None => true,
         Some("runs") => {
             parts.len() <= 3
-                || (parts.len() == 4
-                    && (parts[3] == "provider-clients" || parts[3] == "manifest.json"))
+                || (parts.len() == 4 && parts[3] == "provider-clients")
                 || (parts.len() == 5 && parts[3] == "provider-clients" && published())
         }
-        Some("run-bindings") => parts.len() == 1 || (parts.len() == 2 && published()),
         Some("runtime") => {
             parts.len() == 1
                 || (parts.len() == 2
@@ -92,7 +90,7 @@ pub(super) struct Subscription;
 #[cfg(not(target_os = "macos"))]
 impl Subscription {
     pub fn start(_: &Path) -> anyhow::Result<Self> {
-        anyhow::bail!("continuous active Run discovery requires macOS FSEvents")
+        anyhow::bail!("continuous active Session discovery requires macOS FSEvents")
     }
 
     pub fn changes(&self) -> Changes {
@@ -235,7 +233,7 @@ mod macos {
                     bail!("cannot allocate event roots");
                 }
                 let queue =
-                    dispatch_queue_create(c"loopflow.active-runs".as_ptr(), ptr::null_mut());
+                    dispatch_queue_create(c"loopflow.active-sessions".as_ptr(), ptr::null_mut());
                 let mut context = Context {
                     version: 0,
                     info: (&mut *state as *mut State).cast(),

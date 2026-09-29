@@ -149,47 +149,25 @@ pub(crate) struct LiveExecProviders {
 }
 
 #[derive(Debug)]
-pub(crate) struct LiveRunProcesses {
+pub(crate) struct LiveSessionProcesses {
     pub execs: Vec<LiveExecProviders>,
     pub clients: Vec<(crate::durable::RunId, LiveProviderProcess)>,
     pub gaps: Vec<String>,
 }
 
-/// Run observations use the same process and ownership evidence as `ps`,
+/// Session observations use the same process and ownership evidence as `ps`,
 /// without loading the Exec event ledger or provider output.
 pub(crate) fn live_exec_providers(
     snapshot: &ProcessSnapshot,
-    bound_owners: &[crate::durable::TaskWorkerOwner],
-    clients: &[(
-        crate::durable::RunId,
-        crate::run_record::ProviderClientRef,
-        String,
-    )],
-) -> LiveRunProcesses {
+    clients: &[(crate::durable::RunId, crate::run_record::ProviderClientRef)],
+) -> LiveSessionProcesses {
     let mut native = Vec::new();
     let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();
-    for (run_id, client, harness) in clients {
-        let Some(process) = by_pid.get(&client.pid) else {
-            continue;
-        };
-        if process.kernel_state.starts_with('Z') {
-            continue;
-        }
-        if crate::run_record::provider_client_matches(
-            client,
-            harness,
-            process.pid,
-            process.started_at,
-            &process.command,
-        ) {
-            native.push((
-                run_id.clone(),
-                LiveProviderProcess {
-                    pid: process.pid,
-                    provider: harness.clone(),
-                    state: os_activity_state(process),
-                },
-            ));
+    for (input, client) in clients {
+        if let Some(process) = by_pid.get(&client.pid) {
+            if process.matches_start(client.pid, client.started_at.unix_timestamp(), 5) {
+                native.push((input.clone(), observed_process(process)));
+            }
         }
     }
     let native_pids = native
@@ -206,21 +184,6 @@ pub(crate) fn live_exec_providers(
         .map(|receipt| (receipt.pid, receipt.exec_id.clone()))
         .collect::<HashMap<_, _>>();
     let mut gaps = Vec::new();
-    for owner in bound_owners {
-        if by_pid.get(&owner.pid).is_some_and(|process| {
-            (process.started_at - owner.started_at).abs() <= PROCESS_START_TOLERANCE_SECONDS
-        }) && !receipts.iter().any(|receipt| {
-            receipt.exec_id == owner.exec_id.as_str()
-                && receipt.trace_id == owner.trace_id.as_str()
-                && receipt.pid == owner.pid
-                && receipt.started_at == owner.started_at
-        }) {
-            gaps.push(format!(
-                "Exec {} is live but its ownership receipt is unavailable",
-                owner.exec_id
-            ));
-        }
-    }
     let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
     let unclaimed = unclaimed
         .iter()
@@ -269,15 +232,51 @@ pub(crate) fn live_exec_providers(
         .collect();
     if unclaimed > 0 {
         gaps.push(format!(
-            "{unclaimed} Home-owned provider processes have no verified Run attribution"
+            "{unclaimed} Home-owned provider processes have no verified Session attribution"
         ));
     }
     gaps.sort();
     gaps.dedup();
-    LiveRunProcesses {
+    LiveSessionProcesses {
         execs,
         clients: native,
         gaps,
+    }
+}
+
+/// Exact recorded provider identity may survive its launching Exec.
+/// A caller still needs a verified current driver or native client to display it.
+pub(crate) fn exact_provider_process(
+    snapshot: &ProcessSnapshot,
+    pid: u32,
+    started_at: i64,
+) -> Option<LiveProviderProcess> {
+    snapshot
+        .processes
+        .iter()
+        .find(|process| {
+            process.matches_start(pid, started_at, PROCESS_START_TOLERANCE_SECONDS)
+                && process.kind.is_some_and(ProcessKind::is_provider)
+        })
+        .map(observed_process)
+}
+
+fn observed_process(process: &OsProcess) -> LiveProviderProcess {
+    LiveProviderProcess {
+        pid: process.pid,
+        provider: process
+            .kind
+            .map(|kind| kind.label().to_owned())
+            .unwrap_or_else(|| {
+                process
+                    .command
+                    .split_whitespace()
+                    .next()
+                    .and_then(|word| Path::new(word).file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "unknown".into())
+            }),
+        state: os_activity_state(process),
     }
 }
 
@@ -1141,6 +1140,19 @@ fn kernel_state_label(state: &str) -> &'static str {
         Some('U' | 'D') => "blocked",
         Some('Z') => "zombie",
         _ => "unknown",
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_process(pid: u32, ppid: u32, started_at: i64, command: &str) -> OsProcess {
+    OsProcess {
+        pid,
+        ppid,
+        process_group: pid,
+        started_at,
+        kernel_state: "S".into(),
+        command: command.into(),
+        kind: process_kind(command),
     }
 }
 

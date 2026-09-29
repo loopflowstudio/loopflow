@@ -14,9 +14,10 @@ retry-policy decision follows from delivery authorization.
 Main owns executable edits, builds/tests, Git and this handoff. Supervisor owns
 [control](parallel-work.md); follow its live contribution/release records. The
 2026-09-29 curation explicitly authorizes main to compact evidence.md too. Keep
-one executable writer. The active Session-view proposal under
-`.lf/tmp/active-session-proposal/` is not released: do not integrate unfinished
-files or the older test-only active-observation characterization patch.
+one executable writer. Supervisor released the active Session-view proposal
+`f928998ca6687fe814817bc2349fc3c8b8e67e8fe5729da740968e1f4fd98786` for this
+compression cut; its reviewed hunks are integrated. Flow-discovery and released-import
+contributions remain private pending terminal handback; see Supervisor's ownership index.
 
 Read these complete, unchanged acceptance owners before choosing another cut:
 [accepted model](data-model-one-table-per.md), [remaining work](remaining-work.md),
@@ -26,7 +27,7 @@ Older drafts are evidence, not approval. Their full acceptance matrix remains
 binding even when a slice below passes. [Evidence](evidence.md) indexes original
 red results, replacements and limits.
 
-## Current boundary and publication
+## Metadata checkpoint preceding compression
 
 Same captured `feature` invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
 implement iteration 10. Do not restart it. Current worker
@@ -52,12 +53,10 @@ worktrees/processes. Use ordinary source inspection for code.
    startup/query/payload partition remain open. Current Desktop inventory remains
    complete: passing individual pages into reconciliation would drop retained
    panes. Change paging and reconciliation together.
-2. Integrate the Session-based active-view proposal only after Supervisor releases
-   its terminal handback. Stable AgentSession plus exact driver Exec replaces
-   obsolete per-input ActiveRun. Retain native client→Session links, exact PID/start
-   evidence, uncertain drivers, sequential Flow steps in one Exec, shared engines,
-   last-good/watch behavior and database-outside-Home support. Add no driver-input
-   owner just to preserve retired wire. Main owns all behavioral proof.
+2. Active observation now uses Session/Exec ownership and removes run-bindings.
+   The hosted terminal attachment counterexample remains unresolved: local mounted
+   proofs pass, and per-terminal window/surface/focus/ancestor diagnostics preserve
+   the failing assertion for the next hosted run. Do not call the bounded wait a fix.
 3. Resolve Codex valid decision retry through Jack's existing decision conversation.
    The stale child is correctly rejected but the legitimate retry still receives
    old tool environment after a failed native turn. Keep independent work moving;
@@ -70,6 +69,29 @@ worktrees/processes. Use ordinary source inspection for code.
    Resolve findings before gates and landing through the saved Flow. Configured
    provider/Desktop, backed-up real-Home conversion and release activation keep
    separate evidence/procedure requirements; local fixtures cannot discharge them.
+
+## Compression cut: active Session ownership
+
+The current `compress` worker retains the same invocation and iteration. Removed
+run-bindings publication/scanning and the per-input ActiveRun wire; Monitor uses
+stable Session identity. Queries select observed Exec/PID/client keys through new
+SQLite indexes. Exact start mismatches cannot suppress new PIDs or reassign them
+to stale owners. Managed Claude records its existing engine identity; Flow status
+uses the managed runtime's provider. Historical unknown engines remain explicit.
+
+Proofs under `.lf/tmp/cut-i/`: `active-rust-final.log` 13 passes;
+`active-public.log` 17 passes including actual watch EOF/closed-output cleanup.
+`active-swift-2.log` 38/39 pass (all mounted cases pass); its one obsolete error-text
+assertion is corrected and `active-swift-transport.log` passes all five parameters.
+Bundled SQLite: 20,000 retained Sessions, five reads total 0.39ms empty / 0.43ms
+four candidates (`active-repairs.log`); query-only, warm fixture evidence.
+Initial `active-focused.log` compilation failed; `active-focused-2.log` retains an
+import-fixture refusal and one Claude leaked-handle report. Vendor setup overwrote
+AgentConfig PATH and launched installed Claude in a disposable test Home; that
+attempt is not fake-provider proof or configured acceptance. The corrected fixture
+pins process PATH/executable before launch; final 13-case run has no leak report.
+Earlier Swift compilation and Clippy diagnostics are retained in `active-swift.log`
+and `active-clippy.log`. No full gate, fresh hosted green, or concept acceptance.
 
 ## Current implementation and its limits
 

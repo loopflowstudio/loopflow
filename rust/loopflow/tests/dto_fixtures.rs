@@ -9,26 +9,29 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
-fn active_runs_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::runs::ActiveRunsSnapshot;
+fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
+    use loopflow::lf::commands::runs::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
-    let snapshot: ActiveRunsSnapshot = serde_json::from_str(json).unwrap();
+    let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
         loopflow::lf::commands::runs::DiscoveryState::Ready
     );
-    assert_eq!(snapshot.runs[0].work, snapshot.task);
-    assert_eq!(snapshot.runs[0].processes[0].state, ActivityState::Waiting);
+    assert_eq!(snapshot.sessions[0].work, snapshot.task);
+    assert_eq!(
+        snapshot.sessions[0].processes[0].state,
+        ActivityState::Waiting
+    );
     assert_eq!(snapshot.gaps.len(), 1);
     assert_eq!(
-        serde_json::from_str::<ActiveRunsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
+        serde_json::from_str::<ActiveSessionsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
             .unwrap(),
         snapshot
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
     missing.as_object_mut().unwrap().remove("discovery");
-    assert!(serde_json::from_value::<ActiveRunsSnapshot>(missing).is_err());
+    assert!(serde_json::from_value::<ActiveSessionsSnapshot>(missing).is_err());
 }
 
 #[test]

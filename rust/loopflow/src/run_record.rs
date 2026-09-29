@@ -2215,7 +2215,6 @@ impl Drop for CaptureHandle {
 #[derive(Debug)]
 struct RunCapture {
     driver: Option<(String, crate::exec::SessionDriver)>,
-    binding: Option<active::RunBindingGuard>,
     manifest: RunManifest,
     dir: PathBuf,
     provider: String,
@@ -2298,7 +2297,6 @@ impl RunCapture {
         let recorder = RunRecorder::start(&dir, &manifest);
         Self {
             driver: None,
-            binding: None,
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
             account_id: manifest
@@ -2329,9 +2327,6 @@ impl RunCapture {
     fn start_attempt(&mut self) -> std::io::Result<()> {
         if self.attempt_started {
             return Ok(());
-        }
-        if self.binding.is_none() {
-            self.binding = Some(active::RunBindingGuard::publish(&self.dir)?);
         }
         self.attempt_started = true;
         self.append_event(RunEvent::ProviderAttemptStarted {
@@ -2500,7 +2495,6 @@ impl RunCapture {
             self.warn_telemetry(error);
         }
         self.settled_outcome = Some(outcome.to_string());
-        self.binding = None;
         if self.attempt_started {
             if let Err(error) = self.append_event(RunEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),

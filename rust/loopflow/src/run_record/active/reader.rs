@@ -13,10 +13,9 @@ use crate::lf::commands::top::{sample_processes, OsProcess, ProcessSnapshot};
 use crate::run_record::ProviderClientRef;
 
 use super::events::{Changes, Subscription};
-use super::{ActiveRunsSnapshot, DiscoveryState, RunBinding};
+use super::{ActiveSessionsSnapshot, DiscoveryState};
 
 type Observation = (
-    BTreeMap<PathBuf, RunBinding>,
     ProcessSnapshot,
     Vec<(crate::durable::RunId, ProviderClientRef)>,
     Vec<String>,
@@ -25,12 +24,6 @@ type Observation = (
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Receipt {
     Native(ProviderClientRef),
-    Capture {
-        binding: RunBinding,
-        // Namespace presence resolves ownerless capture attribution, not liveness.
-        // None means an ownership event invalidated this cached observation.
-        native_history: Option<bool>,
-    },
     Exec(ExecProcessReceipt),
 }
 
@@ -42,10 +35,6 @@ impl Receipt {
         let (pid, start, tolerance) = match self {
             Self::Native(client) => (client.pid, client.started_at.unix_timestamp(), 5),
             Self::Exec(exec) => (exec.pid, exec.started_at, 3),
-            Self::Capture { binding, .. } => match &binding.owner {
-                Some(owner) => (owner.pid, owner.started_at, 3),
-                None => return true, // Unknown ownership must remain visible.
-            },
         };
         processes
             .get(&pid)
@@ -65,7 +54,7 @@ pub(super) struct DiscoveryCost {
 }
 
 #[derive(Debug)]
-pub(crate) struct ActiveRunReader {
+pub(crate) struct ActiveSessionReader {
     home: PathBuf,
     home_identity: Option<(u64, u64)>,
     subscription: Option<Subscription>,
@@ -80,7 +69,7 @@ pub(crate) struct ActiveRunReader {
     pub(super) cost: DiscoveryCost,
 }
 
-impl ActiveRunReader {
+impl ActiveSessionReader {
     pub(crate) fn start(home: &Path, continuous: bool, cancel: CancellationToken) -> Result<Self> {
         // Resolve aliases once: FSEvents returns canonical paths (not /tmp aliases).
         let ancestor = home
@@ -128,7 +117,7 @@ impl ActiveRunReader {
     fn check_cancelled(&self) -> Result<()> {
         anyhow::ensure!(
             !self.cancel.is_cancelled(),
-            "active Run observation cancelled"
+            "active Session observation cancelled"
         );
         Ok(())
     }
@@ -151,28 +140,15 @@ impl ActiveRunReader {
     }
 
     fn check_unknown_limit(&self) -> Result<()> {
-        let unresolved = self.candidates.iter().filter(|(_, candidate)| {
-            matches!(
-                candidate,
-                Receipt::Capture {
-                    binding: RunBinding { owner: None, .. },
-                    ..
-                }
-            )
-        });
-        let (count, bytes) = unresolved.fold(
-            (
-                self.errors.len(),
-                self.errors
-                    .iter()
-                    .map(|(path, error)| path.as_os_str().len() + error.len())
-                    .sum::<usize>(),
-            ),
-            |(count, bytes), (path, _)| (count + 1, bytes + path.as_os_str().len()),
-        );
+        let count = self.errors.len();
+        let bytes = self
+            .errors
+            .iter()
+            .map(|(path, error)| path.as_os_str().len() + error.len())
+            .sum::<usize>();
         anyhow::ensure!(
             count <= 4096 && bytes <= 4 * 1024 * 1024,
-            "too much unresolved Run ownership; repair receipts before retrying"
+            "too much unresolved Session ownership; repair receipts before retrying"
         );
         Ok(())
     }
@@ -188,36 +164,6 @@ impl ActiveRunReader {
             return Ok(());
         }
         let read = (|| -> Result<Option<Receipt>> {
-            if parts.first().is_some_and(|p| *p == "run-bindings") && parts.len() == 2 {
-                let value: Option<RunBinding> = self.read(path)?;
-                if let Some(value) = &value {
-                    crate::durable::RunId::parse(value.run_id.as_str())?;
-                }
-                let Some(binding) = value else {
-                    return Ok(None);
-                };
-                let native_history = if binding.owner.is_none() {
-                    let cached = match self.candidates.get(path) {
-                        Some(Receipt::Capture {
-                            binding: previous,
-                            native_history,
-                        }) if previous == &binding && self.subscription.is_some() => {
-                            *native_history
-                        }
-                        _ => None,
-                    };
-                    Some(match cached {
-                        Some(present) => present,
-                        None => self.has_native_receipt(&binding.run_id)?,
-                    })
-                } else {
-                    None
-                };
-                return Ok(Some(Receipt::Capture {
-                    binding,
-                    native_history,
-                }));
-            }
             if relative.parent() == Some(Path::new(EXEC_PROCESS_ROOT)) {
                 let value: Option<ExecProcessReceipt> = self.read(path)?;
                 if let Some(value) = &value {
@@ -257,15 +203,6 @@ impl ActiveRunReader {
                 self.record_error(path, error)?;
             }
         }
-        if matches!(
-            self.candidates.get(path),
-            Some(Receipt::Capture {
-                binding: RunBinding { owner: None, .. },
-                ..
-            })
-        ) {
-            self.check_unknown_limit()?;
-        }
         Ok(())
     }
 
@@ -275,32 +212,8 @@ impl ActiveRunReader {
         };
         let parts: Vec<_> = relative.iter().collect();
         path.extension().is_some_and(|ext| ext == "json")
-            && ((parts.len() == 2 && parts[0] == "run-bindings")
-                || relative.parent() == Some(Path::new(EXEC_PROCESS_ROOT))
+            && (relative.parent() == Some(Path::new(EXEC_PROCESS_ROOT))
                 || (parts.len() == 5 && parts[0] == "runs" && parts[3] == "provider-clients"))
-    }
-
-    fn has_native_receipt(&mut self, run: &crate::durable::RunId) -> Result<bool> {
-        let dir = crate::run_record::record_dir(&self.home, run).context("invalid Run ID")?;
-        let entries = match fs::read_dir(dir.join("provider-clients")) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.into()),
-        };
-        self.cost.directories += 1;
-        for entry in entries {
-            let path = entry?.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                if let Some(client) = self.read::<ProviderClientRef>(&path)? {
-                    anyhow::ensure!(
-                        client.schema_version == 1 && client.pid > 1,
-                        "invalid native receipt"
-                    );
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
     }
 
     fn scan(&mut self, path: &Path, processes: &HashMap<u32, &OsProcess>) -> Result<()> {
@@ -377,34 +290,6 @@ impl ActiveRunReader {
         processes: &HashMap<u32, &OsProcess>,
     ) -> Result<()> {
         let paths: Vec<_> = paths.into_iter().collect();
-        let native_changes = paths
-            .iter()
-            .filter_map(|path| {
-                let relative = path.strip_prefix(&self.home).ok()?;
-                let parts: Vec<_> = relative.iter().collect();
-                if parts.len() >= 3
-                    && parts[0] == "runs"
-                    && (parts.len() == 3 || parts[3] == "provider-clients")
-                {
-                    crate::durable::RunId::parse(parts[2].to_str()?)
-                        .ok()
-                        .map(|id| id.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        for candidate in self.candidates.values_mut() {
-            if let Receipt::Capture {
-                binding,
-                native_history,
-            } = candidate
-            {
-                if binding.owner.is_none() && native_changes.contains(binding.run_id.as_str()) {
-                    *native_history = None;
-                }
-            }
-        }
         for path in paths {
             self.check_cancelled()?;
             let relative = match path.strip_prefix(&self.home) {
@@ -441,26 +326,51 @@ impl ActiveRunReader {
         &mut self,
         store: &crate::store::SharedStore,
         task: Option<crate::durable::WorkRef>,
-    ) -> ActiveRunsSnapshot {
+    ) -> ActiveSessionsSnapshot {
         self.cost = DiscoveryCost::default();
-        let mut result = ActiveRunsSnapshot {
+        let mut result = ActiveSessionsSnapshot {
             home: self.home.clone(),
             observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             task,
             discovery: DiscoveryState::Ready,
-            runs: Vec::new(),
+            sessions: Vec::new(),
             gaps: Vec::new(),
         };
         let observation = self.collect();
         match observation {
-            Ok((bindings, processes, clients, gaps)) => {
+            Ok((processes, clients, gaps)) => {
                 result.gaps.extend(gaps);
                 result.gaps.extend(
                     self.errors
                         .iter()
                         .map(|(p, e)| format!("{}: {e}", p.display())),
                 );
-                super::project(store, &bindings, &processes, &clients, &mut result).await;
+                let inputs = clients
+                    .iter()
+                    .map(|(input, _)| input.clone())
+                    .collect::<Vec<_>>();
+                let execs = processes
+                    .receipts
+                    .iter()
+                    .map(|receipt| receipt.exec_id.clone())
+                    .collect::<Vec<_>>();
+                let pids = processes
+                    .processes
+                    .iter()
+                    .map(|process| process.pid())
+                    .collect::<Vec<_>>();
+                let ownership = match store
+                    .sqlite
+                    .session_process_ownership(&inputs, &execs, &pids)
+                {
+                    Ok(ownership) => ownership,
+                    Err(error) => {
+                        result.discovery = DiscoveryState::Unavailable;
+                        result.gaps.push(error.to_string());
+                        return result;
+                    }
+                };
+                super::project(&ownership, &processes, &clients, &mut result);
                 // Revalidate known ownership after the join as well. This protects
                 // one-shot reads, which have no notification subscription.
                 let before = self.candidates.clone();
@@ -474,6 +384,20 @@ impl ActiveRunReader {
                     }
                 }
                 changed |= before != self.candidates;
+                // SQL is sampled on every tick, including when its database is
+                // outside Home. Filesystem notifications are not its invalidation.
+                match store
+                    .sqlite
+                    .session_process_ownership(&inputs, &execs, &pids)
+                {
+                    Ok(after) => changed |= ownership != after,
+                    Err(error) => {
+                        result.discovery = DiscoveryState::Unavailable;
+                        result.sessions.clear();
+                        result.gaps.push(error.to_string());
+                        return result;
+                    }
+                }
                 let after = self.changes();
                 if changed || after.rescan || !after.paths.is_empty() {
                     self.rescan |= after.rescan;
@@ -481,17 +405,17 @@ impl ActiveRunReader {
                     for path in after.paths {
                         self.pending.insert(path);
                     }
-                    result.runs.clear();
+                    result.sessions.clear();
                     result.discovery = DiscoveryState::Scanning;
                     result
                         .gaps
-                        .push("Run ownership changed during observation; reading again".into());
+                        .push("Session ownership changed during observation; reading again".into());
                 } else if self.rescan {
                     result.discovery = DiscoveryState::Scanning;
                     result
                         .gaps
-                        .push("Run discovery is catching up with filesystem changes".into());
-                    result.runs.clear();
+                        .push("Session discovery is catching up with filesystem changes".into());
+                    result.sessions.clear();
                 }
             }
             Err(error) => {
@@ -534,7 +458,7 @@ impl ActiveRunReader {
             self.candidates.clear();
             self.errors.clear();
             self.pending = Changes::default();
-            for root in ["runs", "run-bindings", EXEC_PROCESS_ROOT] {
+            for root in ["runs", EXEC_PROCESS_ROOT] {
                 self.scan(&self.home.join(root), &by_pid)?;
             }
             self.read_servers(&by_pid)?;
@@ -560,26 +484,17 @@ impl ActiveRunReader {
         for path in paths {
             self.read_receipt(&path, &by_pid)?;
         }
-        let mut bindings = BTreeMap::new();
         let mut receipts = Vec::new();
         let mut clients = Vec::new();
         let mut gaps = Vec::new();
         for (path, candidate) in &self.candidates {
             match candidate {
-                Receipt::Capture {
-                    binding,
-                    native_history,
-                } => {
-                    if *native_history != Some(true) {
-                        bindings.insert(path.clone(), binding.clone());
-                    }
-                }
                 Receipt::Exec(receipt) => receipts.push(receipt.clone()),
                 Receipt::Native(client) => {
                     let dir = path
                         .parent()
                         .and_then(Path::parent)
-                        .context("native receipt has no Run directory")?;
+                        .context("native receipt has no input directory")?;
                     match crate::run_record::input_id_from_dir(dir) {
                         Ok(input) => clients.push((input, client.clone())),
                         Err(error) => gaps.push(format!("{}: {error}", dir.display())),
@@ -588,7 +503,6 @@ impl ActiveRunReader {
             }
         }
         Ok((
-            bindings,
             ProcessSnapshot {
                 processes,
                 receipts,

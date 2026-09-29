@@ -138,12 +138,12 @@ struct TaskFlowView: View {
 
     /// One line under the Flow. Running work reads `● realign · 12m · claude`:
     /// the current occurrence, how long the shared Task record has been in this
-    /// state, and the harness of the exact active Run (else the Task's provider).
+    /// state, and the provider recorded by the managed Task runtime.
     private var statusText: Text {
         guard let step = runningStep else { return Text(statusLine) }
         var parts: [String] = []
         if let elapsed = task.runtime.flatMap({ Self.elapsed(since: $0.updatedAt, now: now) }) { parts.append(elapsed) }
-        if let provider = runningProvider { parts.append(provider) }
+        if let provider = task.runtime?.provider { parts.append(provider) }
         return Text(step).font(Typography.mono) + Text(parts.map { " · \($0)" }.joined())
     }
 
@@ -152,12 +152,6 @@ struct TaskFlowView: View {
         guard let pinned, pinned.execution == .running || pinned.execution == .starting,
               let current = pinned.current else { return nil }
         return pinned.graph.node(current)?.label ?? String(current)
-    }
-
-    private var runningProvider: String? {
-        guard let runtime = task.runtime else { return nil }
-        let work = WorkReference.task(id: runtime.workId)
-        return model.activeRuns.value?.runs.first { $0.work == work }?.harness ?? runtime.provider
     }
 
     /// `12s`, `12m`, `3h 05m`, `2d 03h`; nil when the timestamp does not parse.

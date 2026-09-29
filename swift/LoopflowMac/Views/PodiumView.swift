@@ -56,9 +56,9 @@ struct PodiumView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("The Podium")
         .accessibilityIdentifier("podium")
-        .task { await model.activeRunsLifetime() }
+        .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-            Task { await model.rescanActiveRuns() }
+            Task { await model.rescanActiveSessions() }
         }
         .task {
             await model.refreshPortfolio(

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
-use super::ActiveRunReader;
+use super::ActiveSessionReader;
 use crate::durable::RunId;
 use crate::run_record::active::DiscoveryState;
 use crate::run_record::{resolve_manifest, write_provider_client, CaptureHandle, RunSpec};
@@ -62,16 +62,20 @@ fn prepare(home: &Path) -> RunId {
     .run_id()
 }
 
-async fn visible(reader: &mut ActiveRunReader, store: &SharedStore, ids: &[RunId]) {
+async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[RunId]) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let snapshot = reader.observe(store, None).await;
         let mut actual = snapshot
-            .runs
+            .sessions
             .iter()
             .map(|run| run.id.as_str())
             .collect::<Vec<_>>();
-        let mut expected = ids.iter().map(RunId::as_str).collect::<Vec<_>>();
+        let session_ids = ids
+            .iter()
+            .map(|id| store.sqlite.session_for_run(id).unwrap().unwrap().id)
+            .collect::<Vec<_>>();
+        let mut expected = session_ids.iter().map(String::as_str).collect::<Vec<_>>();
         actual.sort();
         expected.sort();
         if snapshot.discovery == DiscoveryState::Ready
@@ -107,7 +111,7 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
     let first = Client::start();
     write_provider_client(&dir, first.0.id()).unwrap();
     let cancel = CancellationToken::new();
-    let mut reader = ActiveRunReader::start(home.path(), true, cancel.clone()).unwrap();
+    let mut reader = ActiveSessionReader::start(home.path(), true, cancel.clone()).unwrap();
     visible(&mut reader, &store, std::slice::from_ref(&old)).await;
     for _ in 0..3 {
         visible(&mut reader, &store, std::slice::from_ref(&old)).await;
@@ -146,7 +150,7 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
     assert_eq!(reader.cost.rescans, 1);
     let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
     assert_eq!(recovered.discovery, DiscoveryState::Ready);
-    assert_eq!(recovered.runs, cold.runs);
+    assert_eq!(recovered.sessions, cold.sessions);
     assert_eq!(recovered.gaps, cold.gaps);
     let saved = home.path().join("saved-runs");
     fs::rename(home.path().join("runs"), &saved).unwrap();
@@ -174,7 +178,7 @@ async fn missing_roots_and_replaced_home_never_become_false_empty() {
     let parent = tempfile::tempdir().unwrap();
     let home = parent.path().join("new-home");
     let store = store(parent.path()).await;
-    let mut reader = ActiveRunReader::start(&home, true, CancellationToken::new()).unwrap();
+    let mut reader = ActiveSessionReader::start(&home, true, CancellationToken::new()).unwrap();
     visible(&mut reader, &store, &[]).await;
     let id = prepare(&home);
     let (dir, _) = resolve_manifest(&home, id.as_str()).unwrap();
@@ -189,65 +193,62 @@ async fn missing_roots_and_replaced_home_never_become_false_empty() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
-async fn retained_ownerless_capture_follows_loss_of_native_history() {
+#[allow(clippy::await_holding_lock)] // Fixture storage is private and outside the observed Home.
+async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
-    let home = tempfile::tempdir().unwrap();
-    let store = store(home.path()).await;
-    let id = prepare(home.path());
-    let (dir, _) = resolve_manifest(home.path(), id.as_str()).unwrap();
-    let _binding = crate::run_record::active::RunBindingGuard::publish_at(
-        home.path(),
-        super::RunBinding {
-            run_id: id.clone(),
-            owner: None,
-        },
+    let parent = tempfile::tempdir().unwrap();
+    let home = parent.path().join("observed-home");
+    let store = store(parent.path()).await;
+    let base = prepare(&home);
+    let input = RunId::new();
+    let dir = crate::run_record::record_dir(&home, &input).unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    let client = Client::start();
+    // Retained receipt precedes SQL import; the launch writer correctly refuses this state.
+    let receipt_dir = dir.join("provider-clients");
+    fs::create_dir_all(&receipt_dir).unwrap();
+    fs::write(
+        receipt_dir.join(format!("{}.json", client.0.id())),
+        serde_json::to_vec(&crate::run_record::ProviderClientRef {
+            schema_version: 1,
+            pid: client.0.id(),
+            terminal_id: None,
+            started_at: time::OffsetDateTime::now_utc(),
+        })
+        .unwrap(),
     )
     .unwrap();
-    let client = Client::start();
-    write_provider_client(&dir, client.0.id()).unwrap();
-    let mut reader = ActiveRunReader::start(home.path(), true, CancellationToken::new()).unwrap();
-    visible(&mut reader, &store, std::slice::from_ref(&id)).await;
-    let receipt = dir
-        .join("provider-clients")
-        .join(format!("{}.json", client.0.id()));
-    let bytes = fs::read(&receipt).unwrap();
-    fs::remove_file(&receipt).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let observed = reader.observe(&store, None).await;
-        if observed.discovery == DiscoveryState::Ready {
-            let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
-            assert_eq!(observed.runs, cold.runs);
-            assert_eq!(
-                observed.gaps, cold.gaps,
-                "retained discovery lost an ownership dependency"
-            );
-            assert!(!observed.gaps.is_empty());
-            break;
-        }
-        assert!(Instant::now() < deadline, "{observed:?}");
-    }
-    fs::write(&receipt, &bytes).unwrap();
-    visible(&mut reader, &store, std::slice::from_ref(&id)).await;
-    drop(client);
-    visible(&mut reader, &store, &[]).await;
-    visible(&mut reader, &store, &[]).await;
-    assert_eq!(
-        reader.cost.directories, 0,
-        "native history was rediscovered on a warm read"
-    );
-    assert_eq!(
-        reader.cost.receipts, 2,
-        "only the retained capture is reread; the dead native receipt is not"
-    );
-    fs::write(&receipt, b"{").unwrap();
-    let corrupt = reader.observe(&store, None).await;
-    assert!(!corrupt.gaps.is_empty());
-    fs::write(&receipt, bytes).unwrap();
-    visible(&mut reader, &store, &[]).await;
+    let mut reader = ActiveSessionReader::start(&home, true, CancellationToken::new()).unwrap();
+    let first = reader.observe(&store, None).await;
+    assert!(first.sessions.is_empty());
+    assert!(first
+        .gaps
+        .iter()
+        .any(|gap| gap.contains("no known Session")));
+    let mut session = store.sqlite.session_for_run(&base).unwrap().unwrap();
+    session.id = "sql-only-conversation".into();
+    session.input_id = input.clone();
+    session.title = "Before rename".into();
+    store.create_session(session, None).await.unwrap();
+    // No invalidation/refresh: this is the same observe call used by the watch tick.
+    visible(&mut reader, &store, std::slice::from_ref(&input)).await;
+    store
+        .sqlite
+        .rename_session(
+            "sql-only-conversation",
+            None,
+            "After rename",
+            crate::session::TitleSource::Human,
+        )
+        .unwrap();
+    let after = reader.observe(&store, None).await;
+    assert_eq!(after.discovery, DiscoveryState::Ready);
+    assert_eq!(after.sessions[0].id, "sql-only-conversation");
+    assert_eq!(after.sessions[0].title, "After rename");
+    assert_eq!(reader.cost.rescans, 0);
+    assert!(!dir.join("manifest.json").exists());
 }
 
 #[tokio::test]
@@ -262,7 +263,8 @@ async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() 
     let (dir, _) = resolve_manifest(home.path(), id.as_str()).unwrap();
     let client = Client::start();
     write_provider_client(&dir, client.0.id()).unwrap();
-    let mut reader = ActiveRunReader::start(home.path(), true, CancellationToken::new()).unwrap();
+    let mut reader =
+        ActiveSessionReader::start(home.path(), true, CancellationToken::new()).unwrap();
     visible(&mut reader, &store, std::slice::from_ref(&id)).await;
     let manifest = dir.join("manifest.json");
     let bytes = fs::read(&manifest).unwrap();
@@ -277,7 +279,7 @@ async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() 
         let observed = reader.observe(&store, None).await;
         if observed.discovery == DiscoveryState::Ready {
             let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
-            assert_eq!(observed.runs, cold.runs);
+            assert_eq!(observed.sessions, cold.sessions);
             assert_eq!(
                 observed.gaps, cold.gaps,
                 "stale manifest failure survived repair and client exit"
@@ -290,7 +292,7 @@ async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() 
 }
 
 #[tokio::test]
-#[ignore = "explicit discovery cost collection: creates 100,000 historical Runs"]
+#[ignore = "explicit discovery cost collection: creates 100,000 historical input directories"]
 #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn discovery_cost_matrix() {
     let _lock = crate::journal::test_env_lock();
@@ -302,14 +304,6 @@ async fn discovery_cost_matrix() {
     let (live_dir, mut manifest) = resolve_manifest(home.path(), live_id.as_str()).unwrap();
     let client = Client::start();
     write_provider_client(&live_dir, client.0.id()).unwrap();
-    let _binding = crate::run_record::active::RunBindingGuard::publish_at(
-        home.path(),
-        super::RunBinding {
-            run_id: live_id.clone(),
-            owner: None,
-        },
-    )
-    .unwrap();
     manifest.created_at = time::OffsetDateTime::UNIX_EPOCH;
     let stale = crate::run_record::ProviderClientRef {
         schema_version: 1,
@@ -333,7 +327,13 @@ async fn discovery_cost_matrix() {
     })
     .unwrap();
     fs::create_dir_all(home.path().join("runtime/exec-processes")).unwrap();
-    fs::create_dir_all(home.path().join("run-bindings")).unwrap();
+    // Only the two historical conversations revived below need admitted rows.
+    for index in 0..2 {
+        let mut historical = store.sqlite.session_for_run(&live_id).unwrap().unwrap();
+        historical.id = format!("historical-{index}");
+        historical.input_id = RunId::parse(&format!("run_{index:032x}")).unwrap();
+        store.create_session(historical, None).await.unwrap();
+    }
     let mut previous = 0;
     for population in [100, 10_000, 100_000] {
         for index in previous..population {
@@ -353,27 +353,18 @@ async fn discovery_cost_matrix() {
                 &exec,
             )
             .unwrap();
-            let binding = super::RunBinding {
-                run_id: id,
-                owner: Some(owner.clone()),
-            };
-            fs::write(
-                home.path().join(format!("run-bindings/{index}.json")),
-                serde_json::to_vec(&binding).unwrap(),
-            )
-            .unwrap();
         }
         previous = population;
         for mode in ["one_shot", "cold"] {
             let start = Measurement::start();
             let mut reader =
-                ActiveRunReader::start(home.path(), mode == "cold", CancellationToken::new())
+                ActiveSessionReader::start(home.path(), mode == "cold", CancellationToken::new())
                     .unwrap();
             let snapshot = reader.observe(&store, None).await;
             report(population, mode, 0, start, &reader);
             assert_eq!(snapshot.discovery, DiscoveryState::Ready, "{snapshot:?}");
             assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
-            assert_eq!(snapshot.runs.len(), 1);
+            assert_eq!(snapshot.sessions.len(), 1);
             if mode == "one_shot" {
                 continue;
             }
@@ -383,14 +374,17 @@ async fn discovery_cost_matrix() {
                 report(population, "warm", sample, start, &reader);
                 assert_eq!(snapshot.discovery, DiscoveryState::Ready);
                 assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
-                assert_eq!(snapshot.runs[0].id, live_id);
+                assert_eq!(
+                    snapshot.sessions[0].id,
+                    store.sqlite.session_for_run(&live_id).unwrap().unwrap().id
+                );
                 assert_eq!(reader.cost.directories, 0);
                 assert_eq!(reader.cost.rescans, 0);
                 assert_eq!(
-                    reader.cost.receipts, 4,
-                    "only the live receipt and ownerless capture are reread before/after projection"
+                    reader.cost.receipts, 2,
+                    "only the live client receipt is reread before/after projection"
                 );
-                assert_eq!(reader.cost.retained, 2);
+                assert_eq!(reader.cost.retained, 1);
             }
             let old = RunId::parse("run_00000000000000000000000000000000").unwrap();
             let dir = crate::run_record::record_dir(home.path(), &old).unwrap();
@@ -407,8 +401,8 @@ async fn discovery_cost_matrix() {
                 );
                 if snapshot.discovery == DiscoveryState::Ready {
                     assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
-                    assert_eq!(snapshot.runs.len(), 2);
-                    assert!(snapshot.runs.iter().any(|r| r.id == old));
+                    assert_eq!(snapshot.sessions.len(), 2);
+                    assert!(snapshot.sessions.iter().any(|r| r.id == "historical-0"));
                     break;
                 }
                 assert!(start.elapsed() < Duration::from_secs(5), "{snapshot:?}");
@@ -419,7 +413,7 @@ async fn discovery_cost_matrix() {
             let snapshot = reader.observe(&store, None).await;
             report(population, "loss_recovery", 0, start, &reader);
             assert_eq!(snapshot.discovery, DiscoveryState::Ready);
-            assert_eq!(snapshot.runs.len(), 2);
+            assert_eq!(snapshot.sessions.len(), 2);
             assert_eq!(reader.cost.rescans, 1);
             if population == 100_000 {
                 // Publish after process sampling while a real long scan is
@@ -443,7 +437,7 @@ async fn discovery_cost_matrix() {
                 assert!(publication > start.instant && publication < end);
                 report(population, "cold_race", 0, start, &reader);
                 assert_eq!(during.discovery, DiscoveryState::Scanning, "{during:?}");
-                assert!(during.runs.is_empty());
+                assert!(during.sessions.is_empty());
                 visible(&mut reader, &store, &[live_id.clone(), old, racing_id]).await;
                 reader.invalidate();
                 let cancel = reader.cancel.clone();
@@ -473,7 +467,7 @@ fn report(
     mode: &str,
     sample: usize,
     start: Measurement,
-    reader: &ActiveRunReader,
+    reader: &ActiveSessionReader,
 ) {
     let usage = usage();
     // SAFETY: proc_pidinfo receives the correct sized, initialized taskinfo

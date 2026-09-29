@@ -1272,16 +1272,6 @@ mod tests {
     fn session_stop_waits_for_native_client_publication() {
         let _environment = crate::journal::test_env_lock();
         let mut fixture = NativeClient::new();
-        let _env = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
-        std::env::set_var("LF_HOME", fixture.temp.path());
-        std::env::set_var("LF_DB_PATH", fixture.temp.path().join("loopflow.db"));
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let dir = fixture.capture.artifact_dir();
         crate::run_record::write_provider_session(&dir, "retained-history", None).unwrap();
         let launch = lock_provider_clients(&dir).unwrap();

@@ -914,3 +914,43 @@ passing assertions are not clean process settlement.
 Current production count is in [control](parallel-work.md); it excludes working
 edits. Preserve historical failed attempts and measured missingness when updating
 this ledger. Passing an isolated replacement check never upgrades unchanged gaps.
+
+
+## Command/provider and mounted CI repair (2026-09-29)
+
+Supervisor's hosted 59ed94ea5 failures exposed two generic fixtures still naming
+OpenCode while emitting one-shot Claude result JSON. Generic batch/research
+fixtures now select Claude; replay uses the existing native OpenCode HTTP/SSE
+fixture and records the actual submitted body, input and parent. Input roundtrip,
+account-free replay, environment/admission/usage and research artifact assertions
+remain. Interactive OpenCode fake scripts retain their separate TUI contract.
+No production provider path was restored or changed.
+
+The requested no-fail-fast command/provider run collected 54 cases: initially
+52 passed, with replay's missing recorded managed account after a trial Claude
+conversion and a native-stop fixture switching DB after Session admission. A
+second run passed 53, retaining replay's absent private account Home failure.
+Replay then returned to the existing account-free native fixture: 1 pass/1.105s.
+The stop fixture now retains its original store. Shared native decision and
+ordinary automatic retry proofs pass 2/2 in 7.536s. Logs are
+`.lf/tmp/cut-i/command-provider-fixtures{,-2}.log`,
+`command-provider-replay-native.log`, and `command-provider-native-shared.log`.
+The initial run's LEAK annotations remain recorded; the second run had none.
+
+SessionChrome now checks the selected Session workspace chip and the Task-only
+location after clearing selection, retaining both mounted sizes, controls and
+real terminal/draft/companion assertions. The unchanged Monitor test passed
+locally. Source shows its initial asynchronous observation was assumed after a
+100ms delay; the test now waits for the expected attributed snapshot before
+Chapter transfer, retaining the history assertion during both transfer stages.
+This explains a possible initial-observation race, not a reproduced production
+loss. Final focused mounted run passes both tests (two chrome sizes), 4.683s,
+`desktop-ci-proof-final.log`. No production Swift change was needed.
+
+Review: removed fixture-only database drift; avoided expanding replay into
+managed credential setup; kept protocol-specific lifecycle proof in the native
+fixture. This cut changes zero production lines. The preceding local resume
+entry deletion is included in publication. Supervisor's metadata proposal is
+released but unapplied; its dense correlated-scan finding and importer
+surface/closure cases remain the next implementation work. No full CI success,
+configured acceptance, promotion or completion follows.

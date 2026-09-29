@@ -296,19 +296,29 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: brew install xcodegen
+      - name: Fingerprint Xcode build inputs
+        id: xcode-inputs
+        run: uv run python scripts/swift_cache.py key --build-system xcode >> "$GITHUB_OUTPUT"
+      - name: Restore Xcode build
+        id: xcode-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          # Only identical source and toolchain inputs may reuse signed build
+          # state. In particular, changed entitlements need fresh DerivedData.
+          key: ${{ steps.xcode-inputs.outputs.key }}
+      - name: Restore unchanged Xcode source timestamps
+        run: uv run python scripts/swift_cache.py restore --build-system xcode
       - name: Generate Xcode project
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.xcode-cache.outputs.cache-hit != 'true'
         run: xcodegen generate
         working-directory: swift
       - name: Build Loopflow for testing (compile check)
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        # The hosted test *run* is redundant: swift-test runs these same suites
-        # un-hosted. This job's only unique signal is that the Loopflow app
-        # target compiles. build-for-testing gives that without launching the
-        # app, so there is no test-host run loop to hang on — deterministically
-        # no hang, unlike relying on the app to terminate itself.
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.xcode-cache.outputs.cache-hit != 'true'
+        # Compile the app and signed test runners with the terminal fallback;
+        # SwiftPM exercises the suites with GhosttyKit. build-for-testing keeps
+        # that separate configuration's compile proof without launching a host.
         # The real hosted UI run is the separately named required gate
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
         run: |
@@ -316,7 +326,7 @@ jobs:
             -project LoopflowSwift.xcodeproj \
             -scheme LoopflowMac \
             -destination platform=macOS \
-            -derivedDataPath DerivedData \
+            -derivedDataPath .build/xcode-derived-data \
             -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=YES \
@@ -325,6 +335,15 @@ jobs:
             DEVELOPMENT_TEAM=
         timeout-minutes: 12
         working-directory: swift
+      - name: Record Xcode source timestamps
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save --build-system xcode
+      - name: Save Xcode build
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          key: ${{ steps.xcode-inputs.outputs.key }}
 
   tests-result:
     if: always()

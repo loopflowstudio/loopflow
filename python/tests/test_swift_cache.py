@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swift_cache import INDEX, cache_key, restore_source_times, save_source_times
+from scripts.swift_cache import INDEX, INDEXES, cache_key, restore_source_times, save_source_times
 
 
 @pytest.fixture
@@ -107,3 +107,33 @@ def test_cache_key_tracks_contents_and_toolchain_but_not_timestamps(repo: Path) 
     assert restore_source_times(repo) == 0
     source.unlink()
     assert cache_key(repo, "compiler and SDK")[0] != changed
+
+
+def test_xcode_and_swiftpm_keep_separate_build_times(repo: Path) -> None:
+    source = _track(repo, "a.swift", "first")
+    original = source.stat().st_mtime_ns
+    save_source_times(repo, "xcode")
+    assert (repo / INDEXES["xcode"]).is_file()
+    assert not (repo / INDEX).exists()
+    checkout = original + 1_000_000_000
+    os.utime(source, ns=(checkout, checkout))
+    save_source_times(repo)
+    assert restore_source_times(repo, "xcode") == 1
+    assert source.stat().st_mtime_ns == original
+    assert restore_source_times(repo) == 1
+    assert source.stat().st_mtime_ns == checkout
+    source.write_text("other")
+    changed = source.stat().st_mtime_ns
+    assert restore_source_times(repo, "xcode") == 0
+    assert source.stat().st_mtime_ns == changed
+
+
+def test_xcode_key_separates_build_system_and_entitlement_changes(repo: Path) -> None:
+    source = _track(repo, "Loopflow.entitlements", "<dict/>")
+    key, prefix = cache_key(repo, "compiler and SDK", "xcode")
+    assert key != cache_key(repo, "compiler and SDK")[0]
+    source.write_text("<dict><key>com.apple.security.network.client</key><true/></dict>")
+    changed, changed_prefix = cache_key(repo, "compiler and SDK", "xcode")
+    assert changed != key
+    assert changed_prefix == prefix
+    assert cache_key(repo, "new Xcode or generator", "xcode")[0] != changed

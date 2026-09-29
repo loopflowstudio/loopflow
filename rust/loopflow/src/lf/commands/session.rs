@@ -214,6 +214,7 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
+                    SessionState::Unknown => "unknown",
                     SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
                     SessionState::Ready => "ready",

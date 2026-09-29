@@ -269,6 +269,22 @@ struct DTOFixtureTests {
         _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
+    @Test("Metadata does not manufacture a live state or current occurrence")
+    func sessionMetadataFixture() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session_metadata.json"))
+        #expect(session.state == .unknown)
+        guard case .step(_, _, _, let node, let iterations, let occurrence) = session.flowMembership else {
+            Issue.record("Retain the known Flow membership")
+            return
+        }
+        #expect(node == nil)
+        #expect(iterations == nil)
+        #expect(occurrence == .unknown)
+        #expect(session.flowMembership.label.contains("position unavailable"))
+        #expect(session.terminalIds.isEmpty)
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
+    }
+
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(

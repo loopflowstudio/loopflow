@@ -720,6 +720,12 @@ explicit filters expose headless and completed history. `--all` retains its
 all-repositories meaning. Interactive mode does not decide Flow membership,
 completion or permission to advance a review.
 
+List state `unknown` means there is no observed active client, explicit readiness,
+or recorded closure. The conversation remains visible and can be connected;
+Connect validates its current owner and native history. Lists retain recorded
+Flow membership even when its relative position is unknown. They do not open
+captured graphs or transcript/history bodies to fill missing display facts.
+
 Use `--interactive all` for both modes in one inventory. In Desktop, the outline
 menu's **Show headless Sessions** reveals headless conversations. Hiding them
 keeps their open terminals and drafts.

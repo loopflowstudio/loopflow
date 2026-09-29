@@ -136,7 +136,14 @@ struct TaskMonitorTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-show-monitor-issue-now").button().tap()
-        try await settle(window)
+        // Splitting changes the representable hierarchy around retained views.
+        // Observe attachment; a fixed delay cannot establish that remount finished.
+        let mountDeadline = ContinuousClock.now + .seconds(3)
+        repeat {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            await Task.yield()
+        } while !terminals.allSatisfy({ $0.window === window }) && ContinuousClock.now < mountDeadline
         let monitor = store.focusedPane
         #expect(monitor.content == .monitor(taskId: "issue-now"))
         #expect(store.layout.allPanes.filter { $0.content == .shell } == shells)

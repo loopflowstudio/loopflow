@@ -86,9 +86,10 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
 
 fn inventory_query(
     filter: &crate::session::SessionFilter,
+    select: &str,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
-    let mut sql = format!("{SESSION_SELECT} WHERE 1");
+    let mut sql = format!("{select} WHERE 1");
     let mut values = Vec::new();
     let mut bind = |value| {
         values.push(value);
@@ -137,7 +138,110 @@ fn inventory_query(
     Ok((sql, values))
 }
 
+// Preserve the existing filters/order. Materialize only the selected metadata
+// before joining Flow/Work labels; no request or historical payload is selected.
+const SUMMARY_SELECT: &str = "SELECT s.id,s.input_id,s.title,s.title_source,
+    s.ready_summary,s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
+    s.flow_session_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations
+    FROM agent_sessions s";
+
+const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.run_id')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
+
+fn summary_query(page: &str) -> String {
+    // Ask purpose is explicitly independent of its caller's Flow, including
+    // before its prepared input is launched. Other missing membership is unknown.
+    format!("WITH page AS MATERIALIZED ({page}),
+        flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
+            WHERE f.id IN (SELECT flow_session_id FROM page))
+        SELECT s.*,f.id,f.name,f.state,f.current_run_id,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
+        w.name,t.issue_identifier,
+        coalesce(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
+        (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
+         WHERE session_id=s.id AND receipt_key=s.input_id||':manifest.json'
+         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
+        FROM page s
+        LEFT JOIN flows f ON f.id=s.flow_session_id
+        LEFT JOIN waves w ON w.id=s.wave_id
+        LEFT JOIN tasks t ON t.id=s.task_id
+        LEFT JOIN work_placements p ON p.task_id=t.id AND t.current_invocation_id=s.flow_session_id
+        LEFT JOIN homes h ON h.id=p.home_id
+        ORDER BY s.title,s.id", super::flows::FLOW_METADATA_COLUMNS)
+}
+
+fn read_summary(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
+    Ok((|| {
+        Ok(crate::session::SessionSummary {
+            id: row.get(0)?,
+            input_id: RunId::parse(&row.get::<_, String>(1)?).map_err(invalid)?,
+            title: row.get(2)?,
+            title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
+            ready_summary: row.get(4)?,
+            completed_at: row.get(5)?,
+            kind: serde_json::from_value(serde_json::Value::String(row.get(6)?))?,
+            interactive: row.get(7)?,
+            task_id: row
+                .get::<_, Option<String>>(8)?
+                .map(|id| TaskId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            wave_id: row
+                .get::<_, Option<String>>(9)?
+                .map(|id| crate::id::WaveId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            flow_session_id: row.get(10)?,
+            cwd: row.get::<_, String>(11)?.into(),
+            skill: row.get(12)?,
+            provider: row.get(13)?,
+            model: row.get(14)?,
+            node: row.get(15)?,
+            iterations: row
+                .get::<_, Option<String>>(16)?
+                .map(|raw| serde_json::from_str(&raw))
+                .transpose()?,
+            flow: super::flows::read_flow_summary(row, 17)?,
+            wave_name: row.get(25)?,
+            task_identifier: row.get(26)?,
+            managed: row.get(27)?,
+            home_id: row
+                .get::<_, Option<String>>(28)?
+                .map(|id| crate::durable::HomeId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
+            home_route: row.get(29)?,
+            independent: row.get::<_, Option<bool>>(30)?.unwrap_or(false),
+        })
+    })())
+}
+
 impl SqliteStore {
+    pub(crate) fn session_summaries(
+        &self,
+        filter: &crate::session::SessionFilter,
+    ) -> StoreResult<Vec<crate::session::SessionSummary>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (page, values) = inventory_query(filter, SUMMARY_SELECT)?;
+        let mut query = conn.prepare(&summary_query(&page))?;
+        let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
+        rows.map(|row| row?).collect()
+    }
+
+    pub(crate) fn session_summary(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<crate::session::SessionSummary>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1")),
+            [id],
+            read_summary,
+        )
+        .optional()?
+        .transpose()
+    }
+
     /// Old rows are import evidence only. None means no established conversation;
     /// the importer must report that retained row, not silently omit it.
     pub(crate) fn historical_session_inputs(
@@ -642,7 +746,7 @@ impl SqliteStore {
         filter: &crate::session::SessionFilter,
     ) -> StoreResult<Vec<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (sql, values) = inventory_query(filter)?;
+        let (sql, values) = inventory_query(filter, SESSION_SELECT)?;
         let mut query = conn.prepare(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()
@@ -1163,4 +1267,318 @@ pub(super) fn select_input_in(
         return Err(StoreError::InvalidAuthority("Flow changed before conversation selection".into()));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use rusqlite::params;
+    use serde_json::json;
+
+    use super::SqliteStore;
+    use crate::durable::RunId;
+    use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn session_metadata_dense_review_pages_use_indexed_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let indexes: Vec<String> = conn
+            .prepare(
+                "SELECT sql FROM sqlite_master WHERE name IN
+            ('flow_metadata','flow_pending_review','session_input_membership') ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(indexes.len(), 3);
+        conn.execute_batch(
+            "DROP INDEX flow_metadata; DROP INDEX flow_pending_review;
+            DROP INDEX session_input_membership;",
+        )
+        .unwrap();
+        conn.execute_batch("BEGIN;
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<5000)
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
+                position_version,worker_generation,updated_at,state,pending_session_id)
+            SELECT printf('f%05d',i),json_object('id',printf('f%05d',i),'flow','review','steps',hex(zeroblob(1024))),
+                '/repo',0,0,1,0,1,'current',NULL FROM n;
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
+            INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
+                interactive,input_published,cwd,repo,flow_session_id)
+            SELECT printf('s%05d',i),printf('run_%032x',i),printf('Review %05d',i),
+                'human',1,'flow_review',1,1,'/repo','/repo',printf('f%05d',(i-1)%5000+1) FROM n;
+            UPDATE flow_sessions SET pending_session_id='s'||substr(id,2);
+            COMMIT;").unwrap();
+        for sql in indexes {
+            conn.execute_batch(&sql).unwrap();
+        }
+        let mut cases = Vec::new();
+        for (offset, search) in [(0, None), (4500, None), (5100, None), (0, Some("absent"))] {
+            let filter = SessionFilter {
+                offset,
+                limit: 100,
+                search: search.map(str::to_owned),
+                ..SessionFilter::default()
+            };
+            let (page, values) = super::inventory_query(&filter, super::SUMMARY_SELECT).unwrap();
+            let sql = super::summary_query(&page);
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map(rusqlite::params_from_iter(&values), |row| row.get(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(
+                plan.iter()
+                    .any(|line| line.contains("SEARCH f USING COVERING INDEX flow_pending_review")),
+                "{plan:?}"
+            );
+            let instructions: Vec<(String, Option<String>)> = conn
+                .prepare(&format!("EXPLAIN {sql}"))
+                .unwrap()
+                .query_map(rusqlite::params_from_iter(&values), |row| {
+                    Ok((row.get(1)?, row.get(5)?))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(
+                !instructions.iter().any(|(op, args)| op == "Function"
+                    && args.as_ref().is_some_and(|s| s.starts_with("json_"))),
+                "Summary must read indexed scalars without decoding captures/history"
+            );
+            let started = std::time::Instant::now();
+            let ids: Vec<String> = conn
+                .prepare(&sql)
+                .unwrap()
+                .query_map(rusqlite::params_from_iter(&values), |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(
+                ids.len(),
+                if search.is_some() || offset > 5000 {
+                    0
+                } else {
+                    100
+                }
+            );
+            println!("bundled SQLite {} offset={offset} search={search:?} indexed_ms={} rows={} plan={plan:?}",
+                rusqlite::version(), started.elapsed().as_secs_f64()*1000.0, ids.len());
+            cases.push((sql, values, ids));
+        }
+        conn.execute_batch("DROP INDEX flow_pending_review")
+            .unwrap();
+        for (sql, values, expected) in cases {
+            let started = std::time::Instant::now();
+            let ids: Vec<String> = conn
+                .prepare(&sql)
+                .unwrap()
+                .query_map(rusqlite::params_from_iter(values), |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(
+                ids, expected,
+                "Index must preserve historical/review row selection"
+            );
+            println!(
+                "unindexed_ms={} rows={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                ids.len()
+            );
+        }
+    }
+
+    #[test]
+    fn session_metadata_survives_unreadable_detail_without_weakening_exact_reads() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let input = RunId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
+                position_version,worker_generation,updated_at,state,current_run_id)
+                VALUES('flow',?1,'/unavailable',0,0,1,0,1,'current',?2)",
+                params![
+                    json!({"id":"flow","flow":"retained","steps":"invalid capture"}).to_string(),
+                    input.as_str()
+                ],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
+                interactive,input_published,cwd,flow_session_id,request)
+                VALUES('session',?1,'Session','human',1,'conversation',1,1,'/unavailable','flow',?2)",
+                params![input.as_str(), "large request".repeat(1000)]).unwrap();
+            conn.execute(
+                "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,'session')",
+                [input.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                VALUES('session','observed',?1,1,'not JSON')",
+                [format!("{input}:events.jsonl:0")],
+            )
+            .unwrap();
+        }
+        let rows = store.session_summaries(&SessionFilter::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].flow.as_ref().unwrap().name.as_deref(),
+            Some("retained")
+        );
+        assert_eq!(rows[0].node, None);
+        assert!(
+            store.flow("flow").is_err(),
+            "An exact action still validates the capture"
+        );
+        assert!(
+            store.input_events(&input).is_err(),
+            "Exact history still reports corrupt payload"
+        );
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE flow_sessions SET invocation_json=?1,state='completed',ended_at=2 WHERE id='flow'",
+                [json!({"id":"flow","flow":"renamed","steps":"invalid capture"}).to_string()]).unwrap();
+        }
+        let flow = store
+            .session_summary("session")
+            .unwrap()
+            .unwrap()
+            .flow
+            .unwrap();
+        assert_eq!(flow.name.as_deref(), Some("renamed"));
+        assert_eq!(flow.state, FlowSummaryState::Completed);
+    }
+
+    #[test]
+    fn session_metadata_import_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let input = RunId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO agent_sessions(id,input_id,title,title_source,
+            created_at,kind,interactive,input_published,cwd)
+            VALUES('imported',?1,'Imported','human',1,'conversation',1,1,'/unavailable')",
+                [input.as_str()],
+            )
+            .unwrap();
+        let session = store.session("imported").unwrap().unwrap();
+        let mut observation = crate::session::SessionObservation {
+            input_id: input.clone(),
+            source: "manifest.json".into(),
+            observed_at: 1,
+            task_id: None,
+            wave_id: None,
+            payload: json!({"input_id":input.as_str(),"source":"manifest.json","evidence":{
+                "run_id":input.as_str(),"schema_version":1,"flow":{"kind":"independent"}}}),
+        };
+        assert!(
+            !store
+                .session_summary("imported")
+                .unwrap()
+                .unwrap()
+                .independent
+        );
+        for _ in 0..2 {
+            store
+                .retain_session_observation(&session, &observation)
+                .unwrap();
+        }
+        assert!(
+            store
+                .session_summary("imported")
+                .unwrap()
+                .unwrap()
+                .independent
+        );
+        assert_eq!(store.session_history("imported", 0, 0).unwrap().len(), 1);
+        observation.payload["evidence"]["flow"] = serde_json::Value::Null;
+        assert!(store
+            .retain_session_observation(&session, &observation)
+            .is_err());
+        assert!(
+            store
+                .session_summary("imported")
+                .unwrap()
+                .unwrap()
+                .independent
+        );
+    }
+
+    #[test]
+    fn session_metadata_filters_before_decoding_and_preserves_explicit_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            for (id, title, interactive, repo, iterations, membership) in [
+                ("a", "Alpha%", true, "/repo", None, Some("independent")),
+                ("b", "Beta", true, "/repo", None, None),
+                ("headless", "Headless", false, "/repo", None, None),
+                (
+                    "foreign",
+                    "Foreign",
+                    true,
+                    "/other",
+                    Some("bad metadata"),
+                    None,
+                ),
+                ("later", "Zulu", true, "/repo", Some("bad metadata"), None),
+            ] {
+                let input = RunId::new();
+                conn.execute(
+                    "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,
+                    interactive,input_published,cwd,repo,iterations)
+                    VALUES(?1,?2,?3,'human',1,'conversation',?4,1,'/unavailable',?5,?6)",
+                    params![id, input.as_str(), title, interactive, repo, iterations],
+                )
+                .unwrap();
+                if let Some(kind) = membership {
+                    let payload = json!({"input_id":input.as_str(),"source":"manifest.json", "evidence":{
+                        "run_id":input.as_str(),"schema_version":1,"flow":{"kind":kind}}});
+                    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                        VALUES(?1,'observed',?2,1,?3)",
+                        params![id,format!("{input}:manifest.json"),payload.to_string()]).unwrap();
+                }
+            }
+        }
+        let mut filter = SessionFilter {
+            repo: Some("/repo".into()),
+            limit: 2,
+            ..SessionFilter::default()
+        };
+        let rows = store.session_summaries(&filter).unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert!(rows[0].independent);
+        assert!(!rows[1].independent);
+        filter.search = Some("%".into());
+        assert_eq!(
+            store.session_summaries(&filter).unwrap().len(),
+            1,
+            "Contains search is literal"
+        );
+        filter.search = Some("ALPHA".into());
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "a");
+        filter.search = None;
+        filter.interactive = Some(false);
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "headless");
+        filter.interactive = Some(true);
+        filter.offset = 1;
+        filter.limit = 1;
+        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "b");
+    }
 }

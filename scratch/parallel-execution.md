@@ -1887,3 +1887,60 @@ exact earlier membership, repeats and retired-file removal are retained. Final
 production delta +34/-79 versus636abc941. See [evidence](evidence.md).
 Metadata proposal remains unapplied until this coherent importer checkpoint;
 its membership index reads the unchanged manifest observation envelope.
+
+## Passive Session metadata and CI continuation (2026-09-29)
+
+The retained metadata implementation now lists Sessions through a bounded SQL
+projection before local client observation. Captured Flow graphs, request bodies,
+transcripts and history payloads remain exact-detail/action evidence. Maintained
+expression indexes project Flow names and recorded independent membership; a
+pending-Session/state index removes the correlated review scan without changing
+historical review selection. Unknown observation/occurrence travels through the
+Rust/Swift wire. Prepared Asks stay independent; preparation retains inherited
+attribution when a consumed input is replaced and launched again.
+
+Review removed the unused public Flow-summary entry point supplied by the proposal;
+Session inventory uses its shared internal projection directly. Metadata is not a
+new durable owner. Compared with d4a66125c, production Rust/Swift changes are
++394/-10 (net +384), excluding test modules, SQL, docs/generated files and scratch;
+`.lf/tmp/cut-i/metadata-source.json` records method and hashes. This is a reader
+improvement, not a net reduction. Flow inventory, Desktop pagination and complete
+CLI startup/query/payload measurements remain open.
+
+The prior worker's five metadata unit checks and 68 Swift tests completed. Its
+public/density logs remained red; the final attribution edit postdated those
+binaries. The rebuilt Ask case passes in metadata-resume-ask.log. The subsequent
+metadata-final-rust.log records 26 selected passes, including public Ask/taskless
+review, metadata, DTO and seven native-client cases, with one Nextest leaked-handle
+report on native-client publication. The separate final-projection run passes both
+the reduced metadata consumer and publication case with no leak report. This does
+not explain the earlier intermittent handle observation; no live owned test process
+was found afterward. Both logs are retained.
+
+NativeClient now selects a private Home/database before capture and restores its
+ambient authority on drop. The test runner supplies an unrelated empty ambient
+Home, covering the hosted missing-development-database case without changing
+production ownership resolution. The mounted Monitor proof now waits for the
+required terminal/window attachment with a bounded deadline after splitting;
+its old fixed pause did not establish mount completion. All surface, draft,
+companion, focus and history assertions remain. metadata-monitor-mount.log passes
+eight tests across both Monitor suites and both chrome sizes. Local passes do not
+establish a hosted timing diagnosis or configured Desktop acceptance.
+
+Bundled SQLite 3.53.2 measured the 20,000-Session/5,000-Flow review fixture at
+0.38ms first page, 1.41ms offset 4500 and 4.09ms empty offset 5100; the absent-title
+query took 2.06 ms. Removing only the pending-review index measured 0.57 / 267.82 / 2181.93 ms
+and 2.19 ms with identical returned IDs. EXPLAIN uses the covering pending-review
+and membership indexes and no JSON function opcode for summary selection. These
+are warm synthetic SQL measurements, not cold CLI or installed latency.
+
+All-target Clippy passes (16.96s), formatting, migration history, architecture and
+whitespace checks pass; website docs were regenerated. Public Session suites ran all 34 cases without fail-fast:33 passed and the
+checkout-attribution fixture failed. Its helper preferred a two-value historical
+manifest source over the unbound Session's recorded four-value source. The fixture
+now uses unchanged admission ancestry/source before bind, while preserving earlier
+manifest attribution after assignment. Four focused checkout/declared/Ask/bind/
+continuation cases pass in metadata-public-attribution.log; production attribution
+was unchanged for that correction. No full-suite rerun was needed. Full scope, native decision-policy question,
+configured-provider proofs and populated final import obligations remain unchanged.
+No landing, promotion, installed-Home access or Flow navigation is selected.

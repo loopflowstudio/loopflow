@@ -134,6 +134,22 @@ payloads. Exact detail can load the selected captured input, transcript or final
 answer. A provider-neutral exact final-answer receipt and recovered streamed
 prose remain distinguishable; incomplete extraction is labeled.
 
+Session inventory reads the selected rows, Work labels and indexed Flow metadata;
+it does not decode captures or Session history. Readiness text remains the exact
+recorded Session field. Local active-client receipts may establish Active; without
+that observation, explicit readiness or closure, the displayed state is Unknown.
+It does not mean failed or unavailable for connection. Connect and completion
+validate the exact capture and native history before acting. A recorded Flow with
+no selected occurrence keeps its membership with an unknown position; missing
+historical membership never becomes Independent. Unknown or corrupt detail remains
+available for exact inspection instead of preventing unrelated rows from listing.
+
+Current Session contains-search, title/ID ordering, offset/limit and Desktop's
+complete-inventory reconciliation are unchanged. Final paging and dense discovery
+measurements remain separate work. Metadata selection still returns variable-size
+recorded names, readiness text and iteration tuples and checks exact client receipts;
+it is not a constant-byte or constant-time query guarantee.
+
 Typed Task/Wave links survive landing and provider/driver replacement. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries

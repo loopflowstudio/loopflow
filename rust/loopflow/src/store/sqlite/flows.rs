@@ -41,6 +41,49 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
     f.worker_generation, f.claim_json, f.failure_json, f.state
     FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
 
+// Keep the expression identical to index_session_metadata. SQLite reads the
+// indexed scalar; no invocation, cursor, claim or selected-history body is read.
+pub(super) const FLOW_METADATA_COLUMNS: &str = "f.id,
+    CASE WHEN json_valid(f.invocation_json) THEN CASE WHEN json_type(f.invocation_json,'$.flow')='text' THEN json_extract(f.invocation_json,'$.flow') END END AS name,
+    f.state,f.current_run_id,f.pending_session_id,f.task_id,f.wave_id,f.updated_at";
+
+pub(super) fn read_flow_summary(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> StoreResult<Option<crate::session::FlowSummary>> {
+    use crate::session::{FlowSummary, FlowSummaryState};
+    let Some(id) = row.get::<_, Option<String>>(offset)? else {
+        return Ok(None);
+    };
+    Ok(Some(FlowSummary {
+        id,
+        name: row.get(offset + 1)?,
+        state: match row.get::<_, String>(offset + 2)?.as_str() {
+            "current" => FlowSummaryState::Current,
+            "completed" => FlowSummaryState::Completed,
+            "replaced" => FlowSummaryState::Replaced,
+            other => return Err(invalid(format!("unknown Flow state {other}"))),
+        },
+        current_input: row
+            .get::<_, Option<String>>(offset + 3)?
+            .map(|id| RunId::parse(&id))
+            .transpose()
+            .map_err(invalid)?,
+        pending_session: row.get(offset + 4)?,
+        task_id: row
+            .get::<_, Option<String>>(offset + 5)?
+            .map(|id| TaskId::parse(&id))
+            .transpose()
+            .map_err(invalid)?,
+        wave_id: row
+            .get::<_, Option<String>>(offset + 6)?
+            .map(|id| WaveId::parse(&id))
+            .transpose()
+            .map_err(invalid)?,
+        updated_at: row.get(offset + 7)?,
+    }))
+}
+
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }

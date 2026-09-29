@@ -975,11 +975,32 @@ mod tests {
         child: Child,
         capture: crate::run_record::CaptureHandle,
         temp: tempfile::TempDir,
+        _environment: EnvRestore,
     }
 
     impl NativeClient {
         fn new() -> Self {
             let temp = tempfile::tempdir().unwrap();
+            let names = [
+                "LF_HOME",
+                "LF_DB_PATH",
+                "LF_CONTROL_HOME",
+                "LF_CONTROL_DB_PATH",
+                "LF_RUN_ID",
+                "LF_RUN_DIR",
+                "LF_RUN_CONTEXT",
+                "LF_WORK_ADVANCE_CLAIM",
+                "LF_TASK_ORIGIN",
+                "LF_WAVE_ID",
+                "LF_ACCOUNT_LEASE",
+                "LF_HUMAN_SESSION",
+            ];
+            let environment = EnvRestore::capture(&names);
+            for name in names {
+                std::env::remove_var(name);
+            }
+            std::env::set_var("LF_HOME", temp.path());
+            std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
             let provider = fake_provider(
                 &temp,
                 "trap '' TERM\nprintf ready > \"$1\"\nwhile :; do /bin/sleep 0.05; done",
@@ -1012,6 +1033,7 @@ mod tests {
                 child,
                 capture,
                 temp,
+                _environment: environment,
             };
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !ready.exists() {

@@ -1,6 +1,8 @@
 import Foundation
 
 public enum SessionState: String, Codable, Sendable, Hashable {
+    /// Metadata has no trustworthy live/closed observation.
+    case unknown
     case waiting
     case active
     case ready
@@ -95,6 +97,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
                 label = "\(base) · iteration unavailable"
             }
             switch occurrence {
+            case .unknown: return "\(label) · position unavailable"
             case .current: return label
             case .earlier: return "\(label) · earlier"
             case .past: return "\(label) · past run"
@@ -109,6 +112,8 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
 
 /// Where a Flow occurrence sits relative to its Flow's current position.
 public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
+    /// Known membership without a recorded selected occurrence.
+    case unknown
     /// The invocation's current position.
     case current
     /// An earlier position of the invocation that is still active.

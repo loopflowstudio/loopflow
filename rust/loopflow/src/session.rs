@@ -144,3 +144,53 @@ impl Default for SessionFilter {
         }
     }
 }
+
+/// Passive inventory values. Request, transcript, capture and native identity
+/// validation belong to exact detail/actions, never to this row projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionSummary {
+    pub id: String,
+    pub input_id: RunId,
+    pub title: String,
+    pub title_source: TitleSource,
+    pub ready_summary: Option<String>,
+    pub completed_at: Option<i64>,
+    pub kind: SessionKind,
+    pub interactive: bool,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub flow_session_id: Option<String>,
+    pub cwd: std::path::PathBuf,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub node: Option<u32>,
+    pub iterations: Option<Vec<Vec<u32>>>,
+    pub flow: Option<FlowSummary>,
+    pub independent: bool,
+    pub wave_name: Option<String>,
+    pub task_identifier: Option<String>,
+    pub managed: bool,
+    pub home_id: Option<crate::durable::HomeId>,
+    pub home_route: Option<String>,
+}
+
+/// Recorded Flow facts; Current says nothing about a live driver or process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FlowSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub state: FlowSummaryState,
+    pub current_input: Option<RunId>,
+    pub pending_session: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlowSummaryState {
+    Current,
+    Completed,
+    Replaced,
+}

@@ -270,6 +270,8 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
 
     private func membershipHelp(_ membership: SessionFlowMembership) -> String {
         switch membership {
+        case .step(_, _, _, _, _, .unknown):
+            "This conversation retains Flow membership, but its relative position is unknown."
         case .step(_, _, _, _, _, .current):
             "This conversation is the Flow's current step."
         case .step(_, _, _, _, _, .earlier):

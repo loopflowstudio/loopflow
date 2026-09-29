@@ -95,6 +95,8 @@ pub(crate) enum OpenMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
+    /// Passive metadata has no trustworthy live/closed observation.
+    Unknown,
     Waiting,
     Active,
     Ready,
@@ -242,6 +244,8 @@ pub enum SessionFlowMembership {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionFlowOccurrence {
+    /// The row retains membership but no selected occurrence.
+    Unknown,
     /// The invocation's current position.
     Current,
     /// An earlier position of the invocation that is still active.
@@ -521,7 +525,14 @@ pub(crate) fn prepare_input(
             worktree: Some(session.cwd.clone()),
             skill: session.skill.clone(),
             subjects: work_selector(&session)
-                .map(crate::run_record::SubjectAttribution::declared)
+                .map(|selector| crate::run_record::SubjectAttribution {
+                    selector,
+                    source: if session.work_source == Some(WorkSource::Inherited) {
+                        crate::run_record::AttributionSource::Inherited
+                    } else {
+                        crate::run_record::AttributionSource::Declared
+                    },
+                })
                 .into_iter()
                 .collect(),
             flow,
@@ -615,10 +626,159 @@ pub(crate) async fn list(
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
     let mut sessions = Vec::new();
-    for session in store.sessions(filter).await? {
-        sessions.push(surface(store, &session).await?);
+    for session in store.session_summaries(filter).await? {
+        sessions.push(summary_surface(&session));
     }
     Ok(sessions)
+}
+
+/// Passive listing reads record metadata and exact local client receipts only.
+/// Connect/complete still enter owned_target and surface, with full validation.
+fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
+    use crate::session::FlowSummaryState;
+    let kind = match session.kind {
+        crate::session::SessionKind::Conversation => SessionKind::Conversation,
+        crate::session::SessionKind::Ask => SessionKind::Ask,
+        crate::session::SessionKind::FlowReview => SessionKind::Flow,
+    };
+    let work = match (&session.task_id, &session.wave_id) {
+        (Some(task), _) => Some(WorkRef::Task(task.clone())),
+        (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
+        _ => None,
+    };
+    let work_path = session.wave_id.as_ref().map(|wave| {
+        let wave = session
+            .wave_name
+            .clone()
+            .unwrap_or_else(|| format!("Wave {wave} (unavailable)"));
+        match &session.task_id {
+            None => wave,
+            Some(task) => match &session.task_identifier {
+                Some(label) => format!("{wave} / {label}"),
+                None => format!("Task {task} (unavailable)"),
+            },
+        }
+    });
+    let flow_membership = match (&session.flow_session_id, &session.flow) {
+        (None, _) if session.independent => SessionFlowMembership::Independent,
+        (None, _) => SessionFlowMembership::Unknown {
+            reason: "Flow membership was not recorded".into(),
+        },
+        (Some(id), Some(flow)) if flow.name.is_some() => SessionFlowMembership::Step {
+            flow: flow.name.clone().expect("matched a recorded Flow name"),
+            invocation_id: id.clone(),
+            step: session.skill.clone().unwrap_or_default(),
+            // Recorded membership is not revalidated by opening the capture.
+            // Detail/actions validate that exact occurrence before using it.
+            node: session.node,
+            iterations: session.iterations.clone(),
+            occurrence: if flow.state != FlowSummaryState::Current {
+                SessionFlowOccurrence::Past
+            } else if flow.current_input.as_ref() == Some(&session.input_id) {
+                SessionFlowOccurrence::Current
+            } else if flow.current_input.is_some() {
+                SessionFlowOccurrence::Earlier
+            } else if flow.pending_session.as_deref() == Some(session.id.as_str()) {
+                SessionFlowOccurrence::Current
+            } else {
+                SessionFlowOccurrence::Unknown
+            },
+        },
+        (Some(id), _) => SessionFlowMembership::Unknown {
+            reason: format!("Flow {id} metadata is unavailable"),
+        },
+    };
+    let mut unavailable = None;
+    let remote = if session.managed {
+        match (&session.home_id, &session.home_route) {
+            (Some(id), Some(route)) => (route != "local").then_some(id),
+            _ => {
+                unavailable = Some("Session Home placement is unavailable".to_string());
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let clients = if remote.is_none() && unavailable.is_none() {
+        match (&session.provider, local_session_run_dir(&session.input_id)) {
+            (Some(provider), Some(dir)) => {
+                match crate::lf::commands::util::active_provider_clients(&dir, provider) {
+                    Ok(clients) => clients,
+                    Err(error) => {
+                        unavailable =
+                            Some(format!("Session client observation unavailable: {error}"));
+                        Vec::new()
+                    }
+                }
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+    let state = if session.completed_at.is_some() {
+        SessionState::Closed
+    } else if session.ready_summary.is_some() {
+        SessionState::Ready
+    } else if !clients.is_empty() {
+        SessionState::Active
+    } else {
+        // No active client does not establish provider history, engine death,
+        // waiting, or completion. SQL publication/outcome is not OS evidence.
+        SessionState::Unknown
+    };
+    let mut actions = session_actions(kind, state);
+    let open_argv = if unavailable.is_none() {
+        match human_open_argv(remote, Some(&session.cwd), &session.id) {
+            Ok(argv) => argv,
+            Err(error) => {
+                unavailable = Some(format!("Session connection unavailable: {error}"));
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    if let Some(reason) = unavailable {
+        for action in &mut actions {
+            action.unavailable_reason = Some(reason.clone());
+        }
+    }
+    let provider = session.provider.clone().unwrap_or_default();
+    SessionRecord {
+        id: session.id.clone(),
+        run_id: session.input_id.clone(),
+        kind,
+        interactive: session.interactive,
+        work,
+        wave_id: session.wave_id.clone(),
+        work_path,
+        actions,
+        title: session.title.clone(),
+        title_source: match session.title_source {
+            crate::session::TitleSource::Human => SessionTitleSource::Human,
+            crate::session::TitleSource::Generated => SessionTitleSource::Generated,
+        },
+        flow_membership,
+        detail: match (kind, &session.skill) {
+            (SessionKind::Conversation, _) => session
+                .model
+                .as_ref()
+                .map_or(provider.clone(), |model| format!("{provider}:{model}")),
+            (_, Some(skill)) => skill.clone(),
+            (_, None) => "Request for input".into(),
+        },
+        provider: session.provider.clone(),
+        cwd: session.cwd.display().to_string(),
+        state,
+        ready_summary: session.ready_summary.clone(),
+        open_argv,
+        terminal_ids: clients
+            .into_iter()
+            .filter_map(|client| client.terminal_id)
+            .collect(),
+    }
 }
 
 /// Resolve a Session id, or the Run id linked to it. An Ask or Flow Run
@@ -1485,7 +1645,12 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     };
     let mut actions = session_actions(kind, state);
     let flow_membership = match &session.flow_session_id {
-        None => SessionFlowMembership::Independent,
+        None => match store.sqlite.session_summary(&session.id)? {
+            Some(metadata) if metadata.independent => SessionFlowMembership::Independent,
+            _ => SessionFlowMembership::Unknown {
+                reason: "Flow membership was not recorded".into(),
+            },
+        },
         Some(id) => match store.flow(id).await {
             Ok(Some(flow)) => {
                 let graph = crate::engine::flow_graph::FlowGraph::new(
@@ -1517,8 +1682,12 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
                         .is_some_and(|attempt| attempt.run_id == session.input_id)
                     {
                         SessionFlowOccurrence::Current
-                    } else {
+                    } else if flow.current_attempt.is_some() {
                         SessionFlowOccurrence::Earlier
+                    } else if flow.pending_session_id.as_deref() == Some(session.id.as_str()) {
+                        SessionFlowOccurrence::Current
+                    } else {
+                        SessionFlowOccurrence::Unknown
                     },
                 }
             }
@@ -2232,6 +2401,120 @@ fn active_run_id() -> Result<RunId> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
+        let session: super::SessionRecord = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_metadata.json"
+        ))
+        .unwrap();
+        assert_eq!(session.state, super::SessionState::Unknown);
+        assert!(matches!(
+            session.flow_membership,
+            super::SessionFlowMembership::Step {
+                node: None,
+                iterations: None,
+                occurrence: super::SessionFlowOccurrence::Unknown,
+                ..
+            }
+        ));
+        assert!(session.terminal_ids.is_empty());
+        assert_eq!(
+            serde_json::from_value::<super::SessionRecord>(serde_json::to_value(&session).unwrap())
+                .unwrap(),
+            session
+        );
+    }
+
+    #[test]
+    fn session_metadata_keeps_unknown_position_and_unavailable_placement_visible() {
+        let task = TaskId::new();
+        let wave = crate::id::WaveId::new();
+        let mut summary = crate::session::SessionSummary {
+            id: "metadata".into(),
+            input_id: RunId::new(),
+            title: "Retained conversation".into(),
+            title_source: crate::session::TitleSource::Human,
+            ready_summary: None,
+            completed_at: None,
+            kind: crate::session::SessionKind::Conversation,
+            interactive: true,
+            task_id: Some(task.clone()),
+            wave_id: Some(wave.clone()),
+            flow_session_id: Some("flow".into()),
+            cwd: "/unavailable".into(),
+            skill: Some("review".into()),
+            provider: None,
+            model: None,
+            node: Some(2),
+            iterations: None,
+            flow: Some(crate::session::FlowSummary {
+                id: "flow".into(),
+                name: Some("retained".into()),
+                state: crate::session::FlowSummaryState::Current,
+                current_input: None,
+                pending_session: None,
+                task_id: Some(task.clone()),
+                wave_id: Some(wave.clone()),
+                updated_at: 1,
+            }),
+            independent: false,
+            wave_name: Some("Infrastructure".into()),
+            task_identifier: Some("INF-123".into()),
+            // Missing Home must never fall back to a local launch/observation.
+            managed: true,
+            home_id: None,
+            home_route: None,
+        };
+        let row = super::summary_surface(&summary);
+        assert_eq!(row.id, summary.id);
+        assert_eq!(row.work, Some(crate::durable::WorkRef::Task(task)));
+        assert_eq!(row.wave_id, Some(wave));
+        assert_eq!(row.work_path.as_deref(), Some("Infrastructure / INF-123"));
+        assert_eq!(row.state, super::SessionState::Unknown);
+        assert!(matches!(
+            row.flow_membership,
+            super::SessionFlowMembership::Step {
+                node: Some(2),
+                occurrence: super::SessionFlowOccurrence::Unknown,
+                ..
+            }
+        ));
+        assert!(row.open_argv.is_empty());
+        assert!(row
+            .actions
+            .iter()
+            .all(|action| action.unavailable_reason.as_deref()
+                == Some("Session Home placement is unavailable")));
+        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Completed;
+        let row = super::summary_surface(&summary);
+        assert!(matches!(
+            row.flow_membership,
+            super::SessionFlowMembership::Step {
+                occurrence: super::SessionFlowOccurrence::Past,
+                ..
+            }
+        ));
+        assert_eq!(
+            row.state,
+            super::SessionState::Unknown,
+            "Flow completion is not Session/process completion"
+        );
+        summary.flow_session_id = None;
+        assert!(matches!(
+            super::summary_surface(&summary).flow_membership,
+            super::SessionFlowMembership::Unknown { .. }
+        ));
+        summary.independent = true;
+        assert_eq!(
+            super::summary_surface(&summary).flow_membership,
+            super::SessionFlowMembership::Independent
+        );
+        summary.ready_summary = Some("Exact retained feedback".into());
+        let row = super::summary_surface(&summary);
+        assert_eq!(row.state, super::SessionState::Ready);
+        assert_eq!(row.ready_summary, summary.ready_summary);
+    }
+
     use std::collections::HashSet;
     use std::ffi::OsString;
     use std::sync::{LazyLock, Mutex};
@@ -2772,6 +3055,7 @@ mod tests {
             );
             kinds.push(match &session.flow_membership {
                 super::SessionFlowMembership::Step { occurrence, .. } => match occurrence {
+                    super::SessionFlowOccurrence::Unknown => "unknown_occurrence",
                     super::SessionFlowOccurrence::Current => "current",
                     super::SessionFlowOccurrence::Earlier => "earlier",
                     super::SessionFlowOccurrence::Past => "past",

@@ -349,6 +349,7 @@ struct WorkSurfaceView: View {
 
     private func sessionTone(_ state: SessionState) -> WorkspaceTone {
         switch state {
+        case .unknown: .neutral
         case .active: .running
         case .waiting, .ready: .human
         case .closed: .stopped

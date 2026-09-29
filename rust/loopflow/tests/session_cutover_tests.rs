@@ -196,7 +196,9 @@ impl Fixture {
             .query_row(
                 "SELECT CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE s.task_id END,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE s.wave_id END,
-                    CASE WHEN m.seq IS NULL THEN s.work_source
+                    CASE WHEN m.seq IS NULL OR (s.bound_at IS NULL
+                              AND m.task_id IS s.task_id AND m.wave_id IS s.wave_id)
+                         THEN s.work_source
                          ELSE coalesce(json_extract(m.payload,'$.evidence.subjects[0].source'),
                             CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
                     END
@@ -360,10 +362,15 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert!(!blank.status.success());
 
     fixture.release(first);
-    let closed = fixture.sessions();
-    assert_eq!(closed.len(), 1, "provider exit does not complete a Session");
-    assert_eq!(closed[0]["state"], "closed");
-    assert_eq!(closed[0]["title"], "Parser review");
+    let retained = fixture.sessions();
+    assert_eq!(
+        retained.len(),
+        1,
+        "provider exit does not complete a Session"
+    );
+    // Passive inventory no longer opens native history to infer closure.
+    assert_eq!(retained[0]["state"], "unknown");
+    assert_eq!(retained[0]["title"], "Parser review");
 
     // Open resumes the same Run under the same Session.
     let described = fixture.json(&["session", "open", &id, "--json"]);
@@ -1078,7 +1085,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     assert_eq!(listed["run_id"], first_run.as_str());
     assert_eq!(listed["title"], "Which release target?");
     assert_eq!(listed["title_source"], "generated");
-    assert_eq!(listed["state"], "waiting");
+    assert_eq!(listed["state"], "unknown");
     assert_eq!(
         listed["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -1608,14 +1615,14 @@ fn session_list_reads_a_taskless_review_from_sql() {
     assert_eq!(listed[0]["title"], "review-proof");
     assert_eq!(listed[0]["title_source"], "generated");
     assert_eq!(listed[0]["detail"], "review-proof");
-    assert_eq!(listed[0]["state"], "waiting");
+    assert_eq!(listed[0]["state"], "unknown");
     assert_eq!(listed[0]["provider"], "opencode");
     assert_eq!(listed[0]["work"], Value::Null);
     assert_eq!(
         listed[0]["flow_membership"],
         serde_json::json!({
             "kind": "step", "flow": "review-first", "invocation_id": invocation,
-            "step": "review-proof", "node": "0", "iterations": [[]],
+            "step": "review-proof", "node": 0, "iterations": [[]],
             "occurrence": "current"
         })
     );

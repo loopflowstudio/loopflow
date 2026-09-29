@@ -1805,9 +1805,8 @@ impl CaptureHandle {
         manifest.repo = spec.repo;
         manifest.worktree = spec.worktree;
         manifest.skill = spec.skill;
-        manifest.subjects = spec.subjects;
-        // Preparation is the owning transaction for a human Flow step's
-        // membership; a launch cannot reassign the prepared occurrence.
+        // Preparation owns Work attribution and a human Flow step's membership;
+        // the child's --as prompt context cannot reassign that captured input.
         manifest.flow = manifest.flow.or(Some(spec.flow));
         (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
         manifest.host = gethostname::gethostname().to_string_lossy().into_owned();

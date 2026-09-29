@@ -732,7 +732,7 @@ fn project_prompt_omits_unselected_wave_turn_but_keeps_memory() {
 
 #[test]
 fn task_prompt_omits_unselected_wave_turn_but_keeps_memory() {
-    assert_work_prompt_omits_unselected_wave_turn("task/pursue");
+    assert_work_prompt_omits_unselected_wave_turn("implement");
 }
 
 #[test]

@@ -87,7 +87,7 @@ lf ship-api
 ```
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
-`gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/` override
+`gate`, `qa`, the `code` flow, and more. Repo skills in `.lf/skills/` override
 and extend them. [Authoring](authoring.md) starts with a working skill and then
 adds flow and goal structure only where it earns its place.
 

@@ -1940,7 +1940,7 @@ mod tests {
     #[test]
     fn assembled_prompts_deliver_procedures_to_the_owning_skill() {
         let repo = init_repo();
-        for name in ["implement", "debug", "loopflow", "wave/operate"] {
+        for name in ["implement", "debug", "unbreak", "loopflow", "wave/operate"] {
             let components = gather_context(&GatherContextOpts {
                 repo_root: repo.path().to_path_buf(),
                 skill: Some(name.to_string()),
@@ -1958,10 +1958,11 @@ mod tests {
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
+            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
             for procedure in ["lf task restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
-                    orchestrates,
+                    name == "loopflow",
                     "{name}: {procedure}"
                 );
             }

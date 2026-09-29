@@ -1,7 +1,0 @@
-- xor:
-    paths:
-      build:
-        flow: build
-        description: "Compelling item found — design and build it"
-      silence:
-        description: "Nothing compelling to build right now"

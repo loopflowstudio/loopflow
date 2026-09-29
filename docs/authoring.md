@@ -127,17 +127,16 @@ Branches route a flow on an agent's assessment of the current state. Exactly
 one path runs:
 
 ```yaml
-# flow: garden
-- scan
-- assess
+# .lf/flows/assess-change.yaml
+- qa
 - xor:
-    router: assess
+    router: triage
     paths:
-      act:
-        flow: garden-act
-        description: "Adjustments needed — mutate waves, then review"
+      repair:
+        flow: code
+        description: "Reproduced defects within the authorized change need repair"
       silence:
-        description: "Everything is healthy"
+        description: "No actionable defect in the supplied change"
 ```
 
 The `router:` skill reads the available evidence and records one choice with

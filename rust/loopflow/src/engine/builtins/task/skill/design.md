@@ -82,40 +82,9 @@ and execution updates in authorized Task comments, with links to detailed eviden
 Comments may be collapsed: keep current blockers, dependencies, and accepted scope
 visible in the description. Reconcile changed scope instead of appending amendments.
 
-## Existing-design handoff
+## Handoff
 
-When the user asks to file a Task and run a Flow from an existing design,
-keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Wave, with a design reference,
-its maturity, and open questions. Do not invent ownership.
-
-```bash
-lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task checkout <issue> --json
-# Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> --flow <chosen-flow>
-```
-
-Inspect the current context first: a design already in the Task worktree needs
-no transfer. For a separate source, copy the actual documents and supporting
-files before launch, preserve relative references, and check their contents in
-the destination. A path alone does not supply context. Preparation launches no
-worker; put any initial directive on preparation, since an already prepared
-Task rejects a new `run --directive`. Do not overwrite newer destination work.
-
-The destination becomes the working design; retain source provenance without
-maintaining competing active copies. Markdown under its recursive `scratch/`
-tree enters worker context; other assets remain on disk. Preserve material
-needed after scratch cleanup in durable documentation or existing records.
-Do not pipe the design into Task creation: stdin becomes the Task description.
-
-Use the Flow the user selected and inspect its contents when explaining where it
-begins; otherwise use the Wave chapter recommendation. Continue the design already
-present without treating its draft choices as approved. Report the Task link,
-destination design path, selected Flow, and observed launch result. Verify
-supplied context separately from worker startup.
-
-If implementation already exists in the source checkout, preserve it and its
-writer. Document transfer does not adopt a checkout; current preparation does
-not adopt an unbound existing branch/worktree. Report that gap before launching
-a competing implementation. No automatic scratch-transfer flag is available.
+Leave the current design and its evidence ready for kickoff to shape into an
+implementation plan. Task allocation and launch belong to launch-plan when
+execution is requested. Preserve accepted intent and unresolved choices in the
+artifact; finishing design does not itself authorize launching work.

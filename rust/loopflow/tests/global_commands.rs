@@ -143,6 +143,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         let stdout = success(output);
         if args == ["catalog"] {
             assert!(stdout.contains("debug"));
+            assert!(stdout.contains("unbreak"));
         }
         if args.get(1) == Some(&"route") {
             assert!(stdout.contains("claude"));

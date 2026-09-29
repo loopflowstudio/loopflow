@@ -107,7 +107,7 @@ lf task wait <issue-id> --until terminal
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `compress` | Simplify the implementation without changing behavior |
-| `gate` | Verify the branch for shipping: tests, static checks, docs, PR description |
+| `gate` | Verify the branch for shipping: tests, static checks and docs |
 | `qa` | Thorough quality assessment of the current branch |
 
 ### How steps chain
@@ -116,7 +116,7 @@ lf task wait <issue-id> --until terminal
 |------|-------|--------|
 | design | — | `scratch/<branch>.md` |
 | implement | `scratch/<branch>.md` | code |
-| gate | code, tests | code, PR description |
+| gate | code, tests | code, docs and proof |
 | qa | code | findings and fixes on branch |
 
 ### Named flows
@@ -124,11 +124,15 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf --task DES-123 design                  # design skill with Task context
-lf flow launch-plan                      # plan the core → implement → gate → demo → land
-lf build                                 # one code → reviewable Task slice
-lf ship                                  # final Task gate → learnings → land
+lf incident                              # unbreak → 5whys → launch-plan
+lf code                                  # implement → compress; local changes
+lf feature                               # kickoff → design review → pursue → queue → land
+lf ship                                  # gate → land and complete the Task
 ```
+
+Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
+`lf flow incident` explicitly selects the Flow when a name also names a skill
+or CLI command; the prefix is otherwise optional.
 
 Flow YAML owns step order, interactive reviews (`human: true`), and explicit
 backward edges. A Flow with backward edges is a loopflow; it runs with or without

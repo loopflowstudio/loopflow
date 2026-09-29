@@ -1203,3 +1203,28 @@ remaining triggers cannot be dropped until every row has a preserved destination
 Complete import/table removal and every remaining-work requirement stay open.
 The separate Swift active-client fixture failure is under bounded research;
 its unpublished proposal is excluded until supervisor handback.
+
+### Admitted Swift observation fixture (2026-09-29)
+
+Supervisor returned the bounded proposal in `research-active-swift-fixture.md`;
+main applied and formatted only ActiveRunsObservationTests.swift. Each historical
+input now enters through public `session import` before the reader observes its
+live cat client. Import must report one interactive conversation and no failures;
+the private binary/Home/database are pinned with inherited authority cleared.
+Historical input time remains 2020 while the exact client receipt records its
+actual start. Throwing paths await the owned reader and clients before deletion.
+
+`active-swift-fixture-build.log` records the current source CLI build.
+`active-swift-fixture.log` records one actual Swift Testing realCLI pass in
+10.370s (the preceding XCTest zero count is not the result). Automatic first and
+second discovery, rescan, client exit, no gaps and reader cancellation retaining
+the first client all pass with the unchanged 12-second deadline. This is private
+Home/synthetic cat transport proof, not configured provider or Desktop acceptance.
+The existing ignored manifest-only density benchmark also needs admission
+conversion before its scale results could count; it was not run here.
+
+Review retained the production SQL reader and repaired fixture admission, without
+a manifest fallback or timeout change. Production delta is zero; only the Swift
+test and notes changed after c1f1b8c82. Rust bytes retain that checkpoint's Clippy
+result. Whitespace and Rust formatting checks pass. Historical unresolved rows,
+final table removal and the complete remaining-work contract remain open.

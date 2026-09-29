@@ -185,55 +185,64 @@ struct ActiveRunsObservationTests {
             try? clientInput.fileHandleForWriting.close()
             if client.isRunning { client.terminate() }
         }
-        let firstID = "run_00000000000000000000000000000001"
-        let secondID = "run_00000000000000000000000000000002"
-        try publishClient(client, id: firstID, home: home)
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let process = LocalWaveAgentLauncher.queryProcess([
-            root.appendingPathComponent("target/debug/lf").path, "runs", "--active", "--watch", "--json",
-        ])
-        var environment = process.environment ?? [:]
-        for key in ["LF_HOME", "LF_CONTROL_HOME"] { environment[key] = home.path }
-        for key in ["LF_DB_PATH", "LF_CONTROL_DB_PATH"] { environment[key] = home.appendingPathComponent("loopflow.db").path }
-        process.environment = environment
-        let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
-        var iterator = reader.snapshots.makeAsyncIterator()
-        let first = try await nextReady(&iterator, count: 1)
-        #expect(URL(fileURLWithPath: first.home).resolvingSymlinksInPath().standardizedFileURL.path
-                == home.standardizedFileURL.path)
-        #expect(first.gaps.isEmpty)
-        #expect(first.runs.map(\.id) == [firstID])
-        let next = try await nextReady(&iterator, count: 1)
-        #expect(next.observedAt > first.observedAt)
-        let secondClient = Process()
-        secondClient.executableURL = URL(fileURLWithPath: "/bin/cat")
-        let secondInput = Pipe()
-        secondClient.standardInput = secondInput
-        secondClient.standardOutput = FileHandle.nullDevice
-        var secondExit = exits(secondClient).makeAsyncIterator()
-        try secondClient.run()
-        defer {
-            try? secondInput.fileHandleForWriting.close()
-            if secondClient.isRunning { secondClient.terminate() }
+        var observation: ActiveRunsObservation?
+        do {
+            let firstID = "run_00000000000000000000000000000001"
+            let secondID = "run_00000000000000000000000000000002"
+            try await publishClient(client, id: firstID, home: home)
+            let process = fixtureProcess(["runs", "--active", "--watch", "--json"], home: home)
+            let reader = try LocalActiveRunsObservation.start(process: process, configurationChanged: { false })
+            observation = reader
+            var iterator = reader.snapshots.makeAsyncIterator()
+            let first = try await nextReady(&iterator, count: 1)
+            #expect(URL(fileURLWithPath: first.home).resolvingSymlinksInPath().standardizedFileURL.path
+                    == home.standardizedFileURL.path)
+            #expect(first.gaps.isEmpty)
+            #expect(first.runs.map(\.id) == [firstID])
+            let next = try await nextReady(&iterator, count: 1)
+            #expect(next.observedAt > first.observedAt)
+            let secondClient = Process()
+            secondClient.executableURL = URL(fileURLWithPath: "/bin/cat")
+            let secondInput = Pipe()
+            secondClient.standardInput = secondInput
+            secondClient.standardOutput = FileHandle.nullDevice
+            var secondExit = exits(secondClient).makeAsyncIterator()
+            try secondClient.run()
+            defer {
+                try? secondInput.fileHandleForWriting.close()
+                if secondClient.isRunning { secondClient.terminate() }
+            }
+            do {
+                try await publishClient(secondClient, id: secondID, home: home)
+                let published = try await nextReady(&iterator, count: 2)
+                #expect(Set(published.runs.map(\.id)) == [firstID, secondID])
+                await reader.request(.rescan)
+                let recovered = try await nextReady(&iterator, count: 2)
+                #expect(recovered.gaps.isEmpty)
+                #expect(recovered.home == first.home)
+                try secondInput.fileHandleForWriting.close()
+                #expect(await secondExit.next() == 0)
+                let afterExit = try await nextReady(&iterator, count: 1)
+                #expect(afterExit.runs.map(\.id) == [firstID])
+                await reader.cancel()
+                #expect(!process.isRunning)
+                #expect(process.terminationStatus == 0)
+                #expect(client.isRunning)
+                try clientInput.fileHandleForWriting.close()
+                #expect(await clientExit.next() == 0)
+            } catch {
+                try? secondInput.fileHandleForWriting.close()
+                if secondClient.isRunning { secondClient.terminate() }
+                _ = await secondExit.next()
+                throw error
+            }
+        } catch {
+            await observation?.cancel()
+            try? clientInput.fileHandleForWriting.close()
+            if client.isRunning { client.terminate() }
+            _ = await clientExit.next()
+            throw error
         }
-        try publishClient(secondClient, id: secondID, home: home)
-        let published = try await nextReady(&iterator, count: 2)
-        #expect(Set(published.runs.map(\.id)) == [firstID, secondID])
-        await reader.request(.rescan)
-        let recovered = try await nextReady(&iterator, count: 2)
-        #expect(recovered.gaps.isEmpty)
-        #expect(recovered.home == first.home)
-        try secondInput.fileHandleForWriting.close()
-        #expect(await secondExit.next() == 0)
-        let afterExit = try await nextReady(&iterator, count: 1)
-        #expect(afterExit.runs.map(\.id) == [firstID])
-        await reader.cancel()
-        #expect(!process.isRunning)
-        #expect(process.terminationStatus == 0)
-        #expect(client.isRunning)
-        try clientInput.fileHandleForWriting.close()
-        #expect(await clientExit.next() == 0)
     }
 
     private func exits(_ process: Process) -> AsyncStream<Int32> {
@@ -255,7 +264,7 @@ struct ActiveRunsObservationTests {
         throw RegistryQueryError("Reader ended before a complete observation")
     }
 
-    private func publishClient(_ client: Process, id: String, home: URL) throws {
+    private func publishClient(_ client: Process, id: String, home: URL) async throws {
         let directory = home.appendingPathComponent("runs/00/\(id)")
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("provider-clients"), withIntermediateDirectories: true)
         let manifest: [String: Any] = [
@@ -270,6 +279,40 @@ struct ActiveRunsObservationTests {
                                       "terminal_id": NSNull(), "started_at": Date().ISO8601Format(.init(includingFractionalSeconds: true))]
         try JSONSerialization.data(withJSONObject: receipt).write(
             to: directory.appendingPathComponent("provider-clients/\(client.processIdentifier).json"), options: .atomic)
+        let native: [String: Any] = ["schema_version": 1, "provider_session_id": "fixture-\(id)", "account_id": NSNull()]
+        try JSONSerialization.data(withJSONObject: native).write(
+            to: directory.appendingPathComponent("provider-session.json"), options: .atomic)
+        let output = home.appendingPathComponent("import-\(id).json")
+        try Data().write(to: output)
+        let handle = try FileHandle(forWritingTo: output)
+        defer { try? handle.close() }
+        let command = fixtureProcess(["session", "import", "--json"], home: home)
+        command.standardOutput = handle
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
+            command.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+            do { try command.run() }
+            catch { command.terminationHandler = nil; continuation.resume(throwing: error) }
+        }
+        try #require(status == 0)
+        let report = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: output)) as? [String: Any])
+        let failures = try #require(report["failed"] as? [[String: Any]])
+        try #require(failures.isEmpty, "Import failed: \(failures)")
+        try #require(report["interactive"] as? Int == 1)
+    }
+
+    private func fixtureProcess(_ arguments: [String], home: URL) -> Process {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let binary = root.appendingPathComponent("target/debug/lf").path
+        let process = LocalWaveAgentLauncher.queryProcess([binary] + arguments, cwd: home.path)
+        var environment = (process.environment ?? [:]).filter {
+            !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_")
+        }
+        for key in ["LF_BIN", "LF_CONTROL_BIN"] { environment[key] = binary }
+        for key in ["LF_HOME", "LF_CONTROL_HOME"] { environment[key] = home.path }
+        for key in ["LF_DB_PATH", "LF_CONTROL_DB_PATH"] { environment[key] = home.appendingPathComponent("loopflow.db").path }
+        process.environment = environment
+        return process
     }
 
     private func directory() throws -> URL {

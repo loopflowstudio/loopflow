@@ -226,6 +226,10 @@ Final static checks pass: `cargo fmt --check`, `cargo clippy --all-targets --
 architecture inventory and `git diff --check`. The populated Flow upgrade also
 passes on the ordinary source draft frontier (`runtime-children-source-upgrade.log`,
 one selected test). Website docs were regenerated through `dev.py sync-docs`.
+Ruff passes the deletion fixture. Direct lint of the raw OpenCode provider template
+reports the same seven diagnostics on c928 and this slice (six pre-existing line
+lengths plus its substituted `__WAIT__` placeholder); `runtime-ruff-baseline.json`
+retains that comparison. It is not a passing template-wide Ruff result.
 These are focused implementation checks; no full diagnostic or gate reran.
 
 Remaining: review/integrate discovery and released import; final typed history

@@ -117,8 +117,11 @@ continuation appends a new result to the same conversation.
 A Flow step consumes one exact successful AgentSession completion under its
 boundary/version/claim fence. Later conversation continuation does not rewrite
 that consumed result. A mechanical step records its own start/result in Flow
-history without inventing an AgentSession or child Exec. Recovery cannot infer
-exactly-once external effects from cursor movement.
+history under its own child `lf` Exec, without inventing an AgentSession. The
+driver retains navigation authority and consumes the saved result. Recovery
+waits for a surviving step before replacing the driver claim; a missing result
+after process death still requires inspection before retry. Cursor movement
+cannot prove exactly-once external effects.
 
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate

@@ -109,7 +109,46 @@ the launcher survives. The store proof preserves capture/cursor/generation and
 rejects writes with the old claim. These fixtures do not prove public Task worker
 startup, a surviving step after driver death, or the complete parent tree.
 
-Next: replace the in-process Task/Saved launchers with the common child executor,
-move reservation into that child, and preserve live Task steers/attachment through
-the common provider path. Recover the selected step Exec before replacing its
-driver claim. Then run the full isolated Rust matrix before the next publication.
+Mechanical boundaries now execute through hidden `lf __flow-step ID VERSION`.
+The child uses the driver's exact executable and inherited data context, reads the
+captured operation, and records its own Exec on the existing Flow start/result.
+The driver consumes a saved success without creating another step process.
+No new reservation object, result protocol or migration is introduced.
+
+Recovery waits for a surviving mechanical step before reclaiming its driver;
+missing exact process evidence remains unresolved. Task status includes the
+selected live step, checkout restoration retains its ownership, and stop waits
+for both driver and step death before releasing the claim. These are selected
+operation links, not authority inferred from causal ancestry.
+
+The initial stop proof caught an unintended Interrupt write for unknown process
+identity. It is fixed: interruption still requires live driver or selected-step
+evidence. Focused proof covers real public child processes, success then failure,
+killed-driver recovery without replay, Task Started/claim retention, stale child
+rejection, and prior stop/missing-outcome cases. Logs and final validation follow
+in the checkpoint evidence; this remains a mechanical slice, not full item 1.
+
+Next: move agent reservation and execution into this same child entry. Delete
+TaskLauncher/SavedLauncher by moving Task seed/account/steer/attachment support
+into the common provider executor. Capture ownership, surviving provider recovery,
+agent-issued descendants and driver-handoff ancestry remain outstanding. The full isolated Rust matrix passes before this checkpoint; rerun it
+before publishing another source change. Attribution reduction and the
+separate naming commit still follow the complete process-owner conversion.
+
+Review before checkpoint: moving the operation into a child exposed three
+concrete edges. The synchronous operation stays on a blocking thread because
+some operations own a Tokio runtime. A retained successful result bypasses child
+creation on resume. Unknown Task process identity must leave interrupt history
+unchanged. All three are reflected in the code and focused proof. The final
+focused command passed 13 tests, with one nextest leaky-handle diagnostic in the
+existing execution-state test (`.lf/tmp/cut-i/exec-step-final-focused.log`). The
+architecture check passes after registering the new process boundary.
+
+Final checkpoint proof: 2,032 materialized Rust tests passed, 16 skipped, none
+unrun, fail-fast disabled. All-target Clippy, formatting and architecture checks
+pass. The full matrix exposed the simulated worker's missing startup adoption
+and landing's old in-process ancestry assertion; both fixtures now model the
+actual contract. Landing's repair command also consumes its thread tool caller
+before invoking rebase. [Evidence](evidence.md#mechanical-flow-step-checkpoint)
+retains intermediate failures and exact logs. No agent-step or configured-provider
+acceptance follows from this mechanical checkpoint.

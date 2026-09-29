@@ -554,15 +554,20 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             )));
         }
     }
-    if let Some(claim) = store
-        .task_flow(&task.id)
-        .await
-        .map_err(task_error)?
-        .and_then(|position| position.claim)
-    {
-        if crate::journal::task_worker_owner_evidence(&claim.owner)
-            != crate::journal::ProcessIdentityEvidence::Dead
-        {
+    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
+        let driver_may_live = position.claim.as_ref().is_some_and(|claim| {
+            crate::journal::task_worker_owner_evidence(&claim.owner)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        });
+        let step_may_live = store
+            .sqlite
+            .pending_flow_operation_exec(position.id())
+            .map_err(task_error)?
+            .is_some_and(|exec| {
+                crate::journal::exec_process_evidence(&store.sqlite, &exec)
+                    != crate::journal::ProcessIdentityEvidence::Dead
+            });
+        if driver_may_live || step_may_live {
             return Err(task_error("Task worker may still own the missing checkout; stop its execution before restoring it"));
         }
     }
@@ -2470,6 +2475,19 @@ async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         .task_flow(&task.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
+    if let Some(exec) = position
+        .as_ref()
+        .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+        .transpose()
+        .map_err(task_error)?
+        .flatten()
+    {
+        if crate::journal::exec_process_evidence(&store.sqlite, &exec)
+            == crate::journal::ProcessIdentityEvidence::Live
+        {
+            return Ok(true);
+        }
+    }
     Ok(position
         .and_then(|position| position.claim)
         .is_some_and(|claim| {
@@ -2492,8 +2510,20 @@ async fn stop_task_worker(
     else {
         return Ok(position);
     };
-    let evidence = crate::journal::task_worker_owner_evidence(&claim.owner);
-    if evidence == crate::journal::ProcessIdentityEvidence::Live {
+    let step_live = position
+        .as_ref()
+        .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+        .transpose()
+        .map_err(task_error)?
+        .flatten()
+        .is_some_and(|exec| {
+            crate::journal::exec_process_evidence(&store.sqlite, &exec)
+                == crate::journal::ProcessIdentityEvidence::Live
+        });
+    if step_live
+        || crate::journal::task_worker_owner_evidence(&claim.owner)
+            == crate::journal::ProcessIdentityEvidence::Live
+    {
         store
             .append_interrupt(&WorkRef::Task(task.id.clone()))
             .await
@@ -2501,7 +2531,7 @@ async fn stop_task_worker(
     }
     let graceful_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     let termination_deadline = graceful_deadline + Duration::from_secs(3);
-    let mut signaled = false;
+    let mut signaled = std::collections::HashSet::new();
     loop {
         let current = store
             .task_flow(&task.id)
@@ -2523,14 +2553,29 @@ async fn stop_task_worker(
                 task.plan.identifier, task.plan.identifier
             )));
         }
-        match crate::journal::task_worker_owner_evidence(&claim.owner) {
+        let step = current
+            .as_ref()
+            .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+            .transpose()
+            .map_err(task_error)?
+            .flatten();
+        let step_evidence = step
+            .as_ref()
+            .map(|exec| crate::journal::exec_process_evidence(&store.sqlite, exec));
+        if step_evidence == Some(crate::journal::ProcessIdentityEvidence::Unknown) {
+            return Err(task_error("cannot confirm the selected Task step process identity; execution remains unresolved"));
+        }
+        let driver_evidence = crate::journal::task_worker_owner_evidence(&claim.owner);
+        match driver_evidence {
             crate::journal::ProcessIdentityEvidence::Unknown => {
                 return Err(task_error(format!(
                     "cannot confirm Task {} worker {} process identity; execution remains unresolved",
                     task.plan.identifier, claim.owner.exec_id
                 )));
             }
-            crate::journal::ProcessIdentityEvidence::Dead => {
+            crate::journal::ProcessIdentityEvidence::Dead
+                if step_evidence != Some(crate::journal::ProcessIdentityEvidence::Live) =>
+            {
                 // Release only the captured claim. A concurrent replacement is
                 // rejected by the same transaction used by worker settlement.
                 return if let Some(current) = current.as_ref().filter(|flow| flow.claim.is_some()) {
@@ -2543,7 +2588,8 @@ async fn stop_task_worker(
                     Ok(current)
                 };
             }
-            crate::journal::ProcessIdentityEvidence::Live => {}
+            crate::journal::ProcessIdentityEvidence::Live
+            | crate::journal::ProcessIdentityEvidence::Dead => {}
         }
         let now = tokio::time::Instant::now();
         if now >= termination_deadline {
@@ -2552,19 +2598,51 @@ async fn stop_task_worker(
                 task.plan.identifier, claim.owner.exec_id, task.plan.identifier
             )));
         }
-        if !signaled && now >= graceful_deadline {
-            let status = tokio::process::Command::new("kill")
-                .args(["-TERM", &claim.owner.pid.to_string()])
-                .status()
-                .await
-                .map_err(task_error)?;
-            if !status.success() {
-                return Err(task_error(format!(
-                    "failed to stop Task {} worker {}; termination is unconfirmed",
-                    task.plan.identifier, claim.owner.exec_id
-                )));
+        if now >= graceful_deadline {
+            let mut owners = Vec::new();
+            if let Some(exec) = step
+                .filter(|_| step_evidence == Some(crate::journal::ProcessIdentityEvidence::Live))
+            {
+                let receipts =
+                    crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+                        .map_err(task_error)?;
+                if let Some(receipt) = receipts
+                    .into_iter()
+                    .find(|receipt| receipt.exec_id == exec.as_str())
+                {
+                    owners.push(crate::durable::TaskWorkerOwner {
+                        trace_id: crate::id::TraceId::parse(&receipt.trace_id)
+                            .map_err(task_error)?,
+                        exec_id: exec,
+                        pid: receipt.pid,
+                        started_at: receipt.started_at,
+                    });
+                }
+                // A step may finish between observations; reread its result on
+                // the next pass instead of treating receipt cleanup as failure.
             }
-            signaled = true;
+            if driver_evidence == crate::journal::ProcessIdentityEvidence::Live {
+                owners.push(claim.owner.clone());
+            }
+            for owner in owners {
+                if !signaled.contains(&owner.exec_id)
+                    && crate::journal::task_worker_owner_evidence(&owner)
+                        == crate::journal::ProcessIdentityEvidence::Live
+                {
+                    let status = tokio::process::Command::new("kill")
+                        .args(["-TERM", &owner.pid.to_string()])
+                        .status()
+                        .await
+                        .map_err(task_error)?;
+                    if !status.success() {
+                        return Err(task_error(format!(
+                            "failed to stop Task {} Exec {}; termination is unconfirmed",
+                            task.plan.identifier, owner.exec_id
+                        )));
+                    }
+                    signaled.insert(owner.exec_id);
+                }
+            }
         }
         // A released claim or successful signal does not establish process death.
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2622,8 +2700,16 @@ pub(crate) async fn launch_task_process(
                     return Ok(());
                 }
                 crate::journal::ProcessIdentityEvidence::Dead => {
-                    // The dead worker's unfinished attempt ends; a decision it
-                    // recorded stays for the new worker to settle.
+                    // A child step can outlive its driver. Preserve its claim
+                    // until it records the effect before replacing the driver.
+                    let current = store
+                        .task_flow(&task.id)
+                        .await
+                        .map_err(task_error)?
+                        .ok_or_else(|| task_error("Task Flow disappeared"))?;
+                    crate::lf::commands::flow::wait_for_step(store, &current)
+                        .await
+                        .map_err(task_error)?;
                     store
                         .reclaim_task_worker(
                             &task.id,
@@ -5310,6 +5396,19 @@ mod tests {
     }
 
     async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowSession {
+        claim_stop_fixture_for(
+            fixture,
+            pid,
+            crate::durable::test_flow_invocation("code", 0, "implement", None, false),
+        )
+        .await
+    }
+
+    async fn claim_stop_fixture_for(
+        fixture: &TaskFixture,
+        pid: u32,
+        invocation: crate::engine::invocation::QueuedInvocation,
+    ) -> crate::durable::FlowSession {
         let started_at = time::OffsetDateTime::now_utc().unix_timestamp();
         let position = fixture
             .store
@@ -5324,13 +5423,7 @@ mod tests {
                     model: None,
                     current_attempt: None,
                     finished: false,
-                    invocation: crate::durable::test_flow_invocation(
-                        "code",
-                        0,
-                        "implement",
-                        None,
-                        false,
-                    ),
+                    invocation,
                     pending_session_id: None,
                     ready_summary: None,
                     cursor: Default::default(),
@@ -5387,6 +5480,100 @@ mod tests {
             crate::journal::task_worker_owner_evidence(owner),
             crate::journal::ProcessIdentityEvidence::Live,
             "fixture receipt must describe the spawned process",
+        );
+    }
+
+    #[tokio::test]
+    async fn task_stop_waits_for_selected_step_after_driver_death() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let fixture = task_fixture("STOP-STEP").await;
+        let mut driver = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut step = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let invocation = crate::engine::invocation::QueuedInvocation::new(
+            "operation",
+            vec![crate::engine::ConcreteStep::Op(crate::engine::ConcreteOp {
+                item: crate::engine::flow::Op {
+                    command: "rebase".into(),
+                    args: vec!["--plan".into()],
+                },
+                flow_parents: vec![],
+            })],
+        )
+        .unwrap();
+        let position = claim_stop_fixture_for(&fixture, driver.id().unwrap(), invocation).await;
+        record_stop_process(ledger.home(), &position);
+        let mut step_position = position.clone();
+        let step_owner = &mut step_position.claim.as_mut().unwrap().owner;
+        step_owner.exec_id = crate::id::ExecId::new();
+        step_owner.pid = step.id().unwrap();
+        let exec = step_owner.exec_id.clone();
+        record_stop_process(ledger.home(), &step_position);
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?2,1)",
+            rusqlite::params![
+                exec.as_str(),
+                position.claim.as_ref().unwrap().owner.trace_id.as_str()
+            ],
+        )
+        .unwrap();
+        fixture
+            .store
+            .sqlite
+            .begin_flow_operation(
+                position.id(),
+                position.version,
+                position.claim.as_ref(),
+                Some(&exec),
+            )
+            .unwrap();
+        driver.kill().await.unwrap();
+        driver.wait().await.unwrap();
+        assert!(super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
+        let execution =
+            crate::ops::task_execution::task_execution(&fixture.store, &fixture.task.id)
+                .await
+                .unwrap();
+        assert_eq!(
+            execution.state,
+            crate::ops::task_execution::TaskExecutionState::Running
+        );
+        assert!(execution.reason.contains(exec.as_str()));
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                crate::lf::commands::flow::wait_for_step(&fixture.store, &position)
+            )
+            .await
+            .is_err(),
+            "replacement cannot invalidate a live step's claim"
+        );
+        assert!(step.try_wait().unwrap().is_none());
+        let (stopped, exit) = tokio::join!(
+            super::stop_task_worker(&fixture.store, &fixture.task),
+            step.wait()
+        );
+        assert!(!exit.unwrap().success());
+        assert!(stopped.unwrap().unwrap().claim.is_none());
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM flow_events WHERE kind='operation_completed'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0,
+            "termination cannot invent an operation outcome"
         );
     }
 

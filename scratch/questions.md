@@ -82,3 +82,12 @@ clear i still want being called by an agent process to give you the right
 parent-lf process as your lf exec parent." An lf command issued by an agent
 records, as its parent Exec, the lf process that is driving that agent. The
 provider and shell processes in between are not Execs and are skipped.
+
+## Mechanical child entry · 2026-09-29
+
+Implementation choice under Jack Heart's accepted Exec-per-step direction:
+`__flow-step ID VERSION` is a hidden entry for captured boundaries. Internal
+children use the invoking driver's executable and inherited store, so a PATH or
+selected-installation change cannot silently swap schemas during a Flow. The
+existing full Task claim travels as launch context and remains owned by the
+driver; no second durable authority is added. Agent conversion is still pending.

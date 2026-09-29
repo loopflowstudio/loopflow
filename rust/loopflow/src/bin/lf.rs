@@ -1749,6 +1749,9 @@ fn execute_command(
             task.as_deref(),
             *json,
         ),
+        Some(Commands::FlowStep { id, version }) => {
+            loopflow::lf::commands::flow::run_step(id, *version)
+        }
         Some(Commands::Exec { cmd }) => loopflow::lf::commands::exec::run(cmd),
         Some(Commands::Runs {
             active,

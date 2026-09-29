@@ -95,7 +95,7 @@ result in the operating conversation: a Flow decision is returned by the selecte
 successful agent turn and consumed from AgentSession history. He named PydanticAI's
 typed-output logic as the inspiration. The in-turn `lf flow decide` path must not
 remain a second writer for those boundaries. This supersedes the "asked,
-unanswered" entry above. Implementation shape is still to be designed.
+unanswered" entry above. The captured boundary supplies a native output schema; exact successful output owns settlement.
 
 2026-09-29 · **Captured-input naming: reframed, not decided.** Jack rejected the
 candidate names. His principle: an ID is the ID of an object type in the data
@@ -136,3 +136,9 @@ attributed to Jack as a decision:
 - Usage after bind stays prospective, as implemented and proven. Jack's lean
   toward post-hoc attribution, read from the Session's Task at query time, is
   carried to the concept review as an open finding, not built now.
+
+2026-09-29 · **Blocked feedback retained.** The consumer inventory identifies
+`lf flow blocked` as a keyed Ask returning feedback mid-turn, not a verdict.
+The structured-result implementation retains that interaction under the selected
+conversation's current driver. No decision or route writer survives. Jack has
+not selected a replacement for this Ask interaction; bring it to concept review.

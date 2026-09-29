@@ -3,7 +3,6 @@
 import json
 import os
 import queue
-import subprocess
 import sys
 import threading
 import time
@@ -26,7 +25,7 @@ def _event(kind, **properties):
     EVENTS.put({"type": kind, "properties": properties})
 
 
-def _launch(session, request, prompt):
+def _launch(session, request, prompt, output_format):
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_RUN_ID"] + "\n")
     assistant = "msg_" + uuid.uuid4().hex
@@ -41,7 +40,7 @@ def _launch(session, request, prompt):
     transient = HOME / "transient-once"
     if transient.exists() and "Decide the fixture." in str(prompt):
         transient.unlink()
-        (HOME / "original-caller").write_text(os.environ["LF_AGENT_CALLER"])
+        info["structured_output"] = {"decision": "iterate", "summary": "Failed turn cannot navigate"}
         info["error"] = {"name": "APIError", "data": {"message": "fixture status 502"}}
     elif fail.exists():
         fail.unlink()
@@ -55,23 +54,25 @@ def _launch(session, request, prompt):
         if not reply.wait(15):
             info["error"] = {"name": "APIError", "data": {"message": "fixture permission unanswered"}}
         else:
-            env = os.environ.copy()
-            env.update(LF_HOME=env["LF_CONTROL_HOME"], LF_DB_PATH=env["LF_CONTROL_DB_PATH"])
-            original = HOME / "original-caller"
-            if original.exists():
-                stale = env | {"LF_AGENT_CALLER": original.read_text()}
-                rejected = subprocess.run([env["LF_BIN"], "flow", "decide", "advance", "Earlier request"], env=stale, capture_output=True, text=True, timeout=15)
-                (HOME / "old-decision.log").write_text(rejected.stdout + rejected.stderr)
-                original.unlink()
-            repeats = HOME / "remaining-passes"
-            remaining = int(repeats.read_text()) if repeats.exists() else 0
-            decision = "iterate" if remaining else "advance"
-            output = subprocess.run([env["LF_BIN"], "flow", "decide", decision, "Proof observed"],
-                                    env=env, capture_output=True, text=True, timeout=15)
-            if output.returncode == 0 and remaining:
-                repeats.write_text(str(remaining - 1))
-            with (HOME / "decide.log").open("a") as log:
-                log.write(output.stdout + output.stderr)
+            if output_format:
+                assert output_format["type"] == "json_schema"
+                schema = output_format["schema"]
+                assert schema["additionalProperties"] is False
+                repeats = HOME / "remaining-passes"
+                remaining = int(repeats.read_text()) if repeats.exists() else 0
+                if "decision" in schema["properties"]:
+                    decision = "iterate" if remaining else "advance"
+                    info["structured_output"] = {"decision": decision, "summary": "Proof observed"}
+                    invalid = HOME / "invalid-output-once"
+                    if invalid.exists() or (HOME / "invalid-output-always").exists():
+                        invalid.unlink(missing_ok=True)
+                        info["structured_output"] = {"decision": "unknown"}
+                    elif remaining:
+                        repeats.write_text(str(remaining - 1))
+                else:
+                    info["structured_output"] = {"path": schema["properties"]["path"]["enum"][0]}
+                with (HOME / "decide.log").open("a") as log:
+                    log.write(json.dumps(info["structured_output"]) + "\n")
             if (HOME / "disconnect-after-tool").exists():
                 (HOME / "tool-effect").write_text("completed")
                 EVENTS.put(None)
@@ -142,7 +143,7 @@ class Server(BaseHTTPRequestHandler):
                     "request": body,
                 }))
             self._json({})
-            threading.Thread(target=_launch, args=(self.path.split("/")[2], body["messageID"], body["parts"]), daemon=True).start()
+            threading.Thread(target=_launch, args=(self.path.split("/")[2], body["messageID"], body["parts"], body.get("format")), daemon=True).start()
         elif self.path.startswith("/permission/"):
             assert body == {"reply": "once"}
             REPLIES[self.path.split("/")[2]].set()

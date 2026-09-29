@@ -8,6 +8,7 @@ pub mod event;
 pub mod execution;
 pub mod flow;
 pub mod flow_graph;
+pub mod flow_output;
 pub mod git;
 pub mod identity;
 pub mod launch;

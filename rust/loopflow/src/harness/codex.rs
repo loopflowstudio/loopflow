@@ -836,11 +836,11 @@ impl Harness for CodexHarness {
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let input = json!([{ "type": "text", "text": turn_text }]);
 
-        self.send_request(
-            "turn/start",
-            json!({ "threadId": thread_id, "input": input }),
-        )
-        .await?;
+        let mut params = json!({ "threadId": thread_id, "input": input });
+        if let Some(schema) = self.launch.as_ref().and_then(AgentConfig::output_schema) {
+            params["outputSchema"] = schema;
+        }
+        self.send_request("turn/start", params).await?;
         Ok(())
     }
 
@@ -1090,22 +1090,8 @@ impl CodexHarness {
         // Tool authority belongs to this conversation, including when another
         // conversation later shares its engine. Pass only explicit launch and
         // freshly resolved lf executable/Home values as thread configuration.
-        let mut tool_environment = super::conversation_environment(command.as_std(), launch);
-        let mut flow_selection = launch.flow_selection.clone();
-        if let Some(selection) = &mut flow_selection {
-            // Each automatic retry is a new native turn. Descendants retain
-            // this launch's identity even after the thread resumes another.
-            selection.caller_token = Some(uuid::Uuid::new_v4().to_string());
-            let encoded = tool_environment
-                .get(crate::exec::AGENT_CALLER_ENV)
-                .ok_or_else(|| anyhow!("Flow launch has no conversation caller"))?;
-            let mut caller: crate::exec::AgentCaller = serde_json::from_str(encoded)?;
-            caller.flow_turn = selection.caller_token.clone();
-            tool_environment.insert(
-                crate::exec::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&caller)?,
-            );
-        }
+        let tool_environment = super::conversation_environment(command.as_std(), launch);
+        let flow_selection = launch.flow_selection.clone();
         // The engine can host another conversation. Only this thread receives
         // its caller/capture provenance; engine defaults must not lend it to a
         // newly admitted sibling.

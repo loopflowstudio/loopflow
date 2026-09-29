@@ -33,6 +33,7 @@ class Responses(ThreadingHTTPServer):
         self.transient = False
         self.fail_request: int | None = None
         self.commands: dict[int, str] = {}
+        self.invalid_decision_output = False
         self.held = threading.Event()
         self.release = threading.Event()
         self.command = (
@@ -98,11 +99,20 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             }
         else:
+            text = "Fixture complete."
+            if output_format := request.get("text", {}).get("format"):
+                if output_format.get("type") == "json_schema":
+                    schema = output_format["schema"]
+                    assert schema["additionalProperties"] is False
+                    text = json.dumps(
+                        {"decision": "unknown"} if self.server.invalid_decision_output
+                        else {"decision": "advance", "summary": "Native output proof"}
+                    )
             item = {
                 "type": "message",
                 "id": "msg_done",
                 "role": "assistant",
-                "content": [{"type": "output_text", "text": "Fixture complete."}],
+                "content": [{"type": "output_text", "text": text}],
             }
         response = {"id": "resp_provenance", "status": "in_progress", "output": []}
         self._event("response.created", {"response": response})
@@ -926,12 +936,9 @@ def _flow_decision_retry_contract(
         "flow",
         "decide",
     ]
-    server.commands[3] = shlex.join(
-        decision + ["iterate" if replace else "advance", "decision from failed native turn"]
-    )
-    server.commands[5] = (
-        shlex.join(decision + ["advance", "retry decision"]) if replace else "printf no-decision"
-    )
+    server.invalid_decision_output = not replace
+    server.commands[3] = "printf failed-turn-work"
+    server.commands[5] = "printf retry-work"
     if late:
         child = work / "delayed-decision.py"
         child.write_text(
@@ -991,21 +998,21 @@ def _flow_decision_retry_contract(
             "Flow accepted a failed turn descendant decision after its successor started",
             results["late_result"],
         )
-    else:
-        assert any("Decision recorded" in value for value in outputs), outputs
+    schemas = [request.get("text", {}).get("format") for request in server.requests]
+    assert any(schema and schema.get("type") == "json_schema" for schema in schemas), schemas
     completed = [
         (seq, json.loads(payload)["status"])
         for seq, kind, _, payload in results["history"]
         if kind == "completed"
     ]
-    assert [status for _, status in completed] == ["completed", "failed", "completed"]
+    assert [status for _, status in completed] == (["completed", "failed", "completed"] if replace else ["completed", "failed", "completed", "completed", "completed"])
     consumed = [seq for kind, seq in results["flow_events"] if kind == "consumed"]
     if replace:
         assert command.returncode == 0 and results["flow"][0] == "completed", results
         assert consumed == [completed[0][0], completed[2][0]], consumed
     else:
         assert command.returncode != 0 and results["flow"][0] == "current", results
-        assert "requires a decision" in command.stderr, command.stderr
+        assert "structured output validation exhausted" in command.stderr, command.stderr
         assert consumed == [completed[0][0]], consumed
         assert json.loads(results["flow"][2])["progress"].get("verdict") is None
     results["failed_decision_discarded"] = "passed"

@@ -180,6 +180,13 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    pub fn output_schema(&self) -> Option<serde_json::Value> {
+        self.flow_selection
+            .as_ref()?
+            .output
+            .as_ref()
+            .map(|output| output.schema())
+    }
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -604,6 +611,7 @@ pub struct ClaudeArgs {
     pub chrome: bool,
     /// Resume an existing Claude Code session.
     pub resume_id: Option<String>,
+    pub output_schema: Option<serde_json::Value>,
 }
 
 impl ClaudeArgs {
@@ -689,6 +697,11 @@ impl ClaudeArgs {
             args.push(id.clone());
         }
 
+        if let Some(schema) = &self.output_schema {
+            args.push("--json-schema".into());
+            args.push(schema.to_string());
+        }
+
         args
     }
 }
@@ -712,6 +725,7 @@ fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs 
         stream: true,
         chrome: false,
         resume_id: resume_id.map(str::to_string),
+        output_schema: config.output_schema(),
     }
 }
 
@@ -735,6 +749,7 @@ pub fn build_claude_stream_session_args(
 ) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
+        "--replay-user-messages".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
     ];
@@ -915,6 +930,7 @@ pub fn build_claude_command(
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
+        output_schema: launch.output_schema(),
     };
     cmd.extend(claude_args.to_args());
 
@@ -1721,7 +1737,10 @@ fn _launch_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
+    if (matches!(harness.as_str(), "codex" | "opencode")
+        || (harness == "claude" && launch.flow_selection.is_some()))
+        && process.auto
+    {
         return _launch_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
@@ -2857,6 +2876,7 @@ trust_level = "trusted"
             stream: true,
             chrome: true,
             resume_id: Some("sess_abc".to_string()),
+            output_schema: None,
         }
         .to_args();
         assert!(args.contains(&"--chrome".to_string()));

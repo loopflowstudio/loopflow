@@ -1726,7 +1726,7 @@ fn dispatch(
                 args: rest,
                 json,
             }) => {
-                if matches!(name.as_str(), "decide" | "route" | "blocked" | "resume") {
+                if matches!(name.as_str(), "blocked" | "resume") {
                     return loopflow::lf::commands::flow::control(name, rest, &cli);
                 }
                 if name == "list" {

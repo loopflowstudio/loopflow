@@ -53,8 +53,8 @@ The same applies to other reviews: completion returns feedback, not a verdict.
 Carry accepted changes, unresolved questions, and the concrete next action into
 the decision summary, with references the next step can follow.
 
-A rejected decision command is correction feedback, not a failed work pass.
-Correct its reported shape or authority error within this Run when possible;
+Output validation feedback requests a corrected value in this same conversation.
+Return the declared verdict and evidence summary;
 do not rerun implementation to repair output. Missing or malformed output does
 not establish that the work made no progress. If the protocol still cannot be
 satisfied, leave the specific failure visible rather than inventing success.

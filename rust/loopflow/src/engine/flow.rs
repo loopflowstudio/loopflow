@@ -897,10 +897,7 @@ pub fn build_xor_routing_suffix(xor_def: &ConcreteXor) -> String {
         let path = &xor_def.paths[*key];
         suffix.push_str(&format!("- **{key}**: {}\n", path.description));
     }
-    suffix.push_str(
-        "\nRecord your choice with `lf flow route PATH`, replacing PATH with one listed key.\n\
-         Explain your reasoning briefly. Your final prose alone does not select a path.\n",
-    );
+    suffix.push_str("\nReturn the declared JSON object with `path` set to one listed key.\n");
     suffix
 }
 
@@ -951,7 +948,7 @@ fn expand_branch_def(
             action_style: None,
             content: Some(
                 "Read the preceding findings and choose the right path forward. \
-                 Record the choice with `lf flow route PATH` using a listed path key."
+                 Return the declared JSON object with `path` set to a listed path key."
                     .to_string(),
             ),
         },
@@ -1986,12 +1983,12 @@ Design the feature.
         .unwrap();
         let suffix = build_xor_routing_suffix(&branch);
         assert!(suffix.find("**alpha**").unwrap() < suffix.find("**zeta**").unwrap());
-        assert!(suffix.contains("lf flow route PATH"));
+        assert!(suffix.contains("declared JSON object"));
         assert!(branch
             .router
             .content
             .unwrap()
-            .contains("lf flow route PATH"));
+            .contains("declared JSON object"));
         assert!(branch.paths.values().all(|path| path.steps.is_empty()));
     }
 

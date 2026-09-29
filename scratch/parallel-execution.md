@@ -31,13 +31,30 @@ bind remains prospective as an operating assumption pending Jack's decision.
 
 ## Current evidence
 
-HEAD `537e7924d`, PR #1296. Hosted run `36619025873`: Swift and UI pass;
-Rust 1,935 passed / one failed / 15 skipped / 64 unrun. The publication test now
-passes. `wave_resolution_matrix::registry_is_complete` lacks `exec list`, whose
-Wave argument filters recorded work. `exec show` has no Wave argument. The isolated no-fail-fast run (`ci-tail.log`) passed 72/72: all 64 hosted-unrun
-cases, the repaired classification, and seven macOS-only cases. The failed
-classification was first reproduced unchanged (`wave-matrix-red.log`). No green
-hosted matrix is claimed before publication.
+Published checkpoint `3dc30541f`, PR #1296: hosted run `36620826362`
+passes Rust, Swift, UI and all substantive checks. Scratch-clear and its aggregate
+remain red by design. The repaired tail passed 72/72 locally without fail-fast.
+
+The structured-result slice is under final local review. Captured boundaries now
+supply native schemas to Codex, Claude and OpenCode. Exact successful native output
+owns settlement; decide/route command writers are deleted. Invalid output retains
+history and gets at most two corrective turns in the same conversation, including
+recovery. Saved graph bytes remain intact; launch instructions supersede old
+command teaching. `lf flow blocked` remains the keyed feedback Ask and has no
+navigation authority; retaining that interaction is an operating choice for Jack's
+concept review, not a new product decision.
+
+Focused source proofs cover output ownership, Task/taskless continuation, native
+correction/exhaustion and retained runtime children. Public OpenCode fixtures pass
+four typed-result and four retained consumer cases. Real Codex with local synthetic
+Responses passes replacement, exhaustion and delayed removed-command rejection;
+this closes the former legitimate native retry failure within that fixture's
+scope, not configured-provider acceptance. Logs: `.lf/tmp/cut-i/structured-*.log`.
+A populated upgrade retains original receipt bytes/sequences, selected/consumed
+references, discovery indexing and Started in source and materialized schemas.
+The public correction proof caught and repaired feedback being misread as cursor
+movement; the migration proof caught and repaired a dropped discovery index.
+Claude correlation has a native-message fixture, not a configured Claude proof.
 
 Runtime loop children already use the shared driver/settlement transaction:
 retry retains the child, successful return occurs once, later passes are siblings,

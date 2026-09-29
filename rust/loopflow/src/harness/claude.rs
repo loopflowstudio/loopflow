@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -43,6 +44,7 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
+    requests: Arc<Mutex<HashSet<String>>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -58,9 +60,9 @@ impl std::fmt::Debug for ClaudeHarness {
 }
 
 /// Serialize one Claude Code stream-json user message.
-fn user_message_line(text: &str) -> String {
+fn user_message_line(text: &str, id: &str) -> String {
     let message = serde_json::json!({
-        "type": "user",
+        "type": "user", "uuid": id,
         "message": {"role": "user", "content": [{"type": "text", "text": text}]},
     });
     format!("{message}\n")
@@ -79,6 +81,7 @@ impl ClaudeHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
+            requests: Arc::new(Mutex::new(HashSet::new())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -126,15 +129,15 @@ impl ClaudeHarness {
                 let path = crate::store::database_path_from_env()?;
                 Ok::<_, anyhow::Error>((
                     crate::store::sqlite::SqliteStore::new(&path)?,
-                    session,
-                    driver,
+                    session.clone(),
+                    driver.clone(),
                 ))
             })
             .transpose()?;
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;
-        if let Some((store, session, driver)) = owner {
+        if let Some((store, session, driver)) = &owner {
             let recorded = (|| -> Result<()> {
                 if let Some(pid) = child.id() {
                     if let Some(start) = crate::journal::process_started_at(pid)? {
@@ -162,7 +165,15 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
-        self.spawn_reader(stdout);
+        self.spawn_reader(
+            stdout,
+            super::claude_history::History {
+                owner,
+                selection: config.flow_selection.clone(),
+                requests: self.requests.clone(),
+                pending: VecDeque::new(),
+            },
+        );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);
@@ -171,7 +182,11 @@ impl ClaudeHarness {
 
     /// The persistent NDJSON reader: maps events for the whole process lifetime
     /// and emits one `TurnCompleted` per coalesced runner turn.
-    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout) {
+    fn spawn_reader(
+        &mut self,
+        stdout: tokio::process::ChildStdout,
+        mut history: super::claude_history::History,
+    ) {
         let events = self.events.clone();
         let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
@@ -231,6 +246,14 @@ impl ClaudeHarness {
                     }
                 }
 
+                if let Err(error) = history.record(&line) {
+                    let _ = events.send(ConversationEvent::Error {
+                        code: "claude_history".into(),
+                        message: error.to_string(),
+                        evidence: None,
+                    });
+                    break;
+                }
                 let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
                 if let Some(session_id) = state.take_provider_session_id() {
                     *session_slot
@@ -407,7 +430,11 @@ impl Harness for ClaudeHarness {
         self.interrupt_requested.store(false, Ordering::SeqCst);
         self.ensure_process().await?;
 
-        let turn_id = format!("turn_{}", uuid::Uuid::new_v4());
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(turn_id.clone());
         *self
             .current_turn_id
             .lock()
@@ -423,7 +450,7 @@ impl Harness for ClaudeHarness {
             .as_mut()
             .ok_or_else(|| anyhow!("claude stdin not available"))?;
         if let Err(error) = stdin
-            .write_all(user_message_line(&turn_content).as_bytes())
+            .write_all(user_message_line(&turn_content, &turn_id).as_bytes())
             .await
         {
             // The process died between spawn and write; tear it down so the
@@ -454,7 +481,15 @@ impl Harness for ClaudeHarness {
         {
             return SendCurrentOutcome::NotSteerable;
         }
-        if let Err(error) = stdin.write_all(user_message_line(content).as_bytes()).await {
+        let request = uuid::Uuid::new_v4().to_string();
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(request.clone());
+        if let Err(error) = stdin
+            .write_all(user_message_line(content, &request).as_bytes())
+            .await
+        {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
                 error: format!("failed to write claude steer: {error}"),

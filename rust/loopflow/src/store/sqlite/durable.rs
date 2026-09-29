@@ -2241,26 +2241,19 @@ mod durable_store_tests {
         };
         let before = store.task_flow(&task_id).unwrap().unwrap();
         assert!(store
-            .record_flow_decision(id, position.version, &ExecId::new(), &verdict)
+            .test_decision_output(&ExecId::new(), &verdict)
             .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        store
-            .record_flow_decision(id, position.version, &actor, &verdict)
-            .unwrap();
-        store
-            .record_flow_decision(id, position.version, &actor, &verdict)
-            .unwrap();
+        store.test_decision_output(&actor, &verdict).unwrap();
+        store.test_decision_output(&actor, &verdict).unwrap();
         let different = crate::engine::transitions::FlowVerdict {
             decision: crate::engine::transitions::FlowDecision::Advance,
             summary: "changed mind".into(),
         };
         let before = store.task_flow(&task_id).unwrap().unwrap();
-        assert!(store
-            .record_flow_decision(id, position.version, &actor, &different)
-            .is_err());
+        assert!(store.test_decision_output(&actor, &different).is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        // The worker died: its Run ends as interrupted and its recorded
-        // direction survives for the replacement worker to settle.
+        // The worker died: retain its output as history, without a navigation candidate.
         store.test_finish_flow_turn(&actor, "interrupted");
         let replacement = store
             .reclaim_task_worker(
@@ -2270,11 +2263,10 @@ mod durable_store_tests {
                 time::OffsetDateTime::now_utc(),
             )
             .unwrap();
-        assert!(store
-            .record_flow_decision(id, position.version, &actor, &verdict)
-            .is_err());
+        store.test_decision_output(&actor, &verdict).unwrap();
+        assert!(store.flow_output(id).is_err());
         let recovered = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(recovered.cursor.progress.verdict, Some(verdict));
+        assert_eq!(recovered.cursor.progress.verdict, None);
         assert_eq!(recovered.claim, Some(replacement.clone()));
         assert_eq!(
             recovered
@@ -2286,7 +2278,7 @@ mod durable_store_tests {
             Some("interrupted")
         );
         // A reported provider failure differs from a crash: its result cannot
-        // authorize a later retry, even though the review direction survives.
+        // authorize a later retry; its output remains historical evidence.
         let released = store
             .release_flow(id, recovered.version, Some(&replacement))
             .unwrap();
@@ -2477,33 +2469,28 @@ mod durable_store_tests {
             if routing {
                 let before = store.task_flow(&task_id).unwrap().unwrap();
                 assert!(store
-                    .record_flow_path(id, saved.version, &ExecId::new(), "chosen")
-                    .is_err());
-                assert!(store
-                    .record_flow_path(id, saved.version, &actor, "missing")
+                    .test_output(&ExecId::new(), &serde_json::json!({"path": "chosen"}))
                     .is_err());
                 assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
                 store
-                    .record_flow_path(id, saved.version, &actor, "chosen")
+                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
                     .unwrap();
                 store
-                    .record_flow_path(id, saved.version, &actor, "chosen")
+                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
                     .unwrap();
                 let before = store.task_flow(&task_id).unwrap().unwrap();
                 assert!(store
-                    .record_flow_path(id, saved.version, &actor, "other")
+                    .test_output(&actor, &serde_json::json!({"path": "other"}))
                     .is_err());
                 assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
             } else {
-                store
-                    .record_flow_decision(id, saved.version, &actor, &verdict)
-                    .unwrap();
+                store.test_decision_output(&actor, &verdict).unwrap();
                 assert!(store
-                    .record_flow_path(id, saved.version, &actor, "chosen")
+                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
                     .is_err());
             }
             let pending = store.task_flow(&task_id).unwrap().unwrap();
-            assert!(pending.has_pending_decision());
+            assert!(!pending.has_pending_decision());
             assert_eq!(pending.cursor.progress, saved.cursor.progress);
             store.test_finish_flow_turn(&actor, "interrupted");
             let replacement = store
@@ -2516,12 +2503,10 @@ mod durable_store_tests {
                 .unwrap();
             let recovered = store.task_flow(&task_id).unwrap().unwrap();
             assert_eq!(recovered.cursor, pending.cursor);
-            assert!(store
-                .record_flow_path(id, recovered.version, &actor, "chosen")
-                .is_err());
-            assert!(store
-                .record_flow_decision(id, recovered.version, &actor, &verdict)
-                .is_err());
+            assert!(
+                store.flow_output(id).is_err(),
+                "interrupted outputs cannot navigate"
+            );
             assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), recovered);
             let cleared = if routing {
                 store
@@ -2599,9 +2584,7 @@ mod durable_store_tests {
             decision: FlowDecision::Advance,
             summary: "candidate before failure".into(),
         };
-        store
-            .record_flow_decision(id, position.version, &first_actor, &verdict)
-            .unwrap();
+        store.test_decision_output(&first_actor, &verdict).unwrap();
         store
             .release_flow(id, position.version, Some(&first_claim))
             .unwrap();
@@ -2615,9 +2598,11 @@ mod durable_store_tests {
         publish(&store, &failed, &second, &second_claim).unwrap();
         let second_actor = store.test_flow_turn(&second);
         let before = store.task_flow(&task_id).unwrap().unwrap();
-        assert!(store
-            .record_flow_decision(id, failed.version, &first_actor, &verdict)
-            .is_err());
+        store.test_decision_output(&first_actor, &verdict).unwrap();
+        assert!(
+            store.flow_output(id).is_err(),
+            "old output cannot satisfy the replacement"
+        );
         assert!(store
             .end_flow(id, position.version, Some(&first_claim), "")
             .is_err());
@@ -2633,9 +2618,7 @@ mod durable_store_tests {
         assert_eq!(inputs.len(), 2);
         assert!(inputs.contains(&first) && inputs.contains(&second));
         let history = store.session_history(&session.id, 0, 0).unwrap();
-        store
-            .record_flow_decision(id, failed.version, &second_actor, &verdict)
-            .unwrap();
+        store.test_decision_output(&second_actor, &verdict).unwrap();
         store.test_finish_flow_turn(&second_actor, "completed");
         store
             .end_flow(

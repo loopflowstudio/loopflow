@@ -1,6 +1,5 @@
 use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
-use crate::engine::transitions::{FlowDecision, FlowVerdict};
 use crate::engine::{
     expand_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
     ExecutionCursor, Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
@@ -174,45 +173,6 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 
 pub fn control(command: &str, args: &[String], cli: &Cli) -> Result<()> {
     match command {
-        "decide" => {
-            let decision = match args.first().map(String::as_str) {
-                Some("advance") => FlowDecision::Advance,
-                Some("iterate") => FlowDecision::Iterate,
-                _ => anyhow::bail!("usage: lf flow decide advance|iterate SUMMARY"),
-            };
-            let summary = args[1..].join(" ");
-            anyhow::ensure!(
-                !summary.trim().is_empty(),
-                "decision requires evidence or direction"
-            );
-            let verdict = FlowVerdict { decision, summary };
-            let step = active_step()?;
-            let actor =
-                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
-            block_on_store(|store| async move {
-                store
-                    .record_flow_decision(&step.invocation, step.version, &actor, &verdict)
-                    .await
-                    .map_err(Into::into)
-            })?;
-            println!("Decision recorded; it takes effect when its selected native turn finishes successfully.");
-            Ok(())
-        }
-        "route" => {
-            anyhow::ensure!(args.len() == 1, "usage: lf flow route PATH");
-            let actor =
-                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
-            let path = args[0].clone();
-            let step = active_step()?;
-            block_on_store(|store| async move {
-                store
-                    .record_flow_path(&step.invocation, step.version, &actor, &path)
-                    .await
-                    .map_err(Into::into)
-            })?;
-            println!("Route recorded; it takes effect when its selected native turn finishes successfully.");
-            Ok(())
-        }
         "blocked" => {
             let reason = args.join(" ");
             anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
@@ -752,24 +712,6 @@ impl CliFlowExecutor<'_> {
         self.observe(&flow);
         Ok(flow)
     }
-
-    /// The outcome the step's Run recorded on the row.
-    async fn finish(&self) -> Result<SkillOutcome> {
-        let flow = self
-            .store
-            .flow(&self.id)
-            .await?
-            .ok_or_else(|| anyhow!("Flow {} disappeared", self.id))?;
-        let leaf = flow.cursor.leaf();
-        Ok(if let Some(route) = &leaf.route {
-            SkillOutcome::Routed(route.clone())
-        } else {
-            leaf.progress.verdict.clone().map_or(
-                SkillOutcome::Completed { feedback: None },
-                SkillOutcome::Decided,
-            )
-        })
-    }
 }
 
 #[async_trait]
@@ -788,26 +730,44 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 None => SkillOutcome::Waiting,
             });
         }
-        let flow = self.reserve(flow).await?;
+        let mut flow = self.reserve(flow).await?;
         if let Some(progress) = ctx.progress {
             print_skill_progress(progress, &skill.skill.name);
         } else {
             print_nested_skill_progress(&skill.skill.name);
         }
-        // A completed attempt at this position is the step's completion.
-        if flow
-            .current_attempt
-            .as_ref()
-            .is_some_and(crate::durable::FlowAttempt::completed)
-        {
-            return self.finish().await;
+        loop {
+            if !flow
+                .current_attempt
+                .as_ref()
+                .is_some_and(crate::durable::FlowAttempt::completed)
+            {
+                let mut context = ctx.clone();
+                context.direction = flow
+                    .cursor
+                    .leaf()
+                    .progress
+                    .direction
+                    .clone()
+                    .or(context.direction);
+                let progress = self
+                    .launcher
+                    .launch(&flow, skill, &context, self.claim().as_ref())
+                    .await?;
+                *self.progress.lock().expect("Flow progress mutex poisoned") = progress;
+            }
+            match self.store.sqlite.flow_output(&self.id)? {
+                Ok(outcome) => return Ok(outcome),
+                Err(_) => {
+                    flow = self.store.sqlite.correct_flow_output(
+                        &self.id,
+                        self.version(),
+                        self.claim().as_ref(),
+                    )?;
+                    self.observe(&flow);
+                }
+            }
         }
-        let progress = self
-            .launcher
-            .launch(&flow, skill, &ctx, self.claim().as_ref())
-            .await?;
-        *self.progress.lock().expect("Flow progress mutex poisoned") = progress;
-        self.finish().await
     }
 
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
@@ -902,8 +862,11 @@ impl StepLauncher for SavedLauncher {
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
             ));
         }
-        if skill.policy.repeat.is_some() {
-            message.push_str("\n\nRecord this occurrence's decision with `lf flow decide advance \"evidence\"` or `lf flow decide iterate \"next action and proof\"`. If progress is stalled, use `lf flow blocked \"reason, attempted direction, evidence, and question\"`; it opens one Ask running unblock and returns the human's summary. Reassess afterward. Invalid commands return correction feedback; correct the decision here without replaying implementation. A recorded decision is accepted only after this Run succeeds.");
+        if let Some(output) = flow
+            .current_step()
+            .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
+        {
+            message.push_str(&output);
         }
         let mut launch = self.cli.launch_options();
         launch.batch = true;
@@ -1064,21 +1027,17 @@ mod tests {
                 return Err(super::StepEnd::Interrupted.into());
             }
             if skill.policy.repeat.is_some() {
-                self.store
-                    .record_flow_decision(
-                        flow.id(),
-                        flow.version,
-                        &actor,
-                        &crate::engine::transitions::FlowVerdict {
-                            decision: if flow.cursor.iteration < 2 {
-                                crate::engine::transitions::FlowDecision::Iterate
-                            } else {
-                                crate::engine::transitions::FlowDecision::Advance
-                            },
-                            summary: "repeat until the second pass".into(),
+                self.store.sqlite.test_decision_output(
+                    &actor,
+                    &crate::engine::transitions::FlowVerdict {
+                        decision: if flow.cursor.iteration < 2 {
+                            crate::engine::transitions::FlowDecision::Iterate
+                        } else {
+                            crate::engine::transitions::FlowDecision::Advance
                         },
-                    )
-                    .await?;
+                        summary: "repeat until the second pass".into(),
+                    },
+                )?;
             }
             self.store.sqlite.test_finish_flow_turn(&actor, "completed");
             Ok(None)

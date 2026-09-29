@@ -674,3 +674,31 @@ one-line fixture correction; final static receipt follows below.
 `review-auth-commit-static.log`, cargo fmt and diff whitespace checks pass.
 Final production-prefix measurement: +159/-82, net +77;
 trailing cfg(test) modules, integration tests, docs and scratch excluded.
+
+## Interrupted scorecard child · observed recovery counterexample
+
+The next checkpoint rebased conflict-free onto `566fb3981` through pinned lf;
+no behavioral suite was repeated just for integration. Before publication,
+Supervisor requested diagnosis of the retained interruption LEAK. The fixture
+script loops on a stop file, but Driver::drop waited only for lf, then TempDir
+could remove the stop directory before the orphan script observed it.
+Production telemetry used Command::output without interrupt child ownership.
+
+`exec-interruption-child-red.log` records the exact reproduced child PID 4142
+and its unique fixture script path surviving five seconds after lf exited 130.
+The existing interrupted/130/unknown-signal Exec assertion still passed. The
+fixture separately wrote that child's stop file and observed its exit before
+asserting failure. This cleanup is not counted as production settlement. An OS
+inspection also found older similarly named orphans, including a process whose
+start matched the earlier leaking test window; without retained exact launch
+identity those older processes were not signaled. No fleet cleanup is claimed.
+
+Telemetry now places its scorecard in a fresh process group and uses the existing
+ProcessGroupGuard for interrupt cleanup, disarming after output completion.
+No new process registry, lifecycle or fixture-only production branch was added.
+`exec-interruption-child-fixed.log`: two passes in 3.163s, including the original
+telemetry usage/output contract and exact fixture-child disappearance after
+interruption, with no Nextest LEAK. The initial build warned about an accidentally
+added test-module import; it was removed before the final static check. Existing
+signal missingness remains unchanged. This proof is the owned synthetic scorecard
+child, not provider-engine death, historical orphan cleanup or general settlement.

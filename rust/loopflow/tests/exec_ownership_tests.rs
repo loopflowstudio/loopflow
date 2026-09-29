@@ -241,6 +241,7 @@ home = pathlib.Path(os.environ['LF_HOME'])
 name = os.environ['LF_TEST_DRIVER']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
                check=True, stdout=subprocess.DEVNULL)
+(home / (name + '.pid')).write_text(str(os.getpid()))
 (home / (name + '.ready')).write_text(os.environ['LF_PROCESS_ID'])
 while not (home / (name + '.stop')).exists():
     time.sleep(.02)
@@ -275,6 +276,43 @@ async fn interruption_records_the_exec_without_a_fabricated_signal_name() {
         )
         .unwrap();
     assert_eq!(row, ("interrupted".into(), 130, None));
+    let scorecard_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
+    let script = repo
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("scripts/lifecycle_scorecard.py");
+    let alive = || {
+        let output = Command::new("ps")
+            .args(["-p", scorecard_pid.trim(), "-o", "command="])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).contains(script.to_str().unwrap())
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let survived = alive();
+    if survived {
+        eprintln!(
+            "owned scorecard survived interrupted lf: pid={} script={}",
+            scorecard_pid.trim(),
+            script.display()
+        );
+        // Keep fixture cleanup distinct from the interruption result. Release
+        // only this script and observe exit before deleting its stop directory.
+        std::fs::write(&driver.stop, "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "owned scorecard failed fixture cleanup");
+    }
+    assert!(
+        !survived,
+        "interrupted command left its owned scorecard alive"
+    );
 }
 
 #[tokio::test]

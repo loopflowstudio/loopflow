@@ -173,13 +173,38 @@ Next import proof `historical-review-final.log` passes stable identity/feedback
 for unopened, past and finished reviews after `historical-review-red.log`
 reproduced their misclassification. The older multi-origin proof passed in
 `historical-review-repair.log`; that run also exposed a fixture deleting one
-source before its later conflict checks. This is not complete import acceptance:
-supervisor comment `1bfa5c7a-ed3f-4886-a8a0-5fff75935c0b` identifies the new
-active-boundary branch also classifying headless/Op boundaries as reviews.
-Main must preserve classification from captured policy and pair the review proof
-with active autonomous input; an Op must not manufacture an AgentSession.
+source before its later conflict checks. Supervisor comment
+`1bfa5c7a-ed3f-4886-a8a0-5fff75935c0b` caught active headless/Op boundaries being
+classified as reviews. The corrected captured-policy classification and extended
+fixture pass in `historical-review-and-auth.log`: three reviews, one headless
+conversation, no manufactured AgentSession for the mechanical boundary. Existing
+multi-origin import and both cached-auth checks pass in the same four-case run.
+This is not complete import acceptance.
 Comment `51018428-8659-4288-adf7-e75e93f9ee00` retains `--history` for closed
 inventory rather than widening `--all` or default UI behavior.
+
+Local checkpoint `71ec9d23d` preserves these repairs. Supervisor independently
+verified `auth-exec-scope.log`: five Git-free auth commands retain completed Execs,
+while `rebase --plan` records failure and reports unavailable Git. The journal
+placement correction retains actual process cwd and writes optional files at the
+checkout root; `exec-subdirectory-journal-final.log` passes its focused proof.
+Final all-target Clippy passes in `review-auth-commit-static.log`. The six-case
+`auth-exec-directory.log` has six assertion passes but one Nextest LEAK on the
+interruption fixture. Verified comment `ee1c6eb3-6c31-441c-a426-2a2ea83f46a4`
+requests exact fixture-owned process/pipe diagnosis without weakening cleanup.
+The generated nested journals remain preserved under
+`.lf/tmp/cut-i/subdirectory-journal-counterexample`.
+
+The stronger `exec-interruption-child-red.log` reproduces the scorecard surviving
+after its owning lf exits 130. The fixture observes its own recorded PID/script
+before separate cleanup, so cleanup cannot supply the passing result. Telemetry
+now uses the existing process-group guard; `exec-interruption-child-fixed.log`
+passes child termination and the normal scorecard behavior (two tests, no LEAK).
+This is the scorecard boundary only, not provider/Task-wide settlement. The test
+run reported an unused test import; source removes it and final static validation
+remains main's responsibility. Local review checkpoint rebased to `2b7f24a09` on
+main `566fb3981`, with matching recorded Task base. GitHub still held `190455f06`
+at this observation; no new publication or full CI pass is claimed.
 
 The replaced-input public CLI proof passes in `historical-members.log`:
 two inputs retain separate outcome/account/usage evidence in one conversation,

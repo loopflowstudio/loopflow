@@ -11,7 +11,7 @@ has occurred.
 ## Current order
 
 Jack directed autonomous progress with a published checkpoint per coherent
-slice. Finish the in-flight discovery checkpoint, then follow the deepest-first
+slice. Discovery is published at `dbad495f4`; follow the deepest-first
 [remaining order](remaining-work.md): Exec per Flow step, attribution/parent-tree
 reduction, separate naming commit, populated import, and final documentation.
 The latest parent requirement preserves agent-issued commands after driver
@@ -21,6 +21,13 @@ The complete matrix remains binding; this order does not drop configured-provide
 Desktop, Chapter, incident or migration obligations. Final concept review with
 Jack and resolved findings precede final gates and saved delivery. Usage after
 bind remains prospective as an operating assumption pending Jack's decision.
+
+Mechanical steps now use a real child Exec, preserving a surviving step across
+driver death. This is a coherent internal slice of item 1. The common agent
+executor and child-owned capture reservation are next; TaskLauncher/SavedLauncher
+remain until their Task seed, account, steer and attachment behavior moves into
+the direct provider path. [Exec-per-step](exec-per-step.md) and
+[evidence](evidence.md#mechanical-flow-step-checkpoint) retain proof and limits.
 
 ## Current evidence
 

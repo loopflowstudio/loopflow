@@ -46,6 +46,22 @@ pub(crate) async fn task_execution_and_flow(
         .and_then(|position| position.claim.as_ref())
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
+    if let Some(position) = position.as_ref().filter(|flow| flow.failure.is_none()) {
+        if let Some(exec) = store.sqlite.pending_flow_operation_exec(position.id())? {
+            match crate::journal::exec_process_evidence(&store.sqlite, &exec) {
+                ProcessIdentityEvidence::Live => {
+                    snapshot.state = TaskExecutionState::Running;
+                    snapshot.reason =
+                        format!("Step Exec {exec} is running {}", position.current().step);
+                }
+                ProcessIdentityEvidence::Unknown => {
+                    snapshot.state = TaskExecutionState::Unknown;
+                    snapshot.reason = format!("Step Exec {exec} has unknown process identity; inspect its pending effect before recovery");
+                }
+                ProcessIdentityEvidence::Dead => {}
+            }
+        }
+    }
     if let (TaskExecutionState::Running, Some(position)) = (snapshot.state, position.as_ref()) {
         if let Some(reason) = crate::ops::human_session::task_waiting_unblock(store, position)
             .await

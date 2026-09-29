@@ -10,6 +10,38 @@ and [handoff](parallel-execution.md). This replaces chronology, not obligations.
 The complete [remaining matrix](remaining-work.md), [import contract](import-preservation.md),
 [Chapters](chapters.md) and [native tradeoff](native-turn-retry-tradeoff.md) remain binding.
 
+## Mechanical Flow step checkpoint
+
+Mechanical boundaries execute as real child lf processes through the shared
+Flow driver. Existing Flow start/result events name the child's Exec; the driver
+consumes the selected result. Public subprocess proofs retain earlier success
+across a later failure and resume a killed driver without replaying a surviving
+step. Task stop/status preserve that selected step until its exact process dies;
+missing process evidence stays unresolved. [The working design](exec-per-step.md)
+retains agent-step consolidation and the remaining ownership cuts.
+
+The initial full materialized matrix (`.lf/tmp/cut-i/exec-step-full.log`) ran all
+2,032 tests: 2,030 passed, two failed, 16 skipped. One simulated worker bypassed
+startup claim adoption and timed out; its fixture now adopts an actual sleep
+process identity before driving the simulated provider. The landing proof still
+expected in-process operation ancestry; it now checks driver → step → agent-issued
+rebase and assigns repair/history to the step. That stronger assertion exposed
+another fixture gap: its fake Codex invoked rebase before receiving the thread's
+tool environment. It now executes during the simulated turn with its recorded
+caller identity. The focused landing proof passes (`exec-step-land-repair.log`).
+The repaired startup/stop checks pass seven tests with one nextest leaky-handle
+diagnostic (`exec-step-repairs.log`, which also retains the intermediate landing
+failure). No configured-provider proof follows.
+
+`exec-step-full-green.log` passes the full isolated materialized rerun: 2,032
+passed, 16 skipped, none unrun, fail-fast disabled, no leak diagnostic. Rust and
+test bytes match `.lf/tmp/cut-i/exec-step-source.json`; the failed snapshot remains
+in `exec-step-first-source.json`. `exec-step-publish-clippy.log`, formatting,
+diff checks and architecture coverage pass. The source and materialized tests use
+private stores, real lf subprocesses, and simulated provider/GitHub effects.
+Swift is unchanged; its prior 291-test discovery pass is retained, not rerun.
+No installed Home, configured provider or rendered Desktop acceptance is claimed.
+
 ## Discovery checkpoint
 
 `discovery-full-green.log` passes the complete isolated materialized Rust matrix:

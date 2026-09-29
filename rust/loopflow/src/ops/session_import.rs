@@ -228,6 +228,21 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
         }
         import.count(&path, stored);
     }
+    let database = crate::store::database_path_from_env()?;
+    for (session, observation) in store.historical_session_inputs().await? {
+        let result = store
+            .import_session(session, None, vec![observation], dry_run)
+            .await
+            .map(|changed| {
+                Some(if changed {
+                    Stored::Run
+                } else {
+                    Stored::Unchanged
+                })
+            })
+            .map_err(anyhow::Error::from);
+        import.count(&database, result);
+    }
     for dir in crate::run_record::record_dirs(&import.home)? {
         let stored = import.run(&dir).await;
         import.count(&dir, stored);

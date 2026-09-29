@@ -197,7 +197,7 @@ fn prepare_pr(
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
     let copy_state = read_worktree_state(&repo_root)?;
     let copy = normalize_task_pr_copy(
-        resolve_pr_copy(&repo_root, options, progress)?,
+        resolve_pr_copy(&repo_root, &copy_head, options, progress)?,
         task_context.as_ref(),
         &copy_lifecycle,
     )?;
@@ -348,6 +348,7 @@ pub(crate) fn finish_submit_after_rebase(
 
 fn resolve_pr_copy(
     repo_root: &Path,
+    head: &str,
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<PrCopy> {
@@ -363,7 +364,13 @@ fn resolve_pr_copy(
             progress.status("Using cached PR copy from scratch/");
             copy
         }
-        None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
+        None => match crate::ops::pr::published_pr_copy(repo_root, head)? {
+            Some(copy) => {
+                progress.status("Keeping published PR copy for this head");
+                copy
+            }
+            None => generate_pr_copy(repo_root, progress, options.agent.as_deref())?,
+        },
     };
     if let Some(body) = &options.pr_body {
         copy.body = body.clone();

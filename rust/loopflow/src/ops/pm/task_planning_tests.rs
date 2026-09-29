@@ -12,10 +12,8 @@ use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
 use crate::child::ChildRef;
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
-use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::pm::PmSnapshot;
 use crate::store::{open_ephemeral_store, StorageConfig};
-use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
     PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -86,7 +84,12 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let project = json!({"id":project_id, "name":"Chapter", "description":"", "content":"flow: feature", "status":{"type":"started"},
+    let project_name = if project_id == "project-1" {
+        "Chapter"
+    } else {
+        "Next chapter"
+    };
+    let project = json!({"id":project_id, "name":project_name, "description":"", "content":"flow: feature", "status":{"type":"started"},
         "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
     let data =
         if query.contains("query ListTeams") {
@@ -99,6 +102,19 @@ async fn planning_graphql(
                 return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
             }
             json!({"initiative":{"projects":page(vec![project])}})
+        } else if query.contains("query ProjectOwnership") {
+            if vars["id"] == project["id"] {
+                json!({"project":project})
+            } else if vars["id"] == "project-1" {
+                // Rotation preserves the predecessor even after membership listing omits it.
+                let mut previous = project.clone();
+                previous["id"] = json!("project-1");
+                previous["name"] = json!("Chapter");
+                previous["status"] = json!({"type":"completed"});
+                json!({"project":previous})
+            } else {
+                json!({"project":null})
+            }
         } else if query.contains("query ListProjectIssues") {
             let mut state = state.lock().await;
             if !state.issues.is_empty() && state.fail_confirmation {
@@ -812,26 +828,12 @@ fi
                     .success());
             }
             let timestamp = time::OffsetDateTime::now_utc();
-            let project = Project {
-                id: ProjectId::new(),
-                plan: ProjectPlan {
-                    flow: "feature".into(),
-                    status: crate::pm::ProjectStatus::Started,
-                    id: LinearProjectId::new("project-1").unwrap(),
-                    slug: "chapter".into(),
-                    name: "Chapter".into(),
-                    prompt_context: String::new(),
-                    pm_snapshot_synced_at: 1,
-                },
-                wave_id: wave.id().clone(),
-                iteration: 0,
-                abandon_intent: None,
-                created_at: timestamp,
-                updated_at: timestamp,
-            };
-            runtime
-                .block_on(fixture.store.create_project(&project))
-                .unwrap();
+            let project = runtime
+                .block_on(fixture.store.get_project_by_project("project-1"))
+                .unwrap()
+                .expect("task_create synced the current Project");
+            assert_eq!(project.wave_id, *wave.id());
+            assert_eq!(project.plan.status, crate::pm::ProjectStatus::Started);
             let task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {

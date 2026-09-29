@@ -150,6 +150,7 @@ impl Store {
     pub async fn end_flow(
         &self,
         id: &str,
+        version: u64,
         claim: Option<&TaskWorkerClaim>,
         summary: &str,
     ) -> StoreResult<()> {
@@ -157,7 +158,7 @@ impl Store {
         let claim = claim.cloned();
         let summary = summary.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.end_flow(&id, claim.as_ref(), &summary)
+            store.end_flow(&id, version, claim.as_ref(), &summary)
         })
         .await
     }

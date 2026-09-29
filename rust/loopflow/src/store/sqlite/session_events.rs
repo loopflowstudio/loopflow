@@ -73,8 +73,8 @@ impl SqliteStore {
         turn: &str,
         generation: i64,
         exec: &ExecId,
-    ) -> StoreResult<()> {
-        self.record_session_event(
+    ) -> StoreResult<i64> {
+        let seq = self.record_session_event(
             session,
             thread,
             turn,
@@ -93,7 +93,7 @@ impl SqliteStore {
                 "Native turn has a different initiating Exec".into(),
             ));
         }
-        Ok(())
+        Ok(seq)
     }
 
     pub fn session_history(

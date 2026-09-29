@@ -97,6 +97,9 @@ pub(super) fn launch_args(operation: &str, options: &TaskLaunchOptions) -> Vec<S
             args.extend([flag.into(), value.clone()]);
         }
     }
+    if options.retry {
+        args.push("--retry".into());
+    }
     args
 }
 

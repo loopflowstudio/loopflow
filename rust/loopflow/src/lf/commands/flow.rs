@@ -249,6 +249,7 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                         &task.worktree,
                         &task.plan.identifier,
                         crate::ops::task::TaskLaunchOptions {
+                            retry: *retry,
                             agent: cli.model.clone(),
                             ..Default::default()
                         },
@@ -257,6 +258,11 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                 }
             }
             let flow = if *retry {
+                runtime.block_on(prepare_native_retry(&store, flow))?
+            } else {
+                flow
+            };
+            let flow = if *retry && flow.failure.is_some() {
                 let _driver = flow_run::driver_lock(id)?;
                 runtime.block_on(store.retry_flow(id, None))?
             } else {
@@ -342,6 +348,82 @@ impl std::fmt::Display for StepEnd {
 
 impl std::error::Error for StepEnd {}
 
+/// Prepare uncertain native work for an explicit retry. Both Task launch and
+/// taskless resume use this before acquiring a replacement worker claim. Recorded
+/// failures remain with the caller's existing retry/unblock policy.
+pub(crate) async fn prepare_native_retry(
+    store: &SharedStore,
+    flow: FlowSession,
+) -> Result<FlowSession> {
+    if store.sqlite.pending_flow_conversation(flow.id())?.is_none() {
+        return Ok(flow);
+    }
+    let _driver = flow_run::driver_lock(flow.id())?;
+    let saved = store
+        .flow(flow.id())
+        .await?
+        .ok_or_else(|| anyhow!("Flow disappeared"))?;
+    anyhow::ensure!(
+        saved.version == flow.version && saved.claim == flow.claim,
+        "Flow changed before native retry"
+    );
+    recover_native_flow(store, flow.id(), flow.claim.as_ref(), true).await
+}
+
+/// Read the selected provider turn before judging the Flow. A surviving engine
+/// can finish after its driver exits; observing that result does not repair the
+/// driver's unknown command outcome or grant a new conversation driver claim.
+async fn recover_native_flow(
+    store: &SharedStore,
+    id: &str,
+    claim: Option<&TaskWorkerClaim>,
+    retry: bool,
+) -> Result<FlowSession> {
+    loop {
+        let flow = store
+            .flow(id)
+            .await?
+            .ok_or_else(|| anyhow!("Flow {id} disappeared"))?;
+        anyhow::ensure!(
+            flow.claim.as_ref() == claim,
+            "Flow {id} changed under its driver"
+        );
+        let Some(session_id) = store.sqlite.pending_flow_conversation(id)? else {
+            break;
+        };
+        if retry && crate::run_record::conversation_engine_exited(&store.sqlite, &session_id)? {
+            // Missing native completion remains unknown. Explicit retry releases
+            // only the fenced boundary after exact engine exit evidence.
+            return Ok(store.release_flow(id, flow.version, claim).await?);
+        }
+        let (endpoint, thread_id) =
+            store
+                .sqlite
+                .session_connection(&session_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Selected conversation {session_id} has no native connection for recovery"
+                    )
+                })?;
+        let connection = crate::harness::codex_connection::CodexConnection {
+            store: store.sqlite.clone(),
+            session_id,
+            thread_id,
+            driver: None,
+        };
+        tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            connection.recover_history(Path::new(&endpoint)),
+        )
+        .await
+        .context("Selected native turn history did not respond")??;
+        if store.sqlite.pending_flow_conversation(id)?.is_some() {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+    Ok(store.recover_flow(id, claim).await?)
+}
+
 /// Drive one invocation from its row until it completes, waits or blocks.
 /// `claim` is the Task worker's, held until the driver stops; every write is
 /// fenced by it. The engine owns traversal; the launcher owns how a step's
@@ -354,7 +436,7 @@ pub(crate) async fn drive(
 ) -> Result<FlowOutcome> {
     let id = flow.id().to_owned();
     let _driver = flow_run::driver_lock(&id)?;
-    let mut flow = store.recover_flow(&id, claim.as_ref()).await?;
+    let mut flow = recover_native_flow(&store, &id, claim.as_ref(), false).await?;
     if flow.finished {
         println!("Flow {} is already finished.", flow.invocation.flow);
         return Ok(FlowOutcome::Completed);
@@ -388,7 +470,12 @@ pub(crate) async fn drive(
     match outcome {
         Ok(FlowOutcome::Completed) => {
             store
-                .end_flow(&id, claim.as_ref(), progress.as_deref().unwrap_or_default())
+                .end_flow(
+                    &id,
+                    version,
+                    claim.as_ref(),
+                    progress.as_deref().unwrap_or_default(),
+                )
                 .await?;
             Ok(FlowOutcome::Completed)
         }
@@ -587,10 +674,7 @@ impl CliFlowExecutor<'_> {
 
     /// The row at the step about to run, with any earlier attempt settled.
     async fn begin(&self) -> Result<FlowSession> {
-        let flow = self
-            .store
-            .recover_flow(&self.id, self.claim().as_ref())
-            .await?;
+        let flow = recover_native_flow(&self.store, &self.id, self.claim().as_ref(), false).await?;
         anyhow::ensure!(
             !flow.finished && flow.failure.is_none(),
             "Flow is not ready to execute"

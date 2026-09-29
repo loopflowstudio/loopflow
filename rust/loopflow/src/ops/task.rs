@@ -51,6 +51,7 @@ pub enum TaskWaitUntil {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskLaunchOptions {
+    pub retry: bool,
     pub reason: Option<String>,
     pub agent: Option<String>,
     pub name: Option<String>,
@@ -388,47 +389,37 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         args.push(issue.into());
         return super::task_destination::json(&destination, repo, args, None).map_err(task_error);
     }
-    let TaskLaunchOptions {
-        reason,
-        agent,
-        name,
-        flow,
-        stack_on,
-        directive,
-    } = options;
-    prepare_task(
-        repo,
-        issue,
-        TaskCheckoutOptions {
-            name,
-            stack_on,
-            directive,
-        },
-        flow,
-        agent,
-        reason,
-        true,
-    )
-    .and_then(|task| task_snapshot(&task))
+    prepare_task(repo, issue, options, true).and_then(|task| task_snapshot(&task))
 }
 
 pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> OpsResult<Task> {
-    prepare_task(repo, issue, options, None, None, None, false)
+    prepare_task(
+        repo,
+        issue,
+        TaskLaunchOptions {
+            name: options.name,
+            stack_on: options.stack_on,
+            directive: options.directive,
+            ..Default::default()
+        },
+        false,
+    )
 }
 
 fn prepare_task(
     repo: &Path,
     issue: &str,
-    options: TaskCheckoutOptions,
-    requested_flow: Option<String>,
-    requested_agent: Option<String>,
-    reason: Option<String>,
+    options: TaskLaunchOptions,
     launch: bool,
 ) -> OpsResult<Task> {
-    let TaskCheckoutOptions {
+    let TaskLaunchOptions {
         name,
         stack_on,
         directive,
+        flow: requested_flow,
+        agent: requested_agent,
+        reason,
+        retry,
     } = options;
     let directive = directive
         .map(|directive| {
@@ -499,6 +490,7 @@ fn prepare_task(
             reason,
             requested_agent,
             requested_flow,
+            retry,
         ));
     }
     let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -511,6 +503,7 @@ fn prepare_task(
         Some(&resolved.item.id),
         &resolved.project,
         &TaskLaunchOptions {
+            retry,
             reason,
             name,
             stack_on,
@@ -5078,6 +5071,7 @@ pub(crate) async fn continue_task_async(
     reason: Option<String>,
     agent: Option<String>,
     requested_flow: Option<String>,
+    retry: bool,
 ) -> OpsResult<Task> {
     let store = task_store().await?;
     let mut task = store
@@ -5119,10 +5113,19 @@ pub(crate) async fn continue_task_async(
     if task_worker_live(&store, &task).await? {
         return Ok(task);
     }
-    let position =
+    let mut position =
         crate::controller::task::ensure_flow_position(&store, &task.id, selected_flow.as_deref())
             .await
             .map_err(task_error)?;
+    if retry
+        || reason
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty())
+    {
+        position = crate::lf::commands::flow::prepare_native_retry(&store, position)
+            .await
+            .map_err(task_error)?;
+    }
     let skill = crate::engine::current_skill(&position.invocation.steps, &position.cursor);
     if let Some(refusal) = task_configuration_refusal(&task, skill.as_ref().map(|step| &step.skill))
     {

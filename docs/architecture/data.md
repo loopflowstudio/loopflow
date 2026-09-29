@@ -31,7 +31,7 @@ kernel locks                  live local exclusion authority
 | What is this Wave trying to do? | `wave/<name>/GOAL.md` and `MEMORY.md` |
 | What Projects and Tasks exist? | Linear, through the bounded PM projection |
 | What Task boundary should resume? | Work domain state joined to its exact `flow_sessions` row |
-| What saved Flow step should resume? | its `flow_sessions` row: cursor, current attempt Run and failure |
+| What saved Flow step should resume? | its `flow_sessions` row: cursor, selected native start, current attempt Run and failure; `flow_events` retains exact native selection and consumption |
 | What human input is pending? | `agent_sessions` rows joined to their current Runs |
 | Which Runs worked on this Wave or Task? | `runs` rows |
 | What did one provider launch emit? | the Run record on the Home that launched it |

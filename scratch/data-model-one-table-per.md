@@ -1,48 +1,18 @@
 # One SQLite owner per product object
 
-LOO-298 · Jack Heart · Current implementation plan · 2026-09-28
+LOO-298 · Jack Heart · Accepted contract consolidated 2026-09-28.
 
-Jack requested direct ownership of plan clarification and validation. This is the
-current plan, reconciled against `71496d5da4f729ffc34ca1f9881e9598a5e67606`.
-Accepted product decisions, implementation choices and observed proof are
-separated below. This document supersedes the old Run-based H4–H6 plan.
-The previous full design and dated implementation ledger remain in
-[the checkpoint](https://github.com/loopflowstudio/loopflow/blob/71496d5da4f729ffc34ca1f9881e9598a5e67606/scratch/data-model-one-table-per.md).
-The commit exists locally; remote availability was not checked.
+The finish line is **code-complete concept review**: the accepted model works end
+to end, affected checks pass on integrated bytes, replaced owners are deleted,
+and the usage/ownership/deletion review is ready. Tables, renames or a passing
+slice alone do not qualify. Configured provider/Desktop and installed migration
+proofs stay explicit; no branch binary may touch the installed Home.
 
-## Finish line and present state
-
-The requested stop is a **code-complete concept review**: the whole accepted
-model implemented, affected checks passing on the integrated code, and a
-reviewable account of usage, owners, deletion and remaining deployment evidence.
-A plan, new tables, renamed types, one passing slice or a contributor's conclusion
-alone does not reach that stop. Publication, installation and real-Home conversion
-are separate actions; no branch binary may touch the installed Home.
-Jack authorized publishing the next verified checkpoint on 2026-09-28 so
-dependent Tasks could use it. The latest published checkpoint is `705645cd1` on
-PR #1296, based on `a2b59ed50`; the remote branch, GitHub head and Task record
-were independently checked. Current proof and CI limits are in
-[the supervision ledger](parallel-work.md). This supersedes the earlier local-only hold for
-that publication, without claiming code completion or authorizing landing,
-installation or live-Home conversion. The saved 13-step
-feature invocation still contains implement → compress → review-slice →
-concept-review → loop-decide, then a human demo boundary. Preserve its captured
-order; a partial implementation's concept review is not the requested finish.
-
-H1–H3 are implemented and reviewed: Task selects its managed invocation; all
-Task-attributed Flows retain attribution; Task and taskless Flows share a row
-owner and executor. Preserve that work. Cut I is reviewed at `2d597800e`:
-listeners, residents and lfd are deleted. The canonical fleet proof preserved
-all 1,020 receipts in 4.540 seconds; architecture, formatting and all-target
-Clippy passed. The draft build was interrupted after 376.234 seconds, with
-repeated expected-schema reconstruction observed on database opens. Repair that
-development performance path without weakening schema validation. Retain the
-inherited unwritable-store counterexample for the new writer contract. This is
-local Cut I acceptance, not a green full gate or installed acceptance.
-
-The new execution model replaces H4–H6. H7 remains in this Task, governed by
-[Chapters](chapters.md), which Jack accepted on 2026-09-27. The old proposal
-for a chapters table, packet, config line and chapter history API is superseded.
+Read [current work](parallel-execution.md), [remaining work](remaining-work.md),
+[import obligations](import-preservation.md) and [evidence](evidence.md) beside
+this contract. [Chapters](chapters.md) owns the accepted Project model.
+[Control and archive](parallel-work.md) records publication, ownership and history.
+Older Run-based proposals and their intermediate exceptions are superseded here.
 
 ## Accepted product model
 
@@ -256,99 +226,6 @@ between them must reconcile exact saved input without launching twice. Provider
 launch refuses before side effects if required rows cannot be written. Ordinary
 reads never import, scan manifests for identity, or restore mutable sidecars.
 
-## Validation from current source and provider evidence
-
-Inspected at `71496d5da` on 2026-09-28; these observations constrain the plan:
-
-| Observation | Consequence |
-| --- | --- |
-| `session.rs::Run` owns attribution, location, publication and end; Session points at current Run | Removing the struct alone would lose several distinct facts; the destination map above is required |
-| `lf/commands/flow.rs::run_op` executes in the driver process; `store/sqlite/flows.rs::settle_attempt_in` distinguishes missing operation receipts | Exec cannot substitute for each boundary; keep start/outcome correlation and interrupted-operation protection |
-| `journal/mod.rs::ensure_run_context` already records parent Exec within a trace | Evolve this path into the indexed owner; preserve direct-child and historical-parent behavior |
-| `harness/mod.rs::configure_agent_env` removes inherited execution identity | Introduce deliberate Session caller propagation; removing all scrubbing would reintroduce stale authority |
-| `harness/codex.rs::start_inner` creates a dedicated stdio app-server with kill-on-drop | Live connect requires a reconnectable transport/owner; changing resume argv alone cannot implement it |
-| `lf/commands/runs.rs::collect_runs_at` reads row-selected artifacts before final output limits | Query summary/filter/pagination in SQL first; list must not open every transcript |
-| `store/sqlite/runs.rs::bind_session_runs_in` currently updates all Session Runs | Existing code exceeds the earlier current-Run-only assumption; retain this as a counterexample to resolve, not accepted history policy |
-
-Actual installed Codex 0.157.1 was tested with an isolated provider fixture:
-a second app-server and native `codex resume --no-daemon` refuse an actively
-owned conversation; the TUI displays a lock screen. Interrupting a turn does
-not release ownership; stopping the owning server permits resume. This does not
-prove multi-client attachment, default daemon mode, real model/tool continuity,
-or Claude behavior. [Research](research-execution-records-and-resume.md) retains
-code observations; the local probe is `/tmp/lf-codex-resume.Trpyup/`.
-
-The implementation must prove a reconnectable route before building the rest of
-connect around it. Prefer the existing provider's supported endpoint. Any
-Loopflow-owned bridge must be limited to this conversation/engine lifetime; it
-must not restore Wave listeners, residents or a general daemon. A transport proof
-must include driver handoff and nested lf calls, not only transcript viewing.
-
-**Transport feasibility verified on 2026-09-28:** the actual Codex 0.157.1
-app-server accepts two WebSocket clients over a private Unix socket. Client B
-resumed Client A's active thread; the same engine and active turn survived A's
-disconnect. Native `codex resume --remote unix://PATH THREAD` displayed that
-active conversation without a lock screen. Closing that TUI left the turn
-active. B then interrupted only that thread while another thread on the same
-engine stayed active. Upstream responses were synthetic and credential-free.
-Raw JSON, PTY text and reproduction are in
-`/tmp/lf-connect-plan.nrPdX2/native-ui-probe/` and its sibling script.
-The first raw-JSON Unix-socket probe and a proxy probe timed out. Unix transport
-uses a WebSocket handshake; the raw-JSON assumption was wrong. The proxy timeout
-was not diagnosed. None of these probes ran Loopflow's connect implementation,
-transferred its database claim, changed LF ancestry or proved model/tool recovery.
-
-Use this native endpoint as the first implementation route. It establishes that
-a new general Loopflow service is unnecessary for client connectivity. Lifetime,
-capture ownership, per-thread command provenance and exact driver handoff remain
-implementation obligations; successful native attachment does not prove them.
-
-## Implementation order and observable exits
-
-1. **Finish Cut I review.** Independently inspect the actual diff and retained
-   proofs, resolve the interrupted contention result, and move the ignored
-   research snapshot out of live architecture discovery without weakening the
-   checker or deleting evidence. Keep the launch-contract counterexample for
-   the new writer cut. Local review acceptance is not installed acceptance.
-2. **Prove connect and Exec ownership first.** Minimal actual-provider-engine
-   fixture: start a headless conversation, connect another client without a
-   second engine or interrupted turn, transfer the driver, issue a nested lf
-   command and verify parent plus `via_agent`. Explicit restart preserves native
-   thread and fences late output. Include shared-engine sibling survival.
-   Failed feasibility changes the transport design before schema-wide work.
-3. **Convert one complete lifecycle.** First align the core architecture,
-   CLI/Session and planning documentation and STYLE guide with this accepted
-   contract, marking unimplemented behavior. Then convert Exec/AgentSession/FlowSession writers,
-   indexed readers, events and import together for headless → discover → connect
-   → restart, with Task and taskless Flow paths. Carry H4 admission/publication,
-   H5 opaque identity/history and H6 typed ancestry into this change. Delete
-   replaced Run ownership and readers; preserve capture/receipt evidence.
-   Intermediate commits may retain work in progress but are not a cutover.
-4. **Complete consumers and preservation.** Ask/keyed retry, human review,
-   rebase-conflict/landing-repair helpers, replay, nested loops, usage, activity,
-   Session actions, Rust/Swift DTOs and retained desktop panes. Core docs and
-   skills change with their callers. No stale subjects, title sidecars,
-   WorkCatalog reconstruction or alternate taskless driver remains.
-5. **H7.** Implement the accepted status-based Linear Project chapter rotation
-   and `flow:` default. Preserve active Task identity/worktree/PR/FlowSession,
-   cancel only proven untouched backlog, retry interrupted mutations, and show
-   the same result after a second private Home sync. No chapter table or packet.
-6. **Integrated proof, deletion and concept review.** Run affected suites once
-   on final bytes, materialize drafts in a disposable copy, verify populated
-   import and compare production additions/deletions including moves. Inspect
-   the complete user interaction and ownership graph. Present code-complete
-   review here; record deployment gaps separately, without a passing claim.
-
-The supervisor owns the plan, proof interpretation and next instruction. Jack
-authorized maximum useful parallelism without reducing quality on 2026-09-28.
-Bounded contributors now have disjoint file ownership recorded in
-[the parallel work allocation](parallel-work.md); the existing managed worker
-owns execution-model integration and shared files. Contributors leave changes
-uncommitted and do not repair each other's in-progress files. Build/test access
-is coordinated, and final integrated proof stays serial. Use Codex only and
-`lf` for git/delegation. No automatic restart or delivery beyond the requested
-concept-review boundary.
-
 ## Completion evidence matrix
 
 | Requirement | Evidence needed on integrated bytes |
@@ -373,33 +250,3 @@ Configured provider/Desktop acceptance, backed-up real-Home conversion and relea
 activation remain full Task obligations. The current code-complete review must
 name their status and prepared procedure; it cannot claim them from fixtures or
 perform forbidden installed-Home changes to close a checklist.
-
-## Open decisions and next action
-
-### This slice
-
-Exec admission, native-engine provenance and driver handoff are in progress.
-[The working ledger](cutover/exec-ownership.md) records actual failures/passes,
-retained executable edits and the next dependent proof. This is not completion
-of the connect/ownership exit or acceptance of an owner-only cutover.
-
-The accepted object names and Exec-tree requirements are settled. Transport
-feasibility is an engineering proof, not a request for Jack to choose a protocol.
-Prospective bind attribution is the explicit implementation assumption above;
-Jack may revise it. Never silently use the current Session Task to rewrite all
-old usage. This assumption does not block the remaining independent work.
-
-Next action: finish physical owner conversion and Run removal in the saved
-implementation step. The in-place AgentSession/FlowSession rename has a populated
-preservation proof; its remaining Run fields are explicitly intermediate. Retain
-the later connect/handoff/history proofs in `parallel-work.md` within their stated
-limits, and complete the exact acceptance rows above, including Flow consumption,
-restart, import, usage, Desktop and indexed discovery. The two hosted ad hoc/replay fixture failures now have focused local repairs:
-unplanned launches use a writable private store and inaccessible-store admission
-remains refused. Native Flow retry now reserves/reuses a conversation; engine-loss
-recovery retains its thread and old history. Driver-loss recovery still refuses
-an absent Run completion. The next dependency is exact AgentSession-history
-selection under the existing Flow claim, preserving unknown Exec outcomes and
-recorded account/native Home. See `parallel-execution.md` for failures and proof
-scope; neither native retry nor owner renaming completes this cutover. Update this plan
-when evidence changes an implementation choice; do not append another model.

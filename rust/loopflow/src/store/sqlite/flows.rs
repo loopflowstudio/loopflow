@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use time::OffsetDateTime;
 
 use crate::durable::{
-    FlowAttempt, FlowSession, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+    FlowAttempt, FlowSession, FlowTurnSelection, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
     TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
 };
 use crate::engine::invocation::QueuedInvocation;
@@ -30,7 +30,11 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
     f.updated_at, f.position_version, f.task_id, f.wave_id, COALESCE(f.cwd, t.worktree),
     f.message, f.model, f.current_run_id,
     (SELECT published FROM runs WHERE id=f.current_run_id),
-    (SELECT outcome FROM runs WHERE id=f.current_run_id),
+    CASE WHEN f.selected_start IS NULL THEN (SELECT outcome FROM runs WHERE id=f.current_run_id)
+    ELSE (SELECT json_extract(done.payload,'$.status') FROM session_events start
+        JOIN session_events done ON done.session_id=start.session_id
+            AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
+            AND done.kind='completed' WHERE start.seq=f.selected_start) END,
     f.pending_session_id,
     (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
     f.worker_generation, f.claim_json, f.failure_json, f.state
@@ -285,7 +289,8 @@ fn write_cursor_in(
             failure_json=?6, updated_at=?7, position_version=position_version+1,
             claim_json=CASE WHEN ?10 THEN NULL ELSE claim_json END,
             current_run_id=CASE WHEN ?8 THEN NULL ELSE current_run_id END,
-            pending_session_id=CASE WHEN ?8 THEN NULL ELSE pending_session_id END
+            pending_session_id=CASE WHEN ?8 THEN NULL ELSE pending_session_id END,
+            selected_start=CASE WHEN ?8 THEN NULL ELSE selected_start END
          WHERE id=?1 AND position_version=?2 AND state='current' AND claim_json IS ?9",
         params![
             id,
@@ -380,10 +385,15 @@ fn release_in(
 fn end_flow_in(
     tx: &Transaction<'_>,
     id: &str,
+    version: u64,
     claim: Option<&TaskWorkerClaim>,
     summary: &str,
 ) -> StoreResult<()> {
     let flow = current_flow_in(tx, id)?;
+    if flow.version != version || flow.claim.as_ref() != claim {
+        return Err(stale(id));
+    }
+    consume_selected_in(tx, &flow)?;
     if tx.execute(
         "UPDATE flow_sessions SET state='completed', ended_at=?2, claim_json=NULL
          WHERE id=?1 AND state='current' AND claim_json IS ?3",
@@ -490,6 +500,47 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
         )?;
     }
     super::runs::select_attempt_in(tx, flow.id(), flow.version, &run.id)
+}
+
+/// The Flow retains the exact successful native receipt in the same transaction
+/// that moves its cursor. A different turn cannot satisfy this selection.
+fn consume_selected_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<()> {
+    let selected: Option<i64> = tx.query_row(
+        "SELECT selected_start FROM flow_sessions WHERE id=?1",
+        [flow.id()],
+        |row| row.get(0),
+    )?;
+    let Some(start) = selected else { return Ok(()) };
+    let completion: Option<i64> = tx
+        .query_row(
+            "SELECT done.seq FROM session_events origin JOIN session_events done
+         ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
+            AND done.provider_turn=origin.provider_turn AND done.kind='completed'
+         WHERE origin.seq=?1 AND json_extract(done.payload,'$.status')='completed'",
+            [start],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let completion = completion.ok_or_else(|| {
+        StoreError::InvalidAuthority(format!(
+            "Flow {} is waiting for its selected native completion",
+            flow.id()
+        ))
+    })?;
+    tx.execute(
+        "INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at)
+         SELECT flow_id,?3,node,iterations,'consumed',?2,?4 FROM flow_events
+         WHERE flow_id=?1 AND kind='selected' AND session_event=?5
+         ON CONFLICT(flow_id,kind,session_event) DO NOTHING",
+        params![
+            flow.id(),
+            completion,
+            i64::try_from(flow.version).map_err(invalid)?,
+            now_unix(),
+            start
+        ],
+    )?;
+    Ok(())
 }
 
 /// Settle the current attempt from its Run's row: a failed or interrupted
@@ -716,7 +767,8 @@ fn claim_task_worker_in(
             // Its launched Run has no process left; the new worker settles it.
             Some(attempt) if attempt.outcome.is_none() => {
                 tx.execute(
-                    "UPDATE runs SET outcome='interrupted', ended_at=?2 WHERE id=?1",
+                    "UPDATE runs SET outcome='interrupted', ended_at=?2 WHERE id=?1
+                     AND NOT EXISTS(SELECT 1 FROM flow_sessions WHERE current_run_id=?1 AND selected_start IS NOT NULL)",
                     params![attempt.run_id.as_str(), now_unix()],
                 )?;
             }
@@ -791,6 +843,129 @@ impl SqliteStore {
     pub fn task_flow(&self, task_id: &TaskId) -> StoreResult<Option<FlowSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_flow_in(&conn, task_id)
+    }
+
+    pub(crate) fn flow_turn_selection(
+        &self,
+        run: &RunId,
+    ) -> StoreResult<Option<FlowTurnSelection>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT f.id FROM flow_sessions f JOIN runs r ON r.id=f.current_run_id
+             JOIN agent_sessions s ON s.id=r.session_id
+             WHERE r.id=?1 AND r.published=1 AND f.state='current' AND s.kind='conversation'",
+                [run.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(id) = id else { return Ok(None) };
+        let flow = current_flow_in(&conn, &id)?;
+        let after = conn.query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM session_events",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(Some(FlowTurnSelection {
+            flow_id: id,
+            version: flow.version,
+            claim: flow.claim,
+            run_id: run.clone(),
+            after,
+        }))
+    }
+
+    pub(crate) fn pending_flow_conversation(&self, id: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT start.session_id FROM flow_sessions f JOIN session_events start ON start.seq=f.selected_start
+             WHERE f.id=?1 AND f.state='current' AND f.failure_json IS NULL
+               AND NOT EXISTS(SELECT 1 FROM session_events done WHERE done.session_id=start.session_id
+                   AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
+                   AND done.kind='completed')",
+            [id], |row| row.get(0),
+        ).optional()?)
+    }
+
+    /// Select a native turn only for the launch authorized at this exact boundary.
+    /// A Session observer cannot select a turn; the launching Flow driver carries
+    /// its saved version/claim and the reserved Session identity.
+    pub(crate) fn select_flow_turn(
+        &self,
+        selection: &FlowTurnSelection,
+        session: &str,
+        driver: &crate::exec::SessionDriver,
+        start: i64,
+    ) -> StoreResult<()> {
+        let FlowTurnSelection {
+            flow_id: id,
+            version,
+            claim,
+            run_id,
+            after,
+        } = selection;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        if flow.version != *version
+            || flow.claim.as_ref() != claim.as_ref()
+            || flow.failure.is_some()
+            || start <= *after
+        {
+            return Err(stale(id));
+        }
+        let selected: Option<i64> = tx.query_row(
+            "SELECT selected_start FROM flow_sessions WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if let Some(old) = selected.filter(|old| *old != start) {
+            let retryable: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events prior
+                 JOIN session_events done ON done.session_id=prior.session_id
+                   AND done.provider_thread=prior.provider_thread AND done.provider_turn=prior.provider_turn
+                 WHERE prior.seq=?1 AND prior.seq<?2 AND done.kind='completed'
+                   AND json_extract(done.payload,'$.status') IN ('failed','interrupted'))",
+                params![old, start], |row| row.get(0),
+            )?;
+            if !retryable {
+                return Err(stale(id));
+            }
+        }
+        let valid: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
+             JOIN flow_sessions f ON f.id=s.flow_session_id JOIN runs r ON r.id=f.current_run_id
+             WHERE f.id=?1 AND s.id=?2 AND e.seq=?3 AND e.kind='started'
+               AND r.session_id=s.id AND r.id=s.current_run_id AND r.published=1
+               AND r.id=?4 AND e.exec_id=?5 AND e.exec_id=s.driver_exec_id
+               AND s.driver_generation=?6 AND e.provider_generation=?7 AND s.provider_generation=?7
+               AND NOT EXISTS(SELECT 1 FROM flow_events old WHERE old.flow_id=f.id
+                   AND old.kind='selected' AND old.session_event=e.seq AND old.version<>?8))",
+            params![id,session,start,run_id.as_str(),driver.exec_id,driver.generation,driver.provider_generation,i64::try_from(*version).map_err(invalid)?], |row| row.get(0),
+        )?;
+        if !valid {
+            return Err(stale(id));
+        }
+        if selected.is_some_and(|old| old != start) {
+            let mut cursor = flow.cursor.clone();
+            clear_candidate(&mut cursor);
+            tx.execute(
+                "UPDATE flow_sessions SET review_json=?2 WHERE id=?1",
+                params![id, serde_json::to_string(&cursor)?],
+            )?;
+        }
+        let (node, iterations) = super::runs::location_in(&tx, flow.id())?;
+        tx.execute(
+            "UPDATE flow_sessions SET selected_start=?2 WHERE id=?1",
+            params![id, start],
+        )?;
+        tx.execute(
+            "INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at)
+             VALUES(?1,?2,?3,?4,'selected',?5,?6) ON CONFLICT(flow_id,kind,session_event) DO NOTHING",
+            params![id, i64::try_from(*version).map_err(invalid)?, node, serde_json::to_string(&iterations)?, start, now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Settle the current attempt from its Run's row: a failed or interrupted
@@ -955,6 +1130,9 @@ impl SqliteStore {
         if next == saved.cursor {
             return Ok(saved);
         }
+        if moved {
+            consume_selected_in(&tx, &saved)?;
+        }
         // A driver parks at a review; the claim goes with the same write.
         let parks = FlowSession {
             cursor: next.clone(),
@@ -1006,12 +1184,13 @@ impl SqliteStore {
     pub fn end_flow(
         &self,
         id: &str,
+        version: u64,
         claim: Option<&TaskWorkerClaim>,
         summary: &str,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        end_flow_in(&tx, id, claim, summary)?;
+        end_flow_in(&tx, id, version, claim, summary)?;
         tx.commit()?;
         Ok(())
     }
@@ -1065,7 +1244,7 @@ impl SqliteStore {
             .finish(&expected.invocation.steps)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         if finished {
-            end_flow_in(&tx, expected.id(), None, summary)?;
+            end_flow_in(&tx, expected.id(), expected.version, None, summary)?;
         } else {
             write_cursor_in(
                 &tx,
@@ -1373,6 +1552,305 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
+    }
+
+    #[test]
+    fn a_native_completion_settles_only_its_selected_flow_turn_without_a_run_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let flow = launched(
+            &store,
+            vec![step("work", None), step("decide", Some("work"))],
+            1,
+        );
+        let flow = store
+            .reserve_attempt(flow.id(), flow.version, None)
+            .unwrap();
+        let run = &flow.current_attempt.as_ref().unwrap().run_id;
+        let (session, _) = store.session_for_run(run).unwrap().unwrap();
+        store
+            .publish_attempt(flow.id(), flow.version, run, None, "codex", None)
+            .unwrap();
+        let exec = crate::id::ExecId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&exec],
+            )
+            .unwrap();
+        let driver = store
+            .claim_session_driver(&session.id, None, &exec, true)
+            .unwrap();
+        let earlier = store
+            .record_session_turn_origin(
+                &session.id,
+                "thread",
+                "earlier-success",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "earlier-success",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let selection = store.flow_turn_selection(run).unwrap().unwrap();
+        assert!(store
+            .select_flow_turn(&selection, &session.id, &driver, earlier)
+            .is_err());
+        let start = store
+            .record_session_turn_origin(
+                &session.id,
+                "thread",
+                "selected",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        let mut stale = selection.clone();
+        stale.version += 1;
+        assert!(store
+            .select_flow_turn(&stale, &session.id, &driver, start)
+            .is_err());
+        store
+            .select_flow_turn(&selection, &session.id, &driver, start)
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "unrelated-success",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        assert!(
+            store.recover_flow(flow.id(), None).is_err(),
+            "unrelated successes cannot settle selected work"
+        );
+        assert!(store
+            .end_flow(flow.id(), flow.version, None, "premature")
+            .is_err());
+        assert!(!store.flow(flow.id()).unwrap().unwrap().finished);
+        store
+            .record_flow_decision(
+                flow.id(),
+                flow.version,
+                run,
+                &verdict(FlowDecision::Advance),
+            )
+            .unwrap();
+        assert!(store
+            .record_flow_decision(
+                flow.id(),
+                flow.version,
+                run,
+                &verdict(FlowDecision::Iterate)
+            )
+            .is_err());
+        let automatic_start = store
+            .record_session_turn_origin(
+                &session.id,
+                "thread",
+                "automatic-retry",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        assert!(
+            store
+                .select_flow_turn(&selection, &session.id, &driver, automatic_start)
+                .is_err(),
+            "a live selected turn cannot be replaced"
+        );
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "selected",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"failed"}),
+            )
+            .unwrap();
+        store
+            .select_flow_turn(&selection, &session.id, &driver, automatic_start)
+            .unwrap();
+        assert!(
+            store
+                .flow(flow.id())
+                .unwrap()
+                .unwrap()
+                .cursor
+                .leaf()
+                .progress
+                .verdict
+                .is_none(),
+            "a failed native turn cannot supply the retry's navigation"
+        );
+        store
+            .record_flow_decision(
+                flow.id(),
+                flow.version,
+                run,
+                &verdict(FlowDecision::Iterate),
+            )
+            .unwrap();
+        assert!(store
+            .record_flow_decision(
+                flow.id(),
+                flow.version,
+                run,
+                &verdict(FlowDecision::Advance)
+            )
+            .is_err());
+        assert!(
+            store.recover_flow(flow.id(), None).is_err(),
+            "automatic retry awaits its own completion"
+        );
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "automatic-retry",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"failed"}),
+            )
+            .unwrap();
+        assert!(store
+            .recover_flow(flow.id(), None)
+            .unwrap()
+            .failure
+            .is_some());
+        let retry = store.retry_flow(flow.id(), None).unwrap();
+        let retry = store
+            .reserve_attempt(flow.id(), retry.version, None)
+            .unwrap();
+        let retry_run = &retry.current_attempt.as_ref().unwrap().run_id;
+        assert_eq!(
+            store.session_for_run(retry_run).unwrap().unwrap().0.id,
+            session.id
+        );
+        store
+            .publish_attempt(flow.id(), retry.version, retry_run, None, "codex", None)
+            .unwrap();
+        let retry_selection = store.flow_turn_selection(retry_run).unwrap().unwrap();
+        assert!(store
+            .select_flow_turn(&retry_selection, &session.id, &driver, earlier)
+            .is_err());
+        let retry_start = store
+            .record_session_turn_origin(
+                &session.id,
+                "thread",
+                "retry",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        assert!(store
+            .select_flow_turn(&selection, &session.id, &driver, retry_start)
+            .is_err());
+        let wrong_claim = crate::durable::TaskWorkerClaim {
+            invocation_id: flow.id().to_owned(),
+            generation: 99,
+            position_version: retry.version,
+            owner: crate::durable::TaskWorkerOwner {
+                trace_id: crate::id::TraceId::new(),
+                exec_id: exec.clone(),
+                pid: 1,
+                started_at: 1,
+            },
+            claimed_at: time::OffsetDateTime::now_utc(),
+        };
+        let mut stale = retry_selection.clone();
+        stale.claim = Some(wrong_claim.clone());
+        assert!(store
+            .select_flow_turn(&stale, &session.id, &driver, retry_start)
+            .is_err());
+        store
+            .select_flow_turn(&retry_selection, &session.id, &driver, retry_start)
+            .unwrap();
+        assert!(
+            store.recover_flow(flow.id(), None).is_err(),
+            "retry cannot consume an older successful turn"
+        );
+        let completion = store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "retry",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let recovered = store
+            .recover_flow(flow.id(), None)
+            .expect("native completion survives a missing driver outcome");
+        let later = store
+            .record_session_turn_origin(
+                &session.id,
+                "thread",
+                "later",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        assert!(
+            store
+                .select_flow_turn(&retry_selection, &session.id, &driver, later)
+                .is_err(),
+            "successful selection cannot be replaced"
+        );
+        assert!(recovered.current_attempt.as_ref().unwrap().completed());
+        let mut next = recovered.cursor.clone();
+        next.index += 1;
+        assert!(store
+            .checkpoint_flow(flow.id(), recovered.version + 1, &next, None, None)
+            .is_err());
+        assert!(store
+            .end_flow(
+                flow.id(),
+                recovered.version,
+                Some(&wrong_claim),
+                "stale claim"
+            )
+            .is_err());
+        store
+            .end_flow(flow.id(), recovered.version, None, "native success")
+            .unwrap();
+        assert!(store
+            .end_flow(flow.id(), recovered.version, None, "duplicate")
+            .is_err());
+        assert!(store.flow(flow.id()).unwrap().unwrap().finished);
+        let conn = store.conn.lock().unwrap();
+        let consumed: Vec<i64> = conn
+            .prepare("SELECT session_event FROM flow_events WHERE flow_id=?1 AND kind='consumed'")
+            .unwrap()
+            .query_map([flow.id()], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(consumed, vec![completion]);
+        let unknown: (Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT outcome,exit_code FROM execs WHERE id=?1",
+                [&exec],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unknown, (None, None));
+        drop(conn);
+        assert!(
+            store.run(run).unwrap().unwrap().ended.is_none(),
+            "native success cannot invent a Run outcome"
+        );
     }
 
     #[test]

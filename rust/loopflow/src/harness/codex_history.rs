@@ -202,10 +202,10 @@ mod tests {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "BEGIN;
-             INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
-             VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
-             INSERT INTO runs(id,session_id,created_at,cwd,published)
-             VALUES('run_fixture','conversation',1,'/fixture',1);
+             INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_fixture','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id)
+             VALUES('run_fixture','conversation');
              COMMIT;",
         )
         .unwrap();
@@ -289,7 +289,7 @@ mod tests {
         let events = store.session_history("conversation", 0, 0).unwrap();
         let unknown = events
             .iter()
-            .find(|event| event.provider_turn == "unknown")
+            .find(|event| event.provider_turn.as_deref() == Some("unknown"))
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
         assert_eq!(unknown.exec_id, None);

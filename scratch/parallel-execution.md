@@ -479,3 +479,50 @@ CI **36517146691** was in progress at readback; no hosted pass is claimed.
 The native conversion, caller draft, Chapter handback and scratch remain local.
 No source binary accessed the installed Home. No rebase, PR-copy mutation,
 installation, promotion, landing or Flow navigation was performed by this review.
+
+
+## Import implementation continuation · 2026-09-28 · after b884feeef
+
+Main retains the complete remaining-work contract. The imported-evidence draft
+now preserves `session_events` sequence numbers, selected/consumed Flow references,
+and all three affected Started/history triggers. The first populated proof found
+SQLite rejecting a rename while `validate_task_started_update` referred to the
+removed table; that trigger is now recreated too. The next canonical pass reached
+a duplicate-worktree fixture seed. An attempted overlay then erased the generated
+migration registry: its missing `execs` failure is fixture setup, not production.
+Recreated exact-source materialization passes the populated test (one test,
+`historical-materialized-final.log`, source receipt `canonical-history-source.json`).
+The preceding complete-chain test passed in `historical-materialized.log`.
+
+`historical-attributed.log` passes the observed-history Rust DTO and completed
+keyed-Ask recovery; the multi-origin case exposed the import writer supplying a
+redundant Task Flow cwd. That writer now uses the existing Task-owned cwd contract.
+The public multi-origin proof is still under repair; its dry run now resolves
+same-batch captures from parsed input without durable writes. Do not claim its
+membership, Started/report equality or replay assertions passed yet.
+
+The returned Chapter CLI fixture now requires a nonempty PR list containing
+GitHub number 17. Ruff passes after formatting (`chapter-static-final.log`). It
+has not executed on Linux; no public Chapter/default-launch proof follows.
+The native valid-decision retry, legacy multi-member import, final owner readers,
+and other obligations in remaining-work/import-preservation remain open.
+
+The later `historical-attributed-4.log` passes the public multi-origin proof.
+`historical-replay-final.log` repeats only that changed case with the additional
+conflicting-terminal assertion: pass, retained failure history unchanged.
+The proof compares fresh-Home dry-run/applied classification, no preview writes,
+exact existing Started, same-batch capture/member resolution, retained past
+Flow/node/iteration after cursor advancement, seven unchanged replay inputs,
+zero Run rows, both Session inventory modes, and no provider launch. It removes
+mutable source sidecars and retains public lists. This replaces the pending
+judgment above without erasing its failed attempts. Historical membership is
+checked through Session/Flow owners; legacy `runs` reader conversion remains open.
+
+`historical-history-swift.log` passes one actual Swift Testing observed-history
+DTO test. `historical-import-static.log` passes all-target Clippy in 15.99s;
+`cargo fmt` and scoped diff whitespace pass. Unknown provider thread/turn remains
+nullable in the shared Rust/Swift fixture. The supervisor approved publishing this
+coherent import checkpoint and the three setup repairs under existing authority
+(comment c3c6db65); this is supervisor direction, not new approval attributed to Jack.
+Next boundary: historical multi-member inputs on one AgentSession and final SQL
+readers, retaining every original failure, usage owner and exact Flow reference.

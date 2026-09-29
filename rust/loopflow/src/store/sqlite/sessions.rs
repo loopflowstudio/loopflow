@@ -138,6 +138,80 @@ fn inventory_query(
 }
 
 impl SqliteStore {
+    /// Restore historical conversation facts without borrowing the importing Exec's Work.
+    pub(crate) fn import_session(
+        &self,
+        mut session: AgentSession,
+        review: Option<&FlowSession>,
+        history: &[crate::session::ImportedObservation],
+        dry_run: bool,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(flow) = review {
+            super::flows::import_flow_in(&tx, flow)?;
+            if session.node.is_none() && session.kind == SessionKind::FlowReview && !flow.finished {
+                let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
+                session.node = Some(node);
+                session.iterations = Some(iterations);
+            }
+        }
+        resolve_ancestry_in(&tx, &mut session)?;
+        if let Some(mut saved) = session_in(&tx, &session.id)? {
+            // A later rename or closure is conversation state, never overwritten by import.
+            if saved.title_source == TitleSource::Human {
+                session.title = saved.title.clone();
+                session.title_source = saved.title_source;
+            }
+            if session.ready_summary.is_none() {
+                session.ready_summary = saved.ready_summary.clone();
+            }
+            if session.completed_at.is_none() {
+                session.completed_at = saved.completed_at;
+            }
+            // File modification time was the only chronology for unopened Asks.
+            if !session.input_published && session.kind == SessionKind::Ask {
+                session.created_at = saved.created_at;
+                if session.completed_at.is_some() {
+                    session.completed_at = saved.completed_at;
+                }
+            }
+            // Captured names with generated provenance may have been enriched from their file.
+            if session.title_source == TitleSource::Generated
+                && saved.title_source == TitleSource::Generated
+            {
+                saved.title = session.title.clone();
+            }
+            if saved != session {
+                return Err(invalid(format!(
+                    "Session {} conflicts with its recorded input or answer",
+                    session.id
+                )));
+            }
+            let changed = import_history_in(&tx, &session, history)?;
+            if !dry_run {
+                tx.commit()?;
+            }
+            return Ok(changed);
+        }
+        insert_session_in(&tx, &session)?;
+        import_history_in(&tx, &session, history)?;
+        if session.kind == SessionKind::FlowReview && review.is_some_and(|flow| !flow.finished) {
+            tx.execute(
+                "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
+                params![
+                    session.flow_session_id,
+                    session.id,
+                    session.input_id.as_str()
+                ],
+            )?;
+        }
+        if !dry_run {
+            tx.commit()?;
+        }
+        Ok(true)
+    }
+
     pub fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -474,6 +548,36 @@ impl SqliteStore {
     }
 }
 
+fn import_history_in(
+    conn: &Connection,
+    session: &AgentSession,
+    history: &[crate::session::ImportedObservation],
+) -> StoreResult<bool> {
+    let mut changed = false;
+    for observation in history {
+        let key = format!("{}:{}", session.input_id, observation.source);
+        let payload = serde_json::to_string(&observation.payload)?;
+        let saved: Option<String> = conn.query_row(
+            "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
+            params![session.id,key], |row| row.get(0)).optional()?;
+        if let Some(saved) = saved {
+            if saved != payload {
+                return Err(invalid(format!(
+                    "input {} has conflicting {} evidence",
+                    session.input_id, observation.source
+                )));
+            }
+            continue;
+        }
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload)
+            VALUES(?1,'observed',?2,?3,?4,?5,?6)",
+            params![session.id,key,observation.task_id.as_ref().map(TaskId::as_str),
+                observation.wave_id.as_ref().map(crate::id::WaveId::as_str),observation.observed_at,payload])?;
+        changed = true;
+    }
+    Ok(changed)
+}
+
 pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
     let task = flow
         .task_id
@@ -634,6 +738,12 @@ pub(super) fn reserve_session_in(
         session.node = Some(node);
         session.iterations = Some(iterations);
     }
+    resolve_ancestry_in(conn, &mut session)?;
+    insert_session_in(conn, &session)?;
+    Ok(session)
+}
+
+fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreResult<()> {
     if let Some(task) = &session.task_id {
         let wave = super::runs::task_wave_in(conn, task)?;
         if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
@@ -650,6 +760,10 @@ pub(super) fn reserve_session_in(
             .transpose()
             .map_err(invalid)?;
     }
+    Ok(())
+}
+
+fn insert_session_in(conn: &Connection, session: &AgentSession) -> StoreResult<()> {
     conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,ready_summary,completed_at,
         created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
         input_published,cwd,skill,provider,model,node,iterations)
@@ -669,7 +783,7 @@ pub(super) fn reserve_session_in(
             session.caller_input_id.as_ref().map(RunId::as_str)
         ],
     )?;
-    Ok(session)
+    Ok(())
 }
 
 pub(super) fn replace_input_in(conn: &Transaction<'_>, session: &AgentSession) -> StoreResult<()> {

@@ -5078,6 +5078,13 @@ mod tests {
             INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
                 VALUES('flow',4,0,'[[2]]','selected',2,3,'{"caller_token":"original"}'),
                     ('flow',4,0,'[[2]]','consumed',4,5,'{}');
+            UPDATE flow_sessions SET selected_start=2 WHERE id='flow';
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','infra','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','linear-project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','issue','INF-1','/repo',1);
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+                VALUES('conversation','thread','historical','started','historical-start','task','wave',17,'{}');
             COMMIT;
         "#).unwrap();
         let rows = |sql: &str| {
@@ -5106,6 +5113,7 @@ mod tests {
         let flow_history = rows("SELECT * FROM flow_events ORDER BY seq");
         super::_migration_transaction(&conn, |conn| {
             conn.execute_batch(&current_draft_sql(name))?;
+            conn.execute_batch(&current_draft_sql("retain_imported_session_evidence"))?;
             validate_foreign_keys(conn)
         })
         .unwrap();
@@ -5151,6 +5159,60 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, ("current".into(), "conversation".into(), 4));
+        assert_eq!(
+            conn.query_row("SELECT selected_start FROM flow_sessions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let started = || {
+            conn.query_row("SELECT started_at FROM tasks WHERE id='task'", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(started(), 17);
+        assert!(
+            conn.execute(
+                "DELETE FROM session_events WHERE receipt_key='historical-start'",
+                []
+            )
+            .is_err(),
+            "the rebuild must retain the last historical Task start"
+        );
+        conn.execute_batch(r#"
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+                VALUES('conversation','thread','later','started','later-start','task','wave',29,'{}');
+            DELETE FROM session_events WHERE receipt_key='historical-start';
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('unstarted','project','issue-2','INF-2','/other',1);
+            INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload)
+                VALUES('conversation','observed','legacy-unknown','unstarted','wave',7,'{"outcome":"failed"}');
+        "#).unwrap();
+        assert_eq!(started(), 17, "a later turn cannot change first assignment");
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='unstarted'",
+                [],
+                |row| row.get::<_, Option<i64>>(0)
+            )
+            .unwrap(),
+            None,
+            "an imported observation cannot invent a historical start"
+        );
+        conn.execute_batch(r#"
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
+                VALUES('conversation','thread','first','started','first-start','unstarted','wave',31,'{}');
+        "#).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='unstarted'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            31
+        );
         validate_foreign_keys(&conn).unwrap();
     }
 

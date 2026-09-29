@@ -105,7 +105,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    origin.provider_generation,origin.exec_id,origin.task_id,origin.wave_id,e.observed_at,e.payload
+                    origin.provider_generation,origin.exec_id,
+                    CASE WHEN e.kind='observed' THEN e.task_id ELSE origin.task_id END,
+                    CASE WHEN e.kind='observed' THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
              FROM session_events e LEFT JOIN session_events origin
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
@@ -117,8 +119,8 @@ impl SqliteStore {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<i64>>(5)?,
                     row.get::<_, Option<String>>(6)?,
@@ -152,6 +154,7 @@ impl SqliteStore {
                     "started" => SessionEventKind::Started,
                     "usage" => SessionEventKind::Usage,
                     "completed" => SessionEventKind::Completed,
+                    "observed" => SessionEventKind::Observed,
                     _ => {
                         return Err(StoreError::InvalidData(format!(
                             "Unknown Session event {kind}"
@@ -186,10 +189,10 @@ mod tests {
             .unwrap()
             .execute_batch(
                 "BEGIN;
-             INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind,interactive)
-             VALUES('conversation','run_fixture','Retained','human',1,'conversation',1);
-             INSERT INTO runs(id,session_id,created_at,cwd,published)
-             VALUES('run_fixture','conversation',1,'/fixture',1);
+             INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_fixture','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id)
+             VALUES('run_fixture','conversation');
              COMMIT;",
             )
             .unwrap();

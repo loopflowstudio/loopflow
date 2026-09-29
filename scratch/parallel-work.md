@@ -30,7 +30,20 @@ Current managed worker, verified through Task status and OS-live `lf ps`:
   loop-decide → human-demo order. Intermediate concept review is not the goal's
   code-complete review. Supervisor chooses no Flow edge.
 
-No bounded contributor remains active. The Desktop contribution returned exit0;
+No bounded contributor remains active. The Chapter CLI contributor returned
+`tests/e2e/chapter_rotation.py` to main with exit0; tool handle `2564` is closed.
+Handback `.lf/tmp/cut-i/chapter-cli-handback.md`; source SHA256
+`c73e5dccbe8e2af249f95ca636ce1f0c1f9d1fbe0b26f22a03e79590b9e36095` matches.
+It authors public second-Home sync and actual Project-default Task launch proof,
+requiring a scripted provider's completion consumed by the real worker. No
+execution state is seeded. No build, syntax check, formatter or fixture execution
+has run; main owns static checks and serialized Linux execution. Linux TLS and
+OS-account installation selection require a disposable account/container. Source
+review identified one assertion to tighten: require a nonempty synthetic PR row,
+so equal empty lists cannot count as PR preservation. Main owns the file and
+execution prerequisites now; log `.lf/tmp/cut-i/chapter-cli-contributor.log`.
+
+The Desktop contribution returned exit0;
 tool handle `50100` is closed. Verified handback
 `8ff3937a-f2a9-4675-af30-657c13cf687a` returns all six released Swift paths to main.
 Five changed: projection, breadcrumb bar, PodiumModel and two WorkspaceNavigation
@@ -93,20 +106,75 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Local repair checkpoint **f48606e8ca37188d8669dd4133d237d070395ecf** is based on
-**b42d532052f734bf2ff478f8e83c874b339ccef8**. Main preserved the preceding work
-at `884b90be97` and rebased without conflicts; Task base and Git merge-base agree.
-The latest observed publication remains **fb100f486cf69d03bd87a6fda748c2c75588a906**
-on [PR1296](https://github.com/loopflowstudio/loopflow/pull/1296), with auto-merge
-absent. The rebased checkpoints and current owner conversion are unpublished.
-Refresh shared state before delivery. Main alone owns further rebase/publication.
+Published **f60fcb3dedfca0f652d59f2e9904314a286e5c2b** on
+[PR1296](https://github.com/loopflowstudio/loopflow/pull/1296), based on
+**5402d93974dba3b6e94bea1d411951a9dfeb20d9**. GitHub and Task publication agree;
+auto-merge is absent. This checkpoint includes AgentSession admission and the
+returned Desktop/Chapter work. Post-rebase evidence: one historical-window test,
+25 Rust DTO/context checks, eight Wave-detail checks, the mounted terminal/draft
+proof and 25 Python architecture checks pass. Native admission/authority source
+was unchanged by that rebase. No complete matrix or configured acceptance follows.
 
-Remote main subsequently advanced to `2283951248481dd42870a1fb4cea8d96ed384e42`,
-six commits beyond this base. Verified scheduling comment
-`76514211-e006-4cfc-93d0-3a0d06b13022` requests integration/publication at the next
-coherent checkpoint, preserving the ongoing conversion. Run-reader optimization
-#1333 and skill/docs consolidation #1312 overlap; retain their observable behavior
-and captured Flow policy. This is queued direction, not a completed rebase.
+Main then advanced by #1337, ownership filtering before unrelated payload reads,
+and GitHub marked the published head conflicting; no fresh CI was observed there.
+Main completed another local rebase at **a03de75276bf3f7c5e02cc2628e123ca7f29f76e**
+on **7c2f53b9e91564ae0ac37618098bbff065f1af9e**. Task base and Git merge-base agree.
+The reconciled ownership/rename and uncapped parent tests pass. The historical
+window fixture first failed because its private database was not initialized;
+after explicit ephemeral initialization, its focused rerun passes, retaining
+usage, partial evidence, exact parent selection and activity's ending-in-window
+case. Logs: `admission-rebase-1337.log` and `admission-rebase-1337-window.log`.
+Formatting/all-target Clippy passed; main published the reconciliation as
+**b884feeef649301af657b032f9a08861df73ae7b**. GitHub and Task publication agree,
+GitHub reports mergeable and auto-merge remains absent. CI **36525294138** ended
+in failure: architecture, Rust lint, migration, Python, website, e2e smoke, Swift,
+disposable Task installation and UI compilation passed; scratch-clear failed on
+retained active notes. UI compilation is not rendered acceptance. Rust job109266882853 ended
+with 486 passes, one failure, 15 skips and 1,470 unrun. The failure is the fresh
+Codex history fixture inserting removed `agent_sessions.current_run_id`;
+`session_events.rs` and `branch_data.rs` retain two equivalent fresh-store inserts.
+Supervisor sent the three setup repairs to main; historical migration input stays
+unchanged. All three setup repairs pass locally in
+`historical-capture-and-ci-fixtures.log`; they remain unpublished with the active
+import conversion. Log `.lf/tmp/cut-i/ci-b884-rust.log` preserves hosted failure.
+
+Historical import now has narrow passes for autonomous/completed captures and
+completed keyed Ask replay without a provider. History DTO Rust proof passes.
+The new history-table rebuild first failed on the Task validation trigger's
+reference to the temporarily absent table; main restored that trigger alongside
+the two history triggers. The materialized fresh-chain check then passed, while
+populated preservation reached a duplicate-worktree fixture error. The first
+repair rerun lost the generated migration registration in its disposable copy
+and failed before seeding (`no such table: execs`). Supervisor diagnosed that
+specific harness error in verified comment `b78c211c-7ce9-4edd-975d-4a446c89c9b0`.
+Fresh materialization with the repaired fixture now passes the populated test:
+exact history, selected/consumed references, Started preservation and recreated
+trigger behavior. Logs: `historical-history-dto.log`, `historical-materialized.log`,
+`historical-materialized-repair.log`, `historical-materialized-final.log`.
+This is one populated migration proof, not full import acceptance.
+
+Supervisor identified a separate source-derived dry-run dependency: rolled-back
+capture imports cannot satisfy headless membership lookup through `store.flow()`
+later in the same batch. Verified comment `24a0c21e-46d5-4688-8e6f-616adcc75286`
+asks main to prove fresh-Home capture-plus-headless preview without durable writes
+and with the same intended membership as applied import. No executed failure is
+claimed for that initial observation. Main now retains successfully parsed
+captures for the batch and validates each capture/member together inside the
+import transaction. The public attributed-import proof passes in
+`historical-attributed-4.log`: dry-run/applied classification agrees, headless
+Flow/node/iterations survive a moved cursor, original ancestry/caller and failed
+terminal evidence remain, replay is unchanged, and no Run rows are created.
+The preceding failures retain the Task Flow cwd storage mismatch and a fixture
+that omitted explicit headless listing. The corrected test queries both modes;
+interactive remains the default. This proof does not establish normalized
+historical usage, prior SQL members, interrupted import or configured recovery.
+Chapter fixture now passes Ruff (`chapter-static-final.log`) and asserts a
+nonempty PR row; Linux behavioral execution remains outstanding.
+
+Publication preparation removed the previous intermediate `concept-review.md`;
+its exact evidence remains at `aa43c6829c:scratch/concept-review.md`. That review
+was not the requested code-complete review. Remaining scope and import obligations
+stay active here. No review completion or Flow edge follows from publication.
 
 The one materialized diagnostic ran all selected tests: 1,925 passed, 33 failed,
 15 skipped. Supervisor reconciled the failures against focused reruns: 29 have
@@ -114,10 +182,10 @@ passes, one has passing assertions with a process leak, three remain unresolved.
 These are mixed recorded snapshots, not a full green matrix. Exact mappings:
 `.lf/tmp/cut-i/supervisor-matrix-dispositions.json`; limits in evidence.md. Do not
 repeat the full matrix after each small correction. Hosted Rust has not passed
-fully; latest published CI stopped at the now-locally-repaired Project-status
-assertion. Retain full CI and final canonical preservation as finish obligations.
+fully; latest published CI stopped at the now-locally-repaired Codex history
+fixture. Retain full CI and final canonical preservation as finish obligations.
 
-Current dirty conversion moves captured input/publication onto AgentSession and
+The published admission conversion moves captured input/publication onto AgentSession and
 removes Run joins from Session reads and Flow publication. The standalone native
 automatic-retry fixture now passes with zero Run rows on candidate d2cdd28d5bc0:
 one conversation/thread, failed and successful turn history, reported usage and
@@ -142,13 +210,12 @@ retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
 
-Local **f48606e8c against b42d53205**:
-**+14,526 / −29,572 = net −15,046**.
-Rust/Swift +13,665/−29,516; Python/shell +47/−56; SQL +814/−0.
-Receipt `.lf/tmp/execution-model/status-counts-f48606e8c.json` reproduces the
-previous 884 measurement first; these checkpoint repairs reduce net size by 77.
-Current dirty admission changes are excluded. Neither publication nor completion
-is implied.
+Published **f60fcb3ded against 5402d9397**:
+**+14,616 / −29,605 = net −14,989**.
+Rust/Swift +13,615/−29,549; Python/shell +47/−56; SQL +954/−0.
+Receipt `.lf/tmp/execution-model/status-counts-f60fcb3ded.json` reproduces the
+preceding ddf4a2ddc measurement first. Subsequent rebase/reconciliation edits are
+excluded; this is a comparable whole-branch count, not completion evidence.
 
 Last measured published `594c7c319f` against `1dce02734`: +14,445/−29,505, net −15,060.
 Different bases cannot establish incremental deletion. Method:

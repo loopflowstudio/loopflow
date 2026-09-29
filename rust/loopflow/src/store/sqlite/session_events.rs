@@ -43,6 +43,31 @@ impl SqliteStore {
         &self,
         input: &RunId,
     ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+        let native: Option<String> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT output.payload FROM session_events start
+                 JOIN session_events done ON done.session_id=start.session_id
+                   AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
+                   AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'
+                 JOIN session_events output ON output.session_id=start.session_id
+                   AND output.provider_thread=start.provider_thread AND output.provider_turn=start.provider_turn AND output.kind='output'
+                 WHERE start.kind='started' AND start.input_id=?1 ORDER BY done.seq DESC LIMIT 1",
+                 [input.as_str()], |row| row.get(0)).optional()?
+        };
+        if let Some(payload) = native {
+            let value: Value = serde_json::from_str(&payload)?;
+            let text = match value.get("value") {
+                Some(output) => serde_json::to_string(output)?,
+                None => value["text"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        StoreError::InvalidData("native output has no value or text".into())
+                    })?
+                    .to_owned(),
+            };
+            return Ok(Some(crate::run_record::FinalAnswer { text, exact: true }));
+        }
         crate::run_record::final_answer(self.input_events(input)?)
             .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
@@ -237,6 +262,7 @@ impl SqliteStore {
                     "started" => SessionEventKind::Started,
                     "usage" => SessionEventKind::Usage,
                     "completed" => SessionEventKind::Completed,
+                    "output" => SessionEventKind::Output,
                     "observed" => SessionEventKind::Observed,
                     _ => {
                         return Err(StoreError::InvalidData(format!(

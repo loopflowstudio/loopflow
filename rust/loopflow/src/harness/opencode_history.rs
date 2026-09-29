@@ -110,6 +110,7 @@ impl History {
 struct Receipt {
     messages: Vec<Value>,
     completion: Value,
+    output: Option<Value>,
 }
 
 fn native_receipts(thread: &str, messages: &[Value]) -> BTreeMap<String, Receipt> {
@@ -170,6 +171,17 @@ fn native_receipts(thread: &str, messages: &[Value]) -> BTreeMap<String, Receipt
         } else {
             continue;
         };
+        receipt.output = info
+            .get("structured_output")
+            .filter(|value| !value.is_null())
+            .map(|value| json!({"value": value}));
+        if receipt.output.is_none() {
+            receipt.output = last["parts"]
+                .as_array()
+                .and_then(|parts| parts.iter().rev().find(|part| part["type"] == "text"))
+                .and_then(|part| part["text"].as_str())
+                .map(|text| json!({"text": text}));
+        }
         receipt.completion = json!({"status":status,"error":info["error"],
             "started_at":receipt.messages[0]["info"]["time"]["created"],
             "completed_at":info["time"]["completed"],"message_id":info["id"],"provider":"opencode"});
@@ -195,6 +207,9 @@ fn record_receipts(
                 &json!({"provider":"opencode","message":info}),
             )?;
         }
+    }
+    if let Some(output) = &receipt.output {
+        store.record_session_event(session, thread, request, SessionEventKind::Output, output)?;
     }
     if !receipt.completion.is_null() {
         store.record_session_event(

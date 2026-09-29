@@ -91,20 +91,6 @@ impl OpenCodeHarness {
     }
 
     async fn start_inner(&mut self, config: &AgentConfig) -> Result<()> {
-        let mut config = config.clone();
-        if let Some(selection) = &mut config.flow_selection {
-            selection.caller_token = Some(uuid::Uuid::new_v4().to_string());
-            let encoded = config
-                .env
-                .get(crate::exec::AGENT_CALLER_ENV)
-                .ok_or_else(|| anyhow!("Flow launch has no conversation caller"))?;
-            let mut caller: crate::exec::AgentCaller = serde_json::from_str(encoded)?;
-            caller.flow_turn = selection.caller_token.clone();
-            config.env.insert(
-                crate::exec::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&caller)?,
-            );
-        }
         let owner = config
             .session_driver
             .as_ref()
@@ -122,7 +108,6 @@ impl OpenCodeHarness {
             owner,
             config.flow_selection.clone(),
         )));
-        let config = &config;
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -892,6 +877,9 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
             { "type": "text", "text": content }
         ]
     });
+    if let Some(schema) = config.output_schema() {
+        payload["format"] = json!({"type":"json_schema", "schema":schema, "retryCount":2});
+    }
 
     if first_turn && !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());

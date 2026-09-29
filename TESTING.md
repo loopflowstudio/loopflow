@@ -485,7 +485,8 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-driver-loss both` for explicit retry after both driver and engine die,
 `--flow-automatic-retry` for failed then successful turns in one command,
-and `--flow-decision-retry missing|replace` for discarded failed-turn navigation.
+and `--flow-decision-retry missing|replace|late` for typed native results after a failed
+turn, bounded invalid-output correction, and refusal of the removed decision command.
 The managed recovery unit fixture exercises the public Flow-to-Task dispatch,
 preserved adoption refusal, replacement claim and exact native-history consumption;
 its provider history is synthetic, with an owned process supplying exit evidence.

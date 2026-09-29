@@ -7,7 +7,6 @@ use std::process::Command;
 use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::transitions::FlowDecision;
 use loopflow::engine::{expand_flow, load_flow};
 use loopflow::id::{ExecId, TraceId};
 use support::codex_app_server_script;
@@ -508,6 +507,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                     )]),
                     session_driver: Some((session.id.clone(), driver)),
                     flow_selection: Some(loopflow::durable::FlowTurnSelection {
+                        output: None,
                         flow_id: claimed.id().into(),
                         version: claimed.version,
                         claim: Some(claim.clone()),
@@ -545,7 +545,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let decision = lf_command(
             repo.path(),
             home.path(),
-            &["flow", "decide", "iterate", "Checkout proof"],
+            &["task", "status", "--json"],
             None,
         )
         .env("LF_AGENT_CALLER", caller)
@@ -566,10 +566,9 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.task_flow(&child.task.id))
             .unwrap()
             .unwrap();
-        assert_eq!(
-            position.cursor.progress.verdict.unwrap().decision,
-            FlowDecision::Iterate
-        );
+        assert!(position.cursor.progress.verdict.is_none());
+        let resolved: serde_json::Value = serde_json::from_slice(&decision.stdout).unwrap();
+        assert_eq!(resolved["task_id"], child.task.id.as_str());
         assert!(runtime
             .block_on(child.store.task_flow(&parent.id))
             .unwrap()

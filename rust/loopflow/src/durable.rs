@@ -212,6 +212,7 @@ impl FlowAttempt {
 /// conversation continuations do not receive this Flow capability.
 #[derive(Debug, Clone)]
 pub struct FlowTurnSelection {
+    pub output: Option<crate::engine::flow_output::FlowOutput>,
     pub flow_id: String,
     pub version: u64,
     pub claim: Option<TaskWorkerClaim>,

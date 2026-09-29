@@ -17,7 +17,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public var id: Int64 { seq }
 
     public enum Kind: String, Codable, Sendable {
-        case started, usage, completed, observed
+        case started, usage, completed, output, observed
     }
 
     enum CodingKeys: String, CodingKey {

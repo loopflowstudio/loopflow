@@ -5059,6 +5059,91 @@ mod tests {
     }
 
     #[test]
+    fn native_output_upgrade_preserves_selected_history_and_started() {
+        let conn = open();
+        let name = "record_session_output";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','infra','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','linear-project',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','issue','INF-1','/repo',1);
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES('flow','{"id":"flow","capture":"retained"}','/repo',0,0,4,0,1,'current');
+            INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+                VALUES('conversation','input','Saved review','human',1,'conversation',0,1,'/repo');
+            INSERT INTO agent_session_inputs(input_id,session_id) VALUES('input','conversation');
+            INSERT INTO session_events(seq,session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload,input_id)
+                VALUES(12,'conversation','thread','turn','started','start','task','wave',17,'{"original":true}','input'),
+                    (19,'conversation','thread','turn','completed','end','task','wave',18,'{"status":"completed"}','input');
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
+                VALUES('flow',4,0,'[]','selected',12,17,'{}'),('flow',4,0,'[]','consumed',19,18,'{}');
+            UPDATE flow_sessions SET selected_start=12 WHERE id='flow';
+        "#).unwrap();
+        let rows = || {
+            let mut query = conn
+                .prepare("SELECT * FROM session_events ORDER BY seq")
+                .unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before = rows();
+        super::_migration_transaction(&conn, |conn| {
+            conn.execute_batch(&current_draft_sql(name))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        assert_eq!(rows(), before);
+        assert_eq!(
+            conn.query_row("SELECT started_at FROM tasks WHERE id='task'", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            17
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT selected_start FROM flow_sessions WHERE id='flow'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            12
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT session_event FROM flow_events WHERE kind='consumed'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            19
+        );
+        assert!(conn
+            .execute("DELETE FROM session_events WHERE seq=12", [])
+            .is_err());
+        conn.prepare("SELECT session_id FROM session_events INDEXED BY session_input_membership WHERE kind='observed' AND substr(receipt_key,-14)=':manifest.json'").unwrap();
+        conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload) VALUES('conversation','thread','turn','output','output',19,'{\"value\":{\"decision\":\"advance\",\"summary\":\"retained\"}}')", []).unwrap();
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn runtime_children_upgrade_preserves_existing_flows_without_inventing_parents() {
         let conn = open();
         let name = "runtime_flow_children";

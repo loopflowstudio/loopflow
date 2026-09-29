@@ -2616,10 +2616,7 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "task", "run", "LOO-1"]).is_ok());
-        assert!(
-            Cli::try_parse_from(["lf", "flow", "decide", "iterate", "revise implementation"])
-                .is_ok()
-        );
+        assert!(Cli::try_parse_from(["lf", "flow", "blocked", "Missing input"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_ok());
     }
 

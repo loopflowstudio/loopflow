@@ -228,6 +228,53 @@ reads never import, scan manifests for identity, or restore mutable sidecars.
 
 ## Completion evidence matrix
 
+### Structured-result implementation boundary · 2026-09-29
+
+Jack selected provider-constrained output, informed by
+[PydanticAI](https://ai.pydantic.dev/output/) and
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+The captured boundary defines the type before launch: a repeat returns
+`{decision: advance|iterate, summary: string}`; an XOR returns
+`{path: <one captured path name>}`. Reject additional fields. No confidence score
+is inferred. Each occurrence answers its own question; neither current catalog
+content nor a later conversation turn can choose its result type.
+
+The implementation uses the existing owners:
+
+1. Derive schema and typed decoding from the saved ConcreteStep. Carry the schema
+   through AgentConfig into native provider requests. Codex uses per-turn
+   `outputSchema`, Claude print uses `--json-schema`, and OpenCode uses
+   `format.type=json_schema`. See their
+   [Codex](https://learn.chatgpt.com/docs/app-server#turns),
+   [Claude](https://code.claude.com/docs/en/cli-reference) and
+   [OpenCode](https://opencode.ai/docs/sdk/#structured-outputs) contracts.
+2. Retain the provider's final structured value with its exact native turn in
+   Session history, including recovery from native history after driver loss.
+   Streaming text fragments and a command's zero exit cannot supply that value.
+   Provider failure, absent output and invalid output remain distinguishable.
+3. Read/validate the selected successful completion under the existing
+   FlowSession version/claim. Consume it with cursor advancement in the same
+   transaction. Delete the decision/router CLI and its store authority path;
+   keep blocking/Ask feedback separate from navigation.
+4. On invalid output, return the validation error to the same AgentSession with
+   the same schema. Implementation choice: at most two corrective turns, retained
+   durably so recovery cannot reset the bound. Never reinterpret an invalid result
+   as provider failure or authorize a different live turn. Exhaustion leaves the
+   cursor unchanged with a named validation failure.
+5. Saved graphs/policies remain unchanged. The launch-owned output contract
+   supersedes obsolete decision-command instructions in saved prompt content;
+   no graph recompilation or legacy writer remains. Historical candidates without
+   typed output retain their evidence but cannot settle a new boundary.
+
+Proof: invalid→valid in one conversation, bounded exhaustion, late/stale/failed
+results rejected, exact-once Task/taskless continuation, and interrupted native
+output recovery. Retain shared-engine sibling and failed-thread/successful-idle
+cases. The real Codex/local Responses proof now passes the formerly failing legitimate
+retry, exhaustion and delayed-command cases. Current proof and limits are kept in
+[the execution handoff](parallel-execution.md); configured acceptance remains open.
+
+### Whole-design proof
+
 | Requirement | Evidence needed on integrated bytes |
 | --- | --- |
 | Every lf command visible | Root, direct child and agent child Execs, command result and searchable Task/repo/parent filters; no fake process rows |

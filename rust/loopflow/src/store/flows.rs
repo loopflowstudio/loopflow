@@ -4,7 +4,6 @@ use crate::durable::{
     FlowSession, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
     TaskWorkerOwner,
 };
-use crate::engine::transitions::FlowVerdict;
 use crate::engine::ExecutionCursor;
 
 use super::{run_sqlite, Store, StoreResult};
@@ -225,38 +224,6 @@ impl Store {
         let owner = owner.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
-        })
-        .await
-    }
-
-    pub async fn record_flow_decision(
-        &self,
-        id: &str,
-        version: u64,
-        actor: &crate::id::ExecId,
-        verdict: &FlowVerdict,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        let actor = actor.clone();
-        let verdict = verdict.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_decision(&id, version, &actor, &verdict)
-        })
-        .await
-    }
-
-    pub async fn record_flow_path(
-        &self,
-        id: &str,
-        version: u64,
-        actor: &crate::id::ExecId,
-        path: &str,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        let actor = actor.clone();
-        let path = path.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_path(&id, version, &actor, &path)
         })
         .await
     }

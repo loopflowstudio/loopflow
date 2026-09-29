@@ -1,6 +1,6 @@
 // A Task's Flow as Rust projects it (`ops/task_flow.rs`, `engine/flow_graph.rs`).
 //
-// Topology, occurrence keys, cursor position, return counts, and control
+// Topology, captured node IDs, cursor position, return counts, and control
 // legality all come from the shared read. Clients draw them; they never parse
 // Flow YAML or derive which control is legal.
 
@@ -10,8 +10,8 @@ public struct FlowGraph: Decodable, Sendable, Hashable {
     public let name: String
     public let steps: [FlowNode]
 
-    /// Locate an exact structural occurrence, including nested XOR paths.
-    public func node(_ key: String) -> FlowNode? {
+    /// Locate an exact captured occurrence, including nested XOR paths.
+    public func node(_ key: UInt32) -> FlowNode? {
         func find(_ nodes: [FlowNode]) -> FlowNode? {
             for node in nodes {
                 if node.key == key { return node }
@@ -25,20 +25,24 @@ public struct FlowGraph: Decodable, Sendable, Hashable {
     }
 }
 
-public struct FlowNode: Decodable, Sendable, Hashable, Identifiable {
-    /// Structural occurrence key (`3`, `6/fix/0`), unique within the definition.
-    public let key: String
+public struct FlowNode: Decodable, Sendable, Hashable {
+    /// Captured preorder ID, local to this Flow and including all XOR alternatives.
+    public let key: UInt32
+    /// Authored occurrence name; never used as graph identity.
     public let id: String?
     /// Literal skill name, operation, or XOR router.
     public let label: String
     public let kind: FlowNodeKind
     public let human: Bool
-    public let returnsTo: String?
+    public let returnsTo: UInt32?
     /// Composed Flows this occurrence came from, outermost first.
     public let parents: [String]
     public let paths: [FlowGraphPath]
 
-    public var identifier: String { key }
+    /// Includes this node and every descendant, without interpreting an ID as a path.
+    public func contains(_ key: UInt32) -> Bool {
+        self.key == key || paths.contains { $0.steps.contains { $0.contains(key) } }
+    }
 
     enum CodingKeys: String, CodingKey {
         case key, id, label, kind, human, parents, paths
@@ -62,7 +66,7 @@ public struct FlowGraphPath: Decodable, Sendable, Hashable {
 /// The edge itself is the deciding node's `returnsTo`.
 public struct FlowReturn: Decodable, Sendable, Hashable {
     /// Key of the deciding occurrence that owns the edge.
-    public let decider: String
+    public let decider: UInt32
     public let traversals: UInt32
 }
 
@@ -79,9 +83,9 @@ public enum TaskFlowExecution: String, Decodable, Sendable, Hashable {
 public struct PinnedTaskFlow: Decodable, Sendable, Hashable {
     public let invocationId: String
     public let graph: FlowGraph
-    public let current: String?
+    public let current: UInt32?
     /// Occurrences finished in the current pass only.
-    public let completed: [String]
+    public let completed: [UInt32]
     public let returns: [FlowReturn]
     public let iterations: [[UInt32]]
     public let execution: TaskFlowExecution

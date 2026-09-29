@@ -21,8 +21,8 @@ enum FlowNodeState: Equatable {
 }
 
 /// Classify every drawn occurrence from the shared projection.
-func flowNodeStates(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [String: FlowNodeState] {
-    var states: [String: FlowNodeState] = [:]
+func flowNodeStates(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [UInt32: FlowNodeState] {
+    var states: [UInt32: FlowNodeState] = [:]
     func visit(_ nodes: [FlowNode]) {
         for node in nodes {
             states[node.key] = state(of: node, pinned: pinned)
@@ -35,8 +35,7 @@ func flowNodeStates(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [String: Flo
 
 private func state(of node: FlowNode, pinned: PinnedTaskFlow?) -> FlowNodeState {
     guard let pinned else { return node.human ? .pendingHuman : .pending }
-    let isCurrent = pinned.current == node.key
-        || (node.kind == .xor && pinned.current?.hasPrefix(node.key + "/") == true)
+    let isCurrent = pinned.current.map { node.contains($0) } ?? false
     if isCurrent {
         switch pinned.execution {
         case .running, .starting: return .running
@@ -72,7 +71,7 @@ struct TaskFlowView: View {
         nonmutating set { model.navigation.flowDrafts[task.id] = newValue }
     }
 
-    private var inspected: Binding<String?> {
+    private var inspected: Binding<UInt32?> {
         Binding(get: {
             guard let selection = draft.selectedNode,
                   selection.invocationId == pinned?.invocationId else { return nil }
@@ -152,7 +151,7 @@ struct TaskFlowView: View {
     private var runningStep: String? {
         guard let pinned, pinned.execution == .running || pinned.execution == .starting,
               let current = pinned.current else { return nil }
-        return pinned.graph.node(current)?.label ?? current
+        return pinned.graph.node(current)?.label ?? String(current)
     }
 
     private var runningProvider: String? {
@@ -462,7 +461,7 @@ struct FlowDiagram: View {
     let pinned: PinnedTaskFlow?
     /// Real state of the delivery operation (the `pr land` op), shown on its chip.
     var delivery: String? = nil
-    @Binding var inspected: String?
+    @Binding var inspected: UInt32?
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -514,7 +513,7 @@ struct FlowDiagram: View {
                 .accessibilityIdentifier("task-flow-diagram")
                 .onChange(of: inspected, initial: true) { _, key in
                     guard let key, let root = graph.steps.first(where: {
-                        $0.key == key || key.hasPrefix($0.key + "/")
+                        $0.contains(key)
                     }) else { return }
                     reader.scrollTo(root.key, anchor: .center)
                 }
@@ -623,7 +622,7 @@ struct FlowDiagram: View {
 
     // MARK: Drawing
 
-    private func rowView(_ row: Row, states: [String: FlowNodeState]) -> some View {
+    private func rowView(_ row: Row, states: [UInt32: FlowNodeState]) -> some View {
         let nodeTop = row.top
         let nodeBottom = nodeTop + Self.nodeHeight
         let frames: [Int: (x: CGFloat, width: CGFloat)] = Dictionary(uniqueKeysWithValues:
@@ -722,7 +721,7 @@ struct FlowDiagram: View {
     private func nodeButton(_ node: FlowNode, number: Int, width: CGFloat, state: FlowNodeState) -> some View {
         let tone = FlowPalette.tone(state)
         let shape = RoundedRectangle(cornerRadius: 7)
-        let selected = inspected == node.key || inspected?.hasPrefix(node.key + "/") == true
+        let selected = inspected.map { node.contains($0) } ?? false
         let emphasized = state == .running || state == .blocked || state == .stalled
         return Button {
             inspected = selected ? nil : node.key
@@ -822,7 +821,7 @@ private struct RunningShimmer: View {
 }
 
 struct LoopSpan {
-    let decider: String
+    let decider: UInt32
     /// Authored order among the Flow's loops, from 1.
     let number: Int
     let from: Int
@@ -852,7 +851,7 @@ private struct FlowNodeDetail: View {
                     .foregroundStyle(palette.textSecondary)
             }
             ForEach(node.paths, id: \.name) { path in
-                let current = pinned?.current.map { $0.hasPrefix("\(node.key)/\(path.name)/") } ?? false
+                let current = pinned?.current.map { key in path.steps.contains { $0.contains(key) } } ?? false
                 Text("\(path.name)\(current ? " (selected)" : "") — \(path.steps.map(\.label).joined(separator: " → ").ifEmpty("no steps")) · \(path.description)")
                     .font(Typography.caption(11))
                     .foregroundStyle(current ? palette.text : palette.textSecondary)
@@ -874,7 +873,7 @@ private struct FlowNodeDetail: View {
         }
         if let id = node.id { facts.append("id \(id)") }
         if let target = node.returnsTo {
-            let label = graph.steps.first { $0.key == target }?.label ?? target
+            let label = graph.node(target)?.label ?? String(target)
             let taken = pinned?.returns.first { $0.decider == node.key }?.traversals
             facts.append("Iterate returns to \(label)" + (taken.map { " · taken \($0)×" } ?? ""))
         }

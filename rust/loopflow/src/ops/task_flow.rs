@@ -35,8 +35,8 @@ pub enum TaskFlowRecord {
 pub struct PinnedTaskFlow {
     pub invocation_id: String,
     pub graph: FlowGraph,
-    pub current: Option<String>,
-    pub completed: Vec<String>,
+    pub current: Option<u32>,
+    pub completed: Vec<u32>,
     pub returns: Vec<FlowReturn>,
     /// Per-edge counts at each active nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
@@ -48,10 +48,11 @@ pub struct PinnedTaskFlow {
 
 impl PinnedTaskFlow {
     pub(crate) fn new(position: &FlowSession, execution: &TaskExecutionSnapshot) -> Self {
-        let projection = project_cursor(&position.invocation.steps, &position.cursor);
+        let graph = FlowGraph::new(&position.invocation.flow, &position.invocation.steps);
+        let projection = project_cursor(&graph, &position.cursor);
         Self {
             invocation_id: position.invocation.id.clone(),
-            graph: FlowGraph::new(&position.invocation.flow, &position.invocation.steps),
+            graph,
             current: projection.current,
             completed: projection.completed,
             returns: projection.returns,
@@ -168,8 +169,8 @@ mod tests {
         TaskFlowRecord::Pinned(PinnedTaskFlow {
             invocation_id: "inv".into(),
             graph: FlowGraph::new("feature", &[]),
-            current: Some("2".into()),
-            completed: vec!["0".into(), "1".into()],
+            current: Some(2),
+            completed: vec![0, 1],
             returns: Vec::new(),
             iterations: vec![vec![]],
             execution,
@@ -237,14 +238,17 @@ mod tests {
         let edges: Vec<_> = running
             .returns
             .iter()
-            .map(|edge| (edge.decider.as_str(), edge.traversals))
+            .map(|edge| (edge.decider, edge.traversals))
             .collect();
-        assert_eq!(edges, [("3", 2), ("5", 0)]);
+        assert_eq!(edges, [(3, 2), (5, 0)]);
         assert!(matches!(
             snapshots[4].record,
             TaskFlowRecord::Finished { .. }
         ));
         assert_eq!(serde_json::to_value(&snapshots).unwrap(), value);
+        let mut string_node = value[1].clone();
+        string_node["record"]["current"] = serde_json::json!("2");
+        assert!(serde_json::from_value::<TaskFlowSnapshot>(string_node).is_err());
         let mut missing = value[1].clone();
         missing["record"].as_object_mut().unwrap().remove("returns");
         assert!(serde_json::from_value::<TaskFlowSnapshot>(missing).is_err());

@@ -561,8 +561,9 @@ after launch it shows the expanded invocation.
 Composed templates expand before execution. Runtime nested loops have parent
 and child FlowSessions. Membership names a node and iteration tuple in the
 captured graph; an independent conversation about the same Task does not become
-a Flow step. Numeric graph identity and the current structural wire are tracked
-in the cutover status.
+a Flow step. Graph keys, current/completed nodes, return edges and Session
+membership use captured numeric node IDs, local to that FlowSession. Authored
+occurrence names remain labels; nested containment comes from the graph.
 
 A boundary can fail several times before succeeding. AgentSession history keeps
 each provider start, result and usage receipt; the Flow consumes only its exact

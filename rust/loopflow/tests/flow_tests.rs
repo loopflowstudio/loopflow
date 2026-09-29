@@ -1553,7 +1553,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     );
     assert_eq!(session["flow_membership"]["flow"], "review-contribution");
     assert_eq!(session["flow_membership"]["occurrence"], "current");
-    assert_eq!(session["flow_membership"]["node"], "0");
+    assert_eq!(session["flow_membership"]["node"], 0);
     let run_id = session["run_id"].as_str().unwrap();
     let listed = run_lf(
         repo.path(),
@@ -1864,12 +1864,9 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         .as_array()
         .unwrap()
         .iter()
-        .map(|node| node["returns_to"].as_str().map(str::to_string))
+        .map(|node| node["returns_to"].as_u64())
         .collect();
-    assert_eq!(
-        returns,
-        [None, None, Some("1".into()), None, Some("1".into()), None]
-    );
+    assert_eq!(returns, [None, None, Some(1), None, Some(1), None]);
     assert!(catalog
         .iter()
         .any(|entry| entry["name"] == "feature" && entry["graph"].is_object()));
@@ -1935,14 +1932,14 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             "pr land -c"
         ]
     );
-    assert_eq!(record["current"], "1");
-    assert_eq!(record["completed"], serde_json::json!(["0"]));
+    assert_eq!(record["current"], 1);
+    assert_eq!(record["completed"], serde_json::json!([0]));
     assert_eq!(record["iterations"], serde_json::json!([[2, 1]]));
     assert_eq!(
         record["returns"],
         serde_json::json!([
-            {"decider": "2", "traversals": 2},
-            {"decider": "4", "traversals": 1}
+            {"decider": 2, "traversals": 2},
+            {"decider": 4, "traversals": 1}
         ])
     );
     assert_eq!(record["execution"], "idle");

@@ -32,7 +32,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 /// this from the Flow position or the Run's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, invocationId: String, step: String, node: String?, iterations: [[UInt32]]?,
+    case step(flow: String, invocationId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
               occurrence: SessionFlowOccurrence)
     case independent
     case unknown(reason: String)
@@ -53,7 +53,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
                 flow: try container.decode(String.self, forKey: .flow),
                 invocationId: try container.decode(String.self, forKey: .invocationId),
                 step: try container.decode(String.self, forKey: .step),
-                node: try container.decodeIfPresent(String.self, forKey: .node),
+                node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
                 occurrence: try container.decode(SessionFlowOccurrence.self, forKey: .occurrence)
             )

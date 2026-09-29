@@ -67,12 +67,18 @@ Chapter tests, including this case and the transfer matrix's exact timestamp
 assertion. Supervisor inspected both source and log. These are operation-level
 proofs against simulated Linear, not public CLI or configured-provider acceptance.
 
-Remaining proof is specific: second private Home adopts by public sync alone
-(the new operation test calls `pm_sync` directly); Project Flow drives an actual Task launch with no
-override (the selector has a unit test); populated draft/canonical upgrade retains
-Projects through the final execution schema. Reuse unchanged covered behavior
-and rerun affected cases only where subsequent owner changes require it. See
-[evidence](evidence.md). No live Linear rotation or installed acceptance follows.
+The later `chapter-public-cli-3.log` proof, retained in
+[main's execution handoff](parallel-execution.md), exercises public Project-default
+Task launch without override, rotation and second-private-Home adoption through
+public sync alone. It retains Task identity, exact Started timestamp, worktree,
+PR and captured Flow. This uses disposable Linux with scripted Linear/Codex;
+this paragraph records existing evidence and reruns nothing. The numeric-wire
+cut separately preserves managed Task topology and restart refusal.
+
+Remaining proof is populated draft/canonical upgrade through the final execution
+schema and integrated preservation where subsequent owner changes affect these
+cases. Reuse unchanged covered behavior. No live Linear rotation, configured
+provider or installed acceptance follows.
 
 Open product edge: a Wave with no In Progress Project has no accepted automatic
 creation policy. The earlier “create on Task start” sentence was a proposal.

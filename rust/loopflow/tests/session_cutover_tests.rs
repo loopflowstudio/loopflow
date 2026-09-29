@@ -3389,7 +3389,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         serde_json::json!({"kind": "task", "id": task_id})
     );
     assert_eq!(session["flow_membership"]["flow"], "work-then-review");
-    assert_eq!(session["flow_membership"]["node"], "1");
+    assert_eq!(session["flow_membership"]["node"], 1);
 
     let ready = fixture
         .command(&["session", "ready", "Ship the parser"])

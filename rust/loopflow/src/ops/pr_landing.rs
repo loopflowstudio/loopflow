@@ -558,6 +558,7 @@ pub(crate) async fn supervise_pr_landing(
     let mut repair_error = None;
     let mut repaired_incident: Option<CiIncident> = None;
     let mut next_observation = None;
+    let mut next_repair_at = tokio::time::Instant::now();
     loop {
         let now = OffsetDateTime::now_utc();
         if !store
@@ -709,6 +710,10 @@ pub(crate) async fn supervise_pr_landing(
                 head_sha,
                 failing_checks,
             } => {
+                if tokio::time::Instant::now() < next_repair_at {
+                    tokio::time::sleep_until(next_repair_at).await;
+                    continue;
+                }
                 let incident = ci_incident(&landing, &failing_checks, now);
                 store
                     .observe_ci_incident(&incident)
@@ -784,7 +789,9 @@ pub(crate) async fn supervise_pr_landing(
                     None,
                 )
                 .await?;
-                wait_interval(poll_interval).await;
+                // Reconcile a completed repair immediately, including a merge
+                // followed by provider failure. Pace another repair separately.
+                next_repair_at = tokio::time::Instant::now() + poll_interval;
             }
         }
     }
@@ -1424,11 +1431,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repair_error_does_not_hide_a_merge() {
+    async fn completed_repair_reconciles_merge_without_waiting_for_next_poll() {
+        for repair_result in [
+            Ok("Repair published".to_string()),
+            Err(OpsError::Message(
+                "provider disconnected after publication".to_string(),
+            )),
+        ] {
+            let (_directory, store) = store().await;
+            let landing = claimed(&store, _directory.path()).await;
+            let driver = Arc::new(FakeDriver {
+                observations: Mutex::new(VecDeque::from([
+                    failed_check(),
+                    failed_check(),
+                    LandingObservation::Merged {
+                        head_sha: "failed-head".to_string(),
+                        merge_commit: "merge-head".to_string(),
+                    },
+                ])),
+                repairs: Mutex::new(0),
+                repair_results: Mutex::new(VecDeque::from([repair_result])),
+            });
+            let landed = tokio::time::timeout(
+                Duration::from_secs(10),
+                supervise_pr_landing(store, landing, driver, Duration::from_secs(30)),
+            )
+            .await
+            .expect("completed repair must not wait for the next poll")
+            .unwrap();
+            assert_eq!(landed.state, PrLandingState::Merged);
+        }
+    }
+
+    #[tokio::test]
+    async fn unchanged_failure_waits_then_reobserves_before_repairing() {
         let (_directory, store) = store().await;
         let landing = claimed(&store, _directory.path()).await;
         let driver = Arc::new(FakeDriver {
             observations: Mutex::new(VecDeque::from([
+                failed_check(),
                 failed_check(),
                 failed_check(),
                 LandingObservation::Merged {
@@ -1437,14 +1478,16 @@ mod tests {
                 },
             ])),
             repairs: Mutex::new(0),
-            repair_results: Mutex::new(VecDeque::from([Err(OpsError::Message(
-                "provider disconnected after publication".to_string(),
-            ))])),
+            repair_results: Mutex::new(VecDeque::new()),
         });
-        let landed = supervise_pr_landing(store, landing, driver, Duration::ZERO)
+        let interval = Duration::from_millis(100);
+        let started = tokio::time::Instant::now();
+        let landed = supervise_pr_landing(store, landing, driver.clone(), interval)
             .await
             .unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
+        assert_eq!(*driver.repairs.lock().unwrap(), 1);
+        assert!(started.elapsed() >= interval);
     }
 
     #[tokio::test]

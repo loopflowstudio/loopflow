@@ -1,7 +1,9 @@
 """Resource pressure is attributed and recovery never crosses into durable work."""
 
 import importlib.util
+import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +20,8 @@ _spec.loader.exec_module(resources)
 def _policy(**overrides) -> "resources.ResourcePolicy":
     values = {
         "minimum_free_disk_bytes": 100,
+        "cleanup_target_free_disk_bytes": 1_000,
+        "build_cache_retention_hours": 0,
         "worktree_build_cleanup_bytes": 100,
         "maximum_run_record_bytes": 100,
         "maximum_uv_cache_bytes": 100,
@@ -174,6 +178,59 @@ def test_recovery_root_limit_is_a_hard_bound(tmp_path: Path) -> None:
     assert sum((root / "target").exists() for root in roots) == 1
 
 
+def test_cleanup_reclaims_stale_builds_before_emergency_reserve(tmp_path: Path) -> None:
+    policy = _policy(build_cache_retention_hours=24)
+    roots = [tmp_path / name for name in ("stale", "recent", "active")]
+    old = time.time() - 48 * 3600
+    for root in roots:
+        target = root / "target"
+        target.mkdir(parents=True)
+        artifact = target / "artifact"
+        artifact.write_bytes(b"x" * 4096)
+        os.utime(artifact, (old, old))
+        os.utime(target, (old, old))
+    # Updating an existing file does not update its parent's modification time.
+    (roots[1] / "target/artifact").write_bytes(b"warm")
+    sources = [
+        _source(root, id=f"build:{root.name}", active=root.name == "active", budget=10**6)
+        for root in roots
+    ]
+    assert not resources.recover_resources(policy, _snapshot(policy, sources))
+    snapshot = _snapshot(policy, sources, free=500)
+    assert snapshot.ok  # Above the emergency reserve, below the cleanup target.
+
+    actions = resources.recover_resources(policy, snapshot)
+
+    assert [action.source for action in actions] == ["build:stale"]
+    assert not (roots[0] / "target").exists()
+    assert (roots[1] / "target/artifact").read_bytes() == b"warm"
+    assert (roots[2] / "target/artifact").exists()
+
+
+def test_concurrent_recovery_skips_busy_cleaner_then_can_reclaim(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "target").mkdir()
+    artifact = tmp_path / "target/artifact"
+    artifact.write_bytes(b"x" * 4096)
+    policy = _policy()
+    source = _source(tmp_path, id="build:stale")
+    monkeypatch.setattr(resources, "collect_snapshot", lambda *_: _snapshot(policy, [source]))
+    lock = resources._lock_recovery()
+    assert lock is not None
+    try:
+        report = resources.inspect_resources(tmp_path, policy, recover=True)
+        assert report.ok
+        assert not report.recovery
+        assert artifact.exists()
+    finally:
+        lock.close()
+
+    report = resources.inspect_resources(tmp_path, policy, recover=True)
+    assert report.recovery[0].status == "removed"
+    assert not artifact.exists()
+
+
 def test_disk_pressure_prunes_uv_through_its_supported_boundary(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -212,7 +269,7 @@ def test_disk_pressure_prunes_uv_through_its_supported_boundary(
     assert actions[0].source == "cache:uv"
 
 
-def test_sibling_build_warns_self_cleans_and_real_disk_pressure_stops(
+def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     repo, sibling = tmp_path / "current", tmp_path / "landing"
@@ -253,12 +310,12 @@ def test_sibling_build_warns_self_cleans_and_real_disk_pressure_stops(
     assert "200.0 GiB" in output
     assert (sibling / "target/artifact").exists()
 
-    # The current Session is active; its own next build still self-recovers.
+    # Explicit recovery retains active builds, including the current checkout.
     (repo / "target/artifact").write_bytes(b"x" * 4096)
     report = resources.inspect_resources(repo, policy, recover=True)
     assert report.ok
-    assert [action.source for action in report.recovery] == ["build:current"]
-    assert not (repo / "target").exists()
+    assert not report.recovery
+    assert (repo / "target/artifact").exists()
     assert (repo / "source.rs").exists()
     assert (sibling / "target/artifact").exists()
 

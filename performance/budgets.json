@@ -3,7 +3,9 @@
   "window_days": 14,
   "minimum_p95_samples": 20,
   "resource_envelope": {
-    "minimum_free_disk_bytes": 68719476736,
+    "minimum_free_disk_bytes": 34359738368,
+    "cleanup_target_free_disk_bytes": 68719476736,
+    "build_cache_retention_hours": 24,
     "worktree_build_cleanup_bytes": 25769803776,
     "maximum_run_record_bytes": 17179869184,
     "maximum_uv_cache_bytes": 17179869184,

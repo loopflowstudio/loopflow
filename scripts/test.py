@@ -783,11 +783,19 @@ def _resource_summary(report: dict[str, object], label: str) -> str:
     nice = after.get("process_nice")
     if not isinstance(free, int) or not isinstance(floor, int):
         return f"Resource {label}: UNKNOWN"
+    status = "PASS" if report.get("ok") is True else "FAIL"
     summary = (
-        f"Resource {label}: PASS · {free / 2**30:.1f} GiB free / "
+        f"Resource {label}: {status} · {free / 2**30:.1f} GiB free / "
         f"{floor / 2**30:.1f} GiB floor · {jobs} workers · nice +{nice}"
     )
-    return "\n".join([summary, *(f"warning: {warning}" for warning in after.get("warnings", []))])
+    lines = [summary]
+    for action in report.get("recovery", []):
+        lines.append(
+            f"recover: {action['source']} · {action['removed_bytes'] / 2**30:.1f} GiB · "
+            f"{action['status']}: {action['detail']}"
+        )
+    lines.extend(f"warning: {warning}" for warning in after.get("warnings", []))
+    return "\n".join(lines)
 
 
 # --- Durable evidence ----------------------------------------------------
@@ -1520,16 +1528,10 @@ def run_plans(
     kind: str = "changed",
     reuse_passing: bool = False,
 ) -> int:
-    artifact_root = _run_artifact_root()
-    total_budget = sum(_plan_budget(p) for p in plans if p.run)
     running = [p.suite.name for p in plans if p.run]
-    if running:
-        print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
-        print(f"Artifacts on failure: {artifact_root}")
-
-    preflight, preflight_failure = _run_resource_check(True)
-    if preflight is not None and preflight_failure is None:
-        print(_resource_summary(preflight, "preflight"))
+    if not running:
+        print("No suites ran (nothing changed). Use --all to force the full matrix.")
+        return 0
 
     try:
         tree_fingerprint = _tree_fingerprint()
@@ -1537,6 +1539,28 @@ def run_plans(
         tree_fingerprint = None
         print(f"MEASUREMENT WARNING: cannot fingerprint the working tree: {exc}", file=sys.stderr)
     plan_fingerprint = _plan_fingerprint(plans)
+
+    if reuse_passing and kind == "changed" and tree_fingerprint is not None:
+        try:
+            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reusable = None
+            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
+        if reusable is not None:
+            print(
+                "Result: REUSED passing affected-suite evidence for the identical "
+                f"tree and plan ({reusable.name})"
+            )
+            return 0
+
+    artifact_root = _run_artifact_root()
+    total_budget = sum(_plan_budget(p) for p in plans if p.run)
+    print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
+    print(f"Artifacts on failure: {artifact_root}")
+
+    preflight, preflight_failure = _run_resource_check(True)
+    if preflight is not None:
+        print(_resource_summary(preflight, "preflight"))
 
     initial_resources = _resource_receipt(preflight, None, [])
     if preflight_failure is not None:
@@ -1554,19 +1578,6 @@ def run_plans(
         print(f"\n{preflight_failure}")
         print("\nResult: FAIL (resource preflight; product suites not run)")
         return 1
-
-    if reuse_passing and kind == "changed" and running and tree_fingerprint is not None:
-        try:
-            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
-        except (OSError, subprocess.SubprocessError) as exc:
-            reusable = None
-            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
-        if reusable is not None:
-            print(
-                "Result: REUSED passing affected-suite evidence for the identical "
-                f"tree and plan ({reusable.name})"
-            )
-            return 0
 
     recorder = _start_recorder(
         kind,
@@ -1592,7 +1603,7 @@ def run_plans(
     phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
     postflight, postflight_failure = _run_resource_check(False)
     resource_breach = postflight_failure if postflight is not None else None
-    if postflight is not None and postflight_failure is None:
+    if postflight is not None:
         print(_resource_summary(postflight, "postflight"))
     elif postflight is None and postflight_failure is not None:
         print(f"MEASUREMENT WARNING: {postflight_failure}", file=sys.stderr)
@@ -1635,9 +1646,6 @@ def run_plans(
     passed = [name for name, o in outcomes.items() if o.ok]
     total_elapsed = sum(o.elapsed_s for o in outcomes.values())
     print()
-    if not outcomes and resource_breach is None:
-        print("No suites ran (nothing changed). Use --all to force the full matrix.")
-        return 0
     if failed or resource_breach is not None:
         for name, outcome in failed:
             print(f"[{name}] {outcome.failure}")

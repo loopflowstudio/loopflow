@@ -177,6 +177,9 @@ records for this worktree, including when lfd supervises the landing. Use
 Watched repairs return `published` or `blocked` with a summary in their existing
 final answer. A blocked result names the required action. The watcher observes
 GitHub before returning it, so an already-merged PR still finishes successfully.
+That reconciliation happens immediately after the repair returns. Pending CI
+keeps its normal polling interval, and a repeated repair waits for that interval
+and a fresh observation before starting.
 Provider exit code zero alone does not mean the repair succeeded.
 
 After merge, bare `lf pr land` settles that PR and leaves the Task open.

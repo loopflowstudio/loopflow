@@ -6,10 +6,8 @@ not evidence that each preceding implementation has passed.
 ## Docs and README now supply the spec
 
 Jack requested this order on 2026-09-28: rewrite the docs and README for the
-accepted model before further executable owner conversion. The recovery
-checkpoint and mechanical conversion are rebased and published at `fb100f486`
-against main `1dce02734`. The initial spec rewrite, originally `4bb44b999`,
-survives that rebase. It covers the active guides:
+accepted model before further executable owner conversion. The initial spec
+rewrite, originally `4bb44b999`, is retained in the published branch. It covers:
 `README.md`, `docs/index.md`, `docs/lf.md`, `docs/agent-api.md`, `docs/waves.md`,
 architecture/reference/data/execution, and other active pages that define these
 objects. Derived docs were regenerated through the existing generator.
@@ -23,10 +21,9 @@ Architecture Reference now maps the spec to the remaining implementation;
 writing the spec does not complete the requirements below. The metric-planning
 repair is published; execution-owner conversion continues below.
 
-The bounded Chapter contributor updated eight active builtin skills, including
-both chapter reviews, to repository rotation and Linear Project ownership.
-Supervisor reviewed its uncommitted diff and static checks; main owns integration.
-The working restart hint in `ops/task.rs` now names missing synced Project data
+The eight Chapter builtin skill updates, including both chapter reviews, are
+integrated. They use repository rotation and Linear Project ownership.
+The restart hint in `ops/task.rs` names missing synced Project data
 and Wave planning sync, removing the obsolete chapter command. Verify it with
 the Rust consistency pass. Preserve historical migration text. The checked
 ownership inventory must not list deleted Chapter storage as a current dependency.
@@ -75,22 +72,22 @@ one managed FlowSession pointer while allowing other attributed Flows.
   provider/account identity, artifacts and outcomes all need their final owners.
   Delete `runs`, `current_run_id`, old reader/writer paths and replacement wrappers
   only after preservation and callers converge. Renaming tables is intermediate.
-  At checkpoint `f48606e8c`, `store/sqlite/flows.rs::FLOW_SELECT` still reads Run
-  publication/outcome, `publish_attempt` writes it, and creation of the
-  native-selection capability reads Run. The current dirty conversion moves
-  publication and captured input onto AgentSession, removes that Session reader
-  join, and uses native history for the Flow outcome. These changes need complete
-  caller and populated-preservation proof. `select_flow_turn` already carries
-  the reserved AgentSession ID without a Run join.
+  Published admission now owns captured input/publication on AgentSession and
+  removes the Session reader's Run join. Flow publication and selected native
+  history use that owner. General history/usage/activity and landing-repair
+  readers now select retained conversation inputs, preserving each input's
+  attribution and chronology. These are intermediate wire projections, not
+  complete Run deletion. Retained SQL rows and remaining callers still require
+  preservation and conversion; no runtime Run writer should be restored.
   Verdict/route/blocked now share original-turn caller Exec authority. Focused
   source/canonical tests cover those store changes, while the real provider's
   valid decision retry remains failing. The public automatic-retry ownership
-  fixture's zero-Run assertion now passes on candidate `d2cdd28d5bc0` after
-  ordinary capture/Flow reservation move to AgentSession: both native outcomes
-  and reported usage survive, and success is consumed once. This standalone
-  real-Codex/synthetic-provider proof does not establish managed Task, Ask/review,
-  populated preservation, or the still-failing native decision retry. Complete
-  the remaining launch/publication callers and Run-backed readers together.
+  fixture passes on candidate `a1397de2c6f3`, including public usage of 40 input
+  and 10 output tokens, unknown cost, both outcomes and one consumed success.
+  Six Session CLI and five cutover checks separately cover Ask/review paths;
+  populated source/canonical admission checks retain their recorded limits.
+  None proves the complete managed/provider matrix or valid native decision
+  retry. Complete the remaining launch/publication and historical consumers.
   Published `lf/commands/flow.rs::run_op` records mechanical results directly
   on Flow history. Focused source/canonical, standalone crash/retry and hosted
   disposable-OS managed proofs pass within their recorded scope (see evidence).
@@ -103,8 +100,9 @@ one managed FlowSession pointer while allowing other attributed Flows.
   inspection error was classified as a capability blocker because it printed an
   old fixture log containing `operation not permitted`. Quoted command output
   cannot become current control authority. Keep actual delivery/provider failures
-  on their outcome owners; remove this ambiguity during the Task/Exec conversion
-  without introducing command allowlists or a second failure-classification lifecycle.
+  on their outcome owners. The source repair and focused proof are published;
+  captured installed control still uses its earlier binary. Preserve the repair
+  through final integration without command allowlists or another classifier.
 
 ## 2. Native continuity and authority
 
@@ -147,9 +145,11 @@ repo, Task/work evidence, identity, parent, command, mode, title/skill and state
 before payload I/O. Distinguish command context from work performed; observational
 commands must not start Tasks. One Exec can perform work for several Sessions.
 
-Remaining audit gaps: Run lists hydrate before capping; Session inventory still
-joins Run and uses substring search; Flow inventory decodes complete captures;
-Exec has no complete indexed summary/detail API. Preserve missing-payload rows.
+Session inventory no longer joins Run. Remaining audit gaps: final bounded
+enrichment/pagination and substring-search behavior, Flow inventory decoding
+complete captures, and the complete indexed Exec summary/detail API. Preserve
+missing-payload rows. Current conversation history filters Work, caller and date
+in SQL before decoding selected evidence, but that is not the dense-data proof.
 Activity ending within a window and recent-start history are different queries.
 Resolve historical identities independently of launch eligibility/current PRs.
 
@@ -218,31 +218,20 @@ ancestry alone to signal. No duplicate deletion implementation or widened scope.
 Preserve main's upstream semantics and rebase/publish coherent verified checkpoints
 through lf. Run affected checks after final changes, canonical materialization in
 a disposable source copy, architecture/migration checks, fmt and all-target Clippy.
-The latest 2026-09-28 rebase integrates main `b42d53205` without conflicts;
-local checkpoint is `884b90be97`, while published head remains `fb100f486`.
-Task base and Git merge-base agree. It retains PR1317's saved Session executable/Home/database and
-launch-failure journal evidence, plus the subsequent landing and schema-cache
-changes. Two focused schema-cache reconciliation tests pass. Preserve those
-upstream behaviors across Session/Run conversion. Main owns later rebases.
-Hosted Rust at `594c7c319f` stopped at the comments fixture's missing Project
-status after 930 passes, with 1,013 tests unrun. `0131ed763f` repairs that fixture
-and related response builders without weakening required Project fields. Five
-focused tests, formatting and all-target Clippy pass on the isolated fixture
-tree. New CI36515601936 reaches two completion-fixture failures at duplicate
-`projects.external_project_id`, after 932 passes with 1,010 unrun. Their shared
-setup and retained-predecessor mock now pass the twelve-test planning module;
-`70e8db9c6` publishes that fixture-only repair. Its CI then failed the hierarchy
-fixture; `fb100f486` publishes that one-line correction. The latter CI is terminal
-at the obsolete Project-status prohibition: 1,304 passed, one failed, 643 unrun.
-The post-rebase materialized diagnostic now records 1,925 passed, 33 failed,
-15 skipped, with no selected tests left unrun. The Project-status correction
-passes; Git-context setup, historical fixture and unresolved behavior failures
-remain. Retain the exact source receipt and all results, repair causes and rerun
-affected failures; no repeat full matrix is selected for each small correction.
-Full CI is owed. Resumed loop-decide iteration9 completed and chose Iterate;
-implement iteration10 is running after operational recovery of the quoted-output
-classifier failure. This does not finish
-the conversion or discharge any of the remaining requirements above.
+Current publication/base and exact CI receipts belong in
+[the control index](parallel-work.md); main owns subsequent integrations.
+Preserve upstream Session executable/Home/database selection, launch-failure
+journal evidence, landing/release observation, schema cache and resource cleanup
+semantics. Focused reconciliation receipts remain in [evidence](evidence.md) and
+[the main handoff](parallel-execution.md).
+
+The materialized diagnostic ran all selected cases: 1,925 passed, 33 failed,
+15 skipped. Later focused repairs do not turn that mixed snapshot into a full
+green matrix. Preserve its exact source receipt and failure dispositions; rerun
+affected failures, not a full matrix after each small correction. Hosted CI is
+still owed. Implement iteration 10 remains active; no review edge or requirement
+is discharged by publishing a checkpoint. The pre-curation checklist is retained
+at `da19cf0b5:scratch/remaining-work.md` for its historical receipt chronology.
 Do not cite assertion passes with a leaked process as clean settlement. Review
 complete public behavior and deletion paths; measure code by the same method/base.
 Update docs, skills and generated HTML with actual behavior. Compress and follow

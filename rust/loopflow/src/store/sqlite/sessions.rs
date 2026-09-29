@@ -138,6 +138,45 @@ fn inventory_query(
 }
 
 impl SqliteStore {
+    /// Old rows are import evidence only; retain nullable columns as recorded.
+    pub(crate) fn historical_session_inputs(
+        &self,
+    ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare("SELECT i.session_id,r.id,r.created_at,r.task_id,r.wave_id,
+            json_object('id',r.id,'session_id',r.session_id,'invocation_id',r.invocation_id,
+                'task_id',r.task_id,'wave_id',r.wave_id,'work_source',r.work_source,
+                'created_at',r.created_at,'published',r.published,'cwd',r.cwd,'skill',r.skill,
+                'node',r.node,'iterations',r.iterations,'attempt',r.attempt,'provider',r.provider,
+                'model',r.model,'caller_run_id',r.caller_run_id,'outcome',r.outcome,'ended_at',r.ended_at)
+            FROM runs r JOIN agent_session_inputs i ON i.input_id=r.id
+            ORDER BY r.created_at,r.id")?;
+        let rows = query.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (session, input, observed_at, task, wave, raw) = row?;
+            let session = session_in(&conn, &session)?.ok_or(StoreError::NotFound)?;
+            let evidence: serde_json::Value = serde_json::from_str(&raw)?;
+            if evidence["session_id"].as_str().is_some_and(|id| id != session.id) {
+                return Err(invalid(format!("historical input {input} names a different Session")));
+            }
+            Ok((session, crate::session::SessionObservation {
+                input_id: RunId::parse(&input).map_err(invalid)?, source: "runs".into(), observed_at,
+                task_id: task.map(|task| TaskId::parse(&task)).transpose().map_err(invalid)?,
+                wave_id: wave.map(|wave| crate::id::WaveId::parse(&wave)).transpose().map_err(invalid)?,
+                payload: serde_json::json!({"input_id":input,"source":"runs","evidence":evidence}),
+            }))
+        }).collect()
+    }
+
     /// Restore historical conversation facts without borrowing the importing Exec's Work.
     pub(crate) fn resolve_history_input(&self, selector: &str) -> StoreResult<String> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -181,16 +220,19 @@ impl SqliteStore {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare("WITH inputs AS (
                 SELECT i.input_id,i.session_id,i.caller_input_id,
-                    COALESCE(m.observed_at,s.created_at) AS started,
-                    CASE WHEN m.seq IS NULL THEN s.task_id ELSE m.task_id END AS task_id,
-                    CASE WHEN m.seq IS NULL THEN s.wave_id ELSE m.wave_id END AS wave_id,
-                    terminal.observed_at AS ended
+                    COALESCE(m.observed_at,r.observed_at,s.created_at) AS started,
+                    CASE WHEN m.seq IS NOT NULL THEN m.task_id WHEN r.seq IS NOT NULL THEN r.task_id ELSE s.task_id END AS task_id,
+                    CASE WHEN m.seq IS NOT NULL THEN m.wave_id WHEN r.seq IS NOT NULL THEN r.wave_id ELSE s.wave_id END AS wave_id,
+                    COALESCE(terminal.observed_at,json_extract(r.payload,'$.evidence.ended_at')) AS ended
                 FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.input_id||':manifest.json'
+                LEFT JOIN session_events r ON r.session_id=s.id AND r.kind='observed'
+                    AND r.receipt_key=i.input_id||':runs'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
                     AND terminal.receipt_key=i.input_id||':terminal.json'
-                WHERE m.seq IS NOT NULL OR (i.input_id=s.input_id AND s.input_published=1))
+                WHERE m.seq IS NOT NULL OR json_extract(r.payload,'$.evidence.published')=1
+                    OR (i.input_id=s.input_id AND s.input_published=1))
                 SELECT session_id,input_id,caller_input_id,started,task_id,wave_id,
                     (SELECT name FROM waves WHERE id=inputs.wave_id),
                     (SELECT p.project_slug FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=inputs.task_id),

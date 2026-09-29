@@ -4,6 +4,12 @@ use crate::session::{AgentSession, Run, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub(crate) async fn historical_session_inputs(
+        &self,
+    ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {
+        run_sqlite(&self.sqlite, |store| store.historical_session_inputs()).await
+    }
+
     pub(crate) async fn import_session(
         &self,
         session: AgentSession,

@@ -106,7 +106,22 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Current published head is **190455f062fa95d31f31f46e8ebc3ec97a4c5fcd**, based on
+Current published head is **da19cf0b50138d04be5c75b3b4d4df6d1e17f2da**, based on
+**566fb3981d99b430c41358a2bad3559612999693**. GitHub, refreshed Task publication
+and Git merge-base agree; auto-merge is absent. CI **36531960032** finished with
+failure: 1,656 Rust passes, one failed checkout-identity test, 15 skips, 307 unrun.
+The fixture supplies only old Run/Flow environment to `flow decide`, without the
+selected native turn's caller. Verified comment
+`4377c9fd-fe6d-4456-9460-11dd8c926dcc` directs fixture setup repair while retaining
+both upstream variants and child/parent identity assertions; navigation authority
+must not be relaxed. Log `ci-da19cf0b5-rust.log`. Scratch-clear also fails on active
+notes. This is not proof of the still-failing native decision retry.
+This publishes saved-review preservation, Git-free auth/Exec admission, journal
+root placement and the reproduced scorecard interruption repair described below.
+Final all-target Clippy passes in `exec-interruption-static.log` (15.68s).
+No full CI or complete model conversion follows from these focused checks.
+
+The preceding published head **190455f062fa95d31f31f46e8ebc3ec97a4c5fcd** was based on
 **1e163d20931efc7d92b54760877a62a6308143d6**. GitHub, refreshed Task publication
 and Git merge-base agree; auto-merge is absent. CI **36530104314** finished with
 1,578 Rust passes, two auth-status failures, 15 skips and 383 unrun; scratch-clear
@@ -120,8 +135,8 @@ This publishes the reader proof below. The rebase integrated #1340's CI resource
 reporting and #1341's non-waiting uv cache lock. Two cache-recovery conflicts
 retained that lock behavior plus this branch's subprocess timeout;
 `conversation-rebase-cache.log` passes three focused reconciliation cases.
-GitHub main then advanced to #1342 (`566fb3981`, cleanup with recent gate output);
-that commit is not part of the recorded Task base. Main owns the next integration.
+The next conflict-free rebase integrated #1342 (`566fb3981`, cleanup with recent
+gate output), now the recorded Task base. Main owns subsequent integrations.
 
 The preceding published head **dd97558752f1262634ef9edba31857792a99c6e7**, based on
 **7e5f32ce607f7ed744c685b2f7639b304455460c**. GitHub, refreshed Task publication
@@ -205,6 +220,28 @@ run reported an unused test import; source removes it and final static validatio
 remains main's responsibility. Local review checkpoint rebased to `2b7f24a09` on
 main `566fb3981`, with matching recorded Task base. GitHub still held `190455f06`
 at this observation; no new publication or full CI pass is claimed.
+
+Current SQL-only import work has two focused passes in
+`historical-sql-members.log`: retained SQL members without artifacts and the
+existing replaced-input proof. The SQL-only test keeps original outcome/provider,
+unknown usage, title/feedback, replay/conflict behavior and public reads after
+removing old Run rows. It seeds the final schema, not a released populated Home.
+The first red log failed on an invalid attempt ordinal; `historical-sql-members-red-2.log`
+then reached the actual zero-import-versus-two failure. A later unfinished-row
+extension in `historical-sql-partial.log` failed at fixture setup: this schema
+requires outcome/end presence together. Verified supervisor comment
+`ca1521dd-4b10-4712-a347-3da30a72a751` directs a legal unpublished/unterminated row,
+retaining actual terminal-file versus SQL disagreement as a distinct obligation.
+No constraint bypass or production machinery for that impossible row is selected.
+The corrected `historical-sql-unpublished.log` passes (5.122s): the legal
+unpublished member retains null outcome/end, Exec and provider-turn evidence,
+while only the two published members appear in usage. The existing pair of
+SQL-only/replaced-input proofs passed before that extension. Separately,
+`checkout-selected-native-caller.log` passes (7.635s): the scripted provider and
+shared harness record/select a turn, and its original caller authorizes the
+child Task's decision in both upstream variants. Production navigation authority
+is unchanged. This fixture does not establish real native decision retry.
+Final static checks and checkpointing remain main's responsibility.
 
 The replaced-input public CLI proof passes in `historical-members.log`:
 two inputs retain separate outcome/account/usage evidence in one conversation,
@@ -317,6 +354,13 @@ text is not control authority. Exact historical operational recoveries and the
 retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
+
+Published **da19cf0b5 against 566fb3981**:
+**+15,393 / −29,637 = net −14,244**.
+Rust/Swift +14,343/−29,575; Python/shell +48/−62; SQL +1,002/−0.
+Receipt `.lf/tmp/execution-model/status-counts-da19cf0b5.json` first reproduces
+the preceding 190455 measurement. Dirty work is excluded. Changed bases prevent
+interpreting the difference between whole-branch totals as a per-cut delta.
 
 Published **190455f06 against 1e163d209**:
 **+15,299 / −29,636 = net −14,337**.

@@ -558,6 +558,7 @@ pub(crate) fn conversation_snapshot(
     let mut terminal: Option<TerminalReceipt> = None;
     let mut manifest: Option<RunManifest> = None;
     let mut gaps = 0;
+    let mut stored = None;
     for event in history {
         if event.kind != crate::session::SessionEventKind::Observed {
             continue;
@@ -575,6 +576,8 @@ pub(crate) fn conversation_snapshot(
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
+        } else if source == "runs" && input == Some(input_id.as_str()) {
+            stored = Some(evidence);
         } else if source.starts_with("events.jsonl:") {
             match serde_json::from_value::<EventEnvelope>(evidence.clone()) {
                 Ok(envelope) => {
@@ -588,12 +591,28 @@ pub(crate) fn conversation_snapshot(
     let (usage, event_gaps) = reduce_usage_reader(events.as_slice())?;
     gaps += event_gaps + usize::from(manifest.is_none());
     let current = session.input_id == *input_id;
+    let stored_text = |field: &str| {
+        stored
+            .and_then(|row| row[field].as_str())
+            .map(str::to_owned)
+    };
+    let stored_end = stored.and_then(|row| row["ended_at"].as_i64());
+    if let Some(terminal) = &terminal {
+        gaps += usize::from(
+            stored_text("outcome").is_some_and(|outcome| outcome != terminal.outcome)
+                || stored_end.is_some_and(|at| at != terminal.ended_at.unix_timestamp()),
+        );
+    }
     let source = manifest
         .as_ref()
         .and_then(|m| m.subjects.first())
         .map(|s| s.source)
         .unwrap_or_else(|| {
-            if current && session.work_source == Some(crate::session::WorkSource::Inherited) {
+            if stored_text("work_source").as_deref() == Some("inherited")
+                || (stored.is_none()
+                    && current
+                    && session.work_source == Some(crate::session::WorkSource::Inherited))
+            {
                 AttributionSource::Inherited
             } else {
                 AttributionSource::Declared
@@ -618,34 +637,60 @@ pub(crate) fn conversation_snapshot(
         worktree: manifest
             .as_ref()
             .map(|m| m.cwd.to_string_lossy().into_owned())
+            .or_else(|| stored_text("cwd"))
             .or_else(|| current.then(|| session.cwd.to_string_lossy().into_owned())),
         subjects,
         skill: manifest
             .as_ref()
             .map(|m| m.skill.clone())
-            .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
-        outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
+            .unwrap_or_else(|| {
+                if stored.is_some() {
+                    stored_text("skill")
+                } else {
+                    current.then(|| session.skill.clone()).flatten()
+                }
+            }),
+        outcome: terminal
+            .as_ref()
+            .map(|receipt| receipt.outcome.clone())
+            .or_else(|| stored_text("outcome")),
         started: session.created_at,
-        ended: terminal.map(|receipt| receipt.ended_at.unix_timestamp()),
+        ended: terminal
+            .map(|receipt| receipt.ended_at.unix_timestamp())
+            .or(stored_end),
         usage,
         evidence_gaps: gaps,
         harness: manifest
             .as_ref()
             .map(|m| m.harness.clone())
-            .or_else(|| current.then(|| session.provider.clone()).flatten())
+            .or_else(|| {
+                if stored.is_some() {
+                    stored_text("provider")
+                } else {
+                    current.then(|| session.provider.clone()).flatten()
+                }
+            })
             .unwrap_or_else(|| "unknown".into()),
         model: manifest
             .as_ref()
             .map(|m| m.model.clone())
-            .unwrap_or_else(|| current.then(|| session.model.clone()).flatten()),
+            .unwrap_or_else(|| {
+                if stored.is_some() {
+                    stored_text("model")
+                } else {
+                    current.then(|| session.model.clone()).flatten()
+                }
+            }),
         surface: manifest
             .as_ref()
             .map(|m| m.surface.clone())
             .unwrap_or_else(|| {
                 if current && session.interactive {
                     "interactive"
-                } else {
+                } else if current {
                     "headless"
+                } else {
+                    "unknown"
                 }
                 .into()
             }),

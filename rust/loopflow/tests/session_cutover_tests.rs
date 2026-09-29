@@ -1676,6 +1676,155 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
 }
 
 #[test]
+fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
+    use loopflow::durable::RunId;
+    use loopflow::session::{AgentSession, SessionKind, TitleSource};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let prior = RunId::new();
+    let current = RunId::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(fixture.home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let saved = runtime.block_on(async {
+        let first = AgentSession {
+            id: "sql-conversation".into(),
+            input_id: prior.clone(),
+            caller_input_id: None,
+            input_published: true,
+            cwd: fixture.repo.path().into(),
+            skill: Some("implement".into()),
+            provider: Some("opencode".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            flow_session_id: None,
+            work_source: None,
+            bound_at: None,
+            kind: SessionKind::Conversation,
+            interactive: false,
+            repo: None,
+            title: "Kept name".into(),
+            title_source: TitleSource::Human,
+            request: None,
+            ready_summary: Some("Kept feedback".into()),
+            completed_at: None,
+            created_at: 10,
+        };
+        let mut next = store.create_session(first, None).await.unwrap();
+        next.input_id = current.clone();
+        next.provider = Some("claude".into());
+        store.replace_session_input(&prior, next).await.unwrap()
+    });
+    // Historical SQL inputs remain after admission migration. No artifact file
+    // is available; this final-schema fixture is not a released upgrade proof.
+    for (id, at, outcome, provider) in [
+        (&prior, 10, "failed", "opencode"),
+        (&current, 30, "completed", "claude"),
+    ] {
+        fixture.db().execute(
+            "INSERT INTO runs(id,session_id,created_at,published,cwd,skill,provider,outcome,ended_at)
+             VALUES(?1,?2,?3,1,?4,'implement',?5,?6,?7)",
+            rusqlite::params![id.as_str(), saved.id, at, fixture.repo.path().to_string_lossy(), provider, outcome, at + 5],
+        ).unwrap();
+    }
+    let unpublished = RunId::new();
+    fixture
+        .db()
+        .execute(
+            "INSERT INTO agent_session_inputs(input_id,session_id) VALUES(?1,?2)",
+            rusqlite::params![unpublished.as_str(), saved.id],
+        )
+        .unwrap();
+    fixture
+        .db()
+        .execute(
+            "INSERT INTO runs(id,session_id,created_at,published,cwd)
+        VALUES(?1,?2,50,0,?3)",
+            rusqlite::params![
+                unpublished.as_str(),
+                saved.id,
+                fixture.repo.path().to_string_lossy()
+            ],
+        )
+        .unwrap();
+    let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
+    assert_eq!(preview["failed"], json!([]));
+    assert_eq!(preview["run"], 3, "{preview}");
+    assert_eq!(fixture.count("session_events"), 0);
+    let imported = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(imported["failed"], json!([]));
+    assert_eq!(imported["run"], preview["run"]);
+    assert_eq!(
+        fixture.json(&["session", "import", "--json"])["unchanged"],
+        3
+    );
+    assert_eq!(
+        runtime.block_on(store.session(&saved.id)).unwrap(),
+        Some(saved.clone())
+    );
+    let history = fixture.json(&["session", "history", &saved.id, "--json"]);
+    assert_eq!(history.as_array().unwrap().len(), 3);
+    let partial = history
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["payload"]["input_id"] == unpublished.as_str())
+        .unwrap();
+    assert_eq!(partial["payload"]["evidence"]["published"], 0);
+    assert_eq!(partial["payload"]["evidence"]["outcome"], Value::Null);
+    assert_eq!(partial["payload"]["evidence"]["ended_at"], Value::Null);
+    assert_eq!(partial["exec_id"], Value::Null);
+    assert_eq!(partial["provider_turn"], Value::Null);
+    let usage = fixture.json(&["usage", "--days", "0", "--json"]);
+    let rows = usage.as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{usage}");
+    for (id, at, outcome, provider) in [
+        (&prior, 10, "failed", "opencode"),
+        (&current, 30, "completed", "claude"),
+    ] {
+        let row = rows.iter().find(|row| row["id"] == id.as_str()).unwrap();
+        assert_eq!(row["started"], at);
+        assert_eq!(row["ended"], at + 5);
+        assert_eq!(row["outcome"], outcome);
+        assert_eq!(row["harness"], provider);
+        assert_eq!(row["usage"]["input_tokens"], Value::Null);
+        assert!(
+            row["evidence_gaps"].as_u64().unwrap() > 0,
+            "missing payload remains explicit"
+        );
+    }
+    fixture
+        .db()
+        .execute(
+            "UPDATE runs SET outcome='interrupted' WHERE id=?1",
+            [prior.as_str()],
+        )
+        .unwrap();
+    let conflict = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(
+        conflict["failed"].as_array().unwrap().len(),
+        1,
+        "{conflict}"
+    );
+    assert_eq!(
+        fixture.json(&["session", "history", &saved.id, "--json"]),
+        history
+    );
+    fixture.db().execute("DELETE FROM runs", []).unwrap();
+    assert_eq!(fixture.json(&["usage", "--days", "0", "--json"]), usage);
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(fixture.count("agent_session_inputs"), 3);
+    assert!(fixture.launches().is_empty());
+}
+
+#[test]
 fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
     use loopflow::durable::RunId;
     use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};

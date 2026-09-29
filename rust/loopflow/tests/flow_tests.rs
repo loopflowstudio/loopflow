@@ -468,12 +468,82 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 None,
             ))
             .unwrap();
+        // Exercise shared native-turn admission against a scripted provider. The
+        // checkout decision must carry the caller installed in that exact turn.
+        use loopflow::engine::agent::AgentConfig;
+        use loopflow::harness::{codex::CodexHarness, ApprovalPolicy, Harness};
+        let provider = codex_app_server_script("done", "")
+            .replace("read -r thread_start", "read -r thread_start\nprintf '%s\\n' \"$thread_start\" > \"$LF_CONTROL_HOME/thread-request\"")
+            .replace("printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"", "read -r release\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"");
+        let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
+        let _env =
+            support::EnvGuard::with_lf_home(&[("codex", &provider), ("lf", &lf)], home.path());
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?2,?3)",
+            rusqlite::params![owner.exec_id, owner.trace_id, owner.started_at],
+        )
+        .unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let session = store.session_for_run(&reviewer).unwrap().unwrap();
+        let driver = store
+            .claim_session_driver(&session.id, None, &owner.exec_id, true)
+            .unwrap();
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
+        runtime.block_on(async {
+            harness
+                .start(&AgentConfig {
+                    agent: Some("codex".into()),
+                    cwd: Some(repo.path().into()),
+                    env: std::collections::BTreeMap::from([(
+                        "LF_AGENT_CALLER".into(),
+                        serde_json::to_string(&driver.caller(session.id.clone())).unwrap(),
+                    )]),
+                    session_driver: Some((session.id.clone(), driver)),
+                    flow_selection: Some(loopflow::durable::FlowTurnSelection {
+                        flow_id: claimed.id().into(),
+                        version: claimed.version,
+                        claim: Some(claim.clone()),
+                        session_id: session.id,
+                        after: 0,
+                        caller_token: None,
+                    }),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            harness
+                .send_input("Prove checkout identity.")
+                .await
+                .unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                while let Some(event) = received.recv().await {
+                    if matches!(
+                        event,
+                        loopflow::chat::types::ConversationEvent::TurnStarted { .. }
+                    ) {
+                        return;
+                    }
+                }
+                panic!("fixture provider ended before its native start");
+            })
+            .await
+            .unwrap();
+        });
+        let request: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.path().join("thread-request")).unwrap()).unwrap();
+        let caller = request["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"]
+            .as_str()
+            .unwrap();
         let decision = lf_command(
             repo.path(),
             home.path(),
             &["flow", "decide", "iterate", "Checkout proof"],
             None,
         )
+        .env("LF_AGENT_CALLER", caller)
         .env("LF_RUN_ID", reviewer.as_str())
         .env(
             "LF_FLOW_STEP",
@@ -481,6 +551,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         )
         .output()
         .unwrap();
+        runtime.block_on(harness.stop()).unwrap();
         assert!(
             decision.status.success(),
             "{upstream}: {}",

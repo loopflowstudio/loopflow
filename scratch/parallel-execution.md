@@ -702,3 +702,48 @@ interruption, with no Nextest LEAK. The initial build warned about an accidental
 added test-module import; it was removed before the final static check. Existing
 signal missingness remains unchanged. This proof is the owned synthetic scorecard
 child, not provider-engine death, historical orphan cleanup or general settlement.
+
+## SQL-only conversation members and selected-caller fixture
+
+The importer now retains historical `runs` rows joined by existing conversation
+input references as source observations in Session history. Public runs/usage
+read the imported provider, original timing, publication and outcome when payload
+files are missing. Removing those old SQL rows after import no longer removes
+that evidence. Replay compares each source receipt; changed SQL evidence fails
+without replacing retained history. Import creates no provider turn or historical
+Exec and does not borrow the importing command's Work. A NULL historical Session
+ID is unknown; a positively different ID remains a conflict.
+
+`historical-sql-members-red.log` failed on an invalid synthetic attempt ordinal;
+`historical-sql-members-red-2.log` then reached the missing import (zero versus two).
+`historical-sql-members.log` passed the SQL-only and existing replaced-input proofs.
+The subsequent `historical-sql-partial.log` failed during setup: this schema requires
+outcome/end presence together. Supervisor identified the same constraint; the
+fixture now uses an unpublished input with both absent. No constraint was bypassed.
+`historical-sql-unpublished.log` passes in 5.122s: three preserved inputs, two public
+usage rows, unknown counters and missing-payload gaps, stable current name/feedback,
+conflicting replay rejection, and identical usage after old rows are removed.
+This is final-schema/public CLI evidence, not a released populated upgrade. The
+separate SQL/terminal-receipt discrepancy obligation remains; the impossible pair
+was not a production failure.
+
+CI36531960032 on da19cf0b5 stopped at the checkout identity fixture after 1,656
+passes, one failure, 15 skips and 307 unrun tests. Its direct decision supplied
+only the old Run/Flow environment. The repaired fixture uses the shared Codex
+harness with a scripted provider to record/select the native start, claims its
+conversation driver through the existing API, and supplies the emitted thread's
+caller to the real CLI. Main/parent upstream variants, child-only Iterate, unchanged
+parent and nested checkout assertions remain. `checkout-selected-native-caller.log`
+passes in 7.636s without Nextest LEAK. No production navigation check changed;
+this proves fixture-authorized navigation, not delayed-child or valid-retry behavior.
+
+Review retained one SQL-to-history importer and the existing history projection;
+no alternate runtime writer or generic attempt object was added. Production
+prefix measurement versus da19cf0b5: +120/-12, net +108, excluding tests/docs/scratch;
+receipt `.lf/tmp/cut-i/historical-sql-lines.json`. Historical rows remain input only
+until complete released/member preservation permits their deletion. Sessionless
+rows, captured membership and all remaining-work/import-preservation requirements
+remain open, including valid native decision retry and Linux Chapter execution.
+
+`historical-sql-static-final.log`: all-target Clippy passed in 15.30s; formatting
+and diff whitespace checks passed before this checkpoint.

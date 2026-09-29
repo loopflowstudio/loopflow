@@ -20,7 +20,7 @@ use crate::id::WaveId;
 
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{Task, TaskEventKind};
+use crate::work::task::TaskEventKind;
 
 use super::SqliteStore;
 
@@ -245,15 +245,21 @@ fn active_child_in(conn: &Connection, id: &str) -> StoreResult<Option<String>> {
 }
 
 fn root_in(conn: &Connection, id: &str) -> StoreResult<String> {
-    let mut flow = flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
-    while let Some(parent) = &flow.parent_id {
-        flow = flow_in(conn, parent)?.ok_or(StoreError::NotFound)?;
-    }
-    Ok(flow.invocation.id)
+    conn.query_row(
+        "WITH RECURSIVE ancestors(id,parent_id) AS (
+            SELECT id,parent_id FROM flow_sessions WHERE id=?1
+            UNION ALL
+            SELECT f.id,f.parent_id FROM flow_sessions f JOIN ancestors a ON f.id=a.parent_id
+        ) SELECT id FROM ancestors WHERE parent_id IS NULL",
+        [id],
+        |row| row.get(0),
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
 }
 
-/// The Task whose own Flow this invocation is, if a Task points at it.
-fn pointed_task_in(conn: &Connection, id: &str) -> StoreResult<Option<Task>> {
+/// A Task's own Flow reports its progress, failures and completion to the Task.
+fn report_to_task_in(conn: &Connection, id: &str, kind: &TaskEventKind) -> StoreResult<()> {
     let task: Option<String> = conn
         .query_row(
             "SELECT id FROM tasks WHERE current_invocation_id=?1",
@@ -261,16 +267,8 @@ fn pointed_task_in(conn: &Connection, id: &str) -> StoreResult<Option<Task>> {
             |row| row.get(0),
         )
         .optional()?;
-    match task {
-        Some(task) => super::children::task_on(conn, &TaskId::parse(&task).map_err(invalid)?),
-        None => Ok(None),
-    }
-}
-
-/// A Task's own Flow reports its progress, failures and completion to the Task.
-fn report_to_task_in(conn: &Connection, id: &str, kind: &TaskEventKind) -> StoreResult<()> {
-    if let Some(task) = pointed_task_in(conn, id)? {
-        super::children::insert_task_event_in(conn, &task, kind)?;
+    if let Some(task) = task {
+        super::children::insert_task_event_in(conn, &TaskId::parse(&task).map_err(invalid)?, kind)?;
     }
     Ok(())
 }
@@ -2583,6 +2581,7 @@ mod tests {
         let at_inner = successful_boundary(&store, &outer, None);
         let inner = successful_boundary(&store, &at_inner, Some(FlowDecision::Iterate));
         assert_eq!(inner.parent_id.as_deref(), Some(outer.id()));
+        assert_eq!(store.flow_root(inner.id()).unwrap(), root.id());
         let inner = successful_boundary(&store, &inner, None);
         let inner = successful_boundary(&store, &inner, None);
         let outer_return = successful_boundary(&store, &inner, Some(FlowDecision::Advance));

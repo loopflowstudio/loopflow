@@ -24,166 +24,117 @@ checks. Configured provider/Desktop and real-Home/release acceptance require the
 own evidence/procedure. A published checkpoint or focused pass completes none of
 those broader obligations. No review edge has been selected.
 
-## Live ownership
+## Live ownership and published checkpoint
 
-Current worker is compress Run `run_de6cc72e4b3e47fc919c51831f5b43c0`,
-same saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
-iteration10. Main implement Run `run_65fc64d8389d49ea9fdbeb47efdc9c40`
-completed; saved Flow advanced normally to compress. Main retains sole executable
-edit/build/test/Git ownership. Recheck shared status before any launch.
+Managed review-slice Run `run_4f7b9f56776542f896c554ea79c7b192` is live;
+compress Run `run_de6cc72e4b3e47fc919c51831f5b43c0` completed normally.
+Same saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
+iteration10, step4/13. Main retains sole executable edit/build/test/Git ownership.
+Supervisor owns this index and private reviews. Recheck shared status before launch.
+Control Session `run_9c16dbbe2b04440db8469e9b4964912c` keeps human title loopflow.
 
-Prior Run `run_344d4bfe1bf040b99a43e65434efbf97` failed during Codex remote
-compaction at17:13:58UTC (model capacity); claim released. First continuation
-`run_7f332bcc507c4bd2aaf27560f7ab8c84` failed before execution: task prompt
-1,099,291 characters exceeded1,048,576. Supervisor archived three integrated
-proposal originals with SHA manifest under `.lf/tmp/scratch-curation-20260929-continuation/`
-and replaced their automatic-context copies with pointers, removing74,096bytes.
-No evidence or scope was discarded. Same-boundary `lf task run` then launched
-current Run; no restart or Flow navigation. Continuation direction
-`ce409314-a34f-46e1-89b9-ab3d0e1881e6` was verified before launch.
+Published HEAD **94b258e8a41d2e6587a7d24a5d712b0dc8445499**, based on
+main **a3820bf7e493b7d533a45677b7945020adf80721**. Task and GitHub agree.
+`36c19fc58` contains active Session reduction; `94b258e8a` publication preparation.
+Whole committed production delta **+18,787/−31,209 = net−12,422**, corrected
+production-prefix/no-renames method, SQL included, tests/docs/working edits excluded.
+Receipt `.lf/tmp/execution-model/status-counts-94b258e8a.json`.
+Activity cut net−30 versus07030, not the private proposal's net−103.
 
-Published HEAD **07030b7033029c635c9803973d49770f6034da5a**, based on
-main **a3820bf7e493b7d533a45677b7945020adf80721**. Metadata/import/fixture
-checkpoint e6aa8d4c7 rebased conflict-free; 07030b703 changes scratch only.
-GitHub and Task publication agree. Main compacted parallel-execution/evidence
-from203,731 to28,687bytes, retaining hashed originals and committed history.
+Prior capacity failure and oversized continuation were recovered at the same
+boundary without restart. Hashed scratch originals remain in
+`.lf/tmp/scratch-curation-20260929-continuation/` and
+`.lf/tmp/scratch-curation-20260929-metadata/`; context reduction did not discard scope.
 
-Whole committed production delta **+18,280/−30,672=net−12,392** by the same
-corrected production-prefix/no-renames method; tests/docs/working changes excluded.
-Receipts `.lf/tmp/execution-model/status-counts-{e6aa8d4c7,07030b703}.json`.
-The importer cut is net−45; metadata improves reads but adds code. No deletion
-claim follows from archived notes. Focused metadata proof:26Rust selected pass
-with one retained leaked-handle observation; separate two-check repeat clean;
-68Swift tests and eight mounted Monitor/chrome tests pass; Clippy/static pass.
-Public Session suite33/34 passed before its attribution helper correction, then
-four focused attribution/continuation cases passed. No full-green gate claim.
+### Private contributions
 
-Supervisor owns this index and isolated reviews, with no competing executable
-writer or build. Control Session `run_9c16dbbe2b04440db8469e9b4964912c` retains
-its human title loopflow.
+- **Preservation released:** tool25840 exited0, Run
+  `run_6c140a0a9bea481fbf33075fa2f31821` completed. Reviewed handback/patch in
+  `.lf/tmp/released-import-proposal/`, both file hashes verified; patch SHA256
+  `6716382145fdd5420952db0d98cd6deff46bdcd9dbe7530fb4d5c208bbdf186a`.
+  Test-only475-line bridge, ignored by default, uncompiled/unexecuted. Eight
+  private SQL checks do not prove the public importer. Main must execute exact
+  binary/source and canonical-copy commands, requiring one passing test. Review
+  PATH-only provider sentinels given the recent vendor-PATH escape. Preserve
+  separate released/development frontiers and explicit SQL/terminal, recovery,
+  keyed-retry proof limits. No production change or publication hold.
+- **Terminal mounting live:** tool26677, Run `run_822ff2c551f84ce89b9f1f99ec3776d3`.
+  Codex acknowledgment verified. Writes only `.lf/tmp/terminal-mount-proposal/`.
+  Trace hosted detached-but-retained terminal through actual mounting/dismantling
+  owners; private repair proposal and regression plan, no builds/tests/source edits.
+- **Flow discovery released:** tool53793 exited0, Run
+  `run_69b5879a1af84990877c7d331a849e20` completed. Read
+  `.lf/tmp/flow-discovery-proposal/{handback.md,proof-plan.md,flow-discovery.patch}`.
+  All14 original/proposed/current hashes verified. Patch SHA256
+  `1f76dfe9d1872c8650118abd277540e333af478700793affad2699d33be82664`.
+  Release/CI direction **3457fcea-b2f9-462a-b355-d44efc124172** read back.
+  Unapplied/uncompiled. Private SQL/syntax/hunk checks only; no product proof.
+  Rust +426/−7 (SQL separate), no deleted path. Summary filters/pages metadata;
+  detail loads one captured Flow. New unbound_repo observes new launch only;
+  historical import stays unknown. Review Git discovery inside insertion
+  transaction and sessions/inspect template-name collisions during integration.
+  Parent discovery remains absent until the real runtime child producer exists.
 
-**Active preservation contributor:** tool25840, Run
-`run_6c140a0a9bea481fbf33075fa2f31821`, Exec
-`86e94725-719a-41d0-9e0f-b53cdfeacbf1`/PID47592. Live handle/ack verified.
-Writes ONLY `.lf/tmp/released-import-proposal`; prepares the missing bridge
-between populated released schema and public CLI import, reusing covered origin
-proofs. Current-schema seed is not release-upgrade evidence. No source/build/test/
-provider/Home/PM/Git/process changes or publication hold. Main owns integration
-and execution after reviewed terminal handback. Coordination ff722d66-4cca-4e7d-8e25-80ba599578f3 read back.
+All contributors are private, with no live Home/provider/PM/Git/process mutation,
+competing source writer or publication hold. Main retains managed navigation.
 
-**Active private contributor:** tool53793, Run
-`run_69b5879a1af84990877c7d331a849e20`, Exec
-`3e75fceb-63dc-48c9-8f27-acb84f7b36b5`/PID87710. Live handle and
-assignment acknowledgment verified. Writes ONLY `.lf/tmp/flow-discovery-proposal/`:
-bounded searchable FlowSession summary/detail proposal, preserving template list/show,
-existing owners, exact actions and historical missingness. No source/build/test/
-provider/Home/PM/Git/process mutation or publication hold. Main continues active-view
-integration; reviewed terminal handback is required before integrating these hunks.
-Assignment is retained in its directory; coordination bb1fa1af-7ce7-47a4-8601-11349181a42e read back.
+### Active Session cut: actual proof and limits
 
-**Released private contributor:** tool14717 exited0; Run
-`run_5a749c04bcb64b7195089b13a274857d` completed its handback at
-`.lf/tmp/active-session-proposal/handback.md`. Patch SHA256
-`f928998ca6687fe814817bc2349fc3c8b8e67e8fe5729da740968e1f4fd98786`.
-All33 original/proposed hashes verified; only TaskMonitorTests.swift has source
-drift. Integrate reviewed hunks, retaining main's bounded mount repair.
-Release direction **953eabc0-3e2c-4b44-be50-1b06f135973e** was read back.
-This supersedes the main handoff's earlier unreleased statement. Syntax and five
-synthetic SQL assertions passed; no compile/product/OS proof. Proposed production
-cut +489/−592=net−103 is not yet a branch result.
+Published reduction removes run-bindings writer/guard/scan and per-input ActiveRun
+wire. ActiveSession follows retained Session/driver, exact observed Exec/engine
+identity and historical native-client input→Session links. No new lifecycle owner.
+Source review corrected reused-PID exclusion and managed Claude engine recording,
+and bounded queries by observed identities instead of all retained Sessions.
 
-Supervisor review found three specific integration obligations:
-- raw known_pids excludes a reused PID even after its old start identity fails;
-  prove a new unrecorded provider is neither silently hidden nor misattributed.
-- managed Claude ensure_process does not record exact engine identity, unlike
-  Codex/OpenCode. Sequential steps in one Exec otherwise degrade to ambiguity;
-  finish the existing producer path without a new owner. Historical missingness
-  still stays unknown; retain surviving old-engine exclusion.
-- ownership SQL returns every retained provider-origin Session twice per tick.
-  A private exact-query/captured87-migration PythonSQLite probe with20,000 completed,
-  released-driver Sessions and no clients returns all20,000, median11.578ms/query
-  (five warm samples). This proves unbounded historical materialization, not a
-  CLI latency failure. Use relevant observed Exec/PID/client identities and existing
-  keys, measure dense behavior, avoid adding another cache/authority.
-Review hashes `.lf/tmp/cut-i/active-session-supervisor-review.json`; query evidence
-`.lf/tmp/cut-i/active-session-density-review.json`. Main owns resolution/tests.
+Final logs:13 focused Rust pass without leaked handles,17 public Session/watch/DTO
+pass, corrected five-case transport assertion pass, Clippy pass17.78s. Full local
+Swift subsequently passed287tests/48suites. Earlier39-test pass had one stale
+message assertion; its mounted tests passed. Initial Rust compile/type errors,
+12/13 with leaked handle and import/client failure remain evidence. The fake
+Claude PATH was overwritten by vendor environment, reaching installed Claude in
+an isolated test environment; main repaired executable isolation. Do not call
+that earlier run a stand-in-only proof. No installed acceptance follows.
 
-Main integrated the active proposal and source corrections. Current local evidence
-is incomplete: initial Rust build failed two SQL type conversions; the next13-test
-run had12passes (one leaked handle) and one import/client fixture failure. Vendor
-environment setup replaced the fake Claude PATH, reaching the installed executable
-inside the disposable test environment. Main corrected fixture isolation; the later
-three-case repair passes, and17public Session/watch/DTO checks pass. Earlier red/leak
-receipts remain. BundledSQLite five-read totals:0.389ms for0 candidates,0.426ms for4
-among20,000retainedSessions; query-only timings. Swift integration initially failed
-at a remaining old `.runs` consumer, then compiled. The39-test local run passed
-mounted cases but failed one old diagnostic-string assertion; its corrected
-five-case transport test passes. Latest Clippy passes17.78s. Hosted Monitor
-attachment remains unresolved; bounded per-terminal diagnostics are added without
-a longer timeout. `.lf/tmp/cut-i/active-swift-supervisor-progress.json` hashes
-these logs; local passes are not a hosted repair.
-Log hashes/results `.lf/tmp/cut-i/active-integration-supervisor-progress.json`.
-Do not cite stale `active-swift-fixture.log` (earlier02:14 proof) as this cut's result.
-
-Prior tool72315/Run b527d5e completed and exited0. Its handback/SQL-only proof
-under `.lf/tmp/active-observation-proposal/` establishes missing driver→input
-correlation for the old per-input ActiveRun projection. Supervisor's
-`supervisor-session-projection.json` shows stable Session/driver identity and
-historical client-input→Session links survive replacement. Final Session identity
-can remove that dependency; do not add a new driver-input owner merely to preserve
-obsolete wire. This is a proposed reduction, not active-reader acceptance. No
-production deletion delivered and its test-only characterization patch unapplied.
+Bundled SQLite five-query totals0.389ms (empty) /0.426ms (4candidates) among20,000
+retained Sessions; query-only warm timings. Supervisor's earlier unbounded query
+returned20,000rows/median11.578ms per read; different units, not whole CLI evidence.
+Retained reviews/log hashes under `.lf/tmp/cut-i/active-*`; do not reuse stale
+`active-swift-fixture.log` from02:14 as proof of this cut.
 
 ## Publication and checks
 
-Current07030b703 CI: Rust repeats the metadata assertion below (31passes/onefailure,
-15skips/1958unrun). Swift287tests/oneissue142.428s: mixedMonitorRetainsInput still
-fails TaskMonitorTests.swift:151 window attachment after the bounded three-second
-wait. This counterexample invalidates a claimed hosted timing repair; local passes
-retain their narrower scope. Investigate actual terminal/mount identity rather than
-increase timeout/retry. Keep draft, surface, companion and focus preservation.
-Verified direction f0473c7f-8648-4a1d-8ed6-6642d8d52871. Compact logs are
-`.lf/tmp/cut-i/ci-07030b703-{rust-clean.log,swift-summary.json}`; do not dump giant
-Swift inspector values. Separate UI, installation, architecture, migrations,
-lint, Python, website and smoke passed. Scratch-clear fails while evidence remains.
+**94b258e8a CI terminal red**, run36608239269:
+- Rust109542699794:1858passed,1failed,15skipped,133unrun. At
+  session_cutover_tests.rs:3322, every_launch_is_one_row_and_every_reader_lists_it_once
+  expects saved Flow step Wave work_source declared; observes inherited, same Wave.
+  Direct Wave/Task and child assertions earlier in that test passed. Inspect
+  producer/fixture before revising expectation. Prior corrupt-metadata assertion
+  was repaired while retaining valid neighbors and exact broken-open refusal.
+- Swift109542700039:287tests,1issue131.994s. TaskMonitorTests:154, terminal0
+  sameSurface=true but window=nil, ancestors=[], focused=false; its shell leaf
+  remains in layout with nested Monitor/companion. Three-second wait did not fix
+  mounting. Local full287pass does not overturn hosted failure. Preserve surface,
+  draft, companion and focus assertions; identify lifecycle cause, not more waiting.
+- Separate UI, task-installation, architecture, migrations, Rust lint, Python,
+  website and smoke pass. Scratch-clear fails during implementation.
 
-Prior e6aa8d4c7 Rust
-job109534138916 failed after31passes/onefailure,15skips,1958unrun. The test
-`session_list_and_open_preserve_valid_reviews_beside_unreadable_captures` still
-expects passive inventory to decode a corrupt graph. Reconcile with metadata-only
-listing while keeping valid-neighbor access, exact broken-open refusal and retained
-corrupt bytes. This direction is included in verified release comment above.
-Log `.lf/tmp/cut-i/ci-e6aa8d4c7-rust-clean.log`. Other jobs were still running.
+Logs `.lf/tmp/cut-i/ci-94b-{rust,swift}.log` and corresponding `-summary.json`.
+Do not dump giant raw Swift lines. CI direction is the verified comment above.
+07030 had31Rustpasses before the obsolete metadata assertion and the same Swift
+mount failure without diagnostics. Earlier636/59ed/e6aa receipts remain under
+`.lf/tmp/cut-i/ci-*` and committed handoffs; no final gate/merge proof follows.
 
-Historical636abc941 CI36601948200 failed on NativeClient ambient database and
-Monitor mount timing; both received focused repairs in e6aa8d4c7. Those local
-passes do not establish hosted success. Earlier logs remain
-`.lf/tmp/cut-i/ci-636abc941-*`. No final CI/gate or delivery approval follows.
+## Runtime child FlowSession: implementation gap
 
-The terminal predecessor CI 36600147964 at 59ed94ea5 failed:
-- Rust 109515111201: 660 passed, 2 failed, 15 skipped, 1,321 unrun; 37.122 s.
-  Generic launch and replay still used fake OpenCode one-shot executables after
-  the adapter moved to serve HTTP/SSE. Main audited adjacent fixtures; generic
-  launch/research use the existing Claude fixture protocol, replay retains the
-  account-free native OpenCode fixture. No old production adapter restored.
-- Swift 109515111628: 286 tests, five issues, 148.733 s. SessionChrome expected
-  the former Task-only worktree toolbar at both widths. Monitor started Chapter
-  transfer before its first asynchronous activity frame. Assertions now cover
-  Session-owned and Task-only chrome; Monitor waits for attributed initial data
-  and keeps retained history/terminal/draft/companion assertions.
-- Other jobs passed except scratch-clear and aggregate. Full Rust/Swift logs
-  are `.lf/tmp/cut-i/ci-59ed94ea5-*-clean.log`. Swift contains huge inspector
-  values: use `ci-59ed94ea5-swift-summary.json`, never dump raw lines into prompts.
-
-Reviewed local proof: `desktop-ci-proof-final.log` passes two mounted tests in
-4.683 s, including both chrome sizes; `command-provider-replay-native.log`
-passes replay in 1.105 s; `command-provider-native-shared.log` passes taskless
-native decision and automatic retry/earlier-caller rejection in 7.536 s.
-Earlier no-fail-fast command fixture runs were mixed; retain their logs. Main's
-final static/repair receipt is in its handoff, not inferred from these passes.
-Initial Desktop integration had five Rust checks, 67 Swift model/navigation
-checks, mounted PTY retention and the Xcode fallback build passing. These are
-fixture/source proofs, not installed acceptance.
+Accepted model and docs/architecture-reference.md require a runtime loop pass to
+create a child FlowSession; parent waits, child completion/parent progress share
+claim transaction, retries retain child, next pass creates another. Current
+FlowSession/QueuedInvocation/schema have no runtime parent; cursor nesting is XOR
+only and loop returns are counters. This is missing producer behavior, not merely
+an inventory filter or unexecuted test. Template parents and XOR tests cannot
+stand in for it. Evidence `.lf/tmp/cut-i/runtime-flow-parent-review.json` at94b;
+verified direction **bb2c733c-8a36-414a-8709-77e62aebacb4**. Main acknowledged
+it for the next implementation pass. No new object or product decision selected.
 
 ## Released metadata proposal and concrete integration concern
 

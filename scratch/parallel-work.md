@@ -20,7 +20,7 @@ binary access to the installed Home are not.
   `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`, implement iteration10.
   Verified worker Exec `ef8e22ec-9e08-4762-b166-5033132405e7`, PID79038,
   Codex80014. Numeric Flow wire and landing helper admission are published;
-  main checkpointed Exec discovery and is probing OpenCode native ordering. Recheck status/ps before treating these as live.
+  Exec discovery and OpenCode native history are published at6c0981dbd; main is integrating Desktop controls. Recheck status/ps before treating these as live.
 - Supervisor owns this index and isolated read-only inspections; no second
   executable writer or competing builds. Control Session
   `run_9c16dbbe2b04440db8469e9b4964912c` has human title `loopflow`.
@@ -88,12 +88,22 @@ supervisor direction is not a new decision attributed to Jack.
 
 ## Delivery and immediate counterexamples
 
-Published **a866926d01d91d98b7e0593010d0cdc74617a186**, based on
-**6e7189926ede81b3edd05c8d81955c6cbe67a4e2**. GitHub PR1296 and Task publication
-agree. Optional Linear PR-link enrichment failed JSON decoding; acknowledged
-GitHub publication survives. No auth repair is justified by that optional failure.
+Published **6c0981dbd2561b20a3e87f89a7d0da8bfdee2823**, based on
+**6e7189926ede81b3edd05c8d81955c6cbe67a4e2**. Fresh GitHub PR1296 and Task
+publication agree. CI36599037523 rust-test109511330688 failed after503 passes,
+one failure,15 skips and1480 unrun (20.805s): `opencode_trace_error_turn` still
+expects synthetic started/completed from map_event, but actual output is error
+only. All four opencode_trace tests share that old replay helper. Complete log:
+`.lf/tmp/cut-i/ci-6c0981dbd-rust.log`; clean copy retains the exact assertion.
+Verified direction `af257f68-e386-40fc-a2bd-75a9ac86204a` asks main to migrate
+or replace obsolete trace proof at the native history boundary, preserving unknown
+usage, output/tool correlation and error semantics; never restore idle completion.
+Other passed jobs: architecture,migrations,lint,Python,website,smoke,installation.
+Swift/UI were running at inspection; scratch-clear fails with retained notes.
+No full green. Main is integrating Desktop controls and owns this CI repair.
+No landing or promotion.
 
-Current CI36591364925: Rust job109485005231 failed the retained OpenCode
+Previous CI36591364925: Rust job109485005231 failed the retained OpenCode
 `a_taskless_step_records_its_decision_on_the_invocation`:1,855 passes, one failure,
 15 skips,137 unrun,162.390s. Both decisions lack original-turn authority. Log:
 `.lf/tmp/cut-i/ci-a866926d0-rust.log`. Landing scenario passed on this head.
@@ -298,6 +308,19 @@ samples follow the first; cache uncontrolled, no provider/installed Home. Whole-
 latency only; startup/SQL/payload separation, plans and Desktop remain unproved.
 Initial seed failed the capture-ID constraint; repaired seed retains constraints.
 
+## Desktop controls integration proof (working, 2026-09-29)
+
+Main applied the released proposal, including human-readable confirmation with
+stable transport IDs. Supervisor inspected the working CLI, binding model,
+workspace routing and mounted proof. `desktop-controls-rust.log` passes5 public
+CLI/import/wire checks in11.871s; model/navigation run reports67 Swift passes.
+`desktop-controls-mounted.log` passes the extended real-PTY test in5.531s: hiding
+headless work and binding to a Task in a different checkout retain the same pane
+objects, focus and typed draft. Preview/commit calls use fixture transport and
+partly call the model directly; this is not installed-app/real-Task acceptance or
+an end-to-end click proof for every popover control. Final metadata conversion,
+Desktop paging and recorded native account recovery remain distinct requirements.
+
 ## OpenCode recovery checks reviewed (2026-09-29)
 
 Actual candidate05473216 `adapter-output-green/adapter-result.json` records exit0, completed Flow and
@@ -379,14 +402,14 @@ processes, infer death from silence, or start a competing writer on timeout.
 
 ## Measurement and preserved history
 
-Published a866 versus base6e718: **+16,505 / −30,210 = net−13,705** production.
-Rust/Swift+15,299/−30,148; Python/shell+48/−62; SQL+1,158/−0. Receipt:
-`.lf/tmp/execution-model/status-counts-a866926d0.json`. Corrected production
-prefixes, no rename detection, tests/docs excluded. Changed bases prevent reading
-successive branch totals as incremental cuts; working patches are excluded.
-
-Local checkpoint915aa82ff has its separate same-method receipt
-`.lf/tmp/execution-model/status-counts-915aa82ff.json`: +17,006/−30,210, net−13,204; do not label it published.
+Published6c0981dbd versus base6e718: **+17,680 / −30,618 = net−12,938**
+production. Rust/Swift+16,474/−30,556; Python/shell+48/−62; SQL+1,158/−0.
+Receipt `.lf/tmp/execution-model/status-counts-6c0981dbd.json` reproduces the
+prior915 measurement before computing this head. Corrected production prefixes,
+no rename detection, tests/docs excluded; dirty Desktop/proposal changes excluded.
+Same-method OpenCode cut from915: +686/−420 = net+266. Main's cut report measures
++684/−418 (same net); preserve method details rather than merging gross counts.
+Earlier publisheda866 net−13,705 and local915 net−13,204 receipts remain retained.
 
 Older scratch:62files/676,767bytes in `.lf/tmp/scratch-consolidation-20260928/scratch/`
 with SHA manifest; eleven LOO291 originals under `.lf/tmp/context-archive-7e2101b41/`.

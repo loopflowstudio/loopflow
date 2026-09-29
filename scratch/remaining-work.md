@@ -55,6 +55,11 @@ one managed FlowSession pointer while allowing other attributed Flows.
   replace failed Iterate with successful Advance, and history survives. Retain
   these native proofs and the route-clearing invariant through Run removal;
   XOR router replacement has not been separately replayed.
+  The delayed-child case is now a reproduced failure, not just a proof gap:
+  `supervisor-late-decision-retry-3` lets a failed turn's child decide after the
+  retry starts, and the Flow wrongly completes. Preserve original native-turn
+  authority through child commands; version/current Run alone cannot distinguish
+  automatic retries. See evidence and Task comment `cae3e281-31e1-4ba0-a757-3dd2cb00c4ee`.
 - Mechanical boundaries retain correlated start/outcome directly on FlowSession.
   One lf process may perform several operations; no fake Exec or AgentSession.
   Missing completion keeps inspect-before-retry semantics.

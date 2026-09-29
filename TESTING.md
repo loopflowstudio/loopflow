@@ -16,6 +16,23 @@ run in its summary. Missing or unreadable proof runs the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. PRs and merge groups always execute every check.
 
+CI wraps the expensive Rust, Swift, and Xcode commands with native
+`/usr/bin/time`: `-v` on Linux and `-l` on macOS. Their existing job logs retain
+elapsed time, user/system CPU seconds, maximum RSS, faults, and context switches
+on success or command failure. Swift's failure artifact retains the same output.
+Runner cancellation may prevent a final report. Skipped checks have no new measurement.
+Compare the same command, source,
+runner/toolchain, and cache state; sum user/system time to compare CPU work with
+elapsed time. A timing difference alone does not establish contention.
+
+[GNU time](https://www.gnu.org/software/time/manual/html_node/Memory-Resources.html)
+reports maximum RSS in KiB; macOS reports bytes. These are the native command
+accounting peaks, not simultaneous aggregate process-tree or host physical memory.
+Work performed by external services may be excluded, so this does not measure
+Docker daemon memory or establish a safe parallel-worker count. Local gate CPU
+receipts remain under `.lf/tmp/gate`; use the same native timing command for a
+focused local comparison.
+
 The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.

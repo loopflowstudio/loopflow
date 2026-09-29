@@ -366,7 +366,9 @@ mod tests {
 
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let since = 1_790_000_000;
+        let parent = crate::durable::RunId::new();
         let mut older = None;
         for started in [since - 1, since, since + 1] {
             let capture = CaptureHandle::begin_at(
@@ -401,8 +403,9 @@ mod tests {
             .unwrap();
             // Seed retained historical evidence: runtime admission creates no Run.
             rusqlite::Connection::open(&database).unwrap().execute(
-                "INSERT INTO runs(id,created_at,cwd,published,provider,outcome,ended_at) VALUES(?1,?2,?3,1,'proof','completed',?4)",
-                rusqlite::params![manifest.run_id.as_str(), started, home.path().to_str().unwrap(), since+2],
+                "INSERT INTO runs(id,created_at,cwd,published,provider,outcome,ended_at,caller_run_id) VALUES(?1,?2,?3,1,'proof','completed',?4,?5)",
+                rusqlite::params![manifest.run_id.as_str(), started, home.path().to_str().unwrap(), since+2,
+                    (started >= since).then_some(parent.as_str())],
             ).unwrap();
             if started == since {
                 std::fs::OpenOptions::new()
@@ -447,6 +450,25 @@ mod tests {
         // An excluded corrupt payload must not make the recent window fail.
         std::fs::write(older.unwrap().join("manifest.json"), b"{").unwrap();
         assert_eq!(select(since), selected);
+        // Exact parent selection also precedes payload hydration, without a date cap.
+        assert_eq!(
+            super::collect_runs_at(
+                home.path(),
+                &database,
+                super::WorkFilter::default(),
+                Some(parent.as_str()),
+                0
+            )
+            .unwrap(),
+            selected
+        );
+        let store =
+            crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database).unwrap();
+        assert_eq!(
+            store.runs(None, None, None, None, since).unwrap().len(),
+            3,
+            "activity retains the older work that ended inside the window"
+        );
     }
 
     #[test]

@@ -759,6 +759,26 @@ mod tests {
         }
         let children = store.runs(None, None, None, Some(worker.id.as_str()), 0);
         assert_eq!(children.await.unwrap()[0].run.id, helper.id);
+        for _ in 0..55 {
+            store
+                .create_run(run(None, Some(worker.id.clone())))
+                .await
+                .unwrap();
+        }
+        let children = store
+            .runs(None, None, None, Some(worker.id.as_str()), 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            children.len(),
+            56,
+            "exact parent history has no presentation cap"
+        );
+        assert!(children
+            .iter()
+            .all(|child| child.run.caller_run_id.as_ref() == Some(&worker.id)
+                && child.run.task_id.as_ref() == Some(&task.id)
+                && child.project.as_deref() == Some("desktop-renamed")));
     }
 
     #[tokio::test]

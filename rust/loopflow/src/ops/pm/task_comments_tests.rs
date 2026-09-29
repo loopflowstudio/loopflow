@@ -54,7 +54,8 @@ async fn graphql(
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"",
+            "project":{"id":"project-1","name":"Chapter","description":"","content":"flow: feature",
+                "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation CreateComment") {
         let node = comment(

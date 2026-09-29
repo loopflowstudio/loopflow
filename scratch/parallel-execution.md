@@ -50,7 +50,7 @@ selected complete AgentSession admission/publication and SQL-reader conversion
 through ordinary launches, TaskLauncher, reviews and Asks. Native transport is
 separate. These diagnostic repairs do not complete the implementation slice.
 
-### Active admission conversion (unfinished)
+### Admission checkpoint and remaining conversion
 
 The new `agent_session_admission` draft moves captured input/publication metadata
 onto AgentSession, removes its Run FK and its SQL reader's Run join, and retains
@@ -121,6 +121,35 @@ the earlier static run caught two test-only manual-contains lints, now corrected
 The pinned rebase plan selects direct rebase. No full matrix repeat or completed
 slice follows. Historical discovery/import and all-provider/native decision
 recovery remain implementation work after this admission checkpoint.
+
+Admission checkpoint `ddf4a2ddc` was rebased through pinned `lf` onto main
+`5402d93974dba3b6e94bea1d411951a9dfeb20d9`, producing `95b1dd685`.
+All returned Chapter and Desktop edits are preserved. Integration retains
+upstream Task file operations, the current skill catalog and compact Wave
+operation guidance, while keeping the accepted status-based Chapter contract.
+Deleted thread/Wave-host readers remain deleted. The recent historical SQL
+reader now filters the inclusive time window before hydrating payloads; its
+regression retains boundary usage and partial evidence and excludes an older
+corrupt payload. This remains a historical Run reader, not final owner deletion.
+
+Post-rebase checks pass: one historical-window case, 25 Rust DTO/context cases,
+eight Wave-detail cases, the mounted named-Session terminal-retention proof,
+and 25 Python architecture/skill checks. The latter first found an omitted
+`agent_session_inputs` map entry and archived rebase transcripts scanned as
+active guidance; the map and archive exclusion are corrected, with rejection
+of retired vocabulary in active skills retained. Logs are
+`admission-rebase-{window,contracts,wave-detail,native,docs-2}.log`.
+Formatting, Ruff, whitespace and all-target Clippy pass (15.76 seconds,
+`admission-rebase-static.log`). No full matrix repeated. The zero-Run native
+candidate predates rebase; its admission/authority source remained identical,
+but it is not a fresh integrated native binary proof.
+
+The next complete owner boundary is historical input import and indexed
+conversation/history discovery, preserving original attribution and replay
+conflicts before removing historical Run rows. Native transport stays separate:
+retain paired stale-child rejection and valid-retry failure, and the smallest
+concrete proposal requirement in `native-turn-retry-tradeoff.md` before expanding
+provider machinery. This checkpoint does not complete iteration 10 or LOO-298.
 
 ## Decision pass 10 · 2026-09-28
 

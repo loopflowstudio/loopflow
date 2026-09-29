@@ -72,15 +72,13 @@ pub(crate) fn collect_runs_started_since(
     since: i64,
 ) -> Result<Vec<RunSnapshot>> {
     let path = crate::store::observability_database_path()?;
-    let mut runs = collect_runs_at(
+    collect_runs_at(
         &crate::store::observability_home_dir(),
         &path,
         filter,
         None,
         since,
-    )?;
-    runs.retain(|run| run.started >= since);
-    Ok(runs)
+    )
 }
 
 /// Runs are rows: one query selects them, and each Run's usage and launch
@@ -96,7 +94,10 @@ fn collect_runs_at(
         return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
-    let runs = store.runs(filter.wave, filter.project, filter.task, parent, since)?;
+    let mut runs = store.runs(filter.wave, filter.project, filter.task, parent, since)?;
+    // Activity also selects work ending in the window. This started-only reader
+    // discards older rows before opening payloads, including their event streams.
+    runs.retain(|listed| listed.run.created_at >= since);
     let runs = crate::run_record::run_snapshots(lf_home, runs)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
     Ok(runs.into_iter().map(|(_, snapshot)| snapshot).collect())
@@ -356,6 +357,97 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_tokens;
+
+    #[test]
+    fn history_window_keeps_boundary_usage_and_gaps_before_payload_reads() {
+        use crate::engine::stream::StreamEvent;
+        use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
+        use std::io::Write;
+
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        let since = 1_790_000_000;
+        let mut older = None;
+        for started in [since - 1, since, since + 1] {
+            let capture = CaptureHandle::begin_at(
+                home.path(),
+                RunSpec {
+                    harness: "proof".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: home.path().to_owned(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: Vec::new(),
+                    flow: RunFlowMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            capture.record_stream_event(&StreamEvent::Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(3),
+                cache_read_tokens: None,
+            });
+            capture.finish("completed").unwrap();
+            let dir = capture.artifact_dir();
+            let mut manifest = crate::run_record::read_manifest(&dir).unwrap();
+            manifest.created_at = time::OffsetDateTime::from_unix_timestamp(started).unwrap();
+            std::fs::write(
+                dir.join("manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            // Seed retained historical evidence: runtime admission creates no Run.
+            rusqlite::Connection::open(&database).unwrap().execute(
+                "INSERT INTO runs(id,created_at,cwd,published,provider,outcome,ended_at) VALUES(?1,?2,?3,1,'proof','completed',?4)",
+                rusqlite::params![manifest.run_id.as_str(), started, home.path().to_str().unwrap(), since+2],
+            ).unwrap();
+            if started == since {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(dir.join("events.jsonl"))
+                    .unwrap()
+                    .write_all(b"{")
+                    .unwrap();
+            }
+            if started < since {
+                older = Some(dir);
+            }
+        }
+        let select = |since| {
+            super::collect_runs_at(
+                home.path(),
+                &database,
+                super::WorkFilter {
+                    wave: None,
+                    project: None,
+                    task: None,
+                },
+                None,
+                since,
+            )
+            .unwrap()
+        };
+        let all = select(0);
+        let selected = select(since);
+        assert_eq!(all.len(), 3);
+        assert_eq!(selected.len(), 2);
+        assert_eq!(selected[0].started, since + 1);
+        assert_eq!(selected[1].started, since);
+        assert_eq!(selected[1].usage.input_tokens, Some(12));
+        assert_eq!(selected[1].evidence_gaps, 1);
+        assert_eq!(
+            selected,
+            all.into_iter()
+                .filter(|run| run.started >= since)
+                .collect::<Vec<_>>()
+        );
+        // An excluded corrupt payload must not make the recent window fail.
+        std::fs::write(older.unwrap().join("manifest.json"), b"{").unwrap();
+        assert_eq!(select(since), selected);
+    }
 
     #[test]
     fn tokens_keep_the_compact_human_format() {

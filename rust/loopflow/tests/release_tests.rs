@@ -128,12 +128,15 @@ exit 1
     )
 }
 
-fn write_gh_dropped_auto_merge_script(log_path: &str) -> String {
+fn write_gh_merge_wait_script(log_path: &str, queued: bool) -> String {
+    let queued = if queued { "1" } else { "0" };
     let checks = support::github_checks_page("$head", &[]);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
 armed="{log_path}.armed"
+queued="{queued}"
+seen="{log_path}.seen"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -141,6 +144,7 @@ printf '%s\n' "$*" >> "$log"
 if [ "$1 $2" = "api graphql" ]; then
   case "$*" in
     *LoopflowPrChecks*)
+      if [ "$queued" = 1 ]; then echo "original-head checks cannot settle queued work" >&2; exit 55; fi
       head="$(git rev-parse HEAD)"
       cat <<JSON
 {checks}
@@ -160,16 +164,21 @@ case "$1 $2" in
     exit 0;;
   'pr view')
     head="$(git rev-parse HEAD)"
-    if [ -f "$armed" ]; then
+    if [ "$queued" = 1 ] && [ ! -f "$seen" ]; then
+      touch "$seen"
+      echo '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null}}'
+    elif [ -f "$armed" ] || [ "$queued" = 1 ]; then
       printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
     else
       printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
     fi
     exit 0;;
   'api graphql')
-    if [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
+    if [ "$queued" = 1 ]; then echo queued:PR_release;
+    elif [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
     exit 0;;
   'pr merge')
+    if [ "$queued" = 1 ]; then echo 'queued work is already armed' >&2; exit 56; fi
     touch "$armed"
     exit 0;;
   'release view') exit 1;;
@@ -1527,6 +1536,15 @@ fn failed_candidate_build_reuses_the_version_after_a_fix_merges() {
 
 #[test]
 fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
+    prove_release_merge_wait(false);
+}
+
+#[test]
+fn release_run_waits_for_queued_integration_without_rearming() {
+    prove_release_merge_wait(true);
+}
+
+fn prove_release_merge_wait(queued: bool) {
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);
     git(&repo, &["push", "origin", "v0.9.1"]);
@@ -1537,7 +1555,7 @@ fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
     let head = git_output(&repo, &["rev-parse", "HEAD"]);
     let state = tempfile::tempdir().expect("release state");
     let log_path = state.path().join("gh.log");
-    let gh_script = write_gh_dropped_auto_merge_script(&log_path.to_string_lossy());
+    let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), queued);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress)
@@ -1551,13 +1569,28 @@ fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
     assert_eq!(receipt.commit, head);
     let log = fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("api graphql"));
-    assert!(log.contains(&format!(
-        "pr merge 1176 --squash --auto --match-head-commit {head}"
-    )));
+    if !queued {
+        assert!(log.contains(&format!(
+            "pr merge 1176 --squash --auto --match-head-commit {head}"
+        )));
+    }
 }
 
 #[test]
 fn release_run_repairs_failed_checks_before_tagging() {
+    for awaiting_queue in [false, true] {
+        prove_release_repairs_failed_checks(awaiting_queue);
+    }
+}
+
+fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
+    let request = if awaiting_queue {
+        "awaiting_queue"
+    } else {
+        "true"
+    };
+    let merge_state = if awaiting_queue { "BEHIND" } else { "BLOCKED" };
+    let rest_merge_state = merge_state.to_ascii_lowercase();
     let state = tempfile::tempdir().unwrap();
     let repaired = state.path().join("repaired");
     let checks = support::github_checks_page(
@@ -1584,7 +1617,7 @@ case "$1 $2" in
     if [ -f "$repaired" ]; then
       printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}\n' "$head"
     else
-      echo '{{"state":"OPEN","mergeStateStatus":"BLOCKED","mergeCommit":null}}'
+      echo '{{"state":"OPEN","mergeStateStatus":"{merge_state}","mergeCommit":null}}'
     fi;;
   'api graphql')
     case "$*" in
@@ -1593,11 +1626,11 @@ case "$1 $2" in
 {checks}
 JSON
         ;;
-      *) echo true ;;
+      *) echo {request} ;;
     esac;;
   'api -H')
     if [ -f "$repaired" ]; then merged=true; else merged=false; fi
-    printf '{{"number":1309,"state":"open","merged":%s,"html_url":"https://github.com/loopflowstudio/release-fixture/pull/1309","merge_commit_sha":"%s","head":{{"sha":"%s"}},"mergeable_state":"blocked"}}\n' "$merged" "$head" "$head";;
+    printf '{{"number":1309,"state":"open","merged":%s,"html_url":"https://github.com/loopflowstudio/release-fixture/pull/1309","merge_commit_sha":"%s","head":{{"sha":"%s"}},"mergeable_state":"{rest_merge_state}"}}\n' "$merged" "$head" "$head";;
   *) echo "unexpected gh: $*" >&2; exit 1;;
 esac
 "#,

@@ -597,11 +597,23 @@ pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
 #[derive(Debug)]
 pub(crate) enum MergeRequest {
     Auto,
+    AwaitingQueue,
     Queued(String),
 }
 
+pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&MergeRequest>) -> bool {
+    if matches!(request, Some(MergeRequest::Queued(_))) {
+        return false;
+    }
+    state.is_some_and(|state| {
+        state.eq_ignore_ascii_case("dirty")
+            || (state.eq_ignore_ascii_case("behind")
+                && !matches!(request, Some(MergeRequest::AwaitingQueue)))
+    })
+}
+
 pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
-    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id isMergeQueueEnabled autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
             "api",
@@ -615,7 +627,7 @@ pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Optio
             "-f",
             &format!("query={query}"),
             "--jq",
-            ".data.repository.pullRequest | if .mergeQueueEntry != null then (\"queued:\" + .id) else (.autoMergeRequest != null) end",
+            ".data.repository.pullRequest | if .mergeQueueEntry != null then (\"queued:\" + .id) elif .autoMergeRequest != null and .isMergeQueueEnabled then \"awaiting_queue\" else (.autoMergeRequest != null) end",
         ])
         .current_dir(repo)
         .output()?;
@@ -633,6 +645,7 @@ pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Optio
     match value {
         "false" => Ok(None),
         "true" => Ok(Some(MergeRequest::Auto)),
+        "awaiting_queue" => Ok(Some(MergeRequest::AwaitingQueue)),
         value => Err(OpsError::Message(format!(
             "could not determine whether pull request #{number} has auto-merge enabled: {value:?}"
         ))),
@@ -647,7 +660,7 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
     };
     let mut command = Command::new("gh");
     let description = match request {
-        MergeRequest::Auto => {
+        MergeRequest::Auto | MergeRequest::AwaitingQueue => {
             command.args(["pr", "merge", &number.to_string(), "--disable-auto"]);
             format!("gh pr merge {number} --disable-auto")
         }
@@ -1704,9 +1717,10 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::{
-        classify_pr_read_failure, is_missing_pr, merge_gate_state, normalize_task_pr_copy,
+        classify_pr_read_failure, disable_auto_merge, is_missing_pr, merge_gate_state,
+        merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
         parse_generated_pr_copy, pr_number_from_url, project_checks, GhCheck, GhRestHead, GhRestPr,
-        MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
+        MergeGateReading, MergeRequest, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use serde_json::{json, Value};
@@ -1775,6 +1789,55 @@ esac
             "detailsUrl":format!("https://ci/{name}"),
             "checkSuite":{"workflowRun":{"event":"pull_request","workflow":{"name":"CI"}}}
         })
+    }
+
+    #[test]
+    fn queue_requests_integrate_advancing_bases_but_not_prequeue_conflicts() {
+        for (request, behind, dirty) in [
+            (None, true, true),
+            (Some(MergeRequest::Auto), true, true),
+            (Some(MergeRequest::AwaitingQueue), false, true),
+            (
+                Some(MergeRequest::Queued("pr-id".to_string())),
+                false,
+                false,
+            ),
+        ] {
+            assert_eq!(
+                merge_needs_integration(Some("BEHIND"), request.as_ref()),
+                behind
+            );
+            assert_eq!(
+                merge_needs_integration(Some("dirty"), request.as_ref()),
+                dirty
+            );
+            assert!(!merge_needs_integration(Some("clean"), request.as_ref()));
+            assert!(!merge_needs_integration(None, request.as_ref()));
+        }
+    }
+
+    #[test]
+    fn waiting_for_queue_is_an_active_request_that_can_be_revoked() {
+        let fixture = CheckFixture::new(json!(null), json!(null));
+        std::fs::write(fixture.directory.path().join("armed"), "").unwrap();
+        std::fs::write(
+            fixture.directory.path().join("gh"),
+            r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  *--disable-auto*) rm "$fixture/armed" ;;
+  *) if [ -f "$fixture/armed" ]; then echo awaiting_queue; else echo false; fi ;;
+esac
+"#,
+        )
+        .unwrap();
+        let repo = fixture.directory.path();
+        assert!(matches!(
+            observe_merge_request(repo, 1329).unwrap(),
+            Some(MergeRequest::AwaitingQueue)
+        ));
+        disable_auto_merge(repo, 1329).unwrap();
+        assert!(observe_merge_request(repo, 1329).unwrap().is_none());
     }
 
     #[test]

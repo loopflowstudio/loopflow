@@ -34,6 +34,7 @@ pub enum SessionEventKind {
 /// Parsed offline evidence before its transaction; no execution identity or authority.
 #[derive(Debug)]
 pub(crate) struct ImportedObservation {
+    pub input_id: RunId,
     pub source: String,
     pub observed_at: i64,
     pub task_id: Option<TaskId>,

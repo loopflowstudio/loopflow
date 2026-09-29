@@ -14,9 +14,7 @@ pub(crate) use reader::ActiveRunReader;
 
 use crate::durable::{RunId, TaskWorkerOwner, WorkRef};
 use crate::lf::commands::top::{live_exec_providers, LiveExecProviders, LiveProviderProcess};
-use crate::run_record::{
-    read_manifest, record_dir, write_private_exclusive, RunManifest, SubjectAttribution,
-};
+use crate::run_record::{input_id_from_dir, write_private_exclusive, SubjectAttribution};
 use crate::store::SharedStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,7 +32,7 @@ pub(crate) struct RunBindingGuard {
 impl RunBindingGuard {
     pub(crate) fn publish(dir: &Path) -> std::io::Result<Self> {
         let owner = crate::journal::current_process_identity();
-        let manifest = read_manifest(dir)?;
+        let input = input_id_from_dir(dir)?;
         let home = dir
             .ancestors()
             .nth(3)
@@ -42,7 +40,7 @@ impl RunBindingGuard {
         Self::publish_at(
             home,
             RunBinding {
-                run_id: manifest.run_id,
+                run_id: input,
                 owner,
             },
         )
@@ -181,19 +179,40 @@ pub async fn snapshot(
 }
 
 async fn project(
-    home: &Path,
     store: &SharedStore,
     bindings: &BTreeMap<PathBuf, RunBinding>,
     processes: &crate::lf::commands::top::ProcessSnapshot,
-    clients: &[(RunId, crate::run_record::ProviderClientRef, String)],
+    clients: &[(RunId, crate::run_record::ProviderClientRef)],
     snapshot: &mut ActiveRunsSnapshot,
-    cost: &mut reader::DiscoveryCost,
 ) {
+    // Resolve each retained input once. Native receipts establish process evidence;
+    // they no longer require a second manifest read to discover their provider.
+    let ids = clients
+        .iter()
+        .map(|(id, _)| id.to_string())
+        .collect::<BTreeSet<_>>();
+    let mut inputs = BTreeMap::new();
+    for id in ids {
+        match store.sqlite.input_snapshot(&id) {
+            Ok(input) => {
+                inputs.insert(id, input);
+            }
+            Err(error) => snapshot.gaps.push(format!("Input {id}: {error}")),
+        }
+    }
+    let clients = clients
+        .iter()
+        .filter_map(|(id, client)| {
+            inputs
+                .get(id.as_str())
+                .map(|input| (id.clone(), client.clone(), input.harness.clone()))
+        })
+        .collect::<Vec<_>>();
     let owners = bindings
         .values()
         .filter_map(|binding| binding.owner.clone())
         .collect::<Vec<_>>();
-    let execs = live_exec_providers(processes, &owners, clients);
+    let execs = live_exec_providers(processes, &owners, &clients);
     let unowned = bindings
         .values()
         .filter(|binding| {
@@ -214,26 +233,32 @@ async fn project(
     for (id, mut processes) in runs {
         processes.sort_by_key(|process| process.pid);
         processes.dedup_by_key(|process| process.pid);
-        let manifest = RunId::parse(&id)
-            .ok()
-            .and_then(|id| record_dir(home, &id))
-            .ok_or_else(|| std::io::Error::other("invalid Run ID"))
-            .and_then(|dir| cost.manifest(&dir));
-        let manifest = match manifest {
-            Ok(manifest) => manifest,
+        let input = match inputs
+            .remove(&id)
+            .map(Ok)
+            .unwrap_or_else(|| store.sqlite.input_snapshot(&id))
+        {
+            Ok(input) => input,
             Err(error) => {
-                snapshot.gaps.push(format!("Run {id}: {error}"));
+                snapshot.gaps.push(format!("Input {id}: {error}"));
                 continue;
             }
         };
-        let work = match store.session_for_run(&manifest.run_id).await {
+        let id = match RunId::parse(&id) {
+            Ok(id) => id,
+            Err(error) => {
+                snapshot.gaps.push(error.to_string());
+                continue;
+            }
+        };
+        let work = match store.session_for_run(&id).await {
             Ok(Some(session)) => match (session.task_id, session.wave_id) {
                 (Some(task), _) => Some(WorkRef::Task(task)),
                 (None, wave) => wave.map(WorkRef::Wave),
             },
             Ok(None) => None,
             Err(error) => {
-                snapshot.gaps.push(format!("Run {id}: {error}"));
+                snapshot.gaps.push(format!("Input {id}: {error}"));
                 None
             }
         };
@@ -244,24 +269,16 @@ async fn project(
         {
             continue;
         }
-        snapshot.runs.push(active_run(manifest, work, processes));
-    }
-}
-
-fn active_run(
-    manifest: RunManifest,
-    work: Option<WorkRef>,
-    processes: Vec<LiveProviderProcess>,
-) -> ActiveRun {
-    ActiveRun {
-        id: manifest.run_id,
-        work,
-        subjects: manifest.subjects,
-        label: manifest.skill.unwrap_or_else(|| manifest.harness.clone()),
-        harness: manifest.harness,
-        model: manifest.model,
-        repo: manifest.repo,
-        processes,
+        snapshot.runs.push(ActiveRun {
+            id,
+            work,
+            subjects: input.subjects,
+            label: input.skill.unwrap_or_else(|| input.harness.clone()),
+            harness: input.harness,
+            model: input.model,
+            repo: input.repo.map(PathBuf::from),
+            processes,
+        });
     }
 }
 
@@ -287,7 +304,11 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
     async fn native_client_receipts_do_not_require_a_new_capture_binding() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
             crate::store::open_store(&crate::store::StorageConfig::sqlite(
@@ -296,7 +317,7 @@ mod tests {
             .await
             .unwrap(),
         );
-        let id = crate::run_record::CaptureHandle::prepare_at(
+        let capture = crate::run_record::CaptureHandle::begin_at(
             home.path(),
             crate::run_record::RunSpec {
                 harness: "cat".into(),
@@ -310,9 +331,9 @@ mod tests {
                 flow: crate::run_record::RunFlowMembership::Independent,
                 work: None,
             },
-            None,
         )
         .unwrap();
+        let id = capture.run_id();
         let (dir, _) = crate::run_record::resolve_manifest(home.path(), id.as_str()).unwrap();
         let client = OwnedClient(
             std::process::Command::new("/bin/cat")
@@ -336,7 +357,11 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
     async fn old_waiting_runs_are_task_exact_in_one_checkout_and_dead_clients_disappear() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         use crate::durable::WorkRef;
         use crate::run_record::{
             read_manifest, write_provider_client, CaptureHandle, RunSpec, SubjectAttribution,

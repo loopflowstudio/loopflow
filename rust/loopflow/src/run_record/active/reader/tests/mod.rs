@@ -33,6 +33,8 @@ impl Drop for Client {
 }
 
 async fn store(home: &Path) -> SharedStore {
+    // This fixture also exercises an explicit database outside the observed Home.
+    std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
     Arc::new(
         open_store(&StorageConfig::sqlite(home.join("loopflow.db")))
             .await
@@ -41,7 +43,7 @@ async fn store(home: &Path) -> SharedStore {
 }
 
 fn prepare(home: &Path) -> RunId {
-    CaptureHandle::prepare_at(
+    CaptureHandle::begin_at(
         home,
         RunSpec {
             harness: "cat".into(),
@@ -55,9 +57,9 @@ fn prepare(home: &Path) -> RunId {
             flow: crate::run_record::RunFlowMembership::Independent,
             work: None,
         },
-        None,
     )
     .unwrap()
+    .run_id()
 }
 
 async fn visible(reader: &mut ActiveRunReader, store: &SharedStore, ids: &[RunId]) {
@@ -87,7 +89,11 @@ async fn visible(reader: &mut ActiveRunReader, store: &SharedStore, ids: &[RunId
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn native_feed_discovers_old_resumes_replacement_and_removal() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let old = prepare(home.path());
@@ -160,7 +166,11 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn missing_roots_and_replaced_home_never_become_false_empty() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
     let parent = tempfile::tempdir().unwrap();
     let home = parent.path().join("new-home");
     let store = store(parent.path()).await;
@@ -179,7 +189,11 @@ async fn missing_roots_and_replaced_home_never_become_false_empty() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn retained_ownerless_capture_follows_loss_of_native_history() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let id = prepare(home.path());
@@ -237,7 +251,11 @@ async fn retained_ownerless_capture_follows_loss_of_native_history() {
 }
 
 #[tokio::test]
-async fn manifest_failure_does_not_outlive_its_native_client() {
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
+async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let id = prepare(home.path());
@@ -249,7 +267,9 @@ async fn manifest_failure_does_not_outlive_its_native_client() {
     let manifest = dir.join("manifest.json");
     let bytes = fs::read(&manifest).unwrap();
     fs::write(&manifest, b"{").unwrap();
-    assert!(!reader.observe(&store, None).await.gaps.is_empty());
+    visible(&mut reader, &store, std::slice::from_ref(&id)).await;
+    let observed = reader.observe(&store, None).await;
+    assert!(observed.gaps.is_empty(), "{observed:?}");
     drop(client);
     fs::write(&manifest, bytes).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -271,7 +291,11 @@ async fn manifest_failure_does_not_outlive_its_native_client() {
 
 #[tokio::test]
 #[ignore = "explicit discovery cost collection: creates 100,000 historical Runs"]
+#[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
 async fn discovery_cost_matrix() {
+    let _lock = crate::journal::test_env_lock();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
     let home = tempfile::tempdir().unwrap();
     let store = store(home.path()).await;
     let live_id = prepare(home.path());

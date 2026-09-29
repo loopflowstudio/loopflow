@@ -1107,3 +1107,53 @@ resolve native-only usage, Run-table removal or dense-query costs. Hosted
 `4ced9467f` retains the same OpenCode decision failure (1835 passes, one failure,
 15 skips, 135 unrun); it predates this cut. Supervisor's bounded-investment
 recommendation is not Jack's approval for a new decision interface.
+
+### Continuation and active input readers (2026-09-29)
+
+Jack's retained continuation requirement now has a public missing-manifest
+counterexample and repair. `native-continuation-without-manifest-red.log` showed
+Open replacing the saved Ask input after its manifest disappeared. Saved native
+continuation, prefix selection, failed-review outcome checks and active metadata
+now use AgentSession/input history; exact process receipts remain the authority
+for client liveness and stop. Current Session Work is projected separately from
+historical input attribution. `read_run_snapshot`, `context_ref_is_valid` and
+file `reduce_usage` have no remaining callers and are deleted. Initial prepared
+launch, immutable payload and process/client receipt dependencies remain.
+
+The first compile failed on an unnecessary RunId ordering requirement; string
+keys removed it. Subsequent focused runs exposed non-admitted fixture inputs,
+ambient database selection and the existing stop error assertion. Those failed
+receipts remain. `native-continuation-repair.log` passes five cases (9.180s):
+retained stop identity, stale review rejection, keyed Ask retry, replaced-Home
+discovery and public saved-Ask resume with its original input/prefix. The latter
+also proves active display without a manifest and fixture client settlement.
+`native-retired-reader-removal.log` passes eight usage/format/context/decision
+cases; `native-immutable-input-preservation.log` separately passes rejection of
+conflicting publication and altered context. No immutable-input acceptance check
+was replaced with a successful empty read.
+
+Published db60d9896 CI stopped at three Task-review tests opening a path-derived
+missing database (10 passed, three failed, 15 skipped, 1960 unrun). Review state
+and native history now use the supplied SharedStore. All three assertions pass
+in `native-continuation-and-review-store.log`, whose 15-case result still retains
+two subsequently repaired failures and one concurrent-completion LEAK. The
+isolated `native-review-settlement.log` traced that exact test: short-lived Git
+children, exit zero, pipe EOF and no remaining process group by 0.569s.
+`native-review-settlement-nextest.log` passes cleanly in 0.512s. This is clean
+local settlement evidence; it does not identify the earlier leak's cause.
+
+All-target Clippy passes in `native-continuation-static.log`; formatting,
+whitespace and two generated-documentation checks pass. Production delta against
+`db60d989665f3c1787c36cd019a6f33dc6e30020`: +142/-210 Rust lines (net -68),
+excluding test modules, integration tests and docs, using the retained corrected
+prefix method (`native-continuation-count.json`). Review found and removed the
+last file-outcome consumer instead of keeping a second history reader. The old
+file-age active fixtures do not separately establish old SQL timestamps; active
+queries have no recency cutoff, but dense/history-age proof remains with discovery.
+
+Returned Session-wire research is retained for the coordinated next consumer
+boundary. Complete SQL evidence/table removal, native-only usage, Exec entry
+coverage, final typed DTOs and Chapter CLI proof remain required. The pending
+decision-interface choice is unchanged; neither valid Codex decision retry nor
+OpenCode decision integration is claimed passing. No code-complete or shipment
+claim follows from this checkpoint.

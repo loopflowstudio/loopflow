@@ -18,9 +18,12 @@ and branch-binary access to the installed Home are not.
 Main owns executable edits, builds/tests, cleanup, Git and its handoff. Supervisor
 owns this index, other assigned scratch and isolated nonbuilding inspection/proofs.
 Builds stay serialized. Never checkpoint another active contribution or introduce
-another executable writer. All bounded contributions have returned. The wire/
-Desktop researcher finished with tool64028 exit zero; its 106-line artifact and
-73-file receipt were reviewed. No bounded contributor/tool handle remains active.
+another executable writer. The wire/Desktop researcher finished with tool64028
+exit zero; its 106-line artifact and 73-file receipt were reviewed. A new bounded
+Codex researcher (tool77919) owns only `scratch/research-active-swift-fixture.md`:
+an unapplied patch proposal for the hosted Swift active-reader fixture failure.
+It performs no source edits, builds/tests, Git or shared-state mutations. Main
+retains integration and proof; do not checkpoint its artifact while still active.
 
 ## Active control
 
@@ -52,21 +55,29 @@ to make an inspection pass. Task-specific contributions use `--task LOO-298`;
 
 ## Delivery and next work
 
-Published **db60d989665f3c1787c36cd019a6f33dc6e30020**, based on
-**6f3780338b42a8a2d544a81589ced6febeabac24**. GitHub PR1296 and Task publication
-agree; auto-merge is absent. Rebase resolved documentation conflicts. Comparing
-the saved native checkpoint 792c46eca with the rebased tree shows exactly main's
-five-file published-PR-copy change, preserving the branch's other bytes.
-Main now converts saved native continuation; unclassified SQL history still
-prevents dropping `runs`. Preserve the full remaining-work checklist.
+Published **3280c7524fe7f13c3a5566e8b89637e688d8fd06**, based on
+**567ac07df863b524f9b1ca6698161748b60b27fd**. GitHub PR1296 and Task publication
+agree; auto-merge is absent. The continuation checkpoint dca1d617d rebased with
+one reconciled migration file. Upstream prefix hashing joins this branch's outer
+initialization transaction; the focused initialization/append/adoption contention
+regression passed once (1.021s). This was not a byte-for-byte upstream transplant.
+Main now exposes unresolved historical SQL inputs in the import report; their
+preservation still prevents dropping `runs`. Keep the full remaining-work checklist.
 
-Latest Rust job is **109325762199**, CI **36543960247**, on `db60d9896`:
-10 passes, three Task-review failures, 15 skips and 1,960 unrun tests. Each failure
-reports inability to open the fixture database while parking at a review. Main
-has the counterexample and is converting those reads to the passed store.
-Log `.lf/tmp/cut-i/ci-db60d9896-rust.log`. Other jobs were still running when read.
-The preceding 4ced9467f Rust job retains its separate OpenCode decision failure
-(1,835 passes / 135 unrun); this early failure does not repair or retest it.
+Latest Rust job is **109333256583**, CI **36546252120**, on `3280c7524`:
+897 passes, one failure, 15 skips and 1,077 unrun tests (71.250s). The first
+`session_run_is_resumable` call in `initial_session_publication_requires_history_and_an_owned_client`
+rejects its arbitrary temporary directory with `invalid durable id: expected run_ id`.
+It fails before native publication or child launch. Main has the exact site and
+must preserve both history/client requirements through isolated admission setup.
+Log `.lf/tmp/cut-i/ci-3280c7524-rust.log`. CI is now terminal: Swift job109333256813
+also failed `ActiveRunsObservationTests.realCLI` at its observation deadline
+(280 tests, one issue). Its fixture publishes manifest/client files without SQL
+identity; bounded research owns the patch proposal. Log `ci-3280c7524-swift.log`
+beside the Rust log. Other executed jobs passed except scratch-clear.
+Earlier db60's three Task-review failures now pass their local assertions using
+the supplied store. The preceding 4ced9467f Rust job retains its separate OpenCode
+decision failure (1,835 passes / 135 unrun); the current cutoff does not retest it.
 Hosted interruption proof passed on earlier 9887f8c84; exact controlled Linux
 failure/repair receipts remain in the main handoff. No full-green claim follows.
 
@@ -83,8 +94,11 @@ Provider thread/account publication and lookup now use retained Session history.
 The ordering/import/summary proof passes three cases, and the five focused native
 durability/resume checks pass after the reducer change. Original event order and
 fresh-versus-imported precedence are retained; no provider-session sidecar writer
-remains. Manifest/client-dependent continuation and active readers still need
-conversion. These fixtures do not establish configured native recovery.
+remains. Saved continuation, prefix lookup and active metadata now use SQL input
+identity after manifest removal; initial publication and exact process receipts
+remain. The isolated concurrent-review cleanup trace and nextest passed, without
+establishing the earlier LEAK's cause. These fixtures do not establish configured
+native recovery. The continuation cut is +142/-210 production Rust lines (net -68).
 
 The failed-turn child race is reproduced with real Codex and scripted Responses:
 an old child decides after automatic retry begins, and the Flow wrongly completes.

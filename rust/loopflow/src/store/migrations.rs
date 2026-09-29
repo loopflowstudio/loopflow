@@ -5656,15 +5656,19 @@ mod tests {
         assert_eq!(native.len(), 5);
         for dry_run in [true, false, false] {
             let members = store.historical_session_inputs().unwrap();
-            assert_eq!(members.len(), 3);
+            assert_eq!(members.len(), 4);
             for (session, observation) in members {
+                if observation.input_id == caller {
+                    assert!(session.is_none());
+                    continue;
+                }
                 if observation.input_id != standalone {
                     assert_eq!(observation.payload["evidence"]["invocation_id"], capture.id);
                     assert_eq!(observation.payload["evidence"]["node"], 0);
                     assert_eq!(observation.payload["evidence"]["iterations"], "[[2]]");
                 }
                 store
-                    .import_session(session, None, &[observation], dry_run)
+                    .import_session(session.unwrap(), None, &[observation], dry_run)
                     .unwrap();
             }
             let history = store.session_history("retained", 0, 100).unwrap();
@@ -5705,6 +5709,68 @@ mod tests {
                 1
             );
         }
+        // A selector alone cannot establish preservation. Partial payload,
+        // conflicting SQL, wrong boundary or missing completion stays unresolved.
+        let operation_payload: String = conn
+            .query_row(
+                "SELECT payload FROM flow_events WHERE flow_id=?1 AND kind='operation_started'",
+                [&operation.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        for edit in [
+            "payload=json_remove(payload,'$.sql')",
+            "payload=json_remove(payload,'$.sql.cwd')",
+            "payload=json_set(payload,'$.sql.provider','codex')",
+            "node=node+1",
+        ] {
+            conn.execute(
+                &format!(
+                    "UPDATE flow_events SET {edit} WHERE flow_id=?1 AND kind='operation_started'"
+                ),
+                [&operation.id],
+            )
+            .unwrap();
+            let rows = store.historical_session_inputs().unwrap();
+            assert!(
+                rows.iter()
+                    .any(|(session, input)| session.is_none() && input.input_id == mechanical),
+                "{edit}"
+            );
+            conn.execute("UPDATE flow_events SET payload=?2,node=0 WHERE flow_id=?1 AND kind='operation_started'",
+                rusqlite::params![operation.id,operation_payload]).unwrap();
+        }
+        conn.execute(
+            "UPDATE flow_events SET observed_at=24 WHERE flow_id=?1 AND kind='operation_completed'",
+            [&operation.id],
+        )
+        .unwrap();
+        assert!(store
+            .historical_session_inputs()
+            .unwrap()
+            .iter()
+            .any(|(session, input)| session.is_none() && input.input_id == mechanical));
+        conn.execute(
+            "UPDATE flow_events SET observed_at=23 WHERE flow_id=?1 AND kind='operation_completed'",
+            [&operation.id],
+        )
+        .unwrap();
+        let (completion, start): (i64, i64) = conn.query_row(
+            "SELECT seq,operation_start FROM flow_events WHERE flow_id=?1 AND kind='operation_completed'",
+            [&operation.id], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        conn.execute("UPDATE flow_events SET kind='operation_started',operation_start=NULL,outcome=NULL WHERE seq=?1", [completion]).unwrap();
+        assert!(store
+            .historical_session_inputs()
+            .unwrap()
+            .iter()
+            .any(|(session, input)| session.is_none() && input.input_id == mechanical));
+        conn.execute("UPDATE flow_events SET kind='operation_completed',operation_start=?2,outcome='completed' WHERE seq=?1",
+            [completion,start]).unwrap();
+        assert!(!store
+            .historical_session_inputs()
+            .unwrap()
+            .iter()
+            .any(|(_, input)| input.input_id == mechanical));
         assert_eq!(
             conn.query_row(
                 "SELECT selected_start FROM flow_sessions WHERE id=?1",
@@ -5732,9 +5798,14 @@ mod tests {
             [prior.as_str()],
         )
         .unwrap();
-        let (session, changed) = store.historical_session_inputs().unwrap().remove(0);
+        let (session, changed) = store
+            .historical_session_inputs()
+            .unwrap()
+            .into_iter()
+            .find(|(_, input)| input.input_id == prior)
+            .unwrap();
         assert!(store
-            .import_session(session, None, &[changed], false)
+            .import_session(session.unwrap(), None, &[changed], false)
             .is_err());
         assert_eq!(store.session_history("retained", 0, 100).unwrap().len(), 7);
         assert_eq!(

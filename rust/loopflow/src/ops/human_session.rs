@@ -3245,44 +3245,39 @@ mod tests {
 
     #[test]
     fn initial_session_publication_requires_history_and_an_owned_client() {
-        let dir = tempfile::tempdir().unwrap();
-        let harness = "sleep".to_string();
-        let manifest = RunManifest {
-            schema_version: 1,
-            run_id: crate::durable::RunId::new(),
-            parent_run_id: None,
-            created_at: time::OffsetDateTime::now_utc(),
-            harness,
-            model: None,
-            surface: "tui".to_string(),
-            cwd: dir.path().into(),
-            repo: None,
-            worktree: None,
-            skill: Some("review-design".to_string()),
-            subjects: Vec::new(),
-            launch: None,
-            context: None,
-            runtime_path: None,
-            runtime_digest: None,
-            host: "test".to_string(),
-            boot_id: None,
-            flow: None,
-        };
-        std::fs::write(
-            dir.path().join("manifest.json"),
-            serde_json::to_vec_pretty(&manifest).unwrap(),
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            home.path(),
+            crate::run_record::RunSpec {
+                harness: "sleep".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: home.path().into(),
+                repo: None,
+                worktree: None,
+                skill: Some("review-design".into()),
+                subjects: Vec::new(),
+                flow: crate::run_record::RunFlowMembership::Independent,
+                work: None,
+            },
         )
         .unwrap();
-
-        assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
-        crate::run_record::write_provider_session(dir.path(), "provider-session", None).unwrap();
-        assert!(!session_run_is_resumable(dir.path(), &manifest).unwrap());
+        let dir = capture.artifact_dir();
+        let manifest = crate::run_record::read_manifest(&dir).unwrap();
+        assert!(!session_run_is_resumable(&dir, &manifest).unwrap());
+        crate::run_record::write_provider_session(&dir, "provider-session", None).unwrap();
+        assert!(!session_run_is_resumable(&dir, &manifest).unwrap());
         let mut client = std::process::Command::new("/bin/sleep")
             .arg("60")
             .spawn()
             .unwrap();
-        crate::run_record::write_provider_client(dir.path(), client.id()).unwrap();
-        let resumable = session_run_is_resumable(dir.path(), &manifest);
+        let publication = crate::run_record::write_provider_client(&dir, client.id());
+        let resumable = publication
+            .map_err(anyhow::Error::from)
+            .and_then(|()| session_run_is_resumable(&dir, &manifest));
         client.kill().unwrap();
         client.wait().unwrap();
         assert!(resumable.unwrap());

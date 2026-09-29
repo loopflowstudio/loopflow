@@ -1675,6 +1675,205 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
     assert!(fixture.launches().is_empty());
 }
 
+#[test]
+fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
+    use loopflow::durable::RunId;
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let review = ConcreteStep::Skill(ConcreteSkill {
+        skill: Skill::named("review-design"),
+        policy: OccurrencePolicy {
+            human: true,
+            ..Default::default()
+        },
+        flow_parents: vec![],
+    });
+    let autonomous = ConcreteStep::Skill(ConcreteSkill {
+        skill: Skill::named("implement"),
+        policy: OccurrencePolicy::default(),
+        flow_parents: vec![],
+    });
+    let mut saved = Vec::new();
+    for (opened, finished) in [(false, false), (true, false), (true, true)] {
+        let flow = uuid::Uuid::new_v4().to_string();
+        let boundary = uuid::Uuid::new_v4().to_string();
+        let session = format!("flow:{flow}:{boundary}");
+        let input = opened.then(RunId::new);
+        if let Some(input) = &input {
+            let dir = fixture.run_dir(input.as_str());
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("manifest.json"),
+                serde_json::to_vec(&json!({
+                    "schema_version": 1, "run_id": input, "parent_run_id": null,
+                    "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
+                    "surface": "tui", "cwd": fixture.repo.path(), "repo": fixture.repo.path(),
+                    "worktree": fixture.repo.path(), "skill": "review-design", "subjects": [],
+                    "flow": {"kind": "step", "task_id": null, "boundary_key": "0",
+                        "invocation_id": flow, "flow": "design", "step": "review-design",
+                        "node": "0", "iterations": [[]]},
+                    "launch": null, "context": null, "runtime_path": null,
+                    "runtime_digest": null, "host": "fixture", "boot_id": null
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let path = fixture
+            .home
+            .path()
+            .join("flows")
+            .join(&flow)
+            .join("position.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let value = json!({
+            "id": flow, "flow": "design", "cwd": fixture.repo.path(),
+            "steps": [review, autonomous],
+            "cursor": ExecutionCursor { index: if finished { 2 } else { usize::from(opened) }, ..Default::default() },
+            "message": null, "model": "opencode", "wave": null, "task": null, "as_work": null,
+            "active": {"id": boundary, "run_id": input, "completed": opened,
+                "ready_summary": "Keep the saved review feedback"},
+            "failure": null, "finished": finished
+        });
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        saved.push((path, value, session, input));
+    }
+    // An active agent or operation is not necessarily a human review.
+    let autonomous_input = RunId::new();
+    let autonomous_flow = uuid::Uuid::new_v4().to_string();
+    let dir = fixture.run_dir(autonomous_input.as_str());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec(&json!({
+            "schema_version": 1, "run_id": autonomous_input, "parent_run_id": null,
+            "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
+            "surface": "headless", "cwd": fixture.repo.path(), "repo": fixture.repo.path(),
+            "worktree": fixture.repo.path(), "skill": "implement", "subjects": [],
+            "flow": {"kind": "step", "task_id": null, "boundary_key": "1",
+                "invocation_id": autonomous_flow, "flow": "design", "step": "implement",
+                "node": "1", "iterations": [[]]},
+            "launch": null, "context": null, "runtime_path": null,
+            "runtime_digest": null, "host": "fixture", "boot_id": null
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for (id, steps, input, index) in [
+        (
+            autonomous_flow.clone(),
+            vec![review, autonomous],
+            Some(autonomous_input.clone()),
+            1,
+        ),
+        (
+            uuid::Uuid::new_v4().to_string(),
+            vec![ConcreteStep::Op(loopflow::engine::ConcreteOp {
+                item: loopflow::engine::Op {
+                    command: "pr publish".into(),
+                    args: vec![],
+                },
+                flow_parents: vec![],
+            })],
+            None,
+            0,
+        ),
+    ] {
+        let path = fixture
+            .home
+            .path()
+            .join("flows")
+            .join(&id)
+            .join("position.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(&json!({
+            "id": id, "flow": "design", "cwd": fixture.repo.path(), "steps": steps,
+            "cursor": ExecutionCursor { index, ..Default::default() },
+            "message": null, "model": "opencode", "wave": null, "task": null, "as_work": null,
+            "active": {"id": "active", "run_id": input, "completed": false, "ready_summary": null},
+            "failure": null, "finished": false
+        })).unwrap()).unwrap();
+    }
+    let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
+    assert_eq!(preview["failed"], json!([]));
+    assert_eq!(preview["flow_review"], 3, "{preview}");
+    assert_eq!(preview["flow"], 2);
+    assert_eq!(preview["run"], 1);
+    assert_eq!(fixture.count("agent_sessions"), 0);
+    assert_eq!(fixture.count("flow_sessions"), 0);
+    let imported = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(imported["failed"], json!([]));
+    assert_eq!(imported["flow_review"], preview["flow_review"]);
+    let again = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(again["failed"], json!([]));
+    assert_eq!(again["unchanged"], 6, "{again}");
+    for (path, value, session, input) in &saved {
+        let (stored_input, published, feedback, completed, node, iterations):
+            (String, bool, String, Option<i64>, Option<i64>, Option<String>) = fixture.db().query_row(
+                "SELECT input_id,input_published,ready_summary,completed_at,node,iterations FROM agent_sessions WHERE id=?1",
+                [session], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)),
+            ).unwrap();
+        assert_eq!(published, input.is_some());
+        if let Some(input) = input {
+            assert_eq!(stored_input, input.as_str());
+        }
+        assert_eq!(feedback, "Keep the saved review feedback");
+        assert_eq!(completed.is_some(), input.is_some());
+        assert_eq!(node, Some(0));
+        assert_eq!(
+            serde_json::from_str::<Value>(&iterations.unwrap()).unwrap(),
+            json!([[]])
+        );
+        let pending: Option<String> = fixture
+            .db()
+            .query_row(
+                "SELECT pending_session_id FROM flow_sessions WHERE id=?1",
+                [value["id"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending.as_ref(), input.is_none().then_some(session));
+        let mut conflict = value.clone();
+        conflict["active"]["ready_summary"] = json!("A different answer");
+        std::fs::write(path, serde_json::to_vec(&conflict).unwrap()).unwrap();
+        let rejected = fixture.json(&["session", "import", "--json"]);
+        assert_eq!(
+            rejected["failed"].as_array().unwrap().len(),
+            1,
+            "{rejected}"
+        );
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    for (_, _, id, _) in &saved {
+        assert!(
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|session| session["id"] == *id),
+            "{listed}"
+        );
+    }
+    assert_eq!(fixture.count("runs"), 0);
+    assert_eq!(fixture.count("agent_sessions"), 4);
+    let (interactive, kind, flow, node): (bool, String, String, i64) = fixture
+        .db()
+        .query_row(
+            "SELECT interactive,kind,flow_session_id,node FROM agent_sessions WHERE input_id=?1",
+            [autonomous_input.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert!(!interactive);
+    assert_eq!(kind, "conversation");
+    assert_eq!(flow, autonomous_flow);
+    assert_eq!(node, 1);
+    assert!(fixture.launches().is_empty());
+}
+
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() {

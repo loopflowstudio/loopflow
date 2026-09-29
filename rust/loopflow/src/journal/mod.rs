@@ -567,11 +567,17 @@ fn ensure_run_context(
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
     // git-excluded (e.g. not a git repo).
-    let run_dir = match ensure_journal_ignored(repo_root).and_then(|()| {
-        let dir = runs_root(repo_root).join(run_id.as_str());
-        fs::create_dir_all(&dir)?;
-        Ok(dir)
-    }) {
+    let run_dir = match crate::repo::discover_repo_root(repo_root)
+        .map_err(std::io::Error::other)
+        .and_then(|root| {
+            root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
+        })
+        .and_then(|root| {
+            ensure_journal_ignored(&root)?;
+            let dir = runs_root(&root).join(run_id.as_str());
+            fs::create_dir_all(&dir)?;
+            Ok(dir)
+        }) {
         Ok(dir) => Some(dir),
         Err(err) => {
             debug!(

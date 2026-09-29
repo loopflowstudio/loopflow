@@ -1877,3 +1877,13 @@ retains failed attempts, exact counts and the Monitor race hypothesis limits.
 The preceding resume-entry deletion is included in publication. Metadata proposal
 is released but unapplied; review its dense scan counterexample with the importer
 surface/closure regressions next. Full remaining-work scope stays open.
+
+
+## Import surface and closure correction (2026-09-29)
+
+Both Supervisor cases reproduced through the CLI, then passed after merging
+manifest import constructors. Seven import cases pass; historical mode/closure,
+exact earlier membership, repeats and retired-file removal are retained. Final
+production delta +34/-79 versus636abc941. See [evidence](evidence.md).
+Metadata proposal remains unapplied until this coherent importer checkpoint;
+its membership index reads the unchanged manifest observation envelope.

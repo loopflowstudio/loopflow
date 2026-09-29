@@ -2433,6 +2433,131 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
     assert!(fixture.launches().is_empty());
 }
 
+#[test]
+fn import_keeps_tui_closure_without_native_identity() {
+    import_tui_closure(false);
+}
+
+#[test]
+fn import_keeps_earlier_tui_review_closure_and_membership() {
+    import_tui_closure(true);
+}
+
+fn import_tui_closure(flow_member: bool) {
+    use loopflow::durable::RunId;
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let input = RunId::new().to_string();
+    let invocation = uuid::Uuid::new_v4().to_string();
+    let dir = fixture.run_dir(&input);
+    let write = |path: PathBuf, value: Value| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    };
+    let flow = if flow_member {
+        write(
+            fixture
+                .home
+                .path()
+                .join("flows")
+                .join(&invocation)
+                .join("position.json"),
+            json!({
+                "id": invocation, "flow": "historical", "cwd": fixture.repo.path(),
+                "steps": [ConcreteStep::Skill(ConcreteSkill {
+                    skill: Skill::named("review-design"),
+                    policy: OccurrencePolicy { human: true, ..Default::default() },
+                    flow_parents: vec![]
+                })],
+                "cursor": ExecutionCursor { index: 1, ..Default::default() },
+                "message": null, "model": "opencode", "wave": null,
+                "task": null, "as_work": null, "active": null,
+                "failure": null, "finished": true
+            }),
+        );
+        json!({"kind": "step", "task_id": null, "boundary_key": "0",
+            "invocation_id": invocation, "flow": "historical", "step": "review-design",
+            "node": "0", "iterations": [[]]})
+    } else {
+        json!({"kind": "independent"})
+    };
+    write(
+        dir.join("manifest.json"),
+        json!({
+            "schema_version": 1, "run_id": input, "parent_run_id": null,
+            "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
+            "surface": "tui", "cwd": fixture.repo.path(), "repo": fixture.repo.path(),
+            "worktree": fixture.repo.path(), "skill": "review-design", "subjects": [],
+            "flow": flow, "launch": null, "context": null, "runtime_path": null,
+            "runtime_digest": null, "host": "fixture", "boot_id": null
+        }),
+    );
+    write(
+        dir.join("session-resolution.json"),
+        json!({
+            "schema_version": 1, "resolved_at": "2026-09-20T20:05:00Z"
+        }),
+    );
+    let report = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(report["failed"], json!([]), "{report}");
+    let facts = || {
+        fixture.db().query_row(
+        "SELECT interactive,completed_at,flow_session_id,node,iterations FROM agent_sessions WHERE id=?1",
+        [&input], |row| Ok((row.get::<_,bool>(0)?,row.get::<_,Option<i64>>(1)?,
+            row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,
+            row.get::<_,Option<String>>(4)?))).unwrap()
+    };
+    let expected = (
+        true,
+        Some(1_789_934_700),
+        flow_member.then(|| invocation.clone()),
+        flow_member.then_some(0),
+        flow_member.then(|| "[[]]".to_string()),
+    );
+    assert_eq!(
+        facts(),
+        expected,
+        "surface and closure are independent of native identity and current cursor"
+    );
+    let history = fixture.json(&["session", "history", &input, "--json"]);
+    let resolution = history
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["payload"]["source"] == "session-resolution.json")
+        .unwrap();
+    assert_eq!(resolution["observed_at"], 1_789_934_700);
+    assert!(
+        history
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|event| event["kind"] == "observed"),
+        "closure cannot invent native success"
+    );
+    let again = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(again["failed"], json!([]));
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(facts(), expected);
+    std::fs::remove_dir_all(&dir).unwrap();
+    if flow_member {
+        std::fs::remove_dir_all(fixture.home.path().join("flows")).unwrap();
+    }
+    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["id"], input);
+    assert_eq!(listed[0]["interactive"], true);
+    assert_eq!(listed[0]["state"], "closed");
+    assert_eq!(
+        fixture.json(&["session", "history", &input, "--json"]),
+        history
+    );
+    assert!(!dir.exists());
+    assert!(fixture.launches().is_empty());
+}
+
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() {

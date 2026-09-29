@@ -544,14 +544,22 @@ mod tests {
             .await
             .expect("place Wave remotely");
 
+        // Selection is independent of creation order, including across clock seconds.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "UPDATE waves SET created_at = CASE name WHEN 'off' THEN 2 ELSE 1 END",
+                [],
+            )
+            .unwrap();
+
         let selected = waves_for_home(&store, &local.id, None)
             .await
             .expect("select assigned Waves");
 
-        assert_eq!(
-            selected.iter().map(|wave| wave.name()).collect::<Vec<_>>(),
-            vec!["matching", "off"]
-        );
+        let mut names = selected.iter().map(|wave| wave.name()).collect::<Vec<_>>();
+        names.sort_unstable();
+        assert_eq!(names, vec!["matching", "off"]);
     }
 
     #[tokio::test]

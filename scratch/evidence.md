@@ -954,3 +954,26 @@ entry deletion is included in publication. Supervisor's metadata proposal is
 released but unapplied; its dense correlated-scan finding and importer
 surface/closure cases remain the next implementation work. No full CI success,
 configured acceptance, promotion or completion follows.
+
+
+## Historical TUI closure import (2026-09-29)
+
+Supervisor's source counterexample is reproduced by two public CLI tests. The
+independent TUI without native reference and earlier TUI Flow review both imported
+as `(interactive=false, completed_at=NULL)`; the latter retained its exact node.
+`import-tui-closure-red.log` records both failures in 2.511s. The unified importer
+now derives mode from the recorded surface/client evidence, reads closure for all
+manifest origins, and retains session-resolution.json with its resolved timestamp
+in subordinate observation history. Missing native identity stays missing.
+
+`import-tui-closure-green.log`: all seven selected import cases pass in 8.224s,
+including the two new cases, repeated import, retired-file removal, saved review/
+Ask evidence, replaced inputs and SQL-only members. The new cases assert only
+observed history, not synthetic native completion. This is a disposable public-CLI
+filesystem import proof, not an installed or populated canonical upgrade.
+
+Review removes the parallel headless/interactive constructors. Physical production
+source delta versus636abc941: +34/-79, net-45, after formatting; tests/docs excluded.
+The earlier pre-format count net-50 is superseded. No migration or new owner.
+NULL-title classification was corrected separately before this cut: supported
+released reachability remains unproven; original synthetic red evidence survives.

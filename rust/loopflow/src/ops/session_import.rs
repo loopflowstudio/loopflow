@@ -386,6 +386,7 @@ impl Import<'_> {
             let at = evidence
                 .get("observed_at")
                 .or_else(|| evidence.get("ended_at"))
+                .or_else(|| evidence.get("resolved_at"))
                 .or_else(|| evidence.get("created_at"))
                 .and_then(serde_json::Value::as_str)
                 .and_then(|at| {
@@ -400,7 +401,12 @@ impl Import<'_> {
                 payload: serde_json::json!({"input_id": input, "source": source, "evidence": evidence}),
             });
         };
-        for name in ["manifest.json", "terminal.json", "provider-session.json"] {
+        for name in [
+            "manifest.json",
+            "terminal.json",
+            "provider-session.json",
+            "session-resolution.json",
+        ] {
             match std::fs::read(dir.join(name)) {
                 Ok(bytes) => record(
                     name.into(),
@@ -440,7 +446,25 @@ impl Import<'_> {
     }
 
     /// Historical agent inputs retain their exact recorded Flow occurrence.
-    async fn headless(&mut self, dir: &Path, manifest: RunManifest) -> Result<Option<Stored>> {
+    async fn run(&mut self, dir: &Path) -> Result<Option<Stored>> {
+        let manifest = crate::run_record::read_manifest(dir)?;
+        if self.claimed.contains(&manifest.run_id) {
+            return Ok(None);
+        }
+        if let Some(session) = self.store.session_for_run(&manifest.run_id).await? {
+            return self.review_evidence(dir, &manifest, session).await;
+        }
+        let interactive = manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
+        let completed_at = match std::fs::read(dir.join("session-resolution.json")) {
+            Ok(bytes) => Some(
+                serde_json::from_slice::<ResolutionFile>(&bytes)
+                    .context("session-resolution.json")?
+                    .resolved_at
+                    .unix_timestamp(),
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error).context("session-resolution.json"),
+        };
         let (task_id, wave_id, work_source) = self.work(&manifest).await?;
         let mut capture = None;
         let (flow_session_id, node, iterations) = match &manifest.flow {
@@ -495,7 +519,7 @@ impl Import<'_> {
             work_source,
             bound_at: None,
             kind: SessionKind::Conversation,
-            interactive: false,
+            interactive,
             repo: manifest
                 .repo
                 .map(|path| path.to_string_lossy().into_owned()),
@@ -503,10 +527,15 @@ impl Import<'_> {
             title_source,
             request: None,
             ready_summary: None,
-            completed_at: None,
+            completed_at,
             created_at: manifest.created_at.unix_timestamp(),
         };
-        self.store(Stored::Run, session, capture).await
+        let kind = if interactive && session.flow_session_id.is_none() {
+            Stored::Interactive
+        } else {
+            Stored::Run
+        };
+        self.store(kind, session, capture).await
     }
 
     fn run_dir(&self, run: &RunId) -> Result<PathBuf> {
@@ -712,80 +741,6 @@ impl Import<'_> {
                 .unwrap_or(observed_at),
         };
         self.store(Stored::FlowReview, session, Some(flow)).await
-    }
-
-    async fn run(&mut self, dir: &Path) -> Result<Option<Stored>> {
-        let manifest = crate::run_record::read_manifest(dir)?;
-        if self.claimed.contains(&manifest.run_id) {
-            return Ok(None);
-        }
-        if let Some(session) = self.store.session_for_run(&manifest.run_id).await? {
-            return self.review_evidence(dir, &manifest, session).await;
-        }
-        let conversation =
-            manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
-        // A Flow kept only its current review, so an earlier review's Run and
-        // every headless Run are Runs with no Session.
-        if !conversation
-            || crate::run_record::provider_session_from_history(
-                self.history(&manifest.run_id)
-                    .await?
-                    .into_iter()
-                    .map(|event| event.payload),
-            )?
-            .is_none()
-            || matches!(manifest.flow, Some(RunFlowMembership::Step(_)))
-        {
-            return self.headless(dir, manifest).await;
-        }
-        let (task_id, wave_id, work_source) = self.work(&manifest).await?;
-        let seed = manifest
-            .skill
-            .clone()
-            .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str()));
-        let (title, title_source) = name(dir, seed)?;
-        let completed_at = match std::fs::read(dir.join("session-resolution.json")) {
-            Ok(bytes) => Some(
-                serde_json::from_slice::<ResolutionFile>(&bytes)
-                    .context("session-resolution.json")?
-                    .resolved_at
-                    .unix_timestamp(),
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error).context("session-resolution.json"),
-        };
-        let created_at = manifest.created_at.unix_timestamp();
-        // An old Home named an interactive Session by its Run.
-        let id = manifest.run_id.to_string();
-        let session = AgentSession {
-            caller_input_id: manifest.parent_run_id,
-            task_id,
-            wave_id,
-            flow_session_id: None,
-            work_source,
-            bound_at: None,
-            id,
-            input_id: manifest.run_id,
-            input_published: true,
-            cwd: manifest.cwd,
-            skill: manifest.skill,
-            provider: Some(manifest.harness),
-            model: manifest.model,
-            node: None,
-            iterations: None,
-            kind: SessionKind::Conversation,
-            interactive: true,
-            repo: manifest
-                .repo
-                .map(|path| path.to_string_lossy().into_owned()),
-            title,
-            title_source,
-            request: None,
-            ready_summary: None,
-            completed_at,
-            created_at,
-        };
-        self.store(Stored::Interactive, session, None).await
     }
 
     /// The Task and Wave a Run's manifest names, by the selectors it recorded.

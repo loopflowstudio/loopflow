@@ -1680,6 +1680,32 @@ impl SqliteStore {
         Ok(outcome)
     }
 
+    /// Transfer the startup claim to the actual worker without starting another
+    /// generation or changing its selected boundary.
+    pub fn handoff_task_worker(
+        &self,
+        task_id: &TaskId,
+        expected: &TaskWorkerClaim,
+        owner: &TaskWorkerOwner,
+    ) -> StoreResult<TaskWorkerClaim> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = task_flow_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
+        if flow.claim.as_ref() != Some(expected) || flow.version != expected.position_version {
+            return Err(stale_task_worker(task_id));
+        }
+        let claim = TaskWorkerClaim {
+            owner: owner.clone(),
+            ..expected.clone()
+        };
+        tx.execute(
+            "UPDATE flow_sessions SET claim_json=?2 WHERE id=?1",
+            params![flow.id(), serde_json::to_string(&claim)?],
+        )?;
+        tx.commit()?;
+        Ok(claim)
+    }
+
     /// Replace the claim of a worker proven dead at the same position.
     pub fn reclaim_task_worker(
         &self,

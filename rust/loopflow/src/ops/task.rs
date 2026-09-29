@@ -2618,7 +2618,7 @@ pub(crate) async fn launch_task_process(
         crate::durable::TaskWorkerClaimOutcome::Busy(claim) => {
             match crate::journal::task_worker_owner_evidence(&claim.owner) {
                 crate::journal::ProcessIdentityEvidence::Live => {
-                    wait_until_running(store, &task.id).await?;
+                    wait_until_running(store, &task.id, None).await?;
                     return Ok(());
                 }
                 crate::journal::ProcessIdentityEvidence::Dead => {
@@ -2700,7 +2700,7 @@ pub(crate) async fn launch_task_process(
             .map_err(task_error)?;
         return Err(task_error(error));
     }
-    if let Err(error) = wait_until_running(store, &task.id).await {
+    if let Err(error) = wait_until_running(store, &task.id, Some(&claim)).await {
         let _ = store
             .release_flow(&position.invocation.id, position.version, Some(&claim))
             .await;
@@ -2722,6 +2722,7 @@ fn task_boundary_session_name(task: &Task, claim: &crate::durable::TaskWorkerCla
 async fn wait_until_running(
     store: &SharedStore,
     task_id: &crate::work::task::TaskId,
+    launching: Option<&crate::durable::TaskWorkerClaim>,
 ) -> OpsResult<Task> {
     let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
@@ -2738,7 +2739,13 @@ async fn wait_until_running(
         if position.is_none()
             || position.as_ref().is_some_and(|position| {
                 position.is_human()
-                    || (position.claim.is_some() && position.review_artifact_key().is_some())
+                    || position.claim.as_ref().is_some_and(|claim| {
+                        launching.map_or_else(
+                            || position.review_artifact_key().is_some(),
+                            |initial| initial.owner != claim.owner,
+                        ) && crate::journal::task_worker_owner_evidence(&claim.owner)
+                            == crate::journal::ProcessIdentityEvidence::Live
+                    })
             })
         {
             return Ok(task);
@@ -5430,16 +5437,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_worker_stop_waits_for_process_exit_before_releasing_claim() {
+    async fn task_worker_stop_follows_handoff_and_waits_for_the_worker_to_exit() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let fixture = task_fixture("STOP-1").await;
+        let mut launcher = tokio::process::Command::new("sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
         let mut child = tokio::process::Command::new("sleep")
             .arg("30")
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        let position = claim_stop_fixture(&fixture, child.id().unwrap()).await;
+        let mut position = claim_stop_fixture(&fixture, launcher.id().unwrap()).await;
         record_stop_process(ledger.home(), &position);
+        let initial = position.claim.clone().unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                super::wait_until_running(&fixture.store, &fixture.task.id, Some(&initial)),
+            )
+            .await
+            .is_err(),
+            "a live launcher does not acknowledge a running worker"
+        );
+        let worker = crate::durable::TaskWorkerOwner {
+            exec_id: crate::id::ExecId::new(),
+            pid: child.id().unwrap(),
+            ..initial.owner.clone()
+        };
+        position.claim = Some(
+            fixture
+                .store
+                .sqlite
+                .handoff_task_worker(&fixture.task.id, &initial, &worker)
+                .unwrap(),
+        );
+        record_stop_process(ledger.home(), &position);
+        super::wait_until_running(&fixture.store, &fixture.task.id, Some(&initial))
+            .await
+            .unwrap();
+        assert!(super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
         let mut cursor = position.cursor.clone();
         cursor.progress.direction = Some("Continue with the revised direction".into());
         fixture
@@ -5465,6 +5506,11 @@ mod tests {
             child.wait(),
         );
         assert!(!exit.unwrap().success());
+        assert!(launcher.try_wait().unwrap().is_none());
+        assert!(!super::task_worker_live(&fixture.store, &fixture.task)
+            .await
+            .unwrap());
+        launcher.kill().await.unwrap();
         let stopped = stopped.unwrap().unwrap();
         assert!(stopped.claim.is_none());
         assert_eq!(stopped.invocation, position.invocation);
@@ -5657,7 +5703,7 @@ mod tests {
     async fn startup_observation_accepts_already_finished_flow() {
         let fixture = task_fixture("LOO-901").await;
 
-        let observed = super::wait_until_running(&fixture.store, &fixture.task.id)
+        let observed = super::wait_until_running(&fixture.store, &fixture.task.id, None)
             .await
             .unwrap();
 

@@ -1,7 +1,7 @@
 # Homes and processes
 
 A Home is one machine's stable Loopflow authority. It owns local processes,
-credentials, planning storage, Run records, and OS locks.
+credentials, planning storage, command and conversation records, and OS locks.
 Its SSH route may change without changing its identity.
 
 ```bash
@@ -23,7 +23,7 @@ lf ssh build-home --wave product wave/operate
 
 `lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
 its Home identity, resolves its own files and store, and returns the result.
-There is no implicit fan-out and no central Run database.
+There is no implicit fan-out and no central execution database.
 
 The Home and placement types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
@@ -32,8 +32,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ## Place Work
 
 `Placement` maps one `WorkRef` to one `HomeId`. It records where Work belongs,
-not whether a process exists. `lf wave place` changes placement;
-`lf wave enable|disable` controls local eligibility.
+not whether a process exists. `lf wave place` changes placement. It does not launch a process.
 
 ## Process topology
 
@@ -44,16 +43,18 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-      Invocation claim --> boundary Run --> provider child
+      FlowSession claim --> AgentSession <--> native engine
+                            |
+                       driving Exec
 ```
 
-Wave operations are finite attributed Runs. Tasks drive their selected Flow
+Wave operations are finite attributed conversations. Tasks drive their selected Flow
 invocation through the common executor. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
 recovery requires exact saved process identity and the applicable claim or
-lock. A PID, tmux name, parent Run, Work identity or telemetry row alone grants
+lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
 no signal authority.
 
 ## Observe processes
@@ -72,15 +73,15 @@ the live view. This is observation, not a durable lifecycle model.
 OpenCode process groups whose ownership is known. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
-Run records intentionally contain no `owner.json`. Durable cross-process
-control would require the launcher to create a fresh process scope and publish
-PID plus kernel birth identity, boot/Home identity, and the exact process group
-or native scope. Every signal would need to revalidate that receipt.
+Cross-process control requires exact PID/start identity and the applicable
+conversation/provider generation. Revalidate native scope or exclusive process
+group before signaling. A driver may disappear while its engine survives;
+recorded endpoints alone do not prove liveness.
 
 ## Independent bridges
 
 `lf discord serve <wave>` is a foreground bridge from a configured channel to
-bounded Runs. It has no Wave cursor or inbox authority. Cron and Task execution
+bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
 do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
 
 ## Move a Wave without changing its identity
@@ -115,7 +116,7 @@ Promotion changes the executable selected by future top-level processes:
 
 The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock` and is held only for the
 switch transaction. Ordinary harnesses do not check or hold it. Promotion does
-not discover, drain, stop, or settle Runs.
+not discover, drain, stop, or settle conversations.
 
 An already-running old process continues with the executable and store path it
 selected. On the first published-to-development promotion, it may keep writing
@@ -139,7 +140,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.
-- Promotion owns artifact selection and app replacement, not Run
+- Promotion owns artifact selection and app replacement, not conversation
   lifecycle.
 - A schema clone protects preview and recovery; it can also leave old writers
   authoring the prior, now-unselected store.

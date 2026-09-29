@@ -2,55 +2,41 @@
 
 ```bash
 lf --wave product wave/operate
-lf task prepare INF-124
+lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave new-chapter --wave product --chapter 2026-09 --plan plan.json --dry-run --json
+lf repo new-chapter 2026-10 --dry-run
 ```
 
-## The planning model
+Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
+cadence, budget and metric instruments across plans. Its one In Progress Linear
+Project owns Tasks, KRs, targets and the default Flow. A Chapter is the shared
+name of those current Projects across the repository. This page specifies the
+accepted model; [cutover status](../architecture-reference.md#cutover-status)
+records the remaining implementation and proof gaps.
 
-Wave → Task is the public hierarchy. The Wave owns durable purpose, memory,
-conversation, cadence, placement, and metric instruments. One internal Project
-holds its current chapter KRs, metric targets, Flow recommendation, and Task
-membership. The Wave owns the sole objective.
-A Task owns its concrete change, worktree, active remote branch, and serial PRs.
-A managed Task Flow persists its position and worker claim in SQLite. Ordinary
-Flows persist their own Home-local positions without requiring Task Work.
+## Rotate the plan, preserve the work
 
-`wave_chapters` owns the current binding and transition receipts. A unique
-index permits one current chapter and one incomplete transition per Wave.
-Rotation locks against Task filing, prepares a provider UUID before creation,
-and recovers ambiguous replies by reading that identity. Task retirement and
-worker claims share SQLite transactions; first execution survives Flow resets
-as a Task event. Local transfer updates only the parent; stale worker saves
-cannot restore it.
+```bash
+lf repo new-chapter 2026-10
+lf wave sync --wave product
+```
 
-Started unfinished Tasks move, untouched backlog is deleted from Linear, and
-terminal work stays historical. Local retirement preserves Task and PR records.
-The provider writer accepts a deletion acknowledgement or explicit trash flag;
-missing or unreadable issues leave the transition unresolved. Retries retain
-captured identity without requiring ordinary issue ownership after deletion.
-Confirmation and the per-Task chapter receipt commit together. Confirmed removals
-stay out of current planning and retained Task lists, including stale snapshot
-reads; older abandonment receipts do not establish native deletion. Exact Task
-lookup and dated chapter history retain the original records.
+A Planned Project expresses the next plan. Rotation reuses the explicitly named
+successor or creates one with the predecessor's Flow. Started unfinished Tasks
+move with identity, checkout, PR and captured execution intact. Proven untouched
+backlog is canceled; completed Tasks stay historical. Missing local or provider
+evidence cannot authorize retirement. Linear keeps the Projects and their Tasks.
 
-Manual Task deletion retains observed Wave/issue/identifier in
-`task_issue_identities` before the provider effect. Current planning replacement
-and chapter changes do not erase this retry identity. It confers neither current
-ownership nor removal: every new mutation resolves fresh provider ownership,
-and only acknowledgement or positive trash evidence enters `task_deletions`.
-The identity observation has no execution row or lifecycle state.
+Rotation reads fresh provider state after each interruption. A partial transition
+to the requested name is recoverable using stable Project identities and one
+unambiguous predecessor group. Unrelated competing current plans remain unresolved;
+newest-looking names never win. Status mutations do not form a distributed
+transaction. Another Home observes the new plan through normal synchronization.
+There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
+for adoption, default Flow and disposition details.
 
-Archived content and
-membership are read from the frozen boundary receipt, not today's moved Tasks.
-Task observations go directly to the Wave; its single operation judges KRs and
-selects work. Status and roadmap join current chapter planning directly to Tasks.
-Both retain stranded Tasks when the chapter plan is unavailable; historical
-Project operator state remains in diagnostics.
-
-## Compose Skills with a Flow
+## Capture a Flow once
 
 ```yaml
 # .lf/flows/build.yaml
@@ -61,228 +47,120 @@ Project operator state remains in diagnostics.
 
 ```bash
 lf flow build
+lf flow resume FLOW_SESSION
 ```
 
-A Flow is an ordered graph of:
+Flow is the reusable definition; FlowSession is one captured execution. Capture
+expands template composition and saves every Skill, router, alternative and
+review policy. Source edits or deletion cannot change a saved execution. The
+record owns graph, cursor, return counts, nullable Task/Wave, current boundary,
+claim and completion. Only actual runtime loop nesting creates child FlowSessions;
+template composition does not. Parent and child nullable Task ancestry agree.
 
-- Skill nodes, which launch a provider;
-- Op nodes, which perform a bounded mechanical action;
-- Xor nodes, which route from recorded results;
-- review nodes, which stop at an explicit interaction boundary.
+A Task selects one managed FlowSession and may have other attributed Flows.
+Taskless and managed execution share the driver. The Project's Flow supplies the
+default for a new selection; explicit selection is allowed. Continuing a saved
+Flow preserves its definition, review wait, failure and feedback. Explicit restart
+replaces it. Finishing retains history, clears the managed selection and chooses
+no successor; Flow completion alone does not complete Task Work.
 
-A loopflow is the same Flow with one or more backward edges. Expansion captures
-Skill content and all Xor routers and paths, including unchosen paths, before
-execution. `lf flow route PATH` records a selection under the active Run's exact
-authority; successful settlement enters the captured path. Recovery does not
-reload the catalog or read a shared scratch routing file.
+## Settle the exact boundary
 
-Task and ordinary Flows use the same `CliFlowExecutor` and
-[`ExecutionCursor::finish`](../../rust/loopflow/src/engine/execution.rs) for
-navigation, selected-path entry and parent return. `RepeatPolicy` contains only
-`from`: Iterate follows that edge, Advance moves forward, and descriptive pass
-counts impose no limit. Direction persists through implicit forward movement
-until an explicit Advance clears it.
-
-`FlowSession` reads the captured definition, cursor, launch facts, current
-attempt and failure from `flow_sessions`. `position_version` fences the cursor,
-`current_run_id` the attempt, and a managed Task's `claim_json` its worker.
-`flows/<UUID>/driver.lock` serializes drivers. A Task invocation stores no cwd;
-the joined reader uses `tasks.worktree`. Other invocations store their launch cwd.
-
-Resume an invocation with `lf flow resume <UUID>`. For the invocation a Task
-points at, this uses Task resume, preserving agent choice and unblock feedback.
-A helper Flow attributed to a Task keeps its own cursor. Selecting a different
-Flow with `lf task run --flow` replaces the managed invocation once its worker
-has stopped. Completion retains the finished invocation, clears the Task's
-pointer and records `FlowFinished`; it selects no successor and does not mark
-Task Work done.
-
-Human Flow Sessions use the same invocation record. Complete ends the exact
-review and carries its saved feedback to the next step. A following loop-decide
-chooses Advance or Iterate through its authored edge. Agent readiness and provider
-exit leave the review waiting. Source inspection establishes this path, not a
-live desktop/provider handoff proof.
-
-## Run one Work boundary
-
-```text
-load current Work facts
-          |
-          v
-refresh provider truth and authored input
-          |
-          v
-choose next Flow boundary
-          |
-          v
-invoke Skill / Op / session
-          |
-          v
-record one domain transition
-          |
-          `---- next boundary or terminal Work
-```
-
-Task execution is deliberately boundary-based:
-
-1. Resolve stable Work identity.
-2. Load its current status, selected Flow, inputs, and domain evidence.
-3. Refresh Linear, GitHub, metrics, or repository facts required by this
-   boundary.
-4. Build one complete prompt or mechanical operation from those facts.
-5. Execute it.
-6. Advance the exact Flow version or release the worker claim.
-7. Rebuild from durable facts before the next boundary.
-
-A crash loses in-memory judgment. It does not lose Work identity, accepted
-inputs, Task Flow position, worktree, or provider observations. The next Task
-worker resumes from those facts and launches a fresh Run when needed. Wave
-operations reread current chapter facts on every invocation.
-
-## Workers and operations
-
-The Task worker lives under
-[`controller/task/`](../../rust/loopflow/src/controller/task/) and drives successive
-claimed boundaries until human input, a blocker, interruption, or Flow completion.
-Deterministic chapter rotation lives in
-[`ops/chapter.rs`](../../rust/loopflow/src/ops/chapter.rs). Wave metrics and
-relocation live under [`work/wave/`](../../rust/loopflow/src/work/wave/).
-
-## Work state
-
-`WorkStatus` has three durable values:
-
-| Status | Meaning |
-| --- | --- |
-| `Ready` | the Work may take another planning boundary |
-| `Done` | its current objective has converged |
-| `Abandoned` | work stopped without convergence |
-
-Runtime activity is a separate projection. A ready Work may have no live
-process; one Work may launch many Runs over time; an unterminated Run does not
-make Work “running.” Reopen returns the same stable Work to `Ready` after
-clearing transient input defined by that domain.
-
-The Task Flow version prevents an older worker from rolling progress backward.
-Domain-specific races use narrower fences: exact review invocation snapshots, PR
-heads, landing generations, or OS locks.
-
-## Steer
+A boundary is the FlowSession, node and iteration tuple. Its claim and version
+fence each mutation. Agent boundaries select a native start in an AgentSession
+and consume its exact successful completion once. Mechanical boundaries retain
+correlated starts and results in Flow history; they create neither fake agent
+conversations nor synthetic Execs. One actual lf process can execute several
+boundaries and then fail; its command outcome is not every boundary's outcome.
 
 ```bash
-lf task comment INF-123 "keep the public name"
-```
-
-Task steering posts a Linear issue comment. Direct Linear comments enter the
-same path. Only the claimed Task advancer attempts live delivery; independent
-Work-bound Runs receive their ordinary context. The next advancing worker
-refreshes Linear and includes saved comments. Idle steering starts no worker.
-Local event rows and comment-id deduplication are a delivery cache; Linear owns
-the authored direction. Publication, seed inclusion, and provider transport
-acceptance are separate evidence, none proving application by the model.
-
-Wave guidance is extra input to `wave/operate`.
-Wave conversations use ordinary Sessions.
-
-## Questions and sessions
-
-```bash
-lf --as wave:product : "which Task should start?"
-lf ask "review which migration should survive"
-lf session list --json
-lf session open <session-id> --json
-lf session complete <session-id>
-```
-
-Another agent perspective is an ordinary `lf --as` Run. `lf ask` is reserved for
-a decision from the user: it blocks the originating Run while a durable TUI agent shares
-its checkout. Agent readiness leaves the session visible. Complete closes that
-conversation and resumes the originating Run with the ready summary.
-
-A human FlowStep uses its `FlowSession` row. Its Session opens the captured Skill and
-binds the provider Run to that exact step. A saved Flow's review Session has an
-opaque `session_<uuid>` id and is linked through `pending_session_id` on the
-invocation row; Task tokens retain their Task/invocation/node/skill/iteration
-identity. An Ask persists its question and answer on its `agent_sessions` row while
-its caller waits.
-
-```bash
-lf session ready "Human feedback, revised design, remaining work"
-lf session complete <flow-session-id>
-```
-
-Review completion persists before successor launch and provider teardown.
-Its feedback reaches the next step through the cursor's direction. The following
-loop-decide chooses Advance or Iterate using its own explicit edge. Readiness
-and provider exit do not complete a review; Ask Complete returns to the blocked
-caller. Flow reviews and
-Asks project through `SessionRecord`, using `flow` and `ask` kinds. The Mac app
-uses the shared Session surface and provider-native history; it owns no second
-Session state. A thin detached PTY cradle keeps the initial provider client
-alive before a UI arrives.
-
-## Execution topology
-
-```text
-Task CLI / Session Complete
-  `-- mechanical Task driver
-        `-- exact Task Flow-position claim
-              `-- one finite boundary Run at a time
-
-Wave operation
-  `-- one finite wave/operate Run
-```
-
-The exact Task invocation claim admits one worker. Other agent
-perspectives remain ordinary attributed Runs, and human sessions reuse either
-their originating Run or the Task/ordinary Flow's persisted position. Each Wave
-operation refreshes its definition, KRs, metrics, and Tasks before deciding.
-The Task driver executes provider boundaries in fresh Runs, settles its claim,
-and claims the next eligible position. It stops at a human boundary, a blocker,
-interruption, or Flow completion. No resident provider conversation decides what happens next.
-
-The deciding occurrence's `repeat` policy belongs to the pinned invocation.
-In pursue, implement → compress → review-slice supplies the
-work and review evidence; loop-decide owns the navigation judgment:
-
-```bash
-lf flow decide iterate "remaining work, direction and evidence"
-lf flow decide advance "completion proof"
+lf flow decide iterate "remaining work and proof"
+lf flow decide advance "completion evidence"
+lf flow route PATH
 lf flow blocked "reason, attempted direction and question"
 ```
 
-These commands require the active boundary's Run authority. Advance and Iterate
-are the navigation choices. Blocked requests one keyed Ask running unblock;
-recovery joins that Ask or returns its retained completion summary. The decision
-agent then reassesses the evidence. Ask completion approves no separate Flow
-gate and does not itself choose an edge.
+These commands require the selected boundary's authority. Advance follows the
+forward edge; Iterate follows its captured backward edge. Pass counts describe
+history without imposing a budget. A verdict or route is a candidate until the
+selected native turn succeeds. Contradictory candidates in the same turn are
+rejected. A failed turn cannot supply navigation for its retry; the authorized
+successor must choose again. Helpers, older successes and late generations cannot
+settle the current selection.
 
-A saved route or verdict is a candidate until its provider Run succeeds.
-Recovery can consume successful saved results without rerunning that provider;
-failure or explicit interruption discards candidates. Missing required output
-stops the boundary. Task transactions fence settlement with the position claim;
-ordinary Flow records retain the active boundary and Run receipt. This does not
-make external Op effects exactly once: an interrupted ordinary operation without
-a completion receipt remains blocked for inspection.
+A blocked decision opens one keyed Ask. Completion returns saved feedback for
+reassessment at the same boundary, never a navigation verdict. Retry preserves
+the answer instead of opening duplicate conversations.
 
-These descriptions follow source behavior. Configured provider recovery and
-end-to-end Ask reassessment require separate live evidence.
+## Recover without inventing an outcome
 
-## Boundary contracts
+```bash
+lf task run INF-124
+lf flow resume FLOW_SESSION
+lf flow resume FLOW_SESSION --retry
+lf task run INF-124 --retry
+```
 
-- Stable Work identity is the join point for planning input and progress.
-- Provider processes are replaceable; Work survives them.
-- Every Task boundary and Wave operation rebuilds from current durable facts.
-- A Flow cursor advances only from the required boundary result.
-- Steer is durable correction; another agent perspective is an ordinary Run.
-- An unresolved Session is an interactive Run, a Task or ordinary Flow
-  human boundary, or a Run-owned `lf ask` boundary.
-- Run ids remain evidence and provenance, never planning capabilities.
-- Linear owns shared Project and Task planning truth. Local projections support
-  bounded reads and resumable transitions; they do not author provider truth.
+The Flow orchestration claim and conversation driver claim have different owners.
+After driver loss, read back the selected native turn from a surviving engine;
+do not send extra input. Its completion retains original Exec and provider
+generation, even when a new driver records it. The old command outcome stays
+unknown if no terminal receipt exists.
 
-## Next
+Explicit retry after confirmed engine exit resumes the conversation with a new
+provider generation. Exact process/native evidence excludes an old writer.
+Automatic provider retries within one Exec retain earlier failure and usage and
+select only an authorized successor. An uncertain mechanical effect requires
+inspection or explicit retry; moving a cursor does not establish exactly-once
+external effects.
 
-[Delivery →](delivery.md) follows Task Work through Git and GitHub.
-[Homes and processes →](homes.md) explains how services and boundary Runs are
-placed and supervised.
+Managed dispatch keeps Task agent choice, adoption checks and unblock policy.
+A live claimed worker cannot be replaced because a status read timed out. Missing
+process evidence is uncertainty, and causal ancestry grants no signal authority.
+
+## Ask and review
+
+```bash
+lf ask "Review which migration should survive"
+lf session list --json
+lf session connect SESSION --json
+lf session ready "Feedback and remaining work"
+lf session complete SESSION
+```
+
+Ask opens a durable AgentSession in the caller's checkout and waits for explicit
+completion. A keyed retry returns the stored answer without a provider launch.
+A Flow review opens its captured Skill and retains exact Flow membership. Ready
+saves feedback; Complete persists it before provider teardown and successor
+launch. The following step receives the feedback; a later decision chooses
+navigation. Pane close, provider exit and readiness do not complete a review.
+
+Saved handoffs retain executable, Home and database together. Renaming, binding
+and driver replacement retain conversation identity and feedback. Desktop reads
+the same record and keys its terminal surface on AgentSession identity.
+
+## Work, steering and execution
+
+Task status is `Ready`, `Done` or `Abandoned`. Current activity, command outcome,
+conversation state and Flow progress remain separate. A ready Task can have no
+live process; an absent terminal result cannot prove liveness. Binding to a done
+Task assigns work history without reopening it or acquiring its managed claim.
+
+```bash
+lf task comment INF-124 "keep the public name"
+lf --wave product wave/operate "review the current priorities"
+```
+
+Linear owns authored Task comments. Only the claimed Task advancer attempts live
+delivery; independent attributed conversations receive their own launch context.
+Idle steering starts no worker. Publication, prompt inclusion and provider
+acceptance are distinct evidence and do not prove the model followed a correction.
+Wave planning is an ordinary finite AgentSession; no resident operator is needed.
+
+Work reservation sets Task Started once; an inspection Exec does not. Constructors
+validate Task/Wave ancestry, and chapter transfers preserve historical event
+attribution. Task delivery separately owns Git/PR mutations. Conversation identity
+and Flow membership never substitute for that authority.
+
+[Delivery](delivery.md) follows Task Work through Git and GitHub.
+[Execution](execution.md) owns process and conversation admission.

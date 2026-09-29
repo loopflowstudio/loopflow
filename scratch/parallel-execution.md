@@ -47,21 +47,46 @@ disables rename accounting and includes the new SQL draft. Receipt:
 `.lf/tmp/execution-model/flow-recovery-counts.json`. This is one owner conversion
 checkpoint; Runs and their fallback still exist. No deletion or code-complete claim.
 
-## Next dependency
+## Docs-first checkpoint and next dependency
 
-Finish the active final checks, checkpoint this recovery change with Jack's
-scratch consolidation, inspect `lf rebase --plan`, integrate main via `lf rebase`,
-and publish PR1296. Jack authorized these checkpoints. Main advanced to
-`d9632d833c8216b00cde117656d12172eda00c2c` (PR1317): preserve saved Session
-executable/Home/database and failed-launch diagnostics during integration and
-subsequent Run deletion. No landing, auto-merge, promotion or Flow navigation.
+Recovery is checkpointed, rebased onto main `d9632d833` and published as
+`26a0270af` on PR1296. Captured installed control completed rebase bookkeeping;
+Task and Git retain the same base. The reconciled Session launch/retry proof
+passes and preserves exact executable/Home/database plus failed-launch evidence.
 
-Then finish execution owners: replace current Run publication and decision
-membership with AgentSession/FlowSession ownership; mechanical boundaries retain
-start/outcome on Flow history; agent outcomes/usage stay on Session history.
-Remove Run and its readers only after all import evidence and callers converge.
-The remaining-work matrix is still mandatory, including indexed reads, DTO/
-Desktop retention, Chapters, dense measurements and configured acceptance.
+Jack requested docs/README before further owner conversion. The docs-first change
+rewrites the front doors and active architecture/user guides around Exec,
+AgentSession and FlowSession. Architecture Reference owns one cutover-status
+matrix mapping spec to remaining implementation; its checked source inventory
+retains genuine transitional Run dependencies and removes deleted Chapter owners.
+Examples use current parser spellings (connect exists; --restart does not).
+CLI bind states/writes the permanent target; Desktop confirms. No shipment claim.
+
+Proof: README/index and portable architecture checks pass (2 selected tests).
+Generated architecture.html and website docs refreshed. Checked source snapshot
+passes architecture coverage: APIs36, process5, tables35, projections6, providers6,
+subprocess25, shims3. Receipt `.lf/tmp/cut-i/docs-architecture-source.json`.
+The in-place checker failed only on ignored rebase prompt copies under `.lf/log/`;
+those original logs remain untouched. This is a source-snapshot pass, not a green
+in-place scan. Review corrected old Chapter commands/packet prose, failed-turn
+navigation authority and ambiguous bind confirmation. Supervisor's coherent
+scratch updates belong in this checkpoint.
+
+Next, before another publication, fix the hosted metric-portfolio counterexample:
+26a027 CI36507832289 / job109213159143 has 882 passes, one failure, 13 skipped,
+1,050 unrun. `ops::flow::tests::telemetry_flow_persists_the_portfolio_reading`
+loses an observed Wave reading when current Project planning is unavailable.
+Preserve the reading and unknown target; never invent Untargeted to green it.
+Inspect the three neighboring metrics fixtures and use one focused metrics/Flow
+proof. Raw log: `.lf/tmp/execution-model/recovery-26a027-rust-ci.log`.
+
+Then resume execution owners and the full remaining-work matrix: publication,
+decision membership and mechanical results to final Session owners; offline
+import before Run deletion; indexed reads, usage, Rust/Swift DTOs, Desktop,
+Chapters, dense measurements and configured acceptance. Active builtin chapter
+instructions and ops/task.rs still need final consistency conversion from
+`lf wave new-chapter` to the supported repository command. Do not edit immutable
+migration history. No landing, auto-merge, promotion or Flow navigation.
 
 ## Control and proof discipline
 

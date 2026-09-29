@@ -39,19 +39,28 @@ Current control Session `run_9c16dbbe2b04440db8469e9b4964912c` has human title
 
 ## Published state and comparable size
 
-Published head `7e2101b411ecb95c1c7785070c36a9ed90b6df4b`, base
-`a2b59ed50666a433c97cb9002476e74351723759`,
+Published head `26a0270af604ac14abbd20df9a020336bee85a0a`, base
+`d9632d833c8216b00cde117656d12172eda00c2c`,
 [PR1296](https://github.com/loopflowstudio/loopflow/pull/1296).
-Remote/GitHub/Task heads matched at the last check; auto-merge absent.
-Working edits are not included. Refresh shared state before delivery actions.
+GitHub and Task publication heads matched on 2026-09-28; Task base and Git
+merge-base match the integrated main. Auto-merge is absent. Hosted run
+36507832289 completed with one Rust failure (882 passed, 1,050 unrun), scratch-clear
+and aggregate failure; all other jobs passed. The exact metric-reader failure
+is retained in evidence.md.
+Jack's docs/README-first direction is the next substantive step, before further
+owner conversion; main acknowledged it and has begun reading those pages.
+Refresh shared state before delivery actions.
 
-Production **+13,855 / −29,473 = net −15,618**: Rust/Swift+13,082/−29,419;
-Python/shell+44/−54; SQL+729/−0. Method excludes tests/docs, disables rename
+Current measured checkpoint, **26a0270af against d9632d833**, has production
+**+14,240 / −29,502 = net −15,262**: Rust/Swift+13,447/−29,446;
+Python/shell+47/−56; SQL+746/−0. Method excludes tests/docs, disables rename
 accounting, strips trailing Rust tests but retains known trailing production code.
-It reproduced prior 705645's count before this measurement. Receipt
-`.lf/tmp/execution-model/status-counts-7e2101b41.json`; reproduction
-`measure-published-7e2101b41.py` in that directory. Changed bases/moved code are
-not comparable deletion. Earlier forecast 20–40 active hours/3–5 working days,
+It reproduced 7e210's previous count exactly before measuring the new head.
+Receipt `.lf/tmp/execution-model/status-counts-26a0270af.json`; reproduction
+`measure-published-26a0270af.py` in that directory. No working edits are counted.
+The prior 7e210/a2b59 receipt remains: +13,855/−29,473, net −15,618. Changed bases
+and moved code must not be presented as additional deletion.
+Earlier forecast 20–40 active hours/3–5 working days,
 final net −20k to −28k was low-confidence, not a current measurement or commitment.
 
 Last disk sample 69.7GiB free / 64GiB floor; active builds 53.3GiB, inactive 0;

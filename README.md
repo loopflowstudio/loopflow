@@ -1,16 +1,14 @@
 # Loopflow
 
-A software instrument. It doesn't make the software for you. You make the
-software through it.
-
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
+lf debug -c
 ```
 
-AI can build a lot of software fast. It can also spend all day going in
-circles, and it's hard to tell which is happening. Loopflow keeps track, so
-you can see what got done and what still needs you.
+A software instrument. Give an agent a task, keep its conversation, and resume
+captured work when a command stops. Loopflow keeps the command's result, the
+agent's history and the Flow's progress separate, so each answers one question.
 
 Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 or [Codex](https://github.com/openai/codex), which have their own cost.
@@ -80,7 +78,7 @@ lf task checkout INF-123                               # durable Task Work + wor
 lf task run INF-123                                   # start end-to-end Task automation
 lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
-lf --task INF-123 research "write scratch/runtime.md"    # one independent Task-bound Run
+lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
 lf pr arm -c                                          # request exact-head auto-merge and return
@@ -88,7 +86,7 @@ lf pr land -c                                         # watch, repair CI, merge,
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
-an idle Task or broadcasts to independent Runs.
+an idle Task or broadcasts to independent conversations.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -105,14 +103,10 @@ lf user name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
-lf activity            # durable Work changes with exact Run, PR, and Steer proof
-lf runs                # recent Home-local Run records
-lf runs --parent run_ab12 --json # every direct child Run, uncapped
-lf runs run_ab12 --final  # print the durable provider conclusion
-lf runs run_ab12 --events # inspect one Run's append-only evidence
-lf replay run_ab12     # repeat its recorded provider request as a child Run
-lf usage --days 30     # direct provider-authored usage for those Runs
-lf usage --task LOO-265 # drill usage to one Task's Runs
+lf activity            # durable work, delivery and steering history
+lf session list --json # conversations on this Home
+lf usage --days 30      # recorded provider usage
+lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
 lf prune --dry-run     # inspect dead receipts and registered orphan providers
@@ -120,41 +114,48 @@ lf prune --dry-run     # inspect dead receipts and registered orphan providers
 
 ## Sessions
 
-Finish every kind of Session explicitly:
-
 ```bash
 lf session list
-lf session open run_ab12
-lf session rename run_ab12 "Release notes"            # human name; agents add --suggest
-lf session complete run_ab12                         # interactive Run
-
-lf session ready "Ready for review"                 # inside an Ask
-lf session complete ask_ab12                         # release its caller
-
-lf session ready "Ready for review"                 # inside a Task FlowStep
-lf session approve <flowstep-id> "Verified summary"
-lf session iterate <flowstep-id> "Narrow the design"
+lf session list --interactive false --history --json
+lf session connect SESSION
+lf session history SESSION --json
+lf session rename SESSION "Release notes"
+lf session bind SESSION --task INF-123
+lf session ready "Ready for review"  # inside an Ask or review
+lf session complete SESSION        # return its saved feedback
 ```
 
-Ready, provider exit, and pane close resolve nothing. Complete resolves an
-interactive Run or Ask. Approve and Iterate act only on Task FlowSteps.
-In Loopflow.app, switching Sessions or closing a pane keeps its terminal live.
-**Move here** explicitly takes over a Session active in another terminal.
+A Session keeps the conversation's identity, name, feedback and native history
+across commands. Interactive and headless work use the same model. Default lists
+show interactive conversations; explicit filters reveal headless or completed
+ones. `--all` means all repositories.
+
+Ready saves feedback. Complete ends an Ask or review; a Flow's following decision
+chooses navigation. Closing a pane or exiting a provider does not complete a review.
+Bind assigns an unbound conversation to one Task permanently, including a done Task.
 
 ## The model
 
-| Atom | What it does | Where it lives |
-|------|--------------|----------------|
-| **Skill** | Runs a prompt with assembled context | `.lf/skills/*.md` |
-| **Flow** | Chains skills together | `.lf/flows/*.yaml` |
-| **Wave** | Durable operating context: memory, cadence, chat, metrics | `wave/<name>/` |
-| **Chapter** | Fresh plan and KRs for one interval | Internal Linear Project, via `lf wave` |
-| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf task` |
-| **Run** | Append-only evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
-| **Home** | Stable machine identity; its SSH route may move | local SQLite |
+| Object | What it does | Where it lives |
+| --- | --- | --- |
+| **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
+| **Flow** | Composes agent work, mechanical operations and reviews | `.lf/flows/*.yaml` |
+| **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
+| **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
+| **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
+| **Task** | Owns concrete work, its checkout, serial PRs and managed Flow selection | Linear and local SQLite |
+| **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
+| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
+| **FlowSession** | Keeps a captured Flow and consumes exact boundary completions | Home-local SQLite |
+| **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
+
+The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)
+separate this model from the remaining implementation. Existing historical commands
+and wire fields are documented in the CLI reference; Run is not a fourth execution
+object in the model.
 
 | Built-in | What it does |
-|----------|--------------|
+| --- | --- |
 | `testing-audit` | Finds low-value tests and redundant verification, then improves the workflow |
 | `token-compress` | Fits a complete artifact to an explicit token budget without truncating it |
 

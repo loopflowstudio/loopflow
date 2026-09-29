@@ -1,8 +1,61 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 #if canImport(GhosttyKit)
+    @Test("Dismantling an old mount keeps the retained terminal in its new mount")
+    @MainActor
+    func retainedTerminalRemount() async throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.shell("remount-proof")
+        let terminal = pool.view(for: identity)
+        let content = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
+            terminal: identity, surfacePool: pool
+        )
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+        defer {
+            window.contentView = nil
+            pool.release(identity)
+        }
+        let oldMount = NSHostingView(rootView: AnyView(content.disabled(false)))
+        oldMount.frame = root.bounds
+        root.addSubview(oldMount)
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let surface = try #require(terminal.surface)
+        #expect(terminal.window === window)
+
+        // A split mounts its new subtree before SwiftUI retires the old subtree.
+        let newMount = NSHostingView(rootView: AnyView(content))
+        newMount.frame = root.bounds
+        root.addSubview(newMount)
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        try #require(terminal.isDescendant(of: newMount))
+        #expect(window.makeFirstResponder(terminal))
+        // The departing representable can still receive environment updates.
+        // It no longer owns the terminal's focus or size after transfer.
+        oldMount.rootView = AnyView(content.disabled(true))
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.isDescendant(of: newMount))
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+
+        oldMount.rootView = AnyView(EmptyView())
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.window === window)
+        #expect(terminal.isDescendant(of: newMount))
+        #expect(terminal.surface == surface)
+    }
+
 import GhosttyKit
 #endif
 @testable import LoopflowMac

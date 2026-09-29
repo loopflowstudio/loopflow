@@ -79,7 +79,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
-    func makeNSView(context: Context) -> GhosttyMetalView {
+    func makeNSView(context: Context) -> GhosttyTerminalMount {
         let view: GhosttyMetalView
         if let surfacePool {
             view = surfacePool.view(for: terminal)
@@ -95,10 +95,12 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             manager.initialize()
         }
 
-        return view
+        return GhosttyTerminalMount(terminal: view)
     }
 
-    func updateNSView(_ nsView: GhosttyMetalView, context: Context) {
+    func updateNSView(_ mount: GhosttyTerminalMount, context: Context) {
+        let nsView = mount.terminal
+        guard nsView.superview === mount else { return }
         nsView.onFocus = onFocus
         nsView.sizeDidChange(size)
 
@@ -108,6 +110,23 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         }
         nsView.updateFocus(isFocused: isFocused, isEnabled: isEnabled)
     }
+}
+
+/// SwiftUI owns each mount; the workspace owns the terminal. Splitting a pane
+/// can retire the old representable after its terminal has moved to a new one.
+/// Retiring a mount must never detach that terminal from its new parent.
+final class GhosttyTerminalMount: NSView {
+    let terminal: GhosttyMetalView
+
+    init(terminal: GhosttyMetalView) {
+        self.terminal = terminal
+        super.init(frame: terminal.frame)
+        terminal.frame = bounds
+        terminal.autoresizingMask = [.width, .height]
+        addSubview(terminal)
+    }
+
+    required init?(coder: NSCoder) { nil }
 }
 
 /// Retains live terminal views for one window's Sessions workspace so pane

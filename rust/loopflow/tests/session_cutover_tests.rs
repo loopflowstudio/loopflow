@@ -3321,7 +3321,8 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     );
     assert_eq!(
         fixture.run_parents(&step),
-        (None, Some(wave_id.clone()), declared.clone())
+        // The command names the Wave; conversations inherit it from their Flow.
+        (None, Some(wave_id.clone()), Some("inherited".to_string()))
     );
     assert_eq!(fixture.run_parents(&review), fixture.run_parents(&step));
     let positions = invocation_inputs(&fixture, &invocation);

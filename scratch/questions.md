@@ -51,8 +51,9 @@ history/recovery and provider costs with native tools and upstream reload repair
 upstream action or retry-contract change is selected. Existing decision failures
 remain requirements, and independent Run removal, import and reader work continues.
 
-- 2026-09-29, SQL preservation: a sessionless row with a named skill or provider
-  other than `loopflow` supplies agent classification; preserve it under its old
-  input selector. A row with no Session, skill or provider remains unclassified
-  SQL evidence. The populated fixture contains such a caller. Do not fabricate
-  an AgentSession/Exec or drop its bytes while finishing the cutover.
+- 2026-09-29, SQL preservation: the initial skill-name classification at
+  `4682d662a` was disproved by old managed mechanical rows carrying a skill label.
+  `provider=loopflow` is operation evidence. Provider-null labels require captured
+  node policy or a recorded Session relation; labels alone remain unclassified.
+  The populated fixture retains an unknown caller without fabricating a Session
+  or Exec. Its destination remains open before table removal.

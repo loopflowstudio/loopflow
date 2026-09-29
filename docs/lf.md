@@ -752,7 +752,10 @@ not infer an actual lf process from an old provider-launch record alone.
 SQL agent inputs retain their recorded conversation even when an old input link
 is absent. A standalone agent input keeps its original input ID as its Session
 selector; recorded command outcome does not become a successful native turn.
-Mechanical and unclassified SQL rows remain retained for the remaining cutover.
+Named mechanical boundaries with a captured Flow retain their SQL evidence in
+Flow history. Unclassified rows remain retained for the remaining cutover.
+`lf runs INPUT --json` reads retained input history even when its manifest is
+missing; exact Session IDs select current input. Prefixes must be unambiguous.
 
 ## Placing Work and Reaching Homes
 

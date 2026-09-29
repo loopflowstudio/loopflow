@@ -34,6 +34,13 @@ Main is converting Flow settlement to exact AgentSession history; see
 [handoff](parallel-execution.md). Keep one shared Task/taskless driver and Task's
 one managed FlowSession pointer while allowing other attributed Flows.
 
+The 2026-09-29 runtime-child slice implements backward-edge entry, parent wait,
+exact child return, same-child retry and next-pass sibling allocation through the
+shared driver/transaction. Source, materialized and scripted public evidence is
+recorded in [the handoff](parallel-execution.md#runtime-children-and-ci-repairs--implementation-iteration-11).
+Keep those proofs through final discovery/history/import integration. They do not
+settle configured recovery or the separate native retry-contract failure.
+
 - Select the exact native start under Flow version/claim; consume its matching
   success once with cursor advancement. Failure, an older success, a helper,
   stale driver, late generation or unrelated continuation cannot settle it.
@@ -142,10 +149,22 @@ conversation bridge must not recreate deleted Wave listeners/residents/lfd.
 ## 3. Exec admission and discovery
 
 Every actual lf process should be observable with trustworthy command outcome.
-Parsed ordinary commands currently record Execs; help/version/rejected arguments,
-installation/preflight and screenshot paths need explicit final disposition.
-Best-effort command observation is not required agent-launch admission. Never
-invent observed start, exit or signal for an incomplete journal.
+Parsed ordinary commands record Execs. Early help/version/parser exits now use
+`with_process` observation through an existing compatible ledger; install and
+screenshot observe before dispatch. Observation neither initializes nor migrates
+a store, and absent/incompatible history stays explicit without blocking the
+command. This implemented boundary does not need rebuilding.
+
+Source assertions and the retained hosted 94b Rust job109542699794 cover
+`early_commands_record_exact_exits_without_initializing_or_migrating` (1.038s),
+`early_observation_preserves_preflight_target_and_screenshot_child_ancestry`
+(1.176s), and `parser_returns_exact_status_without_admitting_an_early_store`
+(0.075s). They retain code 0/0/2, zero AgentSessions, unchanged schema,
+incompatible target bytes and distinct screenshot child/parent Execs. The
+2026-09-29 concept review inspected those assertions; it ran no new tests.
+This is not every-entry-gate, live installation or all-signal proof; those limits
+remain. Best-effort command observation is not required agent-launch admission.
+Never invent observed start, exit or signal for an incomplete journal.
 
 Use typed summary/detail queries for Exec, AgentSession and FlowSession. Filter
 repo, Task/work evidence, identity, parent, command, mode, title/skill and state

@@ -1,6 +1,6 @@
 # Main implementation handoff
 
-LOO-298 · Jack Heart · Updated 2026-09-29 after the metadata checkpoint.
+LOO-298 · Jack Heart · Updated 2026-09-29 after the runtime-child slice.
 
 ## Finish and ownership
 
@@ -54,19 +54,15 @@ worktrees/processes. Use ordinary source inspection for code.
    startup/query/payload partition remain open. Current Desktop inventory remains
    complete: passing individual pages into reconciliation would drop retained
    panes. Change paging and reconciliation together.
-   Runtime loop children are unfinished core behavior: each pass must create a
-   child FlowSession with the same nullable Task, transactional parent wait/child
-   completion, same-child retry and a new child on the next pass. Current nested
-   cursors cover XOR and repeat counters only; neither proves runtime parentage.
-   Jack's scope confirmation and source hashes are retained in
-   `.lf/tmp/cut-i/runtime-flow-parent-review.json`. Resolve this existing owner
-   behavior in the next implementation pass alongside history/discovery; inventory
-   alone cannot close it.
+   Runtime children now execute through the shared driver and transaction; the
+   slice below records source/canonical and scripted public evidence. Integrate
+   saved-Flow discovery with actual parentage and preserve this behavior through
+   final consumer removal. No metadata reader substitutes for the driver proof.
 2. Active observation now uses Session/Exec ownership and removes run-bindings.
    The review repairs terminal mounting and reproduces/fixes stale old-host focus
-   updates. Hosted detachment still needs confirmation on those bytes; exact
-   window/surface/focus/ancestor diagnostics and preservation assertions remain.
-   Do not call the bounded wait or prior local passes a hosted fix.
+   updates. The released off-window-mount repair now passes six integrated local
+   tests. Hosted confirmation remains owed; lifecycle diagnostics, original
+   attachment/surface/draft/focus assertions and the deadline remain.
 3. Resolve Codex valid decision retry through Jack's existing decision conversation.
    The stale child is correctly rejected but the legitimate retry still receives
    old tool environment after a failed native turn. Keep independent work moving;
@@ -149,14 +145,94 @@ all-target Clippy pass (`review-active-clippy.log`); resource preflight observed
 inherited execution authority cleared; no installed store or configured provider
 was used.
 
-Whole-design blockers remain: runtime loop child FlowSession production and its
-transactional parent/child recovery; final history/discovery/Desktop paging;
+At that review boundary, whole-design blockers included runtime loop child
+production/recovery (implemented in the subsequent slice below), plus final
+history/discovery/Desktop paging;
 released-populated import and attribution; legitimate Codex decision retry;
 configured provider/Desktop acceptance and final integrated checks. Review the
 released Flow-discovery and preservation proposals at the next implementation
 boundary, preserving their cautions and missing cases. Inventory alone cannot
 close runtime nesting. Concept review with Jack still precedes delivery; this
 review chooses no Flow edge and completes no Task.
+
+## Runtime children and CI repairs — implementation iteration 11
+
+Jack's accepted runtime-pass contract now uses `flow_sessions.parent_id` and the
+existing checkpoint transaction. The shared Task/taskless driver selects the
+active child under the root's lock. A backward Iterate freezes the deciding
+parent, transfers its worker claim and enters a child; exact selected successful
+completion returns once. Failed/interrupted retries retain that child, the next
+pass creates a sibling, and overlapping backward edges create nested children.
+Template composition and XOR remain expanded cursor structure without new rows.
+Task keeps its one root pointer; the recursive `managed_flows` view projects its
+members and preserves review/Session attribution without a second owner.
+
+The switched consumer is the existing `drive`/checkpoint path: it no longer
+executes repeated work solely under the root's mutable repeat cursor. Original
+return counters remain captured navigation facts. Review found that transferring
+a worker claim into a child beginning at human review would keep the review
+claimed; the settlement now releases it, and the focused managed-review proof
+retains the root pointer and rejects late completion. Historical flows receive
+NULL parentage, never inferred children.
+
+Compared with c928d261c and including the untracked draft, corrected production-
+prefix measurement is **+406/−140 (net +266)**: Rust/Swift +378/−140 and SQL +28/−0.
+Tests/test modules, docs, scratch and generated files are excluded. This includes
+the terminal repair/diagnostics; it is added behavior, not a reduction claim.
+Method and receipt: `.lf/tmp/cut-i/measure-runtime-children.py` and
+`runtime-children-counts.json`.
+
+Focused proof logs below live under `.lf/tmp/cut-i/`; the scrubbed `run.py` owns
+private Home/database and process cleanup. They do not establish configured
+provider or installed acceptance:
+
+- `runtime-children-focused.log`: 22 source store/reducer/Task-driver passes.
+  `runtime-children-recovery.log` first had 3 passes and one malformed review
+  fixture failure; correcting its initial captured review position yields one
+  pass in `runtime-children-review.log`. No behavioral assertion was removed.
+- `runtime-children-public.log`: three actual public CLI passes through scripted
+  OpenCode, including two distinct completed taskless child passes, six consumed
+  successful completions, completed-root resume with no launch, and zero Run
+  table. Existing managed failure/retry/review and taskless decision cases pass.
+- `runtime-children-canonical-final.log`: 22 passes after draft materialization in
+  a disposable source copy, including seven ownership/upgrade cases and all 15
+  Chapter cases. Child failure/interruption, stale writes, exact parent return,
+  next sibling, overlapping loops, Task and taskless drivers and source-free
+  captured execution are covered. `runtime-children-canonical.log` retains the
+  earlier 6-pass/1-fail fixture whose serialized invocation ID differed from its
+  SQL row; the corrected fixture keeps matching original identity. This includes
+  a populated prior Flow frontier upgrade, not the pending released public-import
+  bridge. Chapter simulations remain operation-level evidence.
+
+Jack's c928 hosted counterexamples are retained. The deletion fixture now models
+RenameProject's name write and success result. `runtime-deletion-linux.log`
+records **one actual applicable Linux public test pass** (38.11s), preserving
+all delete/retry/retained-Task/PR/files assertions and post-delete sync/doctor.
+Its disposable-container source hashes are in `runtime-deletion-linux-source.json`.
+The snapshot precedes later Flow-only edits; this is no green full matrix.
+
+The released terminal patch is integrated by reviewed hunks over bounded debug
+lifecycle diagnostics. `GhosttyTerminalMount` adopts only after it has a window;
+updates saved before attachment are applied when it attaches. An off-window
+speculative representable cannot take the displayed pooled terminal. The private
+contributor's uninstrumented c928 regression failed with five issues; its patch
+passed six cases. Main's integrated `runtime-terminal-integrated.log` passes the
+same six cases in 9.336s, retaining Monitor/Chapter transfer/rename/draft/focus/
+companion/surface assertions. Neither local proof reproduces hosted Monitor's
+ordering. The next hosted swift-test is the confirming proof; no timeout changed.
+
+Final static checks pass: `cargo fmt --check`, `cargo clippy --all-targets --
+-D warnings` (`runtime-children-clippy-complete.log`), migration history,
+architecture inventory and `git diff --check`. The populated Flow upgrade also
+passes on the ordinary source draft frontier (`runtime-children-source-upgrade.log`,
+one selected test). Website docs were regenerated through `dev.py sync-docs`.
+These are focused implementation checks; no full diagnostic or gate reran.
+
+Remaining: review/integrate discovery and released import; final typed history
+and Desktop paging/reconciliation; native retry-contract choice; configured
+provider/Desktop and full final preservation matrix. Jack's complete concept
+review and saved delivery remain required. No installed data, promotion, native
+retry contract or captured-input naming choice changed in this slice.
 
 ## Current implementation and its limits
 

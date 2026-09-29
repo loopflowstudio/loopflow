@@ -2800,6 +2800,7 @@ fn import_stores_each_old_session_once_with_its_name() {
             .start_task_flow(
                 &task.task.id,
                 FlowSession {
+                    parent_id: None,
                     invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
                     cursor: ExecutionCursor::default(),
                     version: 0,
@@ -3723,6 +3724,67 @@ fn a_taskless_step_records_its_decision_on_the_invocation() {
                 .all(|file| file.file_name() == "driver.lock")
         }))
         .unwrap_or(true));
+}
+
+#[test]
+fn public_taskless_flow_records_distinct_completed_loop_passes() {
+    let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
+    std::fs::write(fixture.home.path().join("remaining-passes"), "2").unwrap();
+    let output = fixture.run(&[
+        "--model",
+        "opencode",
+        "flow",
+        "work-then-decide",
+        "-b",
+        "--no-loopflow",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let conn = fixture.db();
+    let flows = conn
+        .prepare("SELECT id,parent_id,state,task_id FROM flow_sessions ORDER BY parent_id,id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(flows.len(), 3);
+    let root = &flows[0].0;
+    assert!(flows[0].1.is_none());
+    assert!(flows[1..]
+        .iter()
+        .all(|(_, parent, _, _)| parent.as_ref() == Some(root)));
+    assert!(flows
+        .iter()
+        .all(|(_, _, state, task)| state == "completed" && task.is_none()));
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM flow_events WHERE kind='consumed'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        6
+    );
+    assert_eq!(fixture.launches().len(), 6);
+    assert_eq!(fixture.retired_run_tables(), 0);
+    assert!(fixture.run(&["flow", "resume", root]).status.success());
+    assert_eq!(
+        fixture.launches().len(),
+        6,
+        "completed resumption must not launch another pass"
+    );
 }
 
 /// A Flow whose invocation row cannot be written does not start: the store

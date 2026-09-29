@@ -664,6 +664,7 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
 fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
     Ok(FlowSession {
+        parent_id: None,
         invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,
@@ -1173,6 +1174,20 @@ mod planning_tests {
                 .push((step.step.clone(), run.clone()));
             if position.cursor.iteration > 0 {
                 assert!(content.contains("repair the demonstrated gap"));
+                let parent = self
+                    .store
+                    .flow(position.parent_id.as_ref().unwrap())
+                    .await?
+                    .unwrap();
+                assert_eq!(parent.task_id, position.task_id);
+                assert_eq!(parent.wave_id, position.wave_id);
+                assert!(parent.claim.is_none());
+                assert_eq!(parent.current().step, "loop-decide");
+                assert!(self
+                    .store
+                    .reserve_attempt(parent.id(), parent.version, None)
+                    .await
+                    .is_err());
             }
             let actor = self.store.sqlite.test_flow_turn(&run);
             if step.step == "concept-review" {
@@ -1550,6 +1565,14 @@ mod planning_tests {
                 assert_eq!(turns.iter().map(|(step, _)| step.as_str()).collect::<Vec<_>>(),
                     ["xor-route", "implement", "compress", "realign", "concept-review", "loop-decide", "implement", "compress", "realign", "concept-review", "loop-decide"]);
                 assert_eq!(turns.iter().map(|(_, run)| run).collect::<std::collections::HashSet<_>>().len(), 11);
+                let memberships = turns.iter().map(|(_, input)| {
+                    store.sqlite.session_for_run(input).unwrap().unwrap().flow_session_id.unwrap()
+                }).collect::<Vec<_>>();
+                assert!(memberships[..6].iter().all(|id| id == flow.id()), "routing and template composition keep the root owner");
+                assert!(memberships[6..].iter().all(|id| id == &memberships[6]));
+                let pass = store.flow(&memberships[6]).await.unwrap().unwrap();
+                assert_eq!(pass.parent_id.as_deref(), Some(flow.id()));
+                assert!(pass.finished);
                 for (_, run) in &turns {
                     let (_, manifest) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
                     assert_eq!(manifest.harness, "claude");
@@ -4054,6 +4077,94 @@ mod planning_tests {
         assert!(store.recent_task_events(&task.id, 10).await.unwrap().iter().any(|event|
             matches!(&event.kind, TaskEventKind::FlowFinished { summary, .. } if summary == "design clarified")
         ));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // serializes the fixture executable and Home
+    async fn runtime_child_review_releases_the_worker_and_retains_the_managed_root() {
+        let guard = super::TestLfBinGuard::pin();
+        let db = guard.ledger.home().join("loopflow.db");
+        let (store, task, mut flow) = human_task_fixture_at(&db).await;
+        flow.invocation.steps = vec![flow.current_plan().clone()];
+        flow.cursor = Default::default();
+        flow.invocation
+            .steps
+            .push(crate::engine::ConcreteStep::Skill(
+                crate::engine::ConcreteSkill {
+                    skill: crate::engine::Skill::named("decide"),
+                    flow_parents: vec![],
+                    policy: crate::engine::OccurrencePolicy {
+                        id: Some("decision".into()),
+                        human: false,
+                        repeat: Some(crate::engine::flow::RepeatPolicy {
+                            from: flow.current().policy.id.unwrap(),
+                        }),
+                    },
+                },
+            ));
+        flow.cursor.index = 1;
+        let flow = store.start_task_flow(&task.id, flow).await.unwrap();
+        let held = claim(&store, &task, &flow, 303).await;
+        let input = reserved_run(&store, &task).await;
+        store
+            .sqlite
+            .publish_attempt(flow.id(), flow.version, &input, Some(&held), "proof", None)
+            .unwrap();
+        let actor = store.sqlite.test_flow_turn(&input);
+        store
+            .record_flow_decision(
+                flow.id(),
+                flow.version,
+                &actor,
+                &crate::engine::transitions::FlowVerdict {
+                    decision: crate::engine::transitions::FlowDecision::Iterate,
+                    summary: "review the revision".into(),
+                },
+            )
+            .await
+            .unwrap();
+        store.sqlite.test_finish_flow_turn(&actor, "completed");
+        let saved = store.flow(flow.id()).await.unwrap().unwrap();
+        let mut cursor = saved.cursor.clone();
+        cursor.finish(&saved.invocation.steps).unwrap();
+        let child = store
+            .checkpoint_flow(saved.id(), saved.version, &cursor, Some(&held), None)
+            .await
+            .unwrap();
+        assert!(child.is_human());
+        assert!(child.claim.is_none());
+        assert_eq!(
+            store.task_flow(&task.id).await.unwrap().unwrap().id(),
+            child.id()
+        );
+        let conn = rusqlite::Connection::open(db).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT current_invocation_id FROM tasks WHERE id=?1",
+                [task.id.as_str()],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            flow.id()
+        );
+        super::park_at_review(&store, &task, &child).await.unwrap();
+        ready_review(&store, &task, "revision accepted").await;
+        let expected = store.task_flow(&task.id).await.unwrap().unwrap();
+        store
+            .complete_task_review(&task.id, &expected, "revision accepted")
+            .await
+            .unwrap();
+        let continued = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert_eq!(continued.id(), child.id());
+        assert_eq!(continued.current().step, "decide");
+        assert_eq!(
+            continued.cursor.leaf().progress.direction.as_deref(),
+            Some("revision accepted")
+        );
+        assert!(store
+            .complete_task_review(&task.id, &expected, "late completion")
+            .await
+            .is_err());
     }
 
     #[tokio::test]

@@ -63,8 +63,13 @@ def _launch(session, request, prompt):
                 rejected = subprocess.run([env["LF_BIN"], "flow", "decide", "advance", "Earlier request"], env=stale, capture_output=True, text=True, timeout=15)
                 (HOME / "old-decision.log").write_text(rejected.stdout + rejected.stderr)
                 original.unlink()
-            output = subprocess.run([env["LF_BIN"], "flow", "decide", "advance", "Proof observed"],
+            repeats = HOME / "remaining-passes"
+            remaining = int(repeats.read_text()) if repeats.exists() else 0
+            decision = "iterate" if remaining else "advance"
+            output = subprocess.run([env["LF_BIN"], "flow", "decide", decision, "Proof observed"],
                                     env=env, capture_output=True, text=True, timeout=15)
+            if output.returncode == 0 and remaining:
+                repeats.write_text(str(remaining - 1))
             with (HOME / "decide.log").open("a") as log:
                 log.write(output.stdout + output.stderr)
             if (HOME / "disconnect-after-tool").exists():

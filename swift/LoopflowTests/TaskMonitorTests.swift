@@ -152,7 +152,7 @@ struct TaskMonitorTests {
             let ancestors = sequence(first: terminal.superview, next: { $0?.superview })
                 .prefix(8).compactMap { view in view.map { "\(type(of: $0)) frame=\($0.frame)" } }
             #expect(terminal.window === window,
-                "terminal=\(index) id=\(terminal.terminal) window=\(String(describing: terminal.window)) target=\(window.windowNumber) sameSurface=\(terminal.surface == surfaces[index]) focused=\(window.firstResponder === terminal) ancestors=\(ancestors) layout=\(store.layout)")
+                "terminal=\(index) id=\(terminal.terminal) window=\(String(describing: terminal.window)) target=\(window.windowNumber) sameSurface=\(terminal.surface == surfaces[index]) focused=\(window.firstResponder === terminal) ancestors=\(ancestors) layout=\(store.layout) lifecycle=\(terminal.mountLifecycle)")
         }
         store.toggleZoom(monitor.id)
         window.setContentSize(NSSize(width: 1100, height: 650))

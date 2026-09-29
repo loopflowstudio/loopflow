@@ -226,6 +226,8 @@ pub struct FlowTurnSelection {
 /// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowSession {
+    /// Runtime loop parent; template composition does not create a parent.
+    pub parent_id: Option<String>,
     pub invocation: QueuedInvocation,
     pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,

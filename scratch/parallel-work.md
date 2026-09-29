@@ -26,20 +26,26 @@ those broader obligations. No review edge has been selected.
 
 ## Live ownership and published checkpoint
 
-Managed review-slice Run `run_4f7b9f56776542f896c554ea79c7b192` is live;
-compress Run `run_de6cc72e4b3e47fc919c51831f5b43c0` completed normally.
-Same saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
-iteration10, step4/13. Main retains sole executable edit/build/test/Git ownership.
+Managed implement Run `run_d80340d07e334bd8b6474b7fa88077d2` is live,
+same saved feature invocation `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`,
+iteration11, step2/13. Autonomous concept-review02b6 and decisionaf0b completed;
+the saved decision selected Iterate: runtime Flow children, then historical
+consumer/discovery and preservation work. No restart or supervisor navigation.
+Captured autonomous review is evidence, not Jack’s complete-implementation review.
+Main retains sole executable edit/build/test/Git ownership.
 Supervisor owns this index and private reviews. Recheck shared status before launch.
 Control Session `run_9c16dbbe2b04440db8469e9b4964912c` keeps human title loopflow.
 
-Published HEAD **94b258e8a41d2e6587a7d24a5d712b0dc8445499**, based on
+Published HEAD **c928d261c06608ba85699d9b905be4b4db9a0c9c**, based on
 main **a3820bf7e493b7d533a45677b7945020adf80721**. Task and GitHub agree.
-`36c19fc58` contains active Session reduction; `94b258e8a` publication preparation.
-Whole committed production delta **+18,787/−31,209 = net−12,422**, corrected
+`36c19fc58` contains active Session reduction; `7be74d097` adds Flow-inheritance
+and terminal-mount repairs, `c928d261c` publication preparation. Upstream main
+still matches that base at this observation; no additional rebase is needed.
+Whole committed production delta **+18,811/−31,214 = net−12,403**, corrected
 production-prefix/no-renames method, SQL included, tests/docs/working edits excluded.
-Receipt `.lf/tmp/execution-model/status-counts-94b258e8a.json`.
-Activity cut net−30 versus07030, not the private proposal's net−103.
+Receipt `.lf/tmp/execution-model/status-counts-c928d261c.json`.
+The new repairs add net19 versus94b; its activity cut was net−30 versus07030,
+not the private proposal's net−103. Preserve method/base when comparing counts.
 
 Prior capacity failure and oversized continuation were recovered at the same
 boundary without restart. Hashed scratch originals remain in
@@ -47,6 +53,26 @@ boundary without restart. Hashed scratch originals remain in
 `.lf/tmp/scratch-curation-20260929-metadata/`; context reduction did not discard scope.
 
 ### Private contributions
+
+2026-09-29 · Jack Heart handed Flow operation to Claude and authorized it to run
+parallel lf work directly. Main's implement worker keeps sole tracked-source,
+build and Git ownership. Review page for Jack:
+`.lf/tmp/concept-review/data-model-review.html`.
+
+- **Terminal detach diagnosis, released:** handback and `detach.patch` in
+  `.lf/tmp/terminal-detach-diagnosis/`, SHA-256
+  `cb5ea4f489fe39fc2fde7d2b7c6f47cb5efa86023411689b320700c464d82742` verified.
+  Reproduced: a mount laid out off-window reparents the pooled terminal in its
+  initializer, then AppKit deallocation detaches it. Uninstrumented red has five
+  issues; patched green passes six focused tests. Private copy, macOS 26; hosted
+  Monitor ordering itself is not reproduced. Main integrates by hand over its
+  own lifecycle diagnostics. Hosted swift-test is the confirming proof.
+- **Final history readers, relaunched:** Codex, `assignment-2.txt` in
+  `.lf/tmp/final-history-proposal/`. Private unexecuted patch replacing
+  RunSnapshot/subject readers; carries the RunId naming finding without choosing
+  a name. Nothing returned yet.
+- **Deletion fixture:** direction posted to the Task thread: the synthetic Linear
+  server needs a `RenameProject` branch returning `success: true`.
 
 - **Preservation released:** tool25840 exited0, Run
   `run_6c140a0a9bea481fbf33075fa2f31821` completed. Reviewed handback/patch in
@@ -74,9 +100,11 @@ boundary without restart. Hashed scratch originals remain in
   Responses returned401 missing authentication header; pinned auth status codex
   says expired. Account listing shows cached connection, then fails on absent
   account_access_profiles; neither proves valid current login. Supervisor changed
-  no credentials/account/store and asked Jack here about future launches. Existing
-  managed review worker remains live. Do not infer its death from this failure or
-  launch repeated account retries. Final history/wire removal remains main's scope.
+  no credentials/account/store and asked Jack here about future launches. A new
+  managed concept-review worker subsequently launched and produced text, so this
+  is not a demonstrated global Codex outage. Do not infer worker death from the
+  auxiliary failure or launch repeated account retries. Final history/wire removal
+  remains main’s scope. Its private assignment has no active contributor.
 - **Flow discovery released:** tool53793 exited0, Run
   `run_69b5879a1af84990877c7d331a849e20` completed. Read
   `.lf/tmp/flow-discovery-proposal/{handback.md,proof-plan.md,flow-discovery.patch}`.
@@ -118,7 +146,25 @@ Retained reviews/log hashes under `.lf/tmp/cut-i/active-*`; do not reuse stale
 
 ## Publication and checks
 
-**94b258e8a CI terminal red**, run36608239269:
+**c928d261c CI terminal red**, run36610278921:
+- Rust109550164205:1895passed,1failed,15skipped,96unrun. Public deletion fixture
+  fails at post-delete wave sync/doctor: synthetic server rejects RenameProject
+  at tests/e2e/task_deletion.py:83; assertion at268. Preceding delete/retry/retained
+  Task/PR/file assertions ran. Source pm.rs:2434 now renames Projects during sync;
+  fixture handles UpdateProject only. Protocol mismatch is source-supported,
+  not yet repaired. Linux-only test needs an executed Linux proof, not a Mac skip.
+- Swift109550164258:288tests,1issue117.830s. Same Monitor terminal0 window=nil,
+  ancestors=[],sameSurface=true after new mount. Original hosted detach persists.
+  CI compiled GhosttyTerminalView.swift and the new test; stale build is not a
+  supported explanation. New stale-update/remount test itself passes1.042s hosted.
+  Its distinct focus defect remains repaired; investigate actual make/update/
+  parent/window transition before another layout change. No timeout extension.
+- All other behavior/static jobs passed; scratch-clear fails during implementation.
+  No full gate or code-complete inference. Verified direction
+  **1756bd10-c2d8-4c79-bc05-daceec153b3e** carries failures into iteration11.
+Logs `.lf/tmp/cut-i/ci-c928-{rust,swift}.log`, bounded hashed `-summary.json`.
+
+**Prior94b258e8a CI terminal red**, run36608239269:
 - Rust109542699794:1858passed,1failed,15skipped,133unrun. At
   session_cutover_tests.rs:3322, every_launch_is_one_row_and_every_reader_lists_it_once
   expects saved Flow step Wave work_source declared; observes inherited, same Wave.
@@ -138,6 +184,17 @@ Do not dump giant raw Swift lines. CI direction is the verified comment above.
 07030 had31Rustpasses before the obsolete metadata assertion and the same Swift
 mount failure without diagnostics. Earlier636/59ed/e6aa receipts remain under
 `.lf/tmp/cut-i/ci-*` and committed handoffs; no final gate/merge proof follows.
+
+
+Existing early Exec observation is implemented and has hosted proof, despite the
+stale remaining-work section3 wording. Current with_process observes early exits
+through an existing compatible ledger; help/version/parser tests retain exact
+0/0/2 exits and schema bytes, preflight preserves target, screenshot retains real
+child ancestry. All three public tests passed in94b hosted Rust (1.038s,1.176s,
+0.075s); logs in ci-94b-rust.log. Missing/incompatible ledger stays an explicit
+observation failure without blocking recovery/help. This does not prove every
+entry gate or live installation. Verified reconciliation comment
+5e28f93f-ec03-4851-90b1-ece2883a4ec7 asks main to retain the correct proof scope.
 
 ## Runtime child FlowSession: implementation gap
 

@@ -105,7 +105,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
         Ok(FlowOutcome::Completed)
     }
 
-    async fn tick(
+    pub(crate) async fn tick(
         &self,
         items: &[ConcreteStep],
         cursor: &mut ExecutionCursor,

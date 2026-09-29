@@ -944,6 +944,31 @@ directory or an explicit forwarded lease; replay uses the same validated Run
 creation path as any other launch.
 None of these commands silently queries or aggregates another Home.
 
+```bash
+lf exec list --task LOO-298 --json
+lf exec list --all --search 'pr land' --outcome failed --limit 25 --json
+lf exec list --all --parent EXEC_ID --json
+lf exec show EXEC_ID --json
+```
+
+Exec history records actual `lf` processes and observed command results.
+`list` defaults to the current repository; `--all` includes every repository.
+`--task` and `--wave` select recorded agent or mechanical work, including historical
+Tasks. `--caller` selects commands issued by an AgentSession. These are distinct
+from the command's own recorded Wave context and causal parent.
+
+JSON returns `entries` and an optional `next` cursor. Pass that object as JSON to
+`--after`, retaining the same filters. The default page size is 100; zero is invalid.
+Pages sort by descending start time, then ID. Refresh from page one for new data:
+continuation does not freeze a snapshot across imports or changing outcomes.
+
+Search matches literal command text across argv elements, ignoring ASCII case;
+`%` and `_` are ordinary characters. The original stored command remains in JSON.
+Malformed historical command text remains searchable as recorded. Exact lookup
+accepts a full ID or an unambiguous prefix. An `unknown` outcome means no terminal
+observation, and says nothing about whether the process is alive. Discovery reads
+bounded command rows without loading conversation captures or transcripts.
+
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
 attach `lf` processes to call records; exact ancestry attaches provider
 processes. Completed calls and launches disappear. Unclaimed providers remain

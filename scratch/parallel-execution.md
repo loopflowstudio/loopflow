@@ -1611,3 +1611,73 @@ assertion. Formatting/whitespace, architecture and generated HTML checks pass.
 `numeric-thread-source.json` names HEAD/base and every changed executable/test/
 fixture/document hash for this proof boundary. No broader matrix was repeated.
 Publication is a review checkpoint, not code-complete acceptance or shipment.
+
+## Exec discovery consumer (2026-09-29)
+
+Jack's released Exec query proposal now feeds public `lf exec list/show`, sharing
+exact/list decoding over `execs`. It preserves raw command evidence, nullable
+outcomes and causal caller fields. The bounded SQL page precedes command-context
+enrichment; Session/Flow payloads are not decoded. Performed Task/Wave work comes
+from recorded native/mechanical starts, not today's conversation binding. This
+adds the missing public process-history consumer; it does not replace remaining
+Run-named conversation wires or finish Desktop inventory reconciliation.
+
+Review repairs: the proposal searched raw JSON argv, so actual `pr land` text
+could not match; search now joins string-array elements while preserving malformed,
+non-array and missing original evidence. The first public proof exposed a real
+reader dependency on an unrelated unnamed historical Project. Narrow retained-ID
+queries replace that full-catalog lookup. Jack's repository-selector review then
+found globally ambiguous Wave names; name resolution now uses the selected repo,
+explicit IDs retain meaning, and `--all` reports genuine ambiguity. The expanded
+public proof uses two repositories with the same Wave name, an unnamed Project,
+a completed Task, public/internal selectors, caller/parent filters and cursor
+continuation. No launch resolver or new ownership table is introduced.
+
+Proof receipts under `.lf/tmp/cut-i/`:
+- `exec-discovery-rust.log` and `-2.log`: compilation stopped on proposed test
+  Task/Project SQL conversions, then the new test's usize conversion. Corrected
+  test bindings, without production type changes.
+- `exec-discovery-rust-3.log`: six store/activity/wire checks passed; public CLI
+  fixture stopped on incorrect `tasks.status` seed. Corrected to `work_state`.
+- `exec-discovery-cli-final.log`: public proof then found the unnamed Project
+  catalog failure. `-final-2.log`: narrow identity reader passed (4.445s).
+- `exec-discovery-repo.log`: expanded public proof passed (6.009s), including
+  same-name repository scope, explicit ID and `--all` ambiguity.
+- `exec-discovery-swift.log`: shared Exec page fixture passed (one test), retaining
+  unknown outcome/caller evidence and cursor. No new Desktop UI proof is claimed.
+- `exec-discovery-clippy.log`: all-target Clippy passed (16.14s); formatting and
+  whitespace passed. Architecture first reported missing `lf exec` inventory;
+  adding its existing owner/API mapping passed. Docs sync/render ran from website
+  after an initial wrong-working-directory command found no root dev.py.
+
+The dense probe `.lf/tmp/exec-discovery-measure/probe.py` initializes an actual
+current-schema disposable Home with the source candidate, then seeds 100,000
+synthetic Execs, 20,000 Sessions, 5,000 Flows and 1,000 Tasks across three recorded
+repos. The initial real inspection adds one Exec. Foreign-key check passes;
+missing captures and unreadable history bodies remain present. The first seed
+attempt violated Flow ID/capture consistency and produced no measurements;
+`exec-discovery-dense-2.log` passes after matching those IDs. No real provider,
+installed Home or artifact hydration is involved.
+
+`results.json` records candidate SHA, host/load, all samples and JSON byte counts.
+Each case has a first fresh-process sample plus 20 repeated fresh processes:
+list p50/p95 314.32/319.61ms; contains miss 338.94/340.85ms; deep cursor page
+316.72/320.40ms; Task 323.43/333.34ms; parent 318.78/328.61ms; exact detail
+318.48/321.11ms. These are whole CLI wall times with uncontrolled OS caches,
+not cold-cache measurements or separated startup/SQL/payload costs. Bundled-SQLite
+query plans, full Session/Flow discovery, indexed search costs and Desktop paging
+remain open. The SQL-only contributor plans remain separately labeled evidence.
+
+Production delta versus `a866926d0`: +533/-32, net +501, across Rust source and
+Swift models, excluding trailing Rust test modules, tests/fixtures, docs and
+scratch; no rename credit. `.lf/tmp/cut-i/exec-discovery-source.json` retains exact
+source fingerprints and per-file counts. No full gate or native-provider result
+is claimed by this cut.
+
+Publication observation: `lf pr publish` automatically committed the completed
+Exec proposal as `a866926d0` after the selective implementation checkpoint. Local
+handback had not arrived yet. Jack subsequently verified terminal contribution
+and released those exact bytes, then directed preserving history. The proposal
+commit contains no executable patch. This does not authorize auto-staging active
+contributions; future publication must wait for handback. OpenCode proposal is
+now released; the newly assigned Desktop proposal remains excluded while active.

@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{ExecId, TraceId};
+use crate::durable::TaskId;
+use crate::id::{ExecId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +25,54 @@ pub struct Exec {
     pub signal: Option<String>,
     /// Recorded command context from its trace, not work assigned to its caller later.
     pub wave: Option<String>,
+}
+
+/// Command discovery filters. Work means recorded work, never today's caller binding.
+/// Contains searches are literal; command case folding follows SQLite lower().
+#[derive(Debug, Clone, Default)]
+pub struct ExecFilter {
+    pub id: Option<ExecId>,
+    pub repo: Option<String>,
+    pub parent_exec_id: Option<ExecId>,
+    pub caller_session_id: Option<String>,
+    pub command_contains: Option<String>,
+    pub identity_contains: Option<String>,
+    pub outcome: Option<ExecOutcomeFilter>,
+    pub performed_work: Option<ExecWorkFilter>,
+}
+
+/// Unknown means no terminal observation, not an OS liveness judgment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecOutcomeFilter {
+    Succeeded,
+    Failed,
+    Interrupted,
+    Unknown,
+}
+
+/// IDs are already resolved by the caller, independently of launch eligibility.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecWorkFilter {
+    Task(TaskId),
+    Wave(WaveId),
+}
+
+/// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
+/// A cursor is not a cross-request snapshot: late imports or changed outcomes may
+/// change membership. Refresh from the first page to observe those changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecCursor {
+    pub started_at: i64,
+    pub id: ExecId,
+}
+
+/// At most the requested number of command rows; no Session or Flow payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecPage {
+    pub entries: Vec<Exec>,
+    pub next: Option<ExecCursor>,
 }
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";

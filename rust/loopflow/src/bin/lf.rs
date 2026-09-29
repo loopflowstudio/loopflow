@@ -1665,16 +1665,6 @@ fn execute_command(
                 | WaveCommand::Retire { .. }),
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
-        Some(Commands::ChatConnect {
-            waves,
-            wave_ids,
-            json,
-        }) => in_repo_runtime(args, |repo| {
-            loopflow::lf::commands::home::connect_chat(waves, wave_ids, *json, repo)
-        }),
-        Some(Commands::Resident { name }) => {
-            in_repo_runtime(args, |_| loopflow::controller::wave::resident::run(name))
-        }
         Some(Commands::Task {
             cmd: TaskCommand::Worker { task_id },
         }) => in_repo_runtime(args, |_| {
@@ -1759,6 +1749,7 @@ fn execute_command(
             task.as_deref(),
             *json,
         ),
+        Some(Commands::Exec { cmd }) => loopflow::lf::commands::exec::run(cmd),
         Some(Commands::Runs {
             active,
             watch,

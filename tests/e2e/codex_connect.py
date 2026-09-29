@@ -1011,7 +1011,9 @@ def _flow_automatic_retry_contract(
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(env["LF_DB_PATH"]) as db:
-        results["run_rows"] = db.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        results["run_tables"] = db.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'"
+        ).fetchone()[0]
         results["flow_state"] = db.execute(
             "SELECT state,failure_json FROM flow_sessions"
         ).fetchone()
@@ -1049,9 +1051,9 @@ def _flow_automatic_retry_contract(
     assert usage[-1]["total"]["outputTokens"] == 10
     assert len(list(Path(env["LF_PROBE_ENGINES"]).glob("*.json"))) == 1
     results["automatic_retry"] = "passed"
-    assert results["run_rows"] == 0, (
+    assert results["run_tables"] == 0, (
         "Flow agent history must use AgentSession and Exec without a separate Run owner",
-        results["run_rows"],
+        results["run_tables"],
     )
     results["session_owners"] = "passed"
     report = _command(

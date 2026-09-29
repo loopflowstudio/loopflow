@@ -205,8 +205,12 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     assert!(!dir.join("events.jsonl").exists());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
-        db.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
+        db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
         0
     );
     assert_eq!(

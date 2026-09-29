@@ -642,16 +642,6 @@ mod tests {
                 crate::ops::human_session::ask(&store, "Continue removed work", None),
             )
             .await;
-            for (name, value) in previous {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-            match previous_db {
-                Some(value) => std::env::set_var("LF_DB_PATH", value),
-                None => std::env::remove_var("LF_DB_PATH"),
-            }
             assert!(resumed.unwrap_err().to_string().contains("was deleted"));
             assert!(asked
                 .expect("Ask must refuse before waiting")
@@ -668,6 +658,16 @@ mod tests {
                     .unwrap()
                     .is_some()
             );
+            for (name, value) in previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+            match previous_db {
+                Some(value) => std::env::set_var("LF_DB_PATH", value),
+                None => std::env::remove_var("LF_DB_PATH"),
+            }
         }
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await

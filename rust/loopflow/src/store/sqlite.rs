@@ -364,11 +364,15 @@ impl SqliteStore {
     pub(crate) fn assert_no_historical_runs(&self) {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn
-            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(
             count, 0,
-            "current execution must not create historical Run rows"
+            "current execution must not recreate the retired Run table"
         );
     }
 

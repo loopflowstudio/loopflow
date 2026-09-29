@@ -1454,6 +1454,21 @@ mod durable_store_tests {
                 },
             )
             .unwrap();
+        assert!(
+            store
+                .replace_session_input(
+                    &replacement.input_id,
+                    crate::session::AgentSession {
+                        cwd: "/changed".into(),
+                        provider: Some("changed".into()),
+                        model: Some("changed".into()),
+                        ..first.clone()
+                    }
+                )
+                .is_err(),
+            "an earlier input cannot become a fresh replacement"
+        );
+        assert_eq!(store.session("orphan").unwrap(), Some(replacement.clone()));
         let elsewhere = open("elsewhere", Some(other_wave));
         let old_runs = store.session_inputs("orphan").unwrap();
         store

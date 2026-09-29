@@ -47,7 +47,7 @@ fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
     );
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let counts: (i64, i64, i64) = conn.query_row(
-        "SELECT (SELECT COUNT(*) FROM runs), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs)",
+        "SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs)",
         [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).unwrap();
     assert_eq!(
@@ -129,8 +129,12 @@ fn mechanical_failure_retains_earlier_success_in_the_same_exec() {
         "failed"
     );
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM runs", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
         0
     );
 }

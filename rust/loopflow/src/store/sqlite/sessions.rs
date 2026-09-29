@@ -144,14 +144,10 @@ impl SqliteStore {
         &self,
     ) -> StoreResult<Vec<(Option<AgentSession>, crate::session::SessionObservation)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT coalesce(i.session_id,r.session_id,r.id),r.id,r.created_at,r.task_id,r.wave_id,
-            json_object('id',r.id,'session_id',r.session_id,'invocation_id',r.invocation_id,
-                'task_id',r.task_id,'wave_id',r.wave_id,'work_source',r.work_source,
-                'created_at',r.created_at,'published',r.published,'cwd',r.cwd,'skill',r.skill,
-                'node',r.node,'iterations',r.iterations,'attempt',r.attempt,'provider',r.provider,
-                'model',r.model,'caller_run_id',r.caller_run_id,'outcome',r.outcome,'ended_at',r.ended_at)
-            FROM runs r LEFT JOIN agent_session_inputs i ON i.input_id=r.id
-            ORDER BY r.created_at,r.id")?;
+        let mut query = conn.prepare("SELECT coalesce(session_id,historical_session_id,input_id),input_id,
+            json_extract(imported_sql,'$.created_at'),historical_task_id,historical_wave_id,imported_sql
+            FROM agent_session_inputs WHERE imported_sql IS NOT NULL
+            ORDER BY json_extract(imported_sql,'$.created_at'),input_id")?;
         let rows = query.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -799,8 +795,8 @@ fn historical_operation_retained(conn: &Connection, row: &serde_json::Value) -> 
 }
 
 /// Sessionless agent rows used the input ID as their conversation selector.
-/// Mechanical or unclassified rows remain on the legacy table until their
-/// Flow/command evidence has a destination; they are never agent conversations.
+/// Mechanical or unclassified inputs retain their original SQL payload with
+/// unknown conversation attachment; they never manufacture agent conversations.
 fn historical_conversation(row: &serde_json::Value) -> StoreResult<AgentSession> {
     let input: String = serde_json::from_value(row["id"].clone())?;
     if !row["session_id"].is_null() {
@@ -862,29 +858,7 @@ pub(super) fn retain_history_in(
     for observation in history {
         if observation.source == "runs" {
             let caller = observation.payload["evidence"]["caller_run_id"].as_str();
-            let saved: Option<(String, Option<String>)> = conn
-                .query_row(
-                    "SELECT session_id,caller_input_id FROM agent_session_inputs WHERE input_id=?1",
-                    [observation.input_id.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
-            match saved {
-                Some((owner, original_caller))
-                    if owner != session.id || original_caller.as_deref() != caller =>
-                {
-                    return Err(invalid(format!(
-                        "input {} has conflicting Session or caller evidence",
-                        observation.input_id
-                    )));
-                }
-                Some(_) => {}
-                None => {
-                    conn.execute("INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
-                        params![observation.input_id.as_str(),session.id,caller])?;
-                    changed = true;
-                }
-            }
+            changed |= attach_input_in(conn, &observation.input_id, &session.id, caller)?;
         }
         let key = format!("{}:{}", observation.input_id, observation.source);
         let payload = serde_json::to_string(&observation.payload)?;
@@ -1094,6 +1068,44 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
     Ok(())
 }
 
+/// Attach an immutable input once; import can resolve an unknown attachment.
+fn attach_input_in(
+    conn: &Connection,
+    input: &RunId,
+    session: &str,
+    caller: Option<&str>,
+) -> StoreResult<bool> {
+    let saved: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT session_id,caller_input_id FROM agent_session_inputs WHERE input_id=?1",
+            [input.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    match saved {
+        Some((owner, original_caller)) => {
+            if owner.as_deref().is_some_and(|owner| owner != session)
+                || original_caller.as_deref() != caller
+            {
+                return Err(invalid(format!(
+                    "input {input} has conflicting Session or caller evidence"
+                )));
+            }
+            if owner.is_some() {
+                return Ok(false);
+            }
+            conn.execute(
+                "UPDATE agent_session_inputs SET session_id=?2 WHERE input_id=?1",
+                params![input.as_str(), session],
+            )?;
+        }
+        None => {
+            conn.execute("INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",params![input.as_str(),session,caller])?;
+        }
+    }
+    Ok(true)
+}
+
 fn insert_session_in(conn: &Connection, session: &AgentSession) -> StoreResult<()> {
     conn.execute("INSERT INTO agent_sessions(id,input_id,title,title_source,ready_summary,completed_at,
         created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
@@ -1106,13 +1118,11 @@ fn insert_session_in(conn: &Connection, session: &AgentSession) -> StoreResult<(
             session.flow_session_id,session.work_source.map(serde_json::to_value).transpose()?.as_ref().and_then(serde_json::Value::as_str),
             session.bound_at,session.input_published,session.cwd.to_string_lossy(),session.skill,session.provider,session.model,
             session.node,session.iterations.as_ref().map(serde_json::to_string).transpose()?])?;
-    conn.execute(
-        "INSERT INTO agent_session_inputs(input_id,session_id,caller_input_id) VALUES(?1,?2,?3)",
-        params![
-            session.input_id.as_str(),
-            session.id,
-            session.caller_input_id.as_ref().map(RunId::as_str)
-        ],
+    attach_input_in(
+        conn,
+        &session.input_id,
+        &session.id,
+        session.caller_input_id.as_ref().map(RunId::as_str),
     )?;
     Ok(())
 }

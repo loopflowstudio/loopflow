@@ -2110,8 +2110,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT COUNT(*) FROM runs WHERE invocation_id=?1",
-                    [op.id()],
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+                    [],
                     |row| row.get::<_, i64>(0)
                 )
                 .unwrap(),
@@ -2323,7 +2323,7 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         let counts: (i64, i64, i64) = conn
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM runs),
+                "SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'),
             (SELECT COUNT(*) FROM flow_events WHERE kind='operation_started'),
             (SELECT COUNT(*) FROM flow_events WHERE kind='operation_completed')",
                 [],

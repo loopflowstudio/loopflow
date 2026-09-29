@@ -2390,10 +2390,10 @@ fn import_stores_each_old_session_once_with_its_name() {
             dir.join("session-name.json"),
             json!({"schema_version": 1, "title": title, "source": source}),
         ));
-        write(
+        sources.borrow_mut().push(write(
             dir.join("provider-session.json"),
             json!({"schema_version": 1, "provider_session_id": format!("ses_{id}"), "account_id": null}),
-        );
+        ));
         id
     };
     let independent = json!({"kind": "independent"});

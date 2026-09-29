@@ -3342,6 +3342,19 @@ mod tests {
                 .enumerate()
                 {
                     if index != 0 {
+                        store.publish_attempt(
+                            flow.id(), flow.version,
+                            &flow.current_attempt.as_ref().unwrap().run_id,
+                            None, "codex", None,
+                        ).await.unwrap();
+                        let actor = store.sqlite.test_flow_turn(
+                            &flow.current_attempt.as_ref().unwrap().run_id,
+                        );
+                        store.sqlite.test_output(
+                            &actor,
+                            &serde_json::json!({"decision":"advance","summary":"Membership fixture completed"}),
+                        ).unwrap();
+                        store.sqlite.test_finish_flow_turn(&actor, "completed");
                         flow = store
                             .checkpoint_flow(flow.id(), flow.version, &cursor, None, None)
                             .await

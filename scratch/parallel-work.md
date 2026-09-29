@@ -123,29 +123,31 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Current published head is **29d5c5229e19c3179a33e17a34ca1248faf8a522**, based on
-**d4b283a873804c18ef1894d49bb690d67f4d59f5** (#1343, Swift compilation reuse).
-GitHub, Task publication and Git merge-base agree; auto-merge is absent.
-CI **36535480097** finished with 1,831 Rust passes, the same two cutover failures,
-15 skips and 134 unrun of 1,967; log `ci-29d5c5229-rust.log`. This publishes the
-populated migration repair and retained evidence. Rebase initially refused before any sequencer while
-supervisor notes were dirty; after their released checkpoint, rebase succeeded
-with the same base. `lf commit --no-add --push` published the exact checkpoint
-without the then-active research artifact. Main is repairing the cutover tests;
-OpenCode's missing native selection is an integration question, not assumed to
-be only stale fixture wiring. All remaining-work obligations stay open.
+Published head **325e0e13ec0a9ec85be8208caffa1c89a33abb52** follows a
+conflict-free rebase onto **76c8f8af404b424c454b5dcd945027e97e28a12c**.
+GitHub and Task publication agree; auto-merge is absent. Provider process
+continuity and inherited-history repair are included. `inherited-replacement.log`
+passes two public-history cases; all-target Clippy passes in 16.67s.
 
-The source Session suite subsequently finishes all twenty cases with fifteen
-passes and five failures (`session-cutover-provider-repair.log`). Direct provider
-PID/start recording repairs the scripted OpenCode continuation/review path;
-selected native decision integration stays red. Four remaining history/fixture
-cases then yield two passes and two inherited-source failures
-(`session-cutover-history-fixtures.log`). Task/Wave agree; original source needs
-proper evidence rather than mutable current-Session fallback. Verified direction
-`233e4769-5fb7-4ff7-ad91-8545c1ae7f33`. These are local intermediate results, not
-a green Session suite or full CI. Main retains their implementation and proof.
+CI **36537161552** finished red: 1,648 Rust passes, one interruption failure,
+15 skips and 319 unrun of 1,968. The owned telemetry driver exits 1 rather than
+130 (`ci-325e0e13e-rust.log`); its fixture discarded the diagnostic. Main now
+captures that output and is reproducing on Linux. The signal hook killing the
+child may let the main command return an error before the handler exits130;
+this is a source hypothesis, not established cause. Both OS exit and Exec outcome,
+plus owned-child settlement, remain required. All other test/lint/install jobs
+passed; scratch-clear and aggregate tests-result failed, merge-proof skipped.
+The run stopped before the retained OpenCode decision failure.
 
-Previous published head **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, same base:
+Local checkpoint **1d86cd4f3** deletes Run/RunEnd/ListedRun and obsolete CRUD.
+Four store proofs retain ancestry, Started, competing binding and uncapped child
+selectors; two CLI proofs retain scoped inventory and import identity. All six
+pass, and all-target Clippy passes in 15.83s. Historical SQL, its cross-table
+triggers and remaining lifecycle readers still need conversion. Neither zero-row
+assertions nor this API deletion proves table removal. Supervisor review and CI
+direction: `eefbfb8d`, `b679d28c`, `d00f81e1`. All remaining-work obligations stay open.
+
+Earlier published head **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, base d4b283a87:
 CI **36533494844** finished with failure: 1,829 Rust passes, two failures,
 15 skips and 134 unrun tests. The Task Flow fixture still queries obsolete Run
 rows; the taskless decision stand-in lacks native caller authority. Verified
@@ -212,11 +214,14 @@ retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
 
-Published **24ea61517 against d4b283a87**:
-**+15,501 / −29,637 = net −14,136**.
-Rust/Swift +14,451/−29,575; Python/shell +48/−62; SQL +1,002/−0.
-Receipt `.lf/tmp/execution-model/status-counts-24ea61517.json` reproduces the
-preceding da19 measurement first. Current migration edits are excluded.
+Local checkpoint **1d86cd4f3 against 76c8f8af**:
+**+15,096 / −29,648 = net −14,552**.
+Rust/Swift +14,019/−29,586; Python/shell +48/−62; SQL +1,029/−0.
+The Run API deletion alone, against its parent325e0e13e, is
+**+29 / −513 = net −484 production lines**. Receipt
+`.lf/tmp/execution-model/status-counts-1d86cd4f3.json` first reproduces the prior
+24ea61517 measurement exactly. Uncommitted interruption edits are excluded;
+publication of this local checkpoint has not been verified.
 
 Earlier whole-branch measurements and exact receipts are retained in the archive
 and committed note above. Changed bases prevent comparing totals as per-cut

@@ -1240,6 +1240,12 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> anyhow::Result<()> {
+    let result = run();
+    loopflow::engine::agent::wait_for_interrupt_cleanup();
+    result
+}
+
+fn run() -> anyhow::Result<()> {
     loopflow::machine_install::dispatch_entry_gate(&loopflow::machine_install::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
@@ -1285,12 +1291,8 @@ fn main() -> anyhow::Result<()> {
             loopflow::store::isolate_branch_data()?;
         }
     }
-    ctrlc::set_handler(|| {
-        loopflow::engine::agent::run_interrupt_cleanups();
-        loopflow::engine::agent::kill_child_if_running();
-        std::process::exit(130);
-    })
-    .expect("failed to set Ctrl+C handler");
+    ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
+        .expect("failed to set Ctrl+C handler");
 
     // Screenshot capture owns no Home, repository, account, or Run state. Its
     // hidden supervisor must also be able to clean up after its public parent

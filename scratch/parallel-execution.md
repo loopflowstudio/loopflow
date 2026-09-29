@@ -889,3 +889,33 @@ fixtures. Final all-target Clippy passes in 15.83s; formatting and whitespace
 pass. No table is dropped and no historical migration bytes change. Next is the
 reported Linux interruption failure: capture its discarded child diagnostic
 before attributing the exit-code mismatch or changing production behavior.
+
+
+## Coordinate interruption with command return
+
+Supervisor reported hosted 325e0e13e returning OS exit 1 instead of 130 in the
+owned scorecard interruption proof. The old fixture discarded the diagnostic.
+Output capture and joint OS/Exec assertions now retain it. The first isolated
+Linux run (`linux-interrupt.log`) passes, so it does not reproduce hosted timing.
+A separate controlled probe delays return from the real group-kill syscall in
+the signal hook. `linux-interrupt-ordering-red.log` reproduces OS exit 1 alongside
+Exec interrupted/130, with stderr “telemetry scorecard exited with signal: 9
+(SIGKILL)”. This establishes the supported race mechanism under fault injection,
+not the unavailable stderr of the original hosted failure.
+
+Ordinary command return now waits on the existing interrupt-hook mutex. The
+signal handler holds that mutex through its cleanup, child termination and exit
+130, so the child error cannot overtake cleanup. No new interrupt state, process
+owner, accepted exit code, production sleep or retry is introduced. The Linux
+fixture retains that controlled ordering and requires both truthful Exec outcome
+and no surviving owned scorecard. Source snapshots and diagnostics are retained
+under `.lf/tmp/cut-i/linux-interrupt*-source.json` and matching logs. Docker uses
+the existing isolated-account/build-cache pattern; no host Home is mounted.
+
+`linux-interrupt-final.log` passes the controlled ordering in 1.17s with
+matching source hashes. Both ordinary exit/journal proofs pass in
+`interrupt-ordinary-exit.log` (2.491s/3.415s). All-target Clippy passes in 15.67s;
+formatting and whitespace pass. Each disposable Linux container was removed.
+The Run API deletion alone is +29/-513 production lines versus 325e0e13e
+(supervisor receipt `status-counts-1d86cd4f3.json`), excluding tests/docs.
+Neither checkpoint closes native decision, import/table or reader obligations.

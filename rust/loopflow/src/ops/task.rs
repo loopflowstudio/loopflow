@@ -2321,12 +2321,14 @@ pub(crate) fn attach_task_github_pr(
         let opened = pr
             .github()
             .is_none_or(|github| github.number != number || github.url != url);
-        let publication = pr.publication.as_mut().ok_or_else(|| {
-            task_error(format!(
-                "Task {} has no durable PR publication request",
-                task.plan.identifier
-            ))
-        })?;
+        // An existing GitHub PR may predate local publication. Retain its
+        // identity now; reviewer copy is recorded only after promotion succeeds.
+        let publication = pr.publication.get_or_insert_with(|| PrPublication {
+            requested_at: time::OffsetDateTime::now_utc(),
+            presentation: None,
+            github: None,
+            merge: None,
+        });
         // A known identity can carry a head-pinned merge request. Revoke it
         // before replacing its head; the previously acknowledged identity
         // remains stored if that reconciliation fails. First attachment has

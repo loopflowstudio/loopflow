@@ -96,7 +96,18 @@ The final tests cover missing, empty, targeted and ambiguous planning over one
 saved observation, plus per-Wave unavailable target rendering. This is fixture
 and presentation-model evidence, not a rendered Desktop or full hosted result.
 
-Then resume execution owners and the full remaining-work matrix: publication,
+Published docs/metrics head: `fa263c19d`, PR1296 open with auto-merge null.
+New whole-boundary RED: `flow-operation-owner-red.log` runs the public CLI with
+two harmless in-process `rebase --plan` operations in a disposable repository/Home.
+The command succeeds but SQL counts are `(runs=2, agent_sessions=0, execs=1)`;
+the contract assertion expects `(0,0,1)`. The test retains its subsequent expected
+Flow start/result history assertions; those have not run past the first failure.
+Retained edit: `flow_tests.rs::mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec`.
+No production conversion edit yet. Main advanced to `c3e8372a3`; integrate via
+pinned `lf rebase` before widening this change. This RED is intentional unfinished
+acceptance work, not a passing checkpoint or permission to discard the test.
+
+Next resume execution owners and the full remaining-work matrix: publication,
 decision membership and mechanical results to final Session owners; offline
 import before Run deletion; indexed reads, usage, Rust/Swift DTOs, Desktop,
 Chapters, dense measurements and configured acceptance. Active builtin chapter

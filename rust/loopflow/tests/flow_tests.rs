@@ -25,6 +25,64 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
     fs::write(flows_dir.join(format!("{name}.yaml")), content).unwrap();
 }
 
+#[test]
+fn mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    write_flow(
+        repo.path(),
+        "mechanical-proof",
+        "- op: rebase --plan\n- op: rebase --plan\n",
+    );
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["flow", "mechanical-proof", "-b", "--no-loopflow"],
+        None,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let counts: (i64, i64, i64) = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM runs), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs)",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).unwrap();
+    assert_eq!(
+        counts,
+        (0, 0, 1),
+        "in-process operations create no Run, conversation or synthetic Exec"
+    );
+    let history: Vec<(String, i64, String)> = conn
+        .prepare("SELECT kind,node,exec_id FROM flow_events ORDER BY seq")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .map(|(kind, node, _)| (kind.as_str(), *node))
+            .collect::<Vec<_>>(),
+        vec![
+            ("operation_started", 0),
+            ("operation_completed", 0),
+            ("operation_started", 1),
+            ("operation_completed", 1)
+        ]
+    );
+    assert!(history.iter().all(|(_, _, exec)| exec == &history[0].2));
+    assert_eq!(
+        conn.query_row("SELECT state FROM flow_sessions", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        "completed"
+    );
+}
+
 fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let flow = load_flow(name, repo).unwrap();
     expand_flow(&flow, repo).unwrap()

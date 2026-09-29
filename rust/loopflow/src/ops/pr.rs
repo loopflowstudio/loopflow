@@ -51,6 +51,14 @@ pub struct PrCopy {
     pub body: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PublishedPrCopy {
+    #[serde(rename = "headRefOid")]
+    head_sha: String,
+    #[serde(flatten)]
+    copy: PrCopy,
+}
+
 const GITHUB_PR_TITLE_MAX_CHARS: usize = 256;
 const TASK_PR_CONTEXT_START: &str = "<!-- loopflow:task-pr-context:start -->";
 const TASK_PR_CONTEXT_END: &str = "<!-- loopflow:task-pr-context:end -->";
@@ -456,6 +464,37 @@ fn is_recent_ancestor(repo: &Path, commit: &str, max_ahead: u32) -> OpsResult<bo
         .parse::<u32>()
         .unwrap_or(u32::MAX);
     Ok(ahead <= max_ahead)
+}
+
+/// Read before pushing: a push can advance the PR head without updating its copy.
+pub(crate) fn published_pr_copy(repo: &Path, head: &str) -> OpsResult<Option<PrCopy>> {
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            &branch,
+            "--state",
+            "open",
+            "--json",
+            "headRefOid,title,body",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("gh pr list --head {branch}"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    let copies: Vec<PublishedPrCopy> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Message(format!("failed to read published PR copy: {error}")))?;
+    Ok(copies
+        .into_iter()
+        .find(|published| published.head_sha == head)
+        .map(|published| published.copy))
 }
 
 pub fn generate_pr_copy(

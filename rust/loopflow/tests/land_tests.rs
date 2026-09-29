@@ -546,6 +546,105 @@ fn final_preparation_only_rewrites_a_single_commit_when_the_base_changes() {
 }
 
 #[test]
+fn final_preparation_preserves_published_copy_only_for_the_same_head() {
+    for (manual_merge, changed_head, body_override) in [
+        (false, false, None),
+        (true, false, None),
+        (false, false, Some("Updated checks")),
+        (false, true, None),
+    ] {
+        let home = tempfile::TempDir::new().unwrap();
+        let repo = TestRepo::new();
+        repo.create_file("scratch/.gitkeep", "");
+        repo.stage_all();
+        repo.commit("track empty scratch");
+        repo.push();
+        repo.create_branch("feature");
+        repo.create_file("feature.txt", "reviewed change");
+        repo.stage_all();
+        repo.commit("reviewed change");
+        repo.push_new_branch("feature");
+        let published_head = repo.head_sha();
+        if changed_head {
+            repo.create_file("feature.txt", "new behavior");
+            repo.stage_all();
+            repo.commit("change the behavior");
+        }
+        let log_path = home.path().join("gh.log");
+        let title_path = home.path().join("title");
+        let body_path = home.path().join("body");
+        let edit = format!(
+            r#"if [ "$1 $2" = "pr edit" ]; then
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --title) printf '%s' "$2" > '{}'; shift 2 ;;
+      --body) printf '%s' "$2" > '{}'; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  exit 0
+fi
+"#,
+            title_path.display(),
+            body_path.display()
+        );
+        let script = gh_existing_pr_script(log_path.to_str().unwrap())
+            .replace("git rev-parse HEAD", "git rev-parse @{upstream}")
+            .replace(
+                r#"\"state\":\"OPEN\""#,
+                r#"\"state\":\"OPEN\",\"title\":\"reviewed title\",\"body\":\"Reviewed behavior. 272 tests passed.\""#,
+            )
+            .replace("if [ \"$1 $2\" = \"pr view\" ]; then", &format!("{edit}if [ \"$1 $2\" = \"pr view\" ]; then"));
+        let provider = if changed_head {
+            agent_script()
+        } else {
+            "#!/bin/sh\necho 'published copy needs no provider' >&2\nexit 71\n".to_string()
+        };
+        let _env = EnvGuard::with_home(
+            &[("gh", script.as_str()), ("codex", provider.as_str())],
+            Some(home.path()),
+        );
+        let options = LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: None,
+            pr_body: body_override.map(str::to_string),
+            agent: Some("codex".to_string()),
+        };
+        if manual_merge {
+            submit(repo.path(), &options, &NullProgress).unwrap();
+        } else {
+            land(repo.path(), &options, &NullProgress).unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(title_path).unwrap(),
+            if changed_head {
+                "generated title"
+            } else {
+                "reviewed title"
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(body_path).unwrap(),
+            body_override.unwrap_or(if changed_head {
+                "generated body"
+            } else {
+                "Reviewed behavior. 272 tests passed."
+            })
+        );
+        if !changed_head {
+            assert_eq!(repo.head_sha(), published_head);
+        }
+    }
+}
+
+#[test]
 fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
     repo.create_branch("feature");

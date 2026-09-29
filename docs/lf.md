@@ -1100,6 +1100,11 @@ Nothing merges automatically. Task and non-Task branches use the same command.
 lf pr submit
 ```
 
+`submit`, `arm`, and `land` keep the published title and body when the remote
+and local heads match. Explicit copy or valid gate output overrides that copy;
+unpublished changes still generate a fresh description. Task merge consequences
+are updated regardless of where the copy came from.
+
 Inside a managed Task worktree, `submit` records a user-owned exact-head merge
 request in the Task PR state. It does not advance or consult the Task's Flow
 position. Use `-c` to complete the Task after merge or `--next <slug>` to

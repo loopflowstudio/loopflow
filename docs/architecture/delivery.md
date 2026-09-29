@@ -84,6 +84,12 @@ watches through merge. `submit` performs the same preparation but leaves the exa
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
 
+Final preparation keeps the existing PR title and body when its published head
+matches the local head. Explicit copy and valid gate output take precedence;
+unpublished changes still generate fresh copy. Task merge-disposition text is
+updated after that selection. Preparing an unchanged published PR needs no agent
+just to rewrite its description.
+
 Repeating `arm` or `land` on a clean, already armed exact head resumes the
 existing request, including standalone PRs. It preserves the commit, merge
 queue position, and CI. Explicit standalone title/body edits update only those

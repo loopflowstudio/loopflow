@@ -168,3 +168,7 @@ Archived ledger sections (links point to the exact original lines):
 This consolidation preserves original red results rather than turning historical
 failures into current passing claims. Unsettled acceptance stays in the active full
 scope documents; repeated patches/log chronology stays in the exact archive.
+
+## Structured-result CI repair (2026-09-29)
+
+Published `61c69c6` failed the membership fixture in hosted Rust run 36625295038; Swift/UI passed. The fixture now publishes and completes an exact typed native turn. A non-fail-fast materialized copy ran all 2,013 local tests: 2,001 passed, 12 failed. The legacy-verdict fixture now checks retained bytes without granting navigation; the landing fixture owns a disposable Git repo. All three repaired cases pass (`published-ci-final-repairs.log`). Remaining failures pass in focused checks with development provenance, an isolated build target, Git context, and the runner's inherited DB pin removed (`published-ci-isolated-target.log`, `published-ci-account-isolation.log`, `published-ci-git-context.log`, `published-ci-auth-context.log`). Formatting/all-target Clippy pass. Logs are under `.lf/tmp/cut-i/`. This is composed local evidence, not a fresh green hosted matrix or whole-design completion. Captured-event work remains uncommitted.

@@ -244,10 +244,9 @@ impl SqliteStore {
         if text.is_empty() {
             return Err(StoreError::InvalidData("Steer text cannot be empty".into()));
         }
-        let task = super::children::task_on(tx, task_id)?.ok_or(StoreError::NotFound)?;
         let event = super::children::insert_task_event_in(
             tx,
-            &task,
+            task_id,
             &TaskEventKind::Steer {
                 author: author.clone(),
                 text: text.to_string(),
@@ -269,8 +268,7 @@ impl SqliteStore {
         require_ready_work(&tx, work)?;
         let id = match work {
             WorkRef::Task(task_id) => {
-                let task = super::children::task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-                super::children::insert_task_event_in(&tx, &task, &TaskEventKind::Interrupt)?.id
+                super::children::insert_task_event_in(&tx, task_id, &TaskEventKind::Interrupt)?.id
             }
             WorkRef::Project(project_id) => {
                 let project = tx.query_row(
@@ -851,6 +849,22 @@ mod durable_store_tests {
         };
         store.insert_task(&task, &pr).unwrap();
         (dir, store, task_id)
+    }
+
+    #[test]
+    fn task_events_reject_missing_tasks_without_returning_a_previous_event() {
+        let (_dir, store, task) = store_with_task();
+        let kind = TaskEventKind::Progress {
+            summary: "work retained".into(),
+        };
+        let event = store.append_task_event(&task, &kind).unwrap();
+        assert_eq!(event.task_id, task);
+        assert_eq!(event.kind, kind);
+        assert!(matches!(
+            store.append_task_event(&TaskId::new(), &kind),
+            Err(crate::store::StoreError::NotFound)
+        ));
+        assert_eq!(store.task_events_after(&task, 0).unwrap(), vec![event]);
     }
 
     fn autonomous_position(task_id: &TaskId) -> FlowSession {

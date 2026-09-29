@@ -486,25 +486,17 @@ pub(crate) async fn drive(
             progress: Mutex::new(None),
             launcher,
         };
-        let steps = flow.invocation.steps.clone();
+        let steps = &flow.invocation.steps;
         let outcome = if flow.cursor.index == steps.len() {
             Ok(Some(FlowOutcome::Completed))
         } else {
             match FlowEngine::new(&executor)
-                .tick(&steps, &mut flow.cursor)
+                .tick(steps, &mut flow.cursor)
                 .await
             {
                 Ok(outcome) => (&executor).checkpoint(&flow.cursor).await.map(|()| outcome),
                 Err(error) => Err(error),
             }
-        };
-        let outcome = match outcome {
-            Ok(None) => {
-                owned_claim = executor.claim();
-                continue;
-            }
-            Ok(Some(outcome)) => Ok(outcome),
-            Err(error) => Err(error),
         };
         let version = executor.version();
         let claim = executor.claim();
@@ -514,7 +506,11 @@ pub(crate) async fn drive(
             .expect("Flow progress mutex poisoned")
             .take();
         return match outcome {
-            Ok(FlowOutcome::Completed) => {
+            Ok(None) => {
+                owned_claim = claim;
+                continue;
+            }
+            Ok(Some(FlowOutcome::Completed)) => {
                 store
                     .end_flow(
                         &id,
@@ -525,8 +521,8 @@ pub(crate) async fn drive(
                     .await?;
                 Ok(FlowOutcome::Completed)
             }
-            Ok(FlowOutcome::Waiting) => Ok(FlowOutcome::Waiting),
-            Ok(FlowOutcome::Blocked(reason)) => {
+            Ok(Some(FlowOutcome::Waiting)) => Ok(FlowOutcome::Waiting),
+            Ok(Some(FlowOutcome::Blocked(reason))) => {
                 store
                     .fail_flow(&id, version, claim.as_ref(), &TaskFlowBlocker::now(&reason))
                     .await?;

@@ -232,6 +232,12 @@ lengths plus its substituted `__WAIT__` placeholder); `runtime-ruff-baseline.jso
 retains that comparison. It is not a passing template-wide Ruff result.
 These are focused implementation checks; no full diagnostic or gate reran.
 
+Compression removes full Task reads from event insertion, capture decoding from
+root-ID lookup, and per-tick graph cloning/outcome rewrapping. Final proof:
+`runtime-compress-final.log` 29 passes; `runtime-compress-public.log` three scripted
+public CLI passes; `runtime-compress-clippy.log`, formatting and diff checks pass.
+No schema, native retry contract, configured acceptance or delivery state changed.
+
 Remaining: review/integrate discovery and released import; final typed history
 and Desktop paging/reconciliation; native retry-contract choice; configured
 provider/Desktop and full final preservation matrix. Jack's complete concept

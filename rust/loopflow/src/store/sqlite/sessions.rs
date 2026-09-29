@@ -150,8 +150,6 @@ impl SqliteStore {
                 'node',r.node,'iterations',r.iterations,'attempt',r.attempt,'provider',r.provider,
                 'model',r.model,'caller_run_id',r.caller_run_id,'outcome',r.outcome,'ended_at',r.ended_at)
             FROM runs r LEFT JOIN agent_session_inputs i ON i.input_id=r.id
-            WHERE i.session_id IS NOT NULL OR r.session_id IS NOT NULL
-                OR r.skill IS NOT NULL OR (r.provider IS NOT NULL AND r.provider!='loopflow')
             ORDER BY r.created_at,r.id")?;
         let rows = query.query_map([], |row| {
             Ok((
@@ -163,23 +161,33 @@ impl SqliteStore {
                 row.get::<_, String>(5)?,
             ))
         })?;
-        rows.map(|row| {
+        let mut inputs = Vec::new();
+        for row in rows {
             let (session, input, observed_at, task, wave, raw) = row?;
             let evidence: serde_json::Value = serde_json::from_str(&raw)?;
+            if !historical_agent_input(&conn, &evidence)? {
+                continue;
+            }
             let session = match session_in(&conn, &session)? {
                 Some(session) => session,
                 None => historical_conversation(&evidence)?,
             };
-            if evidence["session_id"].as_str().is_some_and(|id| id != session.id) {
-                return Err(invalid(format!("historical input {input} names a different Session")));
+            if evidence["session_id"]
+                .as_str()
+                .is_some_and(|id| id != session.id)
+            {
+                return Err(invalid(format!(
+                    "historical input {input} names a different Session"
+                )));
             }
-            Ok((session, crate::session::SessionObservation {
+            inputs.push((session, crate::session::SessionObservation {
                 input_id: RunId::parse(&input).map_err(invalid)?, source: "runs".into(), observed_at,
                 task_id: task.map(|task| TaskId::parse(&task)).transpose().map_err(invalid)?,
                 wave_id: wave.map(|wave| crate::id::WaveId::parse(&wave)).transpose().map_err(invalid)?,
                 payload: serde_json::json!({"input_id":input,"source":"runs","evidence":evidence}),
-            }))
-        }).collect()
+            }));
+        }
+        Ok(inputs)
     }
 
     /// Restore historical conversation facts without borrowing the importing Exec's Work.
@@ -194,7 +202,8 @@ impl SqliteStore {
         }
         let mut query = conn.prepare("SELECT id FROM (
             SELECT input_id AS id FROM agent_session_inputs UNION SELECT caller_input_id FROM agent_session_inputs)
-            WHERE substr(id,1,length(?1))=?1 ORDER BY id LIMIT 2")?;
+            WHERE substr(id,1,length(?1))=?1 OR (substr(id,1,4)='run_' AND substr(id,5,length(?1))=?1)
+            ORDER BY id LIMIT 2")?;
         let ids = query
             .query_map([selector], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -221,6 +230,38 @@ impl SqliteStore {
             crate::run_record::RunSnapshot,
         )>,
     > {
+        self.conversation_inputs(wave, project, task, caller, (since, include_finished), None)
+    }
+
+    pub(crate) fn input_snapshot(
+        &self,
+        selector: &str,
+    ) -> StoreResult<crate::run_record::RunSnapshot> {
+        let selected = self.resolve_history_input(selector)?;
+        let input = self
+            .session(&selected)?
+            .map(|session| session.input_id.to_string())
+            .unwrap_or(selected);
+        self.conversation_inputs(None, None, None, None, (0, false), Some(&input))?
+            .pop()
+            .map(|(_, snapshot)| snapshot)
+            .ok_or(StoreError::NotFound)
+    }
+
+    fn conversation_inputs(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        caller: Option<&str>,
+        window: (i64, bool),
+        input: Option<&str>,
+    ) -> StoreResult<
+        Vec<(
+            Option<crate::durable::WorkRef>,
+            crate::run_record::RunSnapshot,
+        )>,
+    > {
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare("WITH inputs AS (
@@ -236,8 +277,9 @@ impl SqliteStore {
                     AND r.receipt_key=i.input_id||':runs'
                 LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
                     AND terminal.receipt_key=i.input_id||':terminal.json'
-                WHERE m.seq IS NOT NULL OR json_extract(r.payload,'$.evidence.published')=1
-                    OR (i.input_id=s.input_id AND s.input_published=1))
+                WHERE (?7 IS NULL OR i.input_id=?7) AND
+                    (?7 IS NOT NULL OR m.seq IS NOT NULL OR json_extract(r.payload,'$.evidence.published')=1
+                    OR (i.input_id=s.input_id AND s.input_published=1)))
                 SELECT session_id,input_id,caller_input_id,started,task_id,wave_id,
                     (SELECT name FROM waves WHERE id=inputs.wave_id),
                     (SELECT p.project_slug FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=inputs.task_id),
@@ -251,7 +293,7 @@ impl SqliteStore {
                 AND (started>=?5 OR (?6 AND ended>=?5))
                 ORDER BY started DESC,input_id DESC")?;
             let rows = query.query_map(
-                params![wave, project, task, caller, since, include_finished],
+                params![wave, project, task, caller, window.0, window.1, input],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -704,6 +746,32 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn historical_agent_input(conn: &Connection, row: &serde_json::Value) -> StoreResult<bool> {
+    match row["provider"].as_str() {
+        Some("loopflow") => return Ok(false),
+        Some(_) => return Ok(true),
+        None if row["session_id"].is_string() => return Ok(true),
+        None => {}
+    }
+    let (Some(flow), Some(node)) = (row["invocation_id"].as_str(), row["node"].as_u64()) else {
+        return Ok(false);
+    };
+    let Some(flow) = super::flows::flow_in(conn, flow)? else {
+        return Ok(false);
+    };
+    let graph =
+        crate::engine::flow_graph::FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
+    Ok(graph
+        .node_at(u32::try_from(node).map_err(invalid)?)
+        .is_some_and(|node| {
+            matches!(
+                node.kind,
+                crate::engine::flow_graph::FlowNodeKind::Skill
+                    | crate::engine::flow_graph::FlowNodeKind::Xor
+            )
+        }))
 }
 
 /// Sessionless agent rows used the input ID as their conversation selector.

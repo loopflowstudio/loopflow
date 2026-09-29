@@ -5611,6 +5611,26 @@ mod tests {
         conn.execute("INSERT INTO runs(id,task_id,wave_id,created_at,published,cwd,skill,provider,caller_run_id,work_source,outcome,ended_at)
             VALUES(?1,?2,?3,20,1,'/missing-original-checkout','research','claude',?4,'inherited','failed',21)",
             rusqlite::params![standalone.as_str(),task.as_str(),wave,caller.as_str()]).unwrap();
+        let mechanical = crate::durable::RunId::new();
+        let mut operation =
+            crate::durable::test_flow_invocation("old-operation", 0, "publish", None, false);
+        operation.steps = vec![crate::engine::ConcreteStep::Op(crate::engine::ConcreteOp {
+            item: crate::engine::Op {
+                command: "publish".into(),
+                args: vec![],
+            },
+            flow_parents: vec![],
+        })];
+        conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+            VALUES(?1,?2,'/missing-original-checkout',0,2,4,0,1,'current')",rusqlite::params![operation.id,serde_json::to_string(&operation).unwrap()]).unwrap();
+        conn.execute("INSERT INTO runs(id,invocation_id,node,iterations,attempt,created_at,published,cwd,skill,provider,outcome,ended_at)
+            VALUES(?1,?2,0,'[[2]]',1,22,1,'/missing-original-checkout','publish','loopflow','completed',23)",
+            rusqlite::params![mechanical.as_str(),operation.id]).unwrap();
+        conn.execute(
+            "UPDATE flow_sessions SET current_run_id=?1 WHERE id=?2",
+            rusqlite::params![mechanical.as_str(), operation.id],
+        )
+        .unwrap();
         conn.execute_batch("COMMIT").unwrap();
         // Canonical adoption applies the unrecorded suffix before validating
         // the resulting schema. A failure must roll back SQL and both ledgers.
@@ -5698,13 +5718,16 @@ mod tests {
             );
         }
         assert_eq!(
-            conn.query_row("SELECT selected_start FROM flow_sessions", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
+            conn.query_row(
+                "SELECT selected_start FROM flow_sessions WHERE id=?1",
+                [&capture.id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
             3
         );
         let references: Vec<i64> = conn
-            .prepare("SELECT session_event FROM flow_events ORDER BY seq")
+            .prepare("SELECT session_event FROM flow_events WHERE session_event IS NOT NULL ORDER BY seq")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
@@ -5735,6 +5758,32 @@ mod tests {
             .unwrap(),
             17
         );
+        assert!(store.session_for_run(&mechanical).unwrap().is_none());
+        let operation_history: Vec<(String,Option<i64>,Option<String>,String)> = conn.prepare(
+            "SELECT kind,observed_at,exec_id,payload FROM flow_events WHERE flow_id=?1 ORDER BY seq").unwrap()
+            .query_map([&operation.id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap()
+            .collect::<Result<_,_>>().unwrap();
+        assert_eq!(operation_history.len(), 2);
+        assert_eq!(operation_history[0].0, "operation_started");
+        assert_eq!(operation_history[0].1, None);
+        assert_eq!(operation_history[1].0, "operation_completed");
+        assert_eq!(operation_history[1].1, Some(23));
+        for (_, _, exec, payload) in &operation_history {
+            assert_eq!(exec, &None);
+            let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
+            assert_eq!(payload["sql"]["id"], mechanical.as_str());
+            assert_eq!(payload["sql"]["skill"], "publish");
+            assert_eq!(payload["sql"]["provider"], "loopflow");
+        }
+        let (input, operation_start): (Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT current_run_id,operation_start FROM flow_sessions WHERE id=?1",
+                [&operation.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(input.is_none());
+        assert!(operation_start.is_some());
         validate_foreign_keys(&conn).unwrap();
     }
 

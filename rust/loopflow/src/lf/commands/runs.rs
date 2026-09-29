@@ -237,8 +237,14 @@ pub fn observe_provider_session() -> Result<()> {
 
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
     let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
+    let database = crate::store::observability_database_path()?;
+    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+    let snapshot = store
+        .input_snapshot(selector)
         .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    let input = crate::durable::RunId::parse(&snapshot.id)?;
+    let dir = crate::run_record::record_dir(&home, &input)
+        .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.id))?;
     if events {
         match std::fs::read_to_string(dir.join("events.jsonl")) {
             Ok(contents) => print!("{contents}"),
@@ -247,8 +253,6 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         }
         return Ok(());
     }
-    let snapshot = crate::run_record::read_run_snapshot(&dir)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
     if final_answer {
         let answer = crate::run_record::read_final_answer(&dir)
             .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
@@ -286,10 +290,17 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         "Agent: {}",
         format_agent(Some(&snapshot.harness), snapshot.model.as_deref())
     );
-    println!("Working directory: {}", manifest.cwd.display());
+    println!(
+        "Working directory: {}",
+        snapshot.worktree.as_deref().unwrap_or("unknown")
+    );
+    let manifest = crate::run_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",
-        match manifest.launch.as_ref() {
+        match manifest
+            .as_ref()
+            .and_then(|manifest| manifest.launch.as_ref())
+        {
             Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
             Some(_) | None => "unavailable",
         }

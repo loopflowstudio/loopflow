@@ -66,7 +66,7 @@ SCAN_ROOTS = (
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "target", "DerivedData", "__pycache__"}
 # Generated docs, historical evidence and local receipts are not live architecture.
-IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"), Path(".lf/tmp"))
+IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"), Path(".lf/tmp"), Path(".lf/log"))
 
 
 @dataclass(frozen=True)

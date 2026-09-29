@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Stdio;
 
 use clap::Parser;
 use serde::Deserialize;
@@ -6,6 +7,7 @@ use time::OffsetDateTime;
 
 use crate::engine::flow::Op;
 use crate::engine::git::get_default_branch;
+use crate::engine::process::ProcessGroupGuard;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -118,9 +120,23 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg("--runs")
         .arg(run_input.path())
         .arg("--envelope");
-    let output = command
-        .output()
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let child = command
+        .spawn()
         .map_err(|error| OpsError::Message(format!("launch telemetry scorecard: {error}")))?;
+    let process_group = ProcessGroupGuard::new(child.id());
+    let output = child
+        .wait_with_output()
+        .map_err(|error| OpsError::Message(format!("wait for telemetry scorecard: {error}")))?;
+    process_group.disarm();
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(OpsError::Message(format!(

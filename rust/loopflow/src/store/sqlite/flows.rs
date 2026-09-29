@@ -202,37 +202,6 @@ fn report_to_task_in(conn: &Connection, id: &str, kind: &TaskEventKind) -> Store
     Ok(())
 }
 
-/// The captured graph and cursor of any invocation, a Task's included.
-pub(super) fn capture_in(
-    conn: &Connection,
-    id: &str,
-) -> StoreResult<(QueuedInvocation, ExecutionCursor)> {
-    let (capture, cursor, index, iteration, updated_at): (String, Option<String>, i64, i64, i64) =
-        conn.query_row(
-            "SELECT invocation_json, review_json, step_index, iteration, updated_at
-             FROM flow_sessions WHERE id=?1",
-            [id],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            },
-        )?;
-    let capture: QueuedInvocation = serde_json::from_str(&capture)?;
-    let cursor = decode_flow_cursor(
-        cursor.as_deref(),
-        index,
-        iteration,
-        &mut None,
-        OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?,
-    )?;
-    Ok((capture, cursor))
-}
-
 fn validate_flow(flow: &FlowSession) -> StoreResult<()> {
     crate::engine::flow::validate_repeats(&flow.invocation.steps).map_err(invalid)?;
     let step = flow
@@ -703,7 +672,7 @@ pub(super) fn import_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResu
         ));
     }
     if let Some(task) = &flow.task_id {
-        let wave = super::runs::task_wave_in(conn, task)?;
+        let wave = super::durable::task_wave_in(conn, task)?;
         if flow.wave_id.as_ref() != Some(&wave) {
             return Err(invalid("historical Flow Task and Wave disagree"));
         }
@@ -2050,10 +2019,7 @@ mod tests {
             .unwrap();
         assert_eq!(unknown, (None, None));
         drop(conn);
-        assert!(
-            store.run(run).unwrap().is_none(),
-            "native success cannot invent a Run"
-        );
+        store.assert_no_historical_runs();
     }
 
     #[test]
@@ -2109,7 +2075,7 @@ mod tests {
         assert_eq!(same.title, "Investigation");
         assert_eq!(same.input_id, replacement.input_id);
         assert_ne!(run.input_id, replacement.input_id);
-        assert!(store.run(&run.input_id).unwrap().is_none());
+        store.assert_no_historical_runs();
         let history = store.session_history(&session.id, 0, 0).unwrap();
         assert!(history
             .iter()

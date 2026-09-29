@@ -101,37 +101,7 @@ pub enum TitleSource {
     Human,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Run {
-    pub id: RunId,
-    pub session_id: Option<String>,
-    pub invocation_id: Option<String>,
-    pub node: Option<u32>,
-    pub iterations: Option<Vec<Vec<u32>>>,
-    pub attempt: Option<u32>,
-    pub task_id: Option<TaskId>,
-    pub wave_id: Option<WaveId>,
-    pub work_source: Option<WorkSource>,
-    pub created_at: i64,
-    pub published: bool,
-    pub cwd: std::path::PathBuf,
-    pub skill: Option<String>,
-    /// Absent on review Runs recorded before providers were stored.
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    /// The Run that asked for this one. Causality, never membership.
-    pub caller_run_id: Option<RunId>,
-    /// Absent until the Run settles.
-    pub ended: Option<RunEnd>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RunEnd {
-    pub outcome: String,
-    pub at: i64,
-}
-
-/// The Work a launch names. The Run constructor fills a Task's Wave.
+/// The Work a launch names. Admission fills a Task's Wave.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunWork {
     pub task_id: Option<TaskId>,

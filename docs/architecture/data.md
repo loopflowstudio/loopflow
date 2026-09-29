@@ -13,6 +13,22 @@ and provider-native state keep their own storage formats. This page specifies
 those ownership boundaries. [Cutover status](../architecture-reference.md#cutover-status)
 distinguishes this contract from the current source inventory and CLI wire format.
 
+## Rust store API migration
+
+The obsolete `session::Run`, `session::RunEnd`, and `sqlite::ListedRun` types
+and `Store::{run,create_run,runs}` / `SqliteStore::{run,create_run,end_run,runs}`
+methods are removed. This is a source-breaking change for Rust callers.
+Reserve conversations with `create_session`, retain replacement inputs with
+`replace_session_input`, and read conversation identity through `session` or
+`sessions`. Read native evidence through `SqliteStore::session_history`; only the
+existing Flow settlement operations consume successful selected history.
+An actual command records its Exec outcome independently of agent completion.
+
+Historical SQL rows remain import input until preservation and dependent triggers
+are converted. Current commands do not write those rows. The transitional public
+CLI/wire projections remain as described in the cutover status; removing the Rust
+CRUD API does not establish external consumer migration or complete table removal.
+
 ## One owner per fact
 
 | Fact | Owner |

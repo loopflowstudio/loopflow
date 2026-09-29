@@ -554,7 +554,7 @@ impl SqliteStore {
                 )));
             }
         } else {
-            let wave = super::runs::task_wave_in(&tx, task)?;
+            let wave = super::durable::task_wave_in(&tx, task)?;
             if session
                 .wave_id
                 .as_ref()
@@ -898,7 +898,7 @@ pub(super) fn reserve_session_in(
 
 fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreResult<()> {
     if let Some(task) = &session.task_id {
-        let wave = super::runs::task_wave_in(conn, task)?;
+        let wave = super::durable::task_wave_in(conn, task)?;
         if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
             return Err(invalid("AgentSession Task and Wave disagree"));
         }

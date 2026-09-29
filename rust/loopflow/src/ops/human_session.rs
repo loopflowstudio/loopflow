@@ -2420,11 +2420,7 @@ mod tests {
                 "Retained name"
             );
             assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
-            assert!(store
-                .runs(None, None, None, None, 0)
-                .await
-                .unwrap()
-                .is_empty());
+            store.sqlite.assert_no_historical_runs();
         });
     }
 

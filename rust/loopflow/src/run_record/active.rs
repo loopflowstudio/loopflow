@@ -411,9 +411,7 @@ mod tests {
             captures.push(capture);
             clients.push(client);
         }
-        for capture in &captures {
-            assert!(store.run(&capture.run_id()).await.unwrap().is_none());
-        }
+        store.sqlite.assert_no_historical_runs();
         let snapshot = crate::run_record::active::snapshot(
             home.path(),
             &store,

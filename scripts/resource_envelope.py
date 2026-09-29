@@ -678,7 +678,13 @@ def _prune_old_gate_artifacts(
 
 def _prune_uv_cache() -> RecoveryAction:
     before = _allocated_bytes(_uv_cache_dir())
-    result = subprocess.run(["uv", "cache", "prune"], capture_output=True, text=True)
+    # `uv run` itself holds a reader lock for the lifetime of this script.
+    result = subprocess.run(
+        ["uv", "cache", "prune"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "UV_LOCK_TIMEOUT": "0"},
+    )
     after = _allocated_bytes(_uv_cache_dir())
     detail = result.stderr.strip() or result.stdout.strip()
     return RecoveryAction(

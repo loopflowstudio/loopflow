@@ -370,6 +370,9 @@ def test_resource_preflight_blocks_before_product_commands(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("stale", [False, True], ids=["recent-cache", "stale-cache"])
 def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch, capsys, stale):
+    monkeypatch.setattr(
+        resources, "_lock_recovery", lambda: (tmp_path / "recovery.lock").open("a+")
+    )
     repo, sibling = tmp_path / "current", tmp_path / "inactive"
     for root in (repo, sibling):
         (root / "target").mkdir(parents=True)

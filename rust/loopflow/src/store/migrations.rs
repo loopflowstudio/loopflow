@@ -308,8 +308,8 @@ fn adopt_released_development_drafts(
     _validate_applied_draft_prefix(remaining, drafts)?;
     conn.execute_batch("BEGIN EXCLUSIVE")?;
     let result = (|| {
-        for migration in pending {
-            let parent = migration_prefix_fingerprint(&applied_versions(conn)?, MIGRATIONS)?;
+        for (offset, migration) in pending.iter().enumerate() {
+            let parent = migration_prefix_fingerprint(&MIGRATIONS[..applied.len() + offset]);
             insert_applied_migration(conn, migration, &parent)?;
         }
         conn.execute(
@@ -837,8 +837,8 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     adopt_permuted_history(conn, set)?;
 
     let applied = applied_versions(conn)?;
-    for migration in pending_migrations(&applied, set)? {
-        let parent_history = migration_prefix_fingerprint(&applied_versions(conn)?, set)?;
+    for (offset, migration) in pending_migrations(&applied, set)?.iter().enumerate() {
+        let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
         backfill_known_checksums(conn, set)?;
@@ -904,18 +904,14 @@ fn migration_checksum(migration: &Migration) -> String {
     hex::encode(Sha256::digest(migration.sql.as_bytes()))
 }
 
-fn migration_prefix_fingerprint(applied: &[String], set: &[Migration]) -> StoreResult<String> {
+fn migration_prefix_fingerprint(prefix: &[Migration]) -> String {
     let mut digest = Sha256::new();
-    digest.update((applied.len() as u64).to_be_bytes());
-    for version in applied {
-        let migration = set
-            .iter()
-            .find(|migration| migration.version() == *version)
-            .ok_or_else(incompatible)?;
-        hash_text(&mut digest, version);
+    digest.update((prefix.len() as u64).to_be_bytes());
+    for migration in prefix {
+        hash_text(&mut digest, &migration.version());
         hash_text(&mut digest, &migration_checksum(migration));
     }
-    Ok(hex::encode(digest.finalize()))
+    hex::encode(digest.finalize())
 }
 
 fn migration_ledger_has_provenance(conn: &rusqlite::Connection) -> StoreResult<bool> {
@@ -939,12 +935,18 @@ fn backfill_known_checksums(conn: &rusqlite::Connection, set: &[Migration]) -> S
     if !migration_ledger_has_provenance(conn)? {
         return Ok(());
     }
-    for migration in set {
-        conn.execute(
-            "UPDATE schema_migrations SET checksum = ?1
-             WHERE version = ?2 AND checksum IS NULL",
-            (migration_checksum(migration), migration.version()),
-        )?;
+    let missing = conn
+        .prepare("SELECT version FROM schema_migrations WHERE checksum IS NULL")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for version in missing {
+        if let Some(migration) = set.iter().find(|migration| migration.version() == version) {
+            conn.execute(
+                "UPDATE schema_migrations SET checksum = ?1
+                 WHERE version = ?2 AND checksum IS NULL",
+                (migration_checksum(migration), version),
+            )?;
+        }
     }
     Ok(())
 }
@@ -2979,6 +2981,71 @@ mod tests {
         assert_eq!(applied_by.1, crate::build_info::source_identity());
         assert_eq!(applied_by.2, crate::build_info::source_revision());
         assert_eq!(applied_by.3, env!("CARGO_PKG_VERSION"));
+        // Receipts captured before prefix hashing stopped rereading the ledger.
+        for (version, expected) in [
+            (
+                "0.11.017_migration_provenance",
+                "bac372f031c01dc844a91f4327aa0a280c1194b2375b3fb89af0d2e20542736b",
+            ),
+            (
+                "0.12.24.001_release",
+                "20587abd87630443beb3874af02f01a8d4c37677859999ce542b7da301b1005e",
+            ),
+        ] {
+            let parent: String = conn
+                .query_row(
+                    "SELECT parent_history FROM schema_migrations WHERE version = ?1",
+                    [version],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(parent, expected, "{version}");
+        }
+    }
+
+    #[test]
+    fn current_database_does_not_backfill_missing_checksums_on_open() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+        conn.execute(
+            "UPDATE schema_migrations SET checksum = NULL WHERE version = '0.10.001_initial'",
+            [],
+        )
+        .unwrap();
+        let changes = conn.total_changes();
+
+        apply_sqlite(&conn).unwrap();
+
+        assert_eq!(conn.total_changes(), changes);
+        let checksum: Option<String> = conn
+            .query_row(
+                "SELECT checksum FROM schema_migrations WHERE version = '0.10.001_initial'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(checksum, None);
+    }
+
+    #[test]
+    fn failed_upgrade_preserves_missing_and_mismatched_checksums() {
+        let conn = open();
+        apply_through(&conn, "migration_provenance");
+        let applied = applied_versions(&conn).unwrap();
+        conn.execute_batch(
+            "UPDATE schema_migrations SET checksum = NULL WHERE version = '0.10.001_initial';
+             UPDATE schema_migrations SET checksum = 'wrong' WHERE version = '0.11.017_migration_provenance';"
+        ).unwrap();
+
+        let error = apply_sqlite(&conn).unwrap_err();
+
+        assert!(error.to_string().contains("checksum does not match"));
+        assert_eq!(applied_versions(&conn).unwrap(), applied);
+        let checksums = conn.prepare(
+            "SELECT checksum FROM schema_migrations WHERE version IN ('0.10.001_initial', '0.11.017_migration_provenance') ORDER BY version",
+        ).unwrap().query_map([], |row| row.get::<_, Option<String>>(0)).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(checksums, [None, Some("wrong".to_string())]);
     }
 
     #[test]

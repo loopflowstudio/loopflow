@@ -453,6 +453,15 @@ the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
+`exec_ownership_tests::interruption_records_the_exec_without_a_fabricated_signal_name`
+checks the OS exit, durable Exec outcome and absence of its owned scorecard child.
+It retains child output for failures. On Linux, `cc` builds the test-only
+`support/hold_group_kill.c` interposer: after delivering the real group kill it
+holds the signal hook for 200 ms, exposing normal command return racing cleanup.
+The fixture asserts that this scheduling point was reached. This is controlled
+ordering evidence, not a claim about how long a hosted signal handler paused.
+Other Unix platforms exercise the ordinary interruption path.
+
 Exercise native Flow recovery with real Codex and a local Responses fixture:
 
 ```bash

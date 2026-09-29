@@ -1690,7 +1690,7 @@ pub fn read_task_planning(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<TaskPlanningRead> {
-    block_on_pm(read_task_planning_observation(repo, issue, refresh))
+    block_on_pm(read_task_planning_async(repo, issue, refresh))
 }
 
 #[derive(Debug)]
@@ -1708,16 +1708,6 @@ impl TaskPlanningRead {
 }
 
 pub(crate) async fn read_task_planning_async(
-    repo: &Path,
-    issue: &str,
-    refresh: PmRefresh,
-) -> OpsResult<PmTaskRecord> {
-    Ok(read_task_planning_observation(repo, issue, refresh)
-        .await?
-        .record)
-}
-
-async fn read_task_planning_observation(
     repo: &Path,
     issue: &str,
     refresh: PmRefresh,

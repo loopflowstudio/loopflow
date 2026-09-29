@@ -46,7 +46,8 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
         .scope(fixture.context(&url), async {
             let record = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
+                .unwrap()
+                .record;
             assert_eq!(record.item.name, "Inspect a planning-only Task");
             let resolved =
                 crate::ops::task_pm::resolve_task_async(&repo, "issue-1", PmRefresh::Never)
@@ -105,7 +106,8 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(
                 read_task_planning_async(&repo, "fix-1", PmRefresh::Never)
                     .await
-                    .unwrap(),
+                    .unwrap()
+                    .record,
                 edited
             );
             assert_eq!(
@@ -138,7 +140,8 @@ async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() 
         .scope(fixture.context(&url), async {
             let record = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
+                .unwrap()
+                .record;
             assert!(record.project.is_none());
             assert!(record.item.project_id.is_none());
             assert!(record.item.project.is_none());
@@ -212,14 +215,16 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
         .scope(fixture.context(&url), async {
             let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
+                .unwrap()
+                .record;
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .is_err());
             assert_eq!(
                 read_task_planning_async(&repo, "issue-1", PmRefresh::Never)
                     .await
-                    .unwrap(),
+                    .unwrap()
+                    .record,
                 original
             );
         })
@@ -231,36 +236,44 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     let fixture = Fixture::new().await;
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
-    let mut incomplete = issue(project());
-    incomplete["data"]["issue"]
-        .as_object_mut()
-        .unwrap()
-        .remove("project");
-    let (url, _) = spawn(vec![
+    let missing_fields = ["project", "description"];
+    let mut responses = vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
-        team_response(),
-        json_response(StatusCode::OK, incomplete),
-    ])
-    .await;
+    ];
+    for field in missing_fields {
+        let mut incomplete = issue(project());
+        incomplete["data"]["issue"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        responses.extend([team_response(), json_response(StatusCode::OK, incomplete)]);
+    }
+    let (url, _) = spawn(responses).await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
             let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
-            let error = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
-                .await
-                .unwrap_err();
-            assert!(
-                error.to_string().contains("missing field `project`"),
-                "{error}"
-            );
-            assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                .unwrap()
+                .record;
+            for field in missing_fields {
+                let error = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
                     .await
-                    .unwrap(),
-                original
-            );
+                    .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains(&format!("missing field `{field}`")),
+                    "{error}"
+                );
+                assert_eq!(
+                    read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                        .await
+                        .unwrap()
+                        .record,
+                    original
+                );
+            }
         })
         .await;
 }
@@ -281,7 +294,8 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
         .scope(fixture.context(&url), async {
             let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
+                .unwrap()
+                .record;
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
                 .await
                 .is_err());
@@ -349,7 +363,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     .await;
     PM_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let read = super::read_task_planning_observation(&repo, "FIX-1", PmRefresh::Auto)
+            let read = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
             assert!(read.is_stale());
@@ -382,7 +396,8 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
         .scope(fixture.context(&url), async {
             let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
-                .unwrap();
+                .unwrap()
+                .record;
             let scope = repo.to_string_lossy();
             let mut list = PmSnapshotRow {
                 wave_id: wave.id().clone(),

@@ -163,7 +163,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
       nodes {
         id
         identifier
-    updatedAt
+        updatedAt
         url
         title
         description
@@ -1022,9 +1022,10 @@ impl LinearClient {
 
             if !page.page_info.has_next_page {
                 issues.sort_by(|left, right| {
-                    left.priority_sort_order
-                        .total_cmp(&right.priority_sort_order)
-                        .then_with(|| left.sort_order.total_cmp(&right.sort_order))
+                    left.fields
+                        .priority_sort_order
+                        .total_cmp(&right.fields.priority_sort_order)
+                        .then_with(|| left.fields.sort_order.total_cmp(&right.fields.sort_order))
                 });
                 return Ok(issues);
             }
@@ -1141,10 +1142,7 @@ impl LinearClient {
         let response: IssueOwnershipData = self
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
-        response
-            .issue
-            .map(OwnedIssueNode::into_ownership)
-            .transpose()
+        response.issue.map(IssueNode::into_ownership).transpose()
     }
 
     pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
@@ -1729,7 +1727,18 @@ struct CommentUser {
 }
 
 #[derive(Deserialize)]
-struct IssueNode {
+#[serde(bound(deserialize = "P: Deserialize<'de>"))]
+struct IssueNode<P = ProjectRef> {
+    #[serde(flatten)]
+    fields: IssueFields,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<P>,
+}
+
+// List and detail observations require the same complete issue fields.
+// Nullable fields must be present; omission is not a value to store.
+#[derive(Deserialize)]
+struct IssueFields {
     #[serde(rename = "updatedAt")]
     updated_at: String,
     id: String,
@@ -1748,13 +1757,17 @@ struct IssueNode {
     #[serde(deserialize_with = "Option::deserialize")]
     state: Option<WorkflowStateRef>,
     #[serde(deserialize_with = "Option::deserialize")]
-    project: Option<ProjectRef>,
-    #[serde(deserialize_with = "Option::deserialize")]
     team: Option<IdNode>,
 }
 
 impl IssueNode {
     fn into_pm_item(self, rank: u32) -> PmResult<PmItem> {
+        self.fields.into_pm_item(rank, self.project)
+    }
+}
+
+impl IssueFields {
+    fn into_pm_item(self, rank: u32, project: Option<ProjectRef>) -> PmResult<PmItem> {
         let completed = self
             .state
             .as_ref()
@@ -1765,8 +1778,8 @@ impl IssueNode {
         } else {
             self.identifier
         };
-        let project_id = self.project.as_ref().map(|project| project.id.clone());
-        let project = self.project.map(|project| project_slug(&project.name));
+        let project_id = project.as_ref().map(|project| project.id.clone());
+        let project = project.map(|project| project_slug(&project.name));
         let team = self
             .team
             .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
@@ -1802,57 +1815,22 @@ struct ProjectRef {
 
 #[derive(Deserialize)]
 struct IssueOwnershipData {
-    issue: Option<OwnedIssueNode>,
+    issue: Option<IssueNode<ProjectNode>>,
 }
 
-// Detail observations must include nullable fields; omission is not a value to store.
-#[derive(Deserialize)]
-struct OwnedIssueNode {
-    #[serde(rename = "updatedAt")]
-    updated_at: String,
-    id: String,
-    identifier: String,
-    #[serde(deserialize_with = "Option::deserialize")]
-    url: Option<String>,
-    title: String,
-    #[serde(deserialize_with = "Option::deserialize")]
-    description: Option<String>,
-    #[serde(rename = "prioritySortOrder")]
-    priority_sort_order: f64,
-    #[serde(rename = "sortOrder")]
-    sort_order: f64,
-    #[serde(deserialize_with = "Option::deserialize")]
-    assignee: Option<IdNode>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    state: Option<WorkflowStateRef>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    team: Option<IdNode>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    project: Option<ProjectNode>,
-}
-
-impl OwnedIssueNode {
+impl IssueNode<ProjectNode> {
     fn into_ownership(self) -> PmResult<(PmItem, Option<PmProject>)> {
-        let project = self.project;
-        let item = IssueNode {
-            updated_at: self.updated_at,
-            id: self.id,
-            identifier: self.identifier,
-            url: self.url,
-            title: self.title,
-            description: self.description,
-            priority_sort_order: self.priority_sort_order,
-            sort_order: self.sort_order,
-            assignee: self.assignee,
-            state: self.state,
-            project: project.as_ref().map(|project| ProjectRef {
+        let item = self.fields.into_pm_item(
+            0,
+            self.project.as_ref().map(|project| ProjectRef {
                 id: project.id.clone(),
                 name: project.name.clone(),
             }),
-            team: self.team,
-        }
-        .into_pm_item(0)?;
-        Ok((item, project.map(ProjectNode::into_pm_project).transpose()?))
+        )?;
+        Ok((
+            item,
+            self.project.map(ProjectNode::into_pm_project).transpose()?,
+        ))
     }
 }
 

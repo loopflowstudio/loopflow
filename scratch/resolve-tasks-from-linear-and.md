@@ -178,6 +178,23 @@ Focused proof receipts for this iteration:
   The last chapter assertion-only adjustment followed the clippy pass; its focused
   test and formatting/whitespace checks passed afterward.
 
+Compression follow-through: Linear detail and list responses now share the same
+required issue fields and conversion; only their Project payload differs. One
+async planning reader returns the record and refresh evidence to both inspection
+and ownership resolution. Webhook invalidation resolves its issue in the same
+dispatch, and Swift status uses the existing query decoder. Review also corrected
+the misplaced Swift query comment and the fixture documentation's coverage claim.
+The incomplete-response proof now checks omitted descriptions as well as Projects.
+
+Focused checks passed after these reductions: eight planning-lookup cases, the
+Linear list/detail acquisition cases, creation retry and explicit post-merge
+completion, webhook Task steering, cached public-CLI status, and the Swift status
+fixture. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
+`git diff --check` passed. The Swift build emitted Ghostty missing-symbol warnings
+but passed.
+Prior OAuth isolation, migration and installation receipts remain applicable;
+those broader checks were not rerun. No execution schema or policy changed.
+
 Remaining within this boundary: public retained-invalid observations, Project
 revision/membership convergence, and full execution/action DTO fixtures. Hard-stale
 inspection retains the existing refusal policy; no new offline admission was chosen.

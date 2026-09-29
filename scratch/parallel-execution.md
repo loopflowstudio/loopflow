@@ -526,3 +526,19 @@ coherent import checkpoint and the three setup repairs under existing authority
 (comment c3c6db65); this is supervisor direction, not new approval attributed to Jack.
 Next boundary: historical multi-member inputs on one AgentSession and final SQL
 readers, retaining every original failure, usage owner and exact Flow reference.
+
+
+Checkpoint `275589beeae2f6e2d439cc3642c10b95c02942f1` is published on PR1296;
+GitHub and Task publication agree and auto-merge is absent. The Task base remains
+7c2f53b9e; GitHub's base branch had advanced to 7e5f32ce6 at readback.
+
+Next member proof `historical-members.log` passes through public CLI import:
+one stable conversation/two immutable input references retain old failed and
+current completed receipts, independently namespaced equal attempt keys, distinct
+account/usage payloads, and null versus zero. Pre-bind history remains unassigned;
+current history has the recorded Task. Import preserves current input/name/feedback,
+existing Started, dry-run/report agreement and repeat sequence/payload identity;
+zero Run rows and no provider launch. This exercises retained input references
+using final admission APIs, not a newly demonstrated populated released upgrade
+or receipt-based usage aggregation. SQL rows with unavailable artifacts and
+finished/unopened review preservation still need completion.

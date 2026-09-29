@@ -338,7 +338,7 @@ impl Import<'_> {
     ) -> Result<Option<Stored>> {
         let input = session.input_id.clone();
         let starts = self.first_assignment(session.task_id.as_ref()).await?;
-        let history = self.history(&session).await?;
+        let history = self.history(&session.input_id).await?;
         let changed = self
             .store
             .import_session(session, review, history, self.report.dry_run)
@@ -350,8 +350,8 @@ impl Import<'_> {
         Ok(Some(if changed { kind } else { Stored::Unchanged }))
     }
 
-    async fn history(&self, session: &AgentSession) -> Result<Vec<ImportedObservation>> {
-        let dir = self.run_dir(&session.input_id)?;
+    async fn history(&self, input: &RunId) -> Result<Vec<ImportedObservation>> {
+        let dir = self.run_dir(input)?;
         let mut history = Vec::new();
         let (task_id, wave_id, _) = match crate::run_record::read_manifest(&dir) {
             Ok(manifest) => self.work(&manifest).await?,
@@ -368,11 +368,12 @@ impl Import<'_> {
                     OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
                 });
             history.push(ImportedObservation {
+                input_id: input.clone(),
                 source: source.clone(),
                 observed_at: at.unwrap_or_else(OffsetDateTime::now_utc).unix_timestamp(),
                 task_id: task_id.clone(),
                 wave_id: wave_id.clone(),
-                payload: serde_json::json!({"input_id": session.input_id, "source": source, "evidence": evidence}),
+                payload: serde_json::json!({"input_id": input, "source": source, "evidence": evidence}),
             });
         };
         for name in ["manifest.json", "terminal.json", "provider-session.json"] {
@@ -760,15 +761,21 @@ impl Import<'_> {
         session: AgentSession,
     ) -> Result<Option<Stored>> {
         if session.input_id != manifest.run_id {
-            bail!(
-                "historical input {} needs prior-input comparison before import",
-                manifest.run_id
-            );
+            let history = self.history(&manifest.run_id).await?;
+            let changed = self
+                .store
+                .import_session(session, None, history, self.report.dry_run)
+                .await?;
+            return Ok(Some(if changed {
+                Stored::TaskReview
+            } else {
+                Stored::Unchanged
+            }));
         }
         let (title, source) = name(dir, session.title.clone())?;
         let renamed = title != session.title && session.title_source == TitleSource::Generated;
         let unnamed = session.provider.is_none();
-        let history = self.history(&session).await?;
+        let history = self.history(&session.input_id).await?;
         let imported = self
             .store
             .import_session(session.clone(), None, history, self.report.dry_run)

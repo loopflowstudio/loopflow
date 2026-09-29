@@ -11,6 +11,8 @@ use loopflow::store::RunEventRow;
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
+use loopflow_test_support::TestRepo;
+
 fn run_lf(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(args)
@@ -19,6 +21,11 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env("LF_HOME", home)
         .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("NO_COLOR", "1")
+        // Doctor prefers the compiled source root; scope even git -C there to
+        // this fixture so freshness checks cannot fetch into a shared checkout.
+        .env("GIT_DIR", home.join(".git"))
+        .env("GIT_WORK_TREE", home)
+        .env("GIT_ALLOW_PROTOCOL", "file")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
@@ -126,7 +133,7 @@ fn install_current_telemetry_obligation(home: &Path) {
 
 #[test]
 fn doctor_json_reports_the_build_revision_and_freshness_check() {
-    let home = tempfile::tempdir().unwrap();
+    let home = TestRepo::new();
     let output = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         output.status.success(),
@@ -134,6 +141,8 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
         String::from_utf8_lossy(&output.stderr)
     );
 
+    let fetched = fs::read_to_string(home.path().join(".git/FETCH_HEAD")).unwrap();
+    assert!(fetched.contains(&home.head_sha()));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         report["store"]["build_source_revision"],
@@ -148,7 +157,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 
 #[test]
 fn copied_production_history_does_not_block_the_telemetry_scorecard() {
-    let home = tempfile::tempdir().unwrap();
+    let home = TestRepo::new();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     insert_run_event(
         &store,

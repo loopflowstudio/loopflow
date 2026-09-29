@@ -24,8 +24,8 @@ use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    merge_gate_state, observe_merge_request, observe_pr_by_number, MergeRequest, PrInfo,
-    PrObservation, PrReadFreshness,
+    merge_gate_state, merge_needs_integration, observe_merge_request, observe_pr_by_number,
+    MergeRequest, PrInfo, PrObservation, PrReadFreshness,
 };
 use super::progress::Progress;
 
@@ -187,7 +187,7 @@ fn classify_github_observation(
             Ok(LandingObservation::Pending { head_sha })
         }
         _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
-        _ if matches!(pr.merge_state.as_deref(), Some("behind" | "dirty")) => {
+        _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
             Ok(LandingObservation::Degraded {
                 reason: format!(
                     "pull request #{} needs integration ({}); rebase and resume landing",

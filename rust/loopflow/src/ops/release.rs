@@ -2588,7 +2588,9 @@ fn wait_for_pr_merge(
             _ => {}
         }
 
-        if matches!(view.merge_state_status.as_str(), "BEHIND" | "DIRTY") {
+        let request = crate::ops::pr::observe_merge_request(repo, pr_number)?;
+        if crate::ops::pr::merge_needs_integration(Some(&view.merge_state_status), request.as_ref())
+        {
             return Ok(ReleasePrWait::NeedsIntegration(
                 view.merge_state_status.to_ascii_lowercase(),
             ));
@@ -2600,14 +2602,16 @@ fn wait_for_pr_merge(
             )));
         }
 
-        if !crate::ops::pr::auto_merge_enabled(repo, pr_number)? {
+        if request.is_none() {
             progress.status(&format!(
                 "Re-arming release PR #{pr_number} for exact-head auto-merge..."
             ));
             crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha)?;
         }
 
-        if merge_gate_state(repo, pr_number, head_sha)?.is_some_and(|reading| reading.failing) {
+        if !matches!(request, Some(crate::ops::pr::MergeRequest::Queued(_)))
+            && merge_gate_state(repo, pr_number, head_sha)?.is_some_and(|reading| reading.failing)
+        {
             return Ok(ReleasePrWait::NeedsRepair);
         }
 

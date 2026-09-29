@@ -119,7 +119,13 @@ exit 0
     )
 }
 
-fn gh_watched_land_script(log_path: &str) -> String {
+fn gh_watched_land_script(log_path: &str, awaiting_queue: bool) -> String {
+    let request = if awaiting_queue {
+        "awaiting_queue"
+    } else {
+        "true"
+    };
+    let merge_state = if awaiting_queue { "behind" } else { "blocked" };
     let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
     format!(
         r#"#!/bin/sh
@@ -145,7 +151,7 @@ if [ "$1 $2" = "api graphql" ]; then
 JSON
       exit 0 ;;
   esac
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{request}'; else echo 'false'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -159,7 +165,7 @@ fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
   if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
-    echo "{{\"merged\":false,\"state\":\"open\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
     exit 0
   fi
   echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
@@ -1552,7 +1558,12 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_waits_for_authoritative_merged_observation() {
-    for (repair, blocked) in [(false, false), (true, false), (true, true)] {
+    for (repair, blocked, awaiting_queue) in [
+        (false, false, false),
+        (true, false, false),
+        (true, true, false),
+        (true, false, true),
+    ] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
         let local_remote = repo.bare_path().to_string_lossy().to_string();
@@ -1573,7 +1584,7 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
             .unwrap();
         assert!(status.success());
         let log_path = repo.bare_path().join("watched-gh.log");
-        let script = gh_watched_land_script(log_path.to_string_lossy().as_ref());
+        let script = gh_watched_land_script(log_path.to_string_lossy().as_ref(), awaiting_queue);
         let codex = codex_app_server_script(
             if blocked {
                 r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#

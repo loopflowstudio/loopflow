@@ -171,10 +171,13 @@ A failure may need several repairs, including on the same head. Incidents
 record responses; the supervisor owns execution. A moved head requires a new
 observation and check set. GitHub remains the final merge authority.
 
-Once GitHub queues a PR, the supervisor waits for that queue to finish checking
-the integrated commit. A queued PR's original head being behind its base does
-not request a rebase. Leaving the queue restores ordinary PR checks and
-integration recovery; only an authoritative GitHub merge finishes the landing.
+An auto-merge request targeting a merge queue keeps waiting when its base
+advances, including before queue entry. Its original-head CI still receives
+repair, and a real conflict still requires integration. Once GitHub queues the
+PR, landing and release wait for the queue's integrated-commit proof instead
+of interpreting the original head's mergeability or checks. Removing the
+request restores ordinary handling; only an authoritative GitHub merge
+finishes the landing.
 
 `PrLanding` owns the supervisor generation. `LandingSupervisor` names the
 process, placement, and heartbeat used both to claim and to retain that

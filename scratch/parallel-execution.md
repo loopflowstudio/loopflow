@@ -61,12 +61,19 @@ worktrees/processes. Use ordinary source inspection for code.
 2. Active observation now uses Session/Exec ownership and removes run-bindings.
    The review repairs terminal mounting and reproduces/fixes stale old-host focus
    updates. The released off-window-mount repair now passes six integrated local
-   tests. Hosted confirmation remains owed; lifecycle diagnostics, original
-   attachment/surface/draft/focus assertions and the deadline remain.
-3. Resolve Codex valid decision retry through Jack's existing decision conversation.
-   The stale child is correctly rejected but the legitimate retry still receives
-   old tool environment after a failed native turn. Keep independent work moving;
-   do not silently change the decision interface or add provider machinery.
+   tests. Hosted swift-test at `067ff0164` now passes, confirming that repair;
+   lifecycle diagnostics, original attachment/surface/draft/focus assertions and
+   the deadline remain. The review below reuses this unchanged Swift evidence.
+3. At the next implementation boundary, design Jack's accepted structured
+   decision/route result and captured-input event changes together with the
+   final-history reader. Selected successful turns return validated typed output;
+   bounded validation retry stays in the same conversation, and settlement
+   consumes the result from Session history. Delete in-turn decision commands.
+   Captured input becomes a `session_events` sequence, removing `RunId`, the input
+   side table and `SessionRecord.run_id`; preserve old selectors and launch-once
+   reservation/publication. Rebase the released history proposal onto that event
+   model. The old Codex valid-retry failure remains evidence until its replacement
+   is proved; this review does not change provider or decision policy.
 4. Complete preserved import/attribution and populated final-schema obligations,
    all-provider common connect/restart/recovery, public Chapter/default-Flow
    preservation, incident dispositions and integrated verification from the full

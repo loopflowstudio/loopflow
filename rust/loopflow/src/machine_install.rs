@@ -1133,7 +1133,19 @@ fn authorize_for_switch(
             // install so a failed or in-flight switch cannot brick ordinary startup.
             startup_active_during_switch(&receipt)?
         }
-        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Settled(active) => {
+            if switch_id.is_none() {
+                if let Some(selection) = requested_retained_selection(
+                    root,
+                    &active.selection.store,
+                    executable,
+                    Some(role),
+                )? {
+                    return Ok(Some(selection));
+                }
+            }
+            *active
+        }
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1216,7 +1228,14 @@ pub fn selection_for_executable(
         // A failed or in-flight switch resolves through the last good install so
         // ordinary startup keeps working instead of refusing every command.
         MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Settled(active) => {
+            if let Some(selection) =
+                requested_retained_selection(root, &active.selection.store, executable, None)?
+            {
+                return Ok(Some(selection));
+            }
+            *active
+        }
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1244,6 +1263,67 @@ pub fn selection_for_executable(
     };
     expected.verify()?;
     Ok(Some(active.selection))
+}
+
+/// A saved terminal handoff carries its existing executable/store pair. It may
+/// continue after another installation becomes current without switching the
+/// machine or treating the retained executable as a new source build.
+fn requested_retained_selection(
+    root: &Path,
+    active_store: &Path,
+    executable: &Path,
+    role: Option<&ArtifactRole>,
+) -> Result<Option<InstallSelection>> {
+    let Some(requested) = std::env::var_os("LF_DB_PATH")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("LF_HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join("loopflow.db"))
+        })
+    else {
+        return Ok(None);
+    };
+    let requested = crate::store::canonicalize_with_missing_tail(&requested)?;
+    if active_store == requested {
+        return Ok(None);
+    }
+    let receipts = match fs::read_dir(root.join("receipts")) {
+        Ok(receipts) => receipts,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut candidates = Vec::new();
+    for entry in receipts {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let receipt: SwitchReceipt = read_json(&path)?;
+        receipt.validate()?;
+        if receipt.phase == SwitchPhase::Settled {
+            candidates.extend(
+                std::iter::once(receipt.target)
+                    .chain(receipt.prior)
+                    .filter(|selection| selection.store == requested),
+            );
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let digest = file_sha256(executable)?;
+    for selection in candidates {
+        if let Some(artifact) = selection.artifact_set.artifacts.iter().find(|artifact| {
+            artifact.sha256 == digest
+                && role.is_none_or(|role| artifact_matches_runtime_role(&artifact.role, role))
+        }) {
+            artifact.verify()?;
+            return Ok(Some(selection));
+        }
+    }
+    Ok(None)
 }
 
 pub fn selection_for_current_executable() -> Result<Option<InstallSelection>> {
@@ -1913,6 +1993,7 @@ mod tests {
 
     #[test]
     fn settlement_commits_target_then_archives_immutable_receipt() {
+        let _lock = crate::journal::test_env_lock();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
@@ -1961,6 +2042,21 @@ mod tests {
         settle_switch(&root, &next, &later_active).unwrap();
         let restored = retained_development_home(&root, &development.installation_id).unwrap();
         assert_eq!(restored, development);
+        let previous_db = std::env::var_os("LF_DB_PATH");
+        std::env::set_var("LF_DB_PATH", &development.store);
+        let cli = &development
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .path;
+        let authorized = authorize(&root, cli, &ArtifactRole::Cli);
+        let resolved = selection_for_executable(&root, cli);
+        match previous_db {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
+        assert_eq!(authorized.unwrap(), Some(development.clone()));
+        assert_eq!(resolved.unwrap(), Some(development.clone()));
         let stores = owned_stores(&root).unwrap();
         assert!(stores.contains(&published.store));
         assert!(stores.contains(&development.store));

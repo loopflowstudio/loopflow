@@ -4,6 +4,54 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dep
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
+## Session launch continuity (branch evidence, 2026-09-28)
+
+Jack assigned `jack-heart/session-launch-hardening` an independent main-based
+checkout after a review child rejected `--tui` and a later installation selection
+made existing Tasks unreachable. Infrastructure owns this execution-continuity
+repair. The [incident analysis and working design](https://github.com/loopflowstudio/loopflow/blob/a5d76c576609f6efc80a8ca2198480081066c63c/scratch/jack-heart/session-launch-hardening.md)
+preserves observations, unresolved causes and acceptance criteria in local
+history; remote availability was not checked. No new Task was filed. Scheduled
+delivery (LOO-332), recursive Wave operation (LOO-333), and the Session/Run/Exec
+model (LOO-298) retain their separate scope; this prevention does not require
+LOO-298's unintegrated model changes.
+
+- **Selected-store absence does not establish deletion.** The switch receipt
+  and retained records locate the missing Tasks and failed Run in the prior
+  development store. Preserve installation isolation while resolving an existing
+  review's executable and data together. Reuse installation receipts and Session
+  identity; do not merge private stores or choose between divergent copies by
+  timestamp. A restoration preview does not establish applied recovery.
+- **Preparation carries context; it does not prove conversation access.** The
+  branch's saved `open_argv` carries the executable, Home and database, and its
+  startup resolver recognizes matching retained artifacts in settled receipts.
+  This addresses a saved handoff after selection changes. It does not establish
+  ordinary discovery of an existing Session from another selected store. Current
+  preparation semantics belong in [CLI docs](../../docs/lf.md).
+- **Failure provenance must survive before provider startup and after retry.**
+  Record the attempted executable/digest, owning data, cwd and sanitized outcome
+  through existing Run evidence, excluding prompts and credentials. A later
+  provider record or successful help check cannot identify an earlier rejected
+  child. The original offending binary and the switch's initiator remain unknown;
+  parser rejection, provider conversation lookup failure and selected-store absence
+  are distinct observations, with no established single causal chain.
+
+At local checkpoint `a5d76c576`, diagnostics name the child and store, but the
+recorded Session suite passed only 6/7 tests: the focused retry proof still fails
+with “successful retry lost the failed launch evidence.” Source inspection shows
+`session open` bypasses the journal wrapper; richer wrapper error formatting alone
+does not persist that failure. Recorded installation unit tests passed 23 tests,
+and Clippy, formatting and diff checks passed. This curation reruns no behavioral
+checks and claims neither shipment nor recovery. The scratch note's uncommitted
+status is historical; those edits are now in the checkpoint.
+
+The disposable prepare-under-A → select-B → open-same-review proof and real
+Ghostty open/resume remain outstanding. Saved JSON, a window or provider ID alone
+cannot satisfy them. Retry must preserve the failed evidence, both stores and
+the pending decision without starting a competing Task Flow. Scratch remains the
+working design until these obligations are resolved; no Task completion or
+chapter change follows from this curation.
+
 ## Branch data and command ownership (LOO-321, branch evidence 2026-09-28)
 
 [Branch data isolation · LOO-321](https://linear.app/loopflow/issue/LOO-321)

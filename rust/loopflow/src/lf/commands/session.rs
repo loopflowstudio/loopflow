@@ -10,18 +10,17 @@ use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let session_id = match command {
-        SessionCommand::Complete { id } => Some(id),
+    let worktree = match command {
+        SessionCommand::Open { json: false, .. }
+        | SessionCommand::ServeAsk { .. }
+        | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
+        SessionCommand::Complete { id } => {
+            let store = runtime.block_on(open_shared_store())?;
+            runtime.block_on(crate::ops::human_session::completion_worktree(&store, id))?
+        }
         _ => None,
     };
-    let Some(session_id) = session_id else {
-        return runtime.block_on(run_async(command));
-    };
-    let store = runtime.block_on(open_shared_store())?;
-    let Some(worktree) = runtime.block_on(crate::ops::human_session::completion_worktree(
-        &store, session_id,
-    ))?
-    else {
+    let Some(worktree) = worktree else {
         return runtime.block_on(run_async(command));
     };
     let argv = std::env::args().collect::<Vec<_>>();

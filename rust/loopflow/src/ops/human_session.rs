@@ -1660,11 +1660,31 @@ pub(crate) async fn spawn_session_run(
 ) -> Result<tokio::process::Child> {
     let home = crate::store::observability_home_dir();
     let (dir, _) = crate::run_record::resolve_manifest(&home, run_id.as_str())?;
+    let executable = Path::new(command.as_std().get_program());
+    let digest = fs::read(executable)
+        .ok()
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+        .unwrap_or_else(|| "unavailable".to_string());
+    let cwd = match command.as_std().get_current_dir() {
+        Some(cwd) => cwd.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let database = crate::store::observability_database_path()?;
+    // Capture the child before it parses arguments. Its own Run recorder may
+    // never start; the opening Run must retain enough evidence to diagnose it.
+    // Arguments and environment values can contain prompts or credentials.
+    let launch = format!(
+        "Session Run {run_id}: executable {} (sha256 {digest}), cwd {}, Home {}, database {}",
+        executable.display(),
+        cwd.display(),
+        home.display(),
+        database.display()
+    );
     let mut child = command
         .env(PREPARED_RUN_ENV, run_id.as_str())
         .kill_on_drop(true)
         .spawn()
-        .context("launch Session Run")?;
+        .with_context(|| format!("could not start {launch}"))?;
     let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
     loop {
         let manifest = crate::run_record::read_manifest(&dir)?;
@@ -1672,10 +1692,10 @@ pub(crate) async fn spawn_session_run(
             return Ok(child);
         }
         if let Some(status) = child.try_wait().context("probe human Session Run")? {
-            bail!("human Session Run {run_id} exited with {status} before becoming resumable");
+            bail!("{launch}: exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {
-            bail!("human Session Run {run_id} did not become resumable within 30s");
+            bail!("{launch}: did not become resumable within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -1941,10 +1961,17 @@ pub(crate) fn human_open_argv(
     worktree: Option<&Path>,
     id: &str,
 ) -> Result<Vec<String>> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?
-        .display()
-        .to_string();
-    let mut argv = vec![lf];
+    let context = crate::engine::process::current_home_execution_context()?;
+    // A fresh terminal does not inherit the listing process's data selection.
+    // Carry the executable and its data together, including when a different
+    // installation becomes current between listing and opening.
+    let mut argv = vec![
+        "/usr/bin/env".to_string(),
+        format!("LF_BIN={}", context.lf_bin.display()),
+        format!("LF_HOME={}", context.lf_home.display()),
+        format!("LF_DB_PATH={}", context.db_path.display()),
+        context.lf_bin.display().to_string(),
+    ];
     if let Some(home_id) = remote_home {
         argv.push("ssh".to_string());
         if let Some(worktree) = worktree {

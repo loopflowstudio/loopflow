@@ -5,7 +5,8 @@
     uv run python scripts/check_architecture.py --json
 
 The check is deliberately finite. It covers live SQLite tables, root CLI
-families, executable/process entrypoints, provider kinds, literal Rust subprocess edges, declared read projections and
+families, executable/process entrypoints, provider kinds, literal Rust subprocess
+edges, declared read projections and
 compatibility seams, and exact retired vocabulary. It does not claim that every
 public Rust item is an architectural concept.
 """
@@ -64,8 +65,8 @@ SCAN_ROOTS = (
     Path(".lf"),
 )
 IGNORED_PARTS = {".git", ".venv", "node_modules", "target", "DerivedData", "__pycache__"}
-# Generated docs and chapter evidence copy other sources, not live architecture.
-IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"))
+# Generated docs, historical evidence and local receipts are not live architecture.
+IGNORED_PREFIXES = (Path("website/docs"), Path(".lf/chapters"), Path(".lf/tmp"))
 
 
 @dataclass(frozen=True)

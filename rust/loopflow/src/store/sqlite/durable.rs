@@ -2561,7 +2561,9 @@ mod durable_store_tests {
         assert!(store
             .record_flow_decision(id, failed.version, &first, &verdict)
             .is_err());
-        assert!(store.end_flow(id, Some(&first_claim), "").is_err());
+        assert!(store
+            .end_flow(id, position.version, Some(&first_claim), "")
+            .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
         let attempts = store
             .position_runs(&position.invocation.id, node, &tuple)
@@ -2579,7 +2581,12 @@ mod durable_store_tests {
             .record_flow_decision(id, failed.version, &second, &verdict)
             .unwrap();
         store
-            .end_flow(id, Some(&second_claim), "successful attempt")
+            .end_flow(
+                id,
+                failed.version,
+                Some(&second_claim),
+                "successful attempt",
+            )
             .unwrap();
         assert!(store.task_flow(&task_id).unwrap().is_none());
         assert_eq!(
@@ -2588,7 +2595,9 @@ mod durable_store_tests {
                 .unwrap(),
             attempts
         );
-        assert!(store.end_flow(id, Some(&second_claim), "").is_err());
+        assert!(store
+            .end_flow(id, failed.version, Some(&second_claim), "")
+            .is_err());
 
         // The launch named the provider the claim could not know, and the
         // Run's end is its row. Both attempts list once under their Task.
@@ -2821,9 +2830,11 @@ mod durable_store_tests {
         let held = claim(&store, &work, &position, 111);
         let final_position = store.task_flow(&work).unwrap().unwrap();
 
-        assert!(store.end_flow(position.id(), None, "finished").is_err());
+        assert!(store
+            .end_flow(position.id(), position.version, None, "finished")
+            .is_err());
         store
-            .end_flow(position.id(), Some(&held), "finished")
+            .end_flow(position.id(), position.version, Some(&held), "finished")
             .unwrap();
         assert!(store.task_flow(&work).unwrap().is_none());
         assert_eq!(
@@ -2834,7 +2845,7 @@ mod durable_store_tests {
         assert!(evidence.begun);
         assert!(!evidence.worker_claimed);
         assert!(store
-            .end_flow(position.id(), Some(&held), "finished")
+            .end_flow(position.id(), position.version, Some(&held), "finished")
             .is_err());
         let events = store.task_events_after(&work, 0).unwrap();
         assert_eq!(events.len(), 1);
@@ -2847,7 +2858,7 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(next.version, position.version);
         assert!(store
-            .end_flow(position.id(), Some(&held), "late finish")
+            .end_flow(position.id(), position.version, Some(&held), "late finish")
             .is_err());
         assert_eq!(store.task_flow(&work).unwrap(), Some(next));
         assert_eq!(

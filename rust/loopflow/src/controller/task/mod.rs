@@ -321,6 +321,7 @@ impl StepLauncher for TaskLauncher {
         )?;
         capture.claim_conversation_driver()?;
         prepared.turn.config.session_driver = capture.session_driver();
+        prepared.turn.config.flow_selection = capture.flow_turn_selection()?;
         prepared.turn.config.resume_token = capture.conversation_resume_token()?;
         capture.record_input("initial", &prepared.turn.input);
         capture.record_input("steer_seed_through", &prepared.seeded_steer_id.to_string());
@@ -1147,6 +1148,21 @@ mod planning_tests {
                 Some(&run.to_string())
             );
             assert!(config.env.contains_key(crate::ops::flow_run::FLOW_STEP_ENV));
+            if let Some((session, driver)) = &config.session_driver {
+                // This harness simulates a finite provider. Give recovery exact
+                // child-exit evidence instead of treating a missing socket as death.
+                let mut child = tokio::process::Command::new("sleep")
+                    .arg("60")
+                    .kill_on_drop(true)
+                    .spawn()?;
+                let pid = child.id().unwrap();
+                let started = crate::journal::process_started_at(pid)?.unwrap();
+                self.store
+                    .sqlite
+                    .record_session_provider_process(session, driver, pid, started)?;
+                child.kill().await?;
+                child.wait().await?;
+            }
             Ok(())
         }
 
@@ -1645,6 +1661,80 @@ mod planning_tests {
     }
 
     #[test]
+    fn managed_flow_retry_releases_only_dead_native_selection_and_consumes_its_successor() {
+        use crate::session::SessionEventKind;
+        use clap::Parser;
+        let guard = super::TestLfBinGuard::pin();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (store, task, _) = runtime.block_on(human_task_fixture_at(
+            &guard.ledger.home().join("loopflow.db"),
+        ));
+        crate::journal::with_runtime(&task.worktree, &["managed-native-retry-proof".into()], || {
+            let (flow, run, session, prior) = runtime.block_on(async {
+                let mut flow = super::start_task_flow(&task, "task-design").unwrap();
+                flow.invocation.steps.truncate(1);
+                let flow = store.start_task_flow(&task.id, flow).await.unwrap();
+                // The orchestration owner is synthetic; the native exit below is
+                // an actual owned process. This proves managed policy, not Codex.
+                let claim = claim(&store, &task, &flow, u32::MAX).await;
+                let run = reserved_run(&store, &task).await;
+                store.sqlite.publish_attempt(flow.id(), flow.version, &run, Some(&claim), "codex", None).unwrap();
+                let session = store.sqlite.session_for_run(&run).unwrap().unwrap().0;
+                let exec = crate::journal::current_exec_id().unwrap();
+                let driver = store.sqlite.claim_session_driver(&session.id, None, &exec, true).unwrap();
+                let selection = store.sqlite.flow_turn_selection(&run).unwrap().unwrap();
+                let start = store.sqlite.record_session_turn_origin(&session.id, "native-thread", "unfinished", driver.provider_generation, &exec).unwrap();
+                store.sqlite.select_flow_turn(&selection, &session.id, &driver, start).unwrap();
+                let mut engine = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+                let started = crate::journal::process_started_at(engine.id()).unwrap().unwrap();
+                store.sqlite.record_session_provider_process(&session.id, &driver, engine.id(), started).unwrap();
+                engine.kill().unwrap();
+                engine.wait().unwrap();
+                store.sqlite.release_session_driver(&session.id, &driver).unwrap();
+                let prior = store.sqlite.session_history(&session.id, 0, 100).unwrap();
+                (flow, run, session, prior)
+            });
+            // Exercise the public managed dispatch. Its --retry must survive
+            // delegation; normal Task adoption policy still refuses this branch.
+            let cli = crate::lf::Cli::parse_from(["lf"]);
+            let error = crate::lf::commands::flow::control("resume", &[flow.id().into(), "--retry".into()], &cli).unwrap_err();
+            assert!(error.to_string().contains("active PR expects branch"), "{error:#}");
+            runtime.block_on(async {
+                let retried = store.task_flow(&task.id).await.unwrap().unwrap();
+                assert_eq!(retried.id(), flow.id());
+                assert_eq!(retried.cursor, flow.cursor);
+                assert!(retried.current_attempt.is_none() && retried.claim.is_none() && retried.failure.is_none());
+                assert_eq!(store.sqlite.session_history(&session.id, 0, 100).unwrap(), prior);
+                assert!(store.sqlite.run(&run).unwrap().unwrap().ended.is_none());
+                let owner = crate::journal::current_process_identity().unwrap();
+                let TaskWorkerClaimOutcome::Claimed(claim) = store.claim_task_worker(&task.id, retried.id(), retried.version, &owner, time::OffsetDateTime::now_utc()).await.unwrap() else { panic!("retry claim") };
+                let next = reserved_run(&store, &task).await;
+                assert_eq!(store.sqlite.session_for_run(&next).unwrap().unwrap().0.id, session.id);
+                store.sqlite.publish_attempt(retried.id(), retried.version, &next, Some(&claim), "codex", None).unwrap();
+                let expected = store.sqlite.session_driver(&session.id).unwrap();
+                let driver = store.sqlite.claim_session_driver(&session.id, expected.as_ref(), &owner.exec_id, true).unwrap();
+                let selection = store.sqlite.flow_turn_selection(&next).unwrap().unwrap();
+                let start = store.sqlite.record_session_turn_origin(&session.id, "native-thread", "retry", driver.provider_generation, &owner.exec_id).unwrap();
+                store.sqlite.select_flow_turn(&selection, &session.id, &driver, start).unwrap();
+                let completion = store.sqlite.record_session_event(&session.id, "native-thread", "retry", SessionEventKind::Completed, &serde_json::json!({"status":"completed"})).unwrap();
+                super::drive_task(store.clone(), task.id.clone(), claim, closing_harness()).await.unwrap();
+                assert!(store.task_flow(&task.id).await.unwrap().is_none());
+                assert!(store.flow(retried.id()).await.unwrap().unwrap().finished);
+                let conn = rusqlite::Connection::open(guard.ledger.home().join("loopflow.db")).unwrap();
+                let consumed: Vec<i64> = conn.prepare("SELECT session_event FROM flow_events WHERE flow_id=?1 AND kind='consumed'").unwrap()
+                    .query_map([flow.id()], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+                assert_eq!(consumed, vec![completion]);
+                assert!(store.sqlite.run(&run).unwrap().unwrap().ended.is_none());
+                assert!(store.sqlite.run(&next).unwrap().unwrap().ended.is_none());
+            });
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
     fn task_decision_live_unblock_returns_feedback_without_navigation() {
         let _guard = super::TestLfBinGuard::pin();
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1795,13 +1885,12 @@ mod planning_tests {
             .build()
             .unwrap();
         let repo = tempfile::tempdir().unwrap();
-        crate::journal::with_runtime(repo.path(), &["decision-failure-proof".into()], || {
-        runtime.block_on(async {
+        for failure in ["missing", "malformed", "disconnected"] {
+            let guard = super::TestLfBinGuard::pin();
+            crate::journal::with_runtime(repo.path(), &["decision-failure-proof".into()], || {
+            runtime.block_on(async {
             use crate::pm::test_server::{self, json_response};
             use serde_json::json;
-            for failure in ["missing", "malformed", "disconnected"] {
-                // Each case has its own Home: the Run's row and record share it.
-                let guard = super::TestLfBinGuard::pin();
                 let (store, task, _) = human_task_fixture_at(&guard.ledger.home().join("loopflow.db")).await;
                 let (url, _) = test_server::spawn(vec![json_response(
                     axum::http::StatusCode::OK,
@@ -1885,10 +1974,10 @@ mod planning_tests {
                 assert!(prepared.turn.input.contains(feedback));
                 std::env::remove_var(crate::durable::RUN_ID_ENV);
                 std::env::remove_var(crate::ops::human_session::HUMAN_SESSION_ENV);
-            }
             Ok(())
-        })
-        }).unwrap();
+            })
+            }).unwrap();
+        }
     }
 
     #[test]
@@ -1964,7 +2053,7 @@ mod planning_tests {
                 assert!(feedback.is_none());
                 assert_eq!(crate::ops::human_session::task_unblock(&store, &task, &blocked).await.unwrap().0, session);
                 assert_eq!(sessions[0].id, session);
-                let error = crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None).await.unwrap_err();
+                let error = crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None, false).await.unwrap_err();
                 assert!(error.to_string().contains("Complete unblock Session"), "{error}");
                 assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), blocked);
                 std::env::set_var(crate::durable::RUN_ID_ENV, sessions[0].run_id.as_str());
@@ -1981,7 +2070,7 @@ mod planning_tests {
                 let reason = "Keep the published API while replacing the reader";
                 let error = crate::ops::linear_observe::tests::with_posted_comment(
                     &store, &task, reason,
-                    crate::ops::task::continue_task_async(&task.plan.identifier, Some(reason.into()), None, None),
+                    crate::ops::task::continue_task_async(&task.plan.identifier, Some(reason.into()), None, None, false),
                 ).await.unwrap_err();
                 assert!(error.to_string().contains("active PR expects branch"), "{error}");
                 let retried = store.task_flow(&task.id).await.unwrap().unwrap();
@@ -2015,7 +2104,7 @@ mod planning_tests {
                 let resumed = std::sync::Arc::new(tokio::sync::Notify::new());
                 let resume = async {
                     let result = crate::ops::TEST_TASK_LAUNCH.scope(launch_tx,
-                        crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None)).await;
+                        crate::ops::task::continue_task_async(&task.plan.identifier, None, None, None, false)).await;
                     resumed.notify_one();
                     result
                 };
@@ -3843,7 +3932,7 @@ mod planning_tests {
         assert!(completed);
         assert_eq!(position.cursor.iteration, 3);
         store
-            .end_flow(position.id(), Some(&held), "done")
+            .end_flow(position.id(), position.version, Some(&held), "done")
             .await
             .unwrap();
 

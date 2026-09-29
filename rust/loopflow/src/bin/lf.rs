@@ -982,12 +982,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             stack_on,
             directive,
             reason,
+            retry,
             json,
         } => {
             let task = loopflow::ops::task::task_run(
                 repo,
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
+                    retry: *retry,
                     reason: reason.clone(),
                     agent: agent.map(str::to_string),
                     name: name.clone(),
@@ -1018,6 +1020,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
                 title.clone(),
                 report,
                 run.then(|| loopflow::ops::task::TaskLaunchOptions {
+                    retry: false,
                     reason: None,
                     agent: agent.map(str::to_string),
                     name: name.clone(),

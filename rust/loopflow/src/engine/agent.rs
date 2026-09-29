@@ -164,6 +164,8 @@ pub struct AgentConfig {
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
     pub session_driver: Option<(String, crate::exec::SessionDriver)>,
+    /// Only this launch may select the native turn for its Flow boundary.
+    pub flow_selection: Option<crate::durable::FlowTurnSelection>,
 }
 
 impl AgentConfig {
@@ -1134,6 +1136,9 @@ pub fn launch_agent(
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
         launch.session_driver = capture.0.session_driver();
+        launch.flow_selection = capture.0.flow_turn_selection().map_err(|error| {
+            CoreError::ExecutionFailed(format!("Flow admission failed: {error}"))
+        })?;
         if launch.resume_token.is_none() {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
@@ -2925,6 +2930,7 @@ trust_level = "trusted"
     fn build_claude_session_turn_args_minimal() {
         let config = AgentConfig {
             session_driver: None,
+            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -2956,6 +2962,7 @@ trust_level = "trusted"
     fn build_claude_session_turn_args_full() {
         let config = AgentConfig {
             session_driver: None,
+            flow_selection: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -2987,6 +2994,7 @@ trust_level = "trusted"
     fn build_claude_session_turn_args_appends_loopflow_guidance() {
         let config = AgentConfig {
             session_driver: None,
+            flow_selection: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
             agent: None,

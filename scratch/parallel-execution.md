@@ -1282,3 +1282,84 @@ process receipt consumers, native-only recovered usage, Exec entry coverage and
 dense discovery remain. The valid native decision retry/OpenCode failures and all
 remaining-work/import/Chapter obligations are unchanged. No configured-provider,
 installed migration, code-complete or shipment claim follows.
+
+
+### Native-only usage projection · 2026-09-29 · in progress
+
+Table-removal checkpoint ad8cb3a7b is published on base4439aedd9; the conflict-free
+integration changed only upstream doctor_tests. Supervisor's hosted readback retains
+the OpenCode decision failure, 1,840 passes, one failure, 15 skipped and 134 unrun.
+No decision-interface change is selected.
+
+The next source boundary consumes native Session usage in the existing public
+input/history projection. A forward draft records the immutable input at an
+observed native start, alongside its existing Task/Wave attribution. Earlier
+starts without this evidence remain unknown; completion/recovery never borrows
+the replacement's input. Native notifications retain raw thread totals. The
+projection normalizes every snapshot relative to the first observed request,
+marks an unknown baseline partial, and feeds the existing cumulative reducer.
+Native completion does not manufacture a command outcome or final usage receipt.
+Recorder/native correlation requires the exact recorded thread/turn; final recorder
+usage wins, partial matching streams are supplemented rather than summed twice.
+Unknown thread correlation stays a gap. This adds no attempt owner or transport.
+
+Pinned schema source is .lf/tmp/execution-model/supervisor-codex-schema/v2/;
+ThreadTokenUsageUpdatedNotification separates total and last-request counters.
+Thread/read, resume and turns/list schemas contain no tokenUsage field. Recovery
+of retained native observations is distinct from fetching usage missed by every
+client, which remains outstanding. The current proof uses synthetic SQLite
+history, no configured provider or actual crash. It checks generation/input
+replacement, unknown starts/baselines, missing command outcome/cost/finality and
+exact deduplication. native-only-usage.log passed three focused checks.
+Supervisor identified decreasing counters in the first draft; native-usage-decrease-red.log
+reproduces 40 vs required50 (40 peak plus a separate10 partial turn).
+native-usage-decrease-green.log passes after every normalized snapshot reaches
+the shared reducer. Both receipts are retained. Final migration/static checks
+and any native transport proof are still pending.
+
+
+Native usage verification completed for this boundary. native-usage-canonical.log
+passes the populated development upgrade plus native usage fixture (2/2,0.644s),
+with 31 drafts materialized in an ordinary disposable source copy. Receipt
+canonical-native-usage-source.json pins its tree. Subsequent reader changes add a
+retained predecessor baseline and preserve its maximum across decreases; those
+pass native-usage-predecessor.log (1/1,0.402s). Migration bytes remain identical;
+this is not a fresh canonical check of the later reducer bytes. Old native starts
+retain NULL input membership, with selected/consumed Flow event references intact.
+
+The public Codex fixture passed first in native-usage-public-recovery.log and,
+after an explicit pre-reconnect no-usage assertion and predecessor-max proof,
+passed native-usage-public-final.log. Final candidate SHA256
+0a4ffa6b2eefffd5fc48b2e3b189bbeb0f956ffd380459a3f358fc5f494ebaf8
+uses real Codex0.157.1, scripted Responses and a private Home. Both lf clients exit
+130 before the held turn completes; SQL has zero completion and usage rows for
+that turn. Reconnect records one completion and native cumulative usage under the
+original Exec/provider generation; repeated history is unchanged. Public usage
+reports120 input/30 output over three turns, three streams, one recorder-final
+stream, unknown cost and zero usage gaps. The prior Exec remains interrupted/130.
+The shared engine and sibling survive. A direct native inspector remained alive;
+this is not zero-native-clients or replaced-engine recovery, configured accounts,
+native decision retry, or all-provider proof. Receipts are under
+.lf/tmp/execution-model/native-usage-public-final/; native-usage-final-source.json
+pins the changed source/test/schema bytes. No transcript is hydrated by summaries.
+
+The existing summary reader now consumes native history as well as recorder
+observations; complete immutable input mapping does not become a new lifecycle.
+Missing native start/input, missing baseline, native-only finality and unknown cost
+remain explicit. Unmapped old starts stay available in full Session history.
+The default projection still groups by retained input; the final typed wire/dense
+query and whole pre/post-bind matrix remain in remaining-work.md.
+
+Static checks: native-usage-static.log first fails one redundant-field-name lint;
+the shorthand fix passes all-target Clippy in native-usage-static-final.log(17.45s).
+Formatting, migration history, Ruff, whitespace and both docs tests pass. The
+review caught and fixed first/last collapse losing an intermediate counter peak;
+no second accounting policy or attempt object was added. Againstad8cb3a7b the
+corrected production-prefix count is +218/-16, net+202 (Rust210/-16,SQL8/0),
+excluding tests/docs; native-usage-count.json records the method. This checkpoint
+completes only the selected usage consumer, not the full Task or Flow.
+
+The returned unapplied Exec proposal is now owned by main. Next review/apply only
+its hunks, omit the redundant run_events-presence admission check, and preserve
+existing Exec FK admission plus the real-CLI/library distinction. Early compatible
+store observation remains required; no permission question or new sink is selected.

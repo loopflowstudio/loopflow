@@ -25,7 +25,21 @@ Swift-fixture researcher (tool77919) also exited zero. Its artifact
 all twelve source/log hashes match and five diff hunk counts were checked.
 It made no source edits or behavioral proof. Main integrated the proposal; the
 focused realCLI transport test passed in 10.370s and hosted Swift/UI passed on
-003fa792f. No bounded contributor remains active.
+003fa792f. The Exec entry/exit contributor (tool8752) completed exit zero.
+Its [unapplied proposal](proposal-exec-entry.md) is released: artifact SHA-256
+`4b89f5af436fc28f5527498372200b40ff980deee6e94b5002072899ae28f46d`;
+all 25 diff hunks and the embedded digest were checked. Only run_record.rs
+changed among source fingerprints, matching main's documented native-usage work.
+No contributor remains active; main owns source integration and builds.
+
+Supervisor review removes the proposal's extra `process_is_recorded` check:
+it reads journal events, while driver/provider FKs already require the Exec row.
+Keep the real-CLI/library distinction and selective Exec-write-failure proof.
+Early parser/startup/install/screenshot persistence remains unfinished; temporary
+zero-row assertions are not permanent product policy or missing user approval.
+A safe noninitializing writer is the remaining technical boundary. Proposal
+formatting/parsing is not compilation or behavioral evidence; apply hunks only.
+
 
 ## Active control
 
@@ -57,8 +71,18 @@ to make an inspection pass. Task-specific contributions use `--task LOO-298`;
 
 ## Delivery and next work
 
-Published **003fa792fa9f027416db4d260bd1a2a5eb71120d**, based on
-**567ac07df863b524f9b1ca6698161748b60b27fd**. Continuation checkpoint dca1d617d
+Published **ad8cb3a7ba0395ae8e033eb7e2afde8d77d84338**, based on
+**4439aedd9afb6deae779f646b667ab1a1e90d43b**. GitHub and Task publication agree;
+auto-merge is absent. CI36549325005 is terminal: Swift109343328459 and UI passed;
+Rust109343328423 failed the retained OpenCode taskless decision case after 1,840
+passes, one failure, 15 skips and 134 unrun (194.705s). Both step child commands
+refused original-turn authority. Log `ci-ad8cb3a7b-rust.log` under `.lf/tmp/cut-i/`;
+this is the same provider integration gap, not another database fixture. Main
+has the exact output. Other executed jobs passed except scratch-clear. Table removal is checkpoint dab41cf48.
+Comparison from old003fa792f to rebased d5eef693c contains only upstream4439
+doctor_tests.rs isolation (PR1349); no extra test repeat is required.
+
+Earlier base was567ac07df. Continuation checkpoint dca1d617d
 rebased to 3280c7524 with one reconciled migration file. Upstream prefix hashing
 joins this branch's outer initialization transaction; the focused initialization/
 append/adoption contention regression passed once (1.021s). This was not a
@@ -75,7 +99,7 @@ The preceding 4ced9467f Rust job retains its separate OpenCode decision failure
 (1,835 passes / 135 unrun); the current cutoff does not retest it. Hosted
 interruption proof passed on earlier 9887f8c84; retain its controlled Linux scope.
 
-Pending table-removal cut retains every historical SQL row as immutable input
+Published table-removal cut retains every historical SQL row as immutable input
 catalog evidence, with nullable conversation attachment. Unknown inputs still
 report as unresolved; no AgentSession or Exec is invented. Ordinary replacement
 again requires a fresh input INSERT after supervisor review caught earlier-input
@@ -120,11 +144,22 @@ pending decision-interface choice in questions.md. No provider fork, tool proxy,
 shared-engine kill, new attempt object or retry-contract change is selected.
 Independent work continues; missing-decision and valid-retry proofs stay required.
 
+Native-only usage now records the original immutable input on new native starts;
+old unmapped starts stay unknown. Supervisor's source counterexample (20→40→30)
+first failed, then passed after every snapshot used the existing cumulative
+reducer. `native-usage-decrease-green.log` passes replacement, deduplication,
+missing baseline and retained peak in one case (0.406s). The materialized
+`native-usage-canonical.log` passes that case and populated development migration
+(0.238s, 0.642s). All 2,022 source hashes matched when reviewed. Later edits to
+the native CLI fixture remain separate. This is retained SQL evidence; native
+recovery of observations missed by every client remains unproven. Main owns the
+remaining static/public verification and checkpoint.
+
 ## Returned research and proof boundaries
 
 | Artifact / contribution | Reusable finding and outstanding limit |
 | --- | --- |
-| [Run removal](research-final-run-removal.md) | Twelve source hashes verified; separate obsolete CRUD from historical SQL and live lifecycle readers. Main removed CRUD; table removal now has populated canonical proof, pending checkpoint. |
+| [Run removal](research-final-run-removal.md) | Twelve source hashes verified; separate obsolete CRUD from historical SQL and live lifecycle readers. Main removed CRUD; table removal now has populated canonical proof and is published. |
 | [Native retry options](research-native-retry-options.md) | Nine local source/schema hashes and upstream reload predicate verified. Four tradeoffs, no selected transport or passing valid retry. |
 | [Indexed discovery](research-indexed-discovery.md) | SQL-only fixture is not CLI latency proof. Narrowing review lookup drops nullable historical membership; preserve discovery. Desktop still requests unlimited inventory. |
 | [Exec admission](research-exec-admission.md) | Thirty-nine hashes checked; only main handoff drifted. Early paths and two hard exits escape logging; malformed-caller agent admission needs a public probe. No code/test contribution. |
@@ -148,13 +183,14 @@ settlement. No partial import count permits deleting unresolved history.
 
 ## Comparable production measurement
 
-Saved native checkpoint `792c46eca` against 7d1158dac:
-**+15,483 / −29,719 = net −14,236**. Rust/Swift +14,366/−29,657;
-Python/shell +48/−62; SQL +1,069/−0. The native-identity cut alone versus
-4ced9467f is +107/−38 (net +69). Receipt
-`.lf/tmp/execution-model/status-counts-792c46eca.json`; excludes working bytes.
-This measurement predates the latest rebase. The preceding f7f12a757 receipt
-retains its old-base total and method reproduction.
+Published `ad8cb3a7b` against its base `4439aedd9`:
+**+15,710 / −29,888 = net −14,178**. Rust/Swift +14,512/−29,826;
+Python/shell +48/−62; SQL +1,150/−0. Receipt
+`.lf/tmp/execution-model/status-counts-ad8cb3a7b.json`; excludes working bytes.
+The table-removal cut alone is Rust+56/−42, SQL+81/−0 (net+95), because the old
+released/draft migration history remains while forward preservation drops its
+runtime table. Earlier receipts retain their own bases and measured snapshots.
+
 Method: corrected production prefixes in `measure-published-cd4ab9d813.py`, no
 rename detection, tests/docs excluded. Changed bases prevent treating differences
 between whole-branch totals as incremental cuts. No final-size/time estimate proven.

@@ -799,3 +799,68 @@ or migrated. Full remaining-work obligations and native valid-retry red remain.
 whitespace and migration-history checks pass, with 55 shipped migrations unchanged.
 Review keeps the repair in the existing adoption transaction and one forward
 Started draft; no new migration framework or execution owner was introduced.
+
+## Direct-provider continuity and Session fixture reconciliation
+
+The populated-upgrade checkpoint and released notes were pushed selectively as
+29d5c5229 on base d4b283a87. The first pinned rebase stopped before creating a
+sequencer and preserved HEAD; dirty tracked supervisor notes were still present.
+After their explicit handback/checkpoint, the same lf rebase succeeded with no
+base change. The wrapper did not expose Git stderr, so dirty-state rejection is
+the supported explanation rather than a captured exact diagnostic. Selective
+`lf commit --no-add --push` excluded the then-active research artifact.
+
+`session-flow-current-inputs.log` preserves both CI counterexamples after the
+Task Flow fixture stopped querying Runs: OpenCode continuation now reaches
+“Conversation has no connection and no confirmed engine exit”; both decision
+calls still lack selected native original-caller authority. Direct CLI spawn
+now records its actual PID/start identity in the existing Session provider
+fields, just as the native harness records its process. A failed registration
+stops and waits only that spawned child. No new process inventory or native turn
+is created. `session-flow-provider-process.log` passes the same renamed Session,
+failed/successful inputs and exact review in 7.426s. This is scripted OpenCode
+process continuity, not native OpenCode decision/history integration. It neither
+fabricates native completion from recorder success nor repairs Codex retry.
+
+The once-requested affected suite in `session-cutover-provider-repair.log` finishes
+20 cases: 15 passes, five failures, zero skipped. The Task Flow case also proves
+zero Run rows and repeated completed resume without another launch. One red is
+the retained taskless OpenCode decision. Three others share run_parents reading
+the conversation's new binding instead of the input's original observation; the
+fourth still selects legacy Runs throughout its launch/listing proof. Fixture
+queries now read immutable input references and per-input Session observations,
+retaining original ancestry, missingness, completion, caller, scope and listing
+assertions. Only those four cases are being repeated; no broad matrix is claimed.
+
+`session-cutover-history-fixtures.log` passes import-after-bind and prospective
+binding, then retains two source-field assertion failures. An inherited child
+has SQL admission ancestry without authored manifest subjects. The fixture now
+uses Session provenance only when its Task/Wave still exactly match the original
+history ownership; an earlier unassigned input cannot acquire a later binding.
+`session-cutover-inherited-fixtures.log` passes both remaining cases (6.771s and
+8.866s), including parent drill, exact list/usage/activity inventories and original
+bound history. No assertion was removed. The taskless OpenCode decision remains
+red and is an integration obligation, not a fixture pass. No new full suite ran.
+
+
+Supervisor's follow-up exposed a separate public-reader regression after the
+fixture reconciliation: a fresh inherited input with no authored manifest
+subjects became Declared after replacement. `inherited-replacement-red.log`
+first rejected an unsuitable Ask setup (that manifest already had subjects).
+`inherited-replacement-red-2.log` then reproduces the actual public `runs`
+misclassification after replacing the child input through the Session API.
+The shared reader now deduces inherited source from unchanged admission source
+and matching immutable history ancestry; explicit manifest/SQL provenance wins.
+Binding changes source to Bound, so it cannot lend inherited provenance to old
+unassigned inputs. The extension checks public runs/usage before and after input
+replacement, with and without Task filtering, and retains unassigned old history.
+`inherited-replacement.log` passes that case and the replaced historical-input
+proof; this does not claim a second provider turn or configured native recovery.
+Direct-provider Clippy passed in 16.39s before this reader addition; final static
+checks follow for the combined checkpoint. The decision-interface question is
+pending in Jack's existing conversation; no interface change is selected here.
+
+Combined all-target Clippy passes in 16.67s (`inherited-provider-static.log`);
+formatting and diff whitespace pass. Review keeps process evidence in Session
+and source inference constrained by immutable ancestry and write-once assignment.
+No native outcome or new execution owner was added.

@@ -89,3 +89,50 @@ nested child. This preserves authored targets and counters and is an implementat
 interpretation of Jack's accepted child-per-pass contract, not a new Jack decision.
 Source/canonical/public fixtures cover this interpretation; final concept review
 must retain it explicitly.
+
+2026-09-29 · **Decision interface: decided.** Jack Heart chose the structured
+result in the operating conversation: a Flow decision is returned by the selected
+successful agent turn and consumed from AgentSession history. He named PydanticAI's
+typed-output logic as the inspiration. The in-turn `lf flow decide` path must not
+remain a second writer for those boundaries. This supersedes the "asked,
+unanswered" entry above. Implementation shape is still to be designed.
+
+2026-09-29 · **Captured-input naming: reframed, not decided.** Jack rejected the
+candidate names. His principle: an ID is the ID of an object type in the data
+model. The open question is therefore what object the identifier names, before
+any spelling. No rename proceeds until that is answered.
+
+2026-09-29 · **Decision command: remove.** Jack Heart decided the in-turn
+decision CLI is removed outright once the structured result lands; he said it
+"felt wrong" already. No alias, no compatibility path. Supervisor assumption, not
+yet confirmed by Jack: the router's in-turn command goes with it, since a route
+is the same kind of result.
+
+2026-09-29 · **Usage after bind: Jack leans, undecided.** Jack is "slightly more
+inclined towards post-hoc attribution and allowing history to change" and said he
+could be wrong. Candidate shape offered to him: keep usage events immutable and
+derive ownership from the Session's write-once Task at read time, with bind time
+marking the pre-bind portion. Prospective attribution remains the implemented
+behavior until Jack decides. Do not change it on this entry.
+
+2026-09-29 · **Captured input: decided.** Jack Heart decided a captured input is
+an event in AgentSession history, not an object. It is identified by its
+`session_events` sequence and names its Exec through the existing nullable
+`exec_id`. The `RunId` type and the `agent_session_inputs` side table are
+deleted. The Flow's current-input pointer becomes a Session event reference, as
+its selected start already is. Stored `run_…` strings stay valid selectors as
+import evidence resolving to an event. Jack rejected `SessionExec`: (Session,
+Exec) does not identify an input, and the contract excludes that object family.
+Supervisor assumption, open to Jack: the event kind is named `captured`.
+Unverified: how many readers depend on artifact directories keyed by the old
+string.
+
+2026-09-29 · **Operating assumptions under Jack Heart's autonomous goal.** Jack set
+the goal "get all the way to code-complete autonomously" and did not answer two
+open questions. The operator proceeds on these, both reversible, neither
+attributed to Jack as a decision:
+- The router's in-turn command is removed together with the decision command;
+  a route is the same kind of typed result.
+- Usage after bind stays prospective, as implemented and proven. Jack's lean
+  toward post-hoc attribution, read from the Session's Task at query time, is
+  carried to the concept review as an open finding, not built now.

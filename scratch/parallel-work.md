@@ -67,12 +67,18 @@ build and Git ownership. Review page for Jack:
   issues; patched green passes six focused tests. Private copy, macOS 26; hosted
   Monitor ordering itself is not reproduced. Main integrates by hand over its
   own lifecycle diagnostics. Hosted swift-test is the confirming proof.
-- **Final history readers, relaunched:** Codex, `assignment-2.txt` in
-  `.lf/tmp/final-history-proposal/`. Private unexecuted patch replacing
-  RunSnapshot/subject readers; carries the RunId naming finding without choosing
-  a name. Nothing returned yet.
-- **Deletion fixture:** direction posted to the Task thread: the synthetic Linear
-  server needs a `RenameProject` branch returning `success: true`.
+- **Final history readers, released:** handback, proof plan and `history.patch`
+  in `.lf/tmp/final-history-proposal/`, SHA-256
+  `e8f43fbc0ed65b532ff58825e46b0ab600e9dfcec674d82795f9283bb25379c9` verified;
+  read-only applicability passes at `d18cac7d2`. Uncompiled; five private SQL
+  checks and syntax only. Production +848/−386, net +462 across 37 files. Adds
+  four projection types, so main owes a subtract-only pass after it compiles.
+  Keeps `RunId`; orphan native receipts remain outside the aggregate.
+- **Deletion fixture:** repaired in `742852dbf`; no longer fails on hosted CI.
+- **Hosted CI `067ff0164`:** swift-test passes, confirming the terminal repair.
+  rust-test has one failure,
+  `publish_uses_managed_worktree_even_with_unknown_ambient_run`, with 80 unrun;
+  earlier runs never reached that suite. Log `.lf/tmp/cut-i/ci-067f-rust.log`.
 
 - **Preservation released:** tool25840 exited0, Run
   `run_6c140a0a9bea481fbf33075fa2f31821` completed. Reviewed handback/patch in

@@ -14,7 +14,7 @@ impl Store {
 
     pub(crate) async fn historical_session_inputs(
         &self,
-    ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {
+    ) -> StoreResult<Vec<(Option<AgentSession>, crate::session::SessionObservation)>> {
         run_sqlite(&self.sqlite, |store| store.historical_session_inputs()).await
     }
 

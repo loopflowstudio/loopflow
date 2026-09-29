@@ -87,7 +87,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run cargo clippy
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo clippy --all-targets -- -D warnings
+        run: /usr/bin/time -v cargo clippy --all-targets -- -D warnings
 
   rust-test:
     needs: merge-proof
@@ -113,13 +113,13 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
       - name: Run Rust tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: cargo nextest run --all
+        run: /usr/bin/time -v cargo nextest run --all
       - name: Prove checkout refresh through the CLI
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           # Integration tests above already build this executable.
           test -x "$PWD/target/debug/lf"
-          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
+          LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v uv run pytest python/tests/test_checkout_refresh.py
 
   task-installation:
     needs: merge-proof
@@ -188,7 +188,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run E2E smoke test
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: tests/e2e/test_smoke.sh
+        run: /usr/bin/time -v tests/e2e/test_smoke.sh
 
   swift-test:
     needs: merge-proof
@@ -220,7 +220,7 @@ jobs:
             swiftpm-${{ runner.os }}-
       - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
-        run: cargo build -p loopflow --bin lf
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf
       - name: Run Swift tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -230,7 +230,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/swift-tests"
           swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
-          swift test --package-path swift --no-parallel -Xswiftc -gnone \
+          /usr/bin/time -l swift test --package-path swift --no-parallel -Xswiftc -gnone \
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
@@ -260,7 +260,7 @@ jobs:
         run: |
           # The Swift test target depends on LoopflowMac and already builds it.
           test -x swift/.build/debug/LoopflowMac
-          scripts/prove_wave_surface_states.sh
+          /usr/bin/time -l scripts/prove_wave_surface_states.sh
         timeout-minutes: 15
 
   loopflow-ui-test:
@@ -297,7 +297,7 @@ jobs:
         # The real hosted UI run is the separately named required gate
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
         run: |
-          xcodebuild build-for-testing \
+          /usr/bin/time -l xcodebuild build-for-testing \
             -project LoopflowSwift.xcodeproj \
             -scheme LoopflowMac \
             -destination platform=macOS \

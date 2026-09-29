@@ -6,7 +6,84 @@ Detailed reports, earlier failures and source hashes remain in the
 
 ## Published CI and retained red results
 
-Current integrated checkpoint is `26a0270af`, based on main `d9632d833` and
+Latest published head is `81b57c91f`, rebased onto `aab595e6a`. GitHub reports
+mergeable; Task base matches Git and auto-merge is off. CI36510330745, Rust job
+109220794661, reports 928 passed / 1 failed / 13 skipped / 1,007 unrun.
+`ops::pm::oauth_tests::pm_read_linear_oauth_recovers` fails decoding its synthetic
+Linear Project: missing required `status` at oauth_tests.rs:174. The response
+fixture lacks the status already present on its local ProjectPlan. This is not
+the separately recorded SQLite-contention flake. Raw log:
+`.lf/tmp/execution-model/rebase-81b57-rust-ci.log`. Other substantive hosted jobs
+passed; scratch-clear and aggregate result failed. The preserved mechanical
+ownership proof has not passed: its local RED in `flow-operation-owner-red.log`
+observes two Runs, zero AgentSessions and one Exec for two in-process operations.
+CI stopped before that test. The first local `flow-operation-owner-green.log`
+passes the new actual-CLI mechanical assertion (two operations, one Exec, zero
+Runs/AgentSessions, separate Flow events), but OAuth still fails after adding
+status: its whole-Project equality expects the old plan even though H7 refreshes
+planning fields. Retain durable identity/progress/events while checking refreshed
+planning; its synthetic content also lacks the required Flow. Source review
+comment `829b1dc0-bc67-44fb-b0bc-0194a7a1e131` names a separate unfinished Started
+gap: a claim-only mechanical reservation can lose its sole work evidence when
+released before operation start. No full-green or complete owner-removal result
+follows from the one mechanical pass.
+
+`flow-operation-boundaries.log` then passed operation interruption/retry, OAuth
+recovery and the taskless mechanical CLI (three tests). The managed Started
+proof failed before worker execution: OS-account installation selection ignored
+the fixture's HOME override and correctly refused the branch worker. That is
+not a managed execution pass. The Started source writer/claim exception are
+removed; the proof still needs the disposable account harness specified in
+TESTING.md. Comment `01be4f1e-fbe1-46d6-a811-b4359bf63c26` records the handoff.
+
+`flow-operation-managed-os.log` records Docker's 10-second preflight timeout;
+no proof container was created. Local work continues. In `flow-operation-store.log`,
+the historical fixture first violated the existing positive-attempt constraint;
+main corrected its old Run inputs. `flow-operation-store-2.log` then passes
+populated operation migration, exact native completion, interruption/retry and
+OAuth recovery: four passed, two failed, one unrun. The failures are the managed
+reducer still expecting two Run rows after both Ops complete, and the new
+later-operation-failure CLI fixture asserting a missing-generator error. Source
+inspection finds `telemetry-scorecard` in that fixture while the actual parser
+names `__telemetry-scorecard`; actual stderr was not printed by its failed
+assertion. Comment `dee0eb8f-ce65-43b0-9959-bef47dda4bbd` records both findings.
+The subsequent `flow-operation-error-observation.log` prints the actual failure:
+the first operation ran, then `telemetry-scorecard` was rejected as an unsupported
+Op. This confirms the fixture never reached the intended missing-generator error.
+The migration pass preserves selected history, old operation selectors/results
+and unknown start/Exec evidence; it is not a canonical-materialized repetition,
+complete filesystem import or installed-Home proof.
+
+`flow-operation-store-3.log` passes all seven selected tests (29.243s after
+3m04s compilation). The reconciled Task-driver proof checks claim/release leaves
+Started unset, real operation history sets it, both Ops finish without Runs,
+and the first-assignment time cannot change. The corrected CLI failure fixture
+reaches the missing-generator failure and retains earlier success in the same
+failed Exec. These results supersede the two failing assertions above without
+erasing their diagnostic logs. Canonical repetition and disposable-OS managed
+execution remain distinct outstanding checks.
+
+Supervisor's actual-CLI interruption proof also passes on copied candidate
+`33be09c872e4c82c786237a1b21f23d59c024c33a56a1be247fe95f548182467`:
+`.lf/tmp/execution-model/supervisor-mechanical-crash-1/results.json`, with script
+and log in its parent directory. In a private Home/repository, a synthetic
+telemetry script writes one effect and waits. Killing only the fixture's owned
+process group leaves the operation and original Exec outcomes unknown. Remove
+the Flow template: plain resume exits1 with inspect-before-retry and still one
+effect; explicit retry exits0 with exactly one further effect and completes the
+captured two-Op Flow. Five history events retain the original unknown start and
+two successful operations under one new Exec; zero Runs/AgentSessions. No SQL
+mutation, installed Home, provider or remote effect. Preflight passed72.5GiBfree.
+Comment `f098395e-c8b9-4040-a97b-996d65706dda` records the reviewed proof and limits.
+
+`canonical-operation.log` materializes all24 drafts as `0.12.25.001_release` in a
+disposable source copy and passes six checks (5.755s after1m39s compile): populated
+operation history, exact native completion, Task mechanical driver/Started,
+agent reservation/retry continuity, interrupted operation recovery and empty-draft
+initialization/upgrade. This closes the focused canonical repetition above;
+complete historical import and disposable-OS managed execution remain unproven.
+
+Earlier integrated checkpoint `26a0270af`, based on main `d9632d833`, was
 published to PR1296 on 2026-09-28. GitHub and the Task record agree on the head;
 the Task base agrees with Git. Rebased recovery commit `e9597b75e` preserves
 the recovery source and compact scratch from `b352cc691`; the intervening

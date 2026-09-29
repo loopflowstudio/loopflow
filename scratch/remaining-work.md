@@ -7,8 +7,8 @@ not evidence that each preceding implementation has passed.
 
 Jack requested this order on 2026-09-28: rewrite the docs and README for the
 accepted model before further executable owner conversion. The recovery
-checkpoint is rebased and published at `26a0270af`; local docs checkpoint
-`4bb44b999` completes the initial spec rewrite. It covers the active guides:
+checkpoint is rebased and published at `81b57c91f`; docs checkpoint
+`12462fe51` (formerly `4bb44b999`) completes the initial spec rewrite. It covers the active guides:
 `README.md`, `docs/index.md`, `docs/lf.md`, `docs/agent-api.md`, `docs/waves.md`,
 architecture/reference/data/execution, and other active pages that define these
 objects. Derived docs were regenerated through the existing generator.
@@ -19,8 +19,8 @@ replace the separate Run product object. Keep one explicit implementation-status
 section so the target contract does not misrepresent unfinished behavior. Keep
 current command spellings and source inventories accurate during conversion.
 Architecture Reference now maps the spec to the remaining implementation;
-writing the spec does not complete the requirements below. Next is completion
-of the metric-planning repair, then the execution-owner conversion below.
+writing the spec does not complete the requirements below. The metric-planning
+repair is published; execution-owner conversion continues below.
 
 Docs review also found active command guidance that must follow the Chapter
 conversion: builtin split-wave, wave_start-chapter, start-chapter, wave_operate,
@@ -65,7 +65,8 @@ one managed FlowSession pointer while allowing other attributed Flows.
   Current dependency is concrete: `store/sqlite/flows.rs::FLOW_SELECT` still
   reads Run publication/outcome, `select_flow_turn` joins the reserved Run,
   `publish_attempt` writes it, and verdict/route writes use Run authority.
-  `lf/commands/flow.rs::run_op` records mechanical results through CaptureHandle.
+  The working `lf/commands/flow.rs::run_op` now records mechanical results directly
+  on Flow history; its complete proof is still pending (see evidence).
   Convert this complete boundary with TaskLauncher and saved-launch callers;
   preserve exact selected native history and uncertain mechanical effects.
 - Finish Ask/keyed answer, review completion, helpers (rebase conflicts/landing

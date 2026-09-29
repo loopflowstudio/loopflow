@@ -9,7 +9,6 @@ use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
 use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress, WorkBinding};
-use crate::run_record::{RunFlowMembership, RunFlowStep};
 use crate::store::SharedStore;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -790,49 +789,22 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         Ok(())
     }
 
-    /// An operation is an attempt like a skill launch: its Run row is the
-    /// receipt recovery reads, so an interrupted operation blocks for
-    /// inspection instead of replaying its side effect.
+    /// Mechanical effects belong to Flow history, including uncertain outcomes.
     async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
-        let flow = self.reserve(self.begin().await?).await?;
+        let flow = self.begin().await?;
         let name = ops.item.display_name();
         eprintln!("op: {name}");
-        let attempt = flow
-            .current_attempt
-            .as_ref()
-            .ok_or_else(|| anyhow!("op: {name} has no reserved Run"))?;
-        if attempt.completed() {
-            return Ok(());
-        }
         let claim = self.claim();
-        let store = self.store.clone();
-        let (id, version) = (self.id.clone(), flow.version);
-        let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
-            crate::run_record::RunSpec {
-                harness: "loopflow".into(),
-                model: None,
-                surface: "operation".into(),
-                cwd: flow.cwd.clone(),
-                repo: Some(flow.cwd.clone()),
-                worktree: None,
-                skill: None,
-                subjects: Vec::new(),
-                flow: RunFlowMembership::Step(RunFlowStep::of(&flow)?),
-                work: flow.declared_work(),
-            },
-            attempt.run_id.clone(),
-            None,
-            &crate::trace::PreparedTurnContext::from_prompts(
-                "Loopflow mechanical Flow boundary",
-                &name,
-            ),
-            move |run_id| {
-                store
-                    .sqlite
-                    .publish_attempt(&id, version, run_id, claim.as_ref(), "loopflow", None)
-            },
-        )?;
-        capture.record_input("operation", &name);
+        let exec = journal::current_exec_id();
+        let Some(start) = self.store.sqlite.begin_flow_operation(
+            &self.id,
+            flow.version,
+            claim.as_ref(),
+            exec.as_ref(),
+        )?
+        else {
+            return Ok(());
+        };
         let cwd = flow.cwd.clone();
         let item = ops.item.clone();
         let result = tokio::task::spawn_blocking(move || {
@@ -840,11 +812,14 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         })
         .await
         .map_err(|error| anyhow!("op: {name} worker failed: {error}"))?;
-        capture.finish(if result.is_ok() {
-            "completed"
-        } else {
-            "failed"
-        })?;
+        self.store.sqlite.finish_flow_operation(
+            &self.id,
+            flow.version,
+            claim.as_ref(),
+            start,
+            exec.as_ref(),
+            result.is_ok(),
+        )?;
         result.map_err(|error| anyhow!("op: {name} failed: {error}"))
     }
 }

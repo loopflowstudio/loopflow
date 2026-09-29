@@ -3089,6 +3089,13 @@ mod planning_tests {
         assert_eq!(flow.current().kind, StepKind::Op);
         let flow = store.start_task_flow(&task.id, flow).await.unwrap();
         let held = claim(&store, &task, &flow, 404).await;
+        assert!(!store.task_started(&task.id).await.unwrap());
+        let released = store
+            .release_flow(flow.id(), flow.version, Some(&held))
+            .await
+            .unwrap();
+        assert!(!store.task_started(&task.id).await.unwrap());
+        let held = claim(&store, &task, &released, 405).await;
         let create: crate::harness::CreateHarness =
             Box::new(|_, _, _| panic!("an operation step needs no provider"));
 
@@ -3101,16 +3108,30 @@ mod planning_tests {
         assert!(ended.finished);
         assert_eq!(ended.cursor.index, 2);
         assert_eq!(ended.cursor.iteration, 0);
-        // Each operation ran as its own published, completed Run of the Task.
         let runs = store
             .runs(None, None, Some(task.id.as_str()), None, 0)
             .await
             .unwrap();
-        assert_eq!(runs.len(), 2);
-        assert!(runs.iter().all(|listed| {
-            listed.run.provider.as_deref() == Some("loopflow")
-                && listed.run.ended.as_ref().map(|end| end.outcome.as_str()) == Some("completed")
-        }));
+        assert!(runs.is_empty());
+        assert!(store.task_started(&task.id).await.unwrap());
+        let conn = rusqlite::Connection::open(guard.ledger.home().join("loopflow.db")).unwrap();
+        let results: Vec<(i64, String)> = conn
+            .prepare("SELECT node,outcome FROM flow_events WHERE flow_id=?1 AND kind='operation_completed' ORDER BY seq")
+            .unwrap()
+            .query_map([flow.id()], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            results,
+            vec![(0, "completed".into()), (1, "completed".into())]
+        );
+        assert!(conn
+            .execute(
+                "UPDATE tasks SET started_at=started_at+1 WHERE id=?1",
+                [task.id.as_str()]
+            )
+            .is_err());
     }
 
     #[tokio::test]

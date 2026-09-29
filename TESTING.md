@@ -553,8 +553,8 @@ launch tests should prove that the canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task controller consumers: worker claims now leave Started history even
-after a provider failure. Use CI's materialized migration graph for trigger
+include Task controller consumers: durable work reservation retains Started
+after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Installed development
 builds record draft checksums too: add a forward draft after the owning migration
 instead of rewriting an applied draft. Preserve populated historical fixtures.
@@ -614,10 +614,12 @@ Run the real CLI resume regressions with isolated installation authority:
 
 ```bash
 uv run python scripts/test_task_installation.py
+# One changed managed operation proof:
+uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
 This copies source into a disposable Linux container and creates an OS account
-whose installation records select the compiled CLI/daemon. An ELF trailer gives
+whose installation records select the compiled CLI. An ELF trailer gives
 the installed CLI a distinct identity: byte-identical copies are installed too,
 regardless of path. No host Home, credentials or installation is mounted.
 These installation tests run only through
@@ -634,6 +636,11 @@ review or committing a restart checkpoint. Managed-operation CLI assertions belo
 in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
 host account's installation authority. Read-only Flow projections stay in the
 ordinary suite.
+
+The mechanical Flow proof uses that disposable account without an installation
+selection. A claim followed by admission failure/release leaves Started absent;
+the real worker records operation history and Started together. It retains the
+captured Flow after the template disappears and creates no operation Run.
 
 The recovery proof adds a draft unknown to the branch, preserves both
 databases and independent private writes, recommends the

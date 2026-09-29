@@ -5042,6 +5042,73 @@ mod tests {
     }
 
     #[test]
+    fn operation_history_upgrade_preserves_receipts_and_unknown_start_evidence() {
+        let conn = open();
+        let name = "flow_operation_history";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES('flow','{"id":"flow","capture":"retained"}','/repo',1,1,7,0,1,'current');
+            INSERT INTO runs(id,invocation_id,created_at,published,cwd,node,iterations,attempt,provider,outcome,ended_at)
+                VALUES('past','flow',1,1,'/repo',0,'[]',1,'loopflow','failed',2),
+                      ('pending','flow',3,1,'/repo',1,'[]',1,'loopflow',NULL,NULL);
+            UPDATE flow_sessions SET current_run_id='pending' WHERE id='flow';
+            BEGIN;
+            INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at,kind)
+                VALUES('conversation','agent','Retained','human',1,'conversation');
+            INSERT INTO runs(id,session_id,created_at,published,cwd) VALUES('agent','conversation',1,1,'/repo');
+            INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+                VALUES('conversation','thread','turn','started','start',1,'{}');
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at)
+                VALUES('flow',1,0,'[]','selected',last_insert_rowid(),1);
+            COMMIT;
+        "#).unwrap();
+        let before: (i64, i64) = conn
+            .query_row("SELECT seq,session_event FROM flow_events", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let after: (i64, i64) = conn
+            .query_row(
+                "SELECT seq,session_event FROM flow_events WHERE kind='selected'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        let retained: (Option<String>,String,Option<String>,Option<i64>,Option<i64>) = conn.query_row(
+            "SELECT f.current_run_id,json_extract(e.payload,'$.legacy_run_id'),e.exec_id,e.observed_at,done.seq
+             FROM flow_sessions f JOIN flow_events e ON e.seq=f.operation_start
+             LEFT JOIN flow_events done ON done.operation_start=e.seq",[],|row|
+             Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
+        assert_eq!(retained, (None, "pending".into(), None, None, None));
+        let receipt:(String,i64,Option<i64>) = conn.query_row(
+            "SELECT outcome,observed_at,version FROM flow_events WHERE kind='operation_completed'",[],|row|
+            Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(receipt, ("failed".into(), 2, None));
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM execs", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn conversation_ancestry_upgrade_preserves_historical_attribution_and_started() {
         let conn = open();
         let name = "own_conversation_ancestry";

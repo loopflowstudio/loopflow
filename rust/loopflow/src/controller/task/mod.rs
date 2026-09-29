@@ -1900,9 +1900,8 @@ mod planning_tests {
                 assert_eq!(blocked.failure.as_ref().unwrap().run_id.as_ref(), Some(&run));
                 // A completed Run whose step wanted a decision fails the step, not
                 // the Run; a disconnected provider fails the Run itself.
-                let (directory, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
                 assert_eq!(
-                    crate::run_record::read_run_snapshot(&directory).unwrap().status(),
+                    store.sqlite.input_snapshot(run.as_str()).unwrap().status(),
                     if failure == "disconnected" { "failed" } else { "completed" }
                 );
                 assert!(blocked.claim.is_none());
@@ -2001,8 +2000,7 @@ mod planning_tests {
                 let blocked = store.task_flow(&task.id).await.unwrap().unwrap();
                 let run = seen.lock().unwrap()[0].1.clone();
                 assert_eq!(blocked.failure.as_ref().unwrap().run_id.as_ref(), Some(&run));
-                let (directory, _) = crate::run_record::resolve_manifest(guard.ledger.home(), run.as_str()).unwrap();
-                assert_eq!(crate::run_record::read_run_snapshot(&directory).unwrap().status(), "completed");
+                assert_eq!(store.sqlite.input_snapshot(run.as_str()).unwrap().status(), "completed");
                 assert!(blocked.claim.is_none());
                 assert_eq!(blocked.cursor.index, flow.cursor.index);
                 let (execution, graph) = crate::ops::task_execution::task_execution_and_flow(&store, &task.id).await.unwrap();

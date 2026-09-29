@@ -633,19 +633,16 @@ async fn find_session(store: &SharedStore, session_id: &str) -> Result<Option<Se
     if let Some(session) = owned {
         return owned_target(store, session_id, session).await.map(Some);
     }
-    match crate::run_record::resolve_manifest(&crate::store::observability_home_dir(), session_id) {
-        Ok((_, manifest)) => {
-            // Prefix selectors also resolve through the canonical Run's owner.
-            let Some(session) = store.session_for_run(&manifest.run_id).await? else {
-                bail!("Run {} does not belong to a Session", manifest.run_id);
-            };
-            owned_target(store, manifest.run_id.as_str(), session)
-                .await
-                .map(Some)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(anyhow!("Session record unavailable: {error}")),
-    }
+    let selected = match store.sqlite.resolve_history_input(session_id) {
+        Ok(selected) => selected,
+        Err(crate::store::StoreError::NotFound) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let input = RunId::parse(&selected)?;
+    let Some(session) = store.session_for_run(&input).await? else {
+        bail!("Input {input} does not belong to a Session");
+    };
+    owned_target(store, input.as_str(), session).await.map(Some)
 }
 
 async fn owned_target(
@@ -721,8 +718,14 @@ impl NativeRun {
         crate::lf::commands::util::active_provider_clients(&self.dir, &self.provider)
     }
 
-    fn history(&self, session: &crate::session::AgentSession) -> Result<ProviderSessionRef> {
-        crate::run_record::read_provider_session(&self.dir)?
+    fn history(
+        &self,
+        store: &SharedStore,
+        session: &crate::session::AgentSession,
+    ) -> Result<ProviderSessionRef> {
+        store
+            .sqlite
+            .input_provider_session(&session.input_id)?
             .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))
     }
 
@@ -1086,7 +1089,7 @@ pub(crate) async fn open(
             if session.kind == crate::session::SessionKind::Conversation =>
         {
             let native = NativeRun::of(session)?;
-            let provider_session = native.history(session)?;
+            let provider_session = native.history(store, session)?;
             if resume
                 && mode != OpenMode::Replace
                 && native.provider == "codex"
@@ -1335,7 +1338,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<RunId> {
         }
         let mut launch_lock = Some(launch_lock);
         let token = session_token(&session)?;
-        if resume_native_run(&session.input_id, &token, &mut launch_lock)? {
+        if resume_native_run(store, &session.input_id, &token, &mut launch_lock)? {
             return Ok(session.input_id);
         }
         // A consumed launch without native history gets another attempt under
@@ -1375,6 +1378,7 @@ async fn open_flow_locked(
     let mut launch_lock = Some(launch_lock);
     if let Some(run_id) = &previous {
         if resume_native_run(
+            store,
             run_id,
             &HumanSessionToken::Flow {
                 token: Box::new(token.clone()),
@@ -1385,21 +1389,18 @@ async fn open_flow_locked(
         }
     }
     if let Some(run_id) = &previous {
-        let (dir, manifest) = crate::run_record::resolve_manifest(
-            &crate::store::observability_home_dir(),
-            run_id.as_str(),
-        )
-        .context("cannot replace a review Run without its launch evidence")?;
-        if crate::run_record::read_provider_session(&dir)?.is_some()
-            || !crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?
-                .is_empty()
+        let input = store
+            .sqlite
+            .input_snapshot(run_id.as_str())
+            .context("cannot replace a review input without its retained launch evidence")?;
+        let dir = local_session_run_dir(run_id)
+            .ok_or_else(|| anyhow!("invalid Session input {run_id}"))?;
+        if store.sqlite.input_provider_session(run_id)?.is_some()
+            || !crate::lf::commands::util::active_provider_clients(&dir, &input.harness)?.is_empty()
         {
-            bail!("review Run still has native history or an active client");
+            bail!("review input still has native history or an active client");
         }
-        if crate::run_record::read_run_snapshot(&dir)?
-            .outcome
-            .is_none()
-        {
+        if input.outcome.is_none() {
             bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
@@ -1466,7 +1467,10 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     };
     let launched = match remote {
         Some(_) => session.input_published,
-        None => crate::run_record::read_provider_session(&dir)?.is_some(),
+        None => store
+            .sqlite
+            .input_provider_session(&session.input_id)?
+            .is_some(),
     };
     let state = if session.completed_at.is_some() {
         SessionState::Closed
@@ -1747,6 +1751,7 @@ fn session_run_is_resumable(dir: &Path, manifest: &RunManifest) -> Result<bool> 
 }
 
 pub(crate) fn resume_native_run(
+    store: &SharedStore,
     run_id: &RunId,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
@@ -1755,30 +1760,32 @@ pub(crate) fn resume_native_run(
     if let Some(result) = action_test::resume(run_id, launch_lock) {
         return result;
     }
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = match crate::run_record::resolve_manifest(&home, run_id.as_str()) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).context("resolve Session Run"),
+    let Some(session) = store.sqlite.session_for_run(run_id)? else {
+        return Ok(false);
     };
-    let Some(provider_session) = crate::run_record::read_provider_session(&dir)? else {
+    if session.input_id != *run_id {
+        bail!("Session {} changed its input before resume", session.id);
+    }
+    let native = NativeRun::of(&session)?;
+    let dir = native.dir;
+    let Some(provider_session) = store.sqlite.input_provider_session(run_id)? else {
         return Ok(false);
     };
     crate::lf::commands::util::require_provider_session_launch(&dir)?;
-    let clients = crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?;
+    let clients = crate::lf::commands::util::active_provider_clients(&dir, &native.provider)?;
     crate::lf::commands::util::replace_provider_clients(
         &dir,
-        &manifest.harness,
+        &native.provider,
         &clients,
         crate::run_record::ProviderClientStopReason::Moved,
     )?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::lf::commands::util::resume_session_with_env(
-        &manifest.harness,
-        manifest.model.as_deref(),
-        &manifest.cwd,
-        &manifest.run_id,
+        &native.provider,
+        session.model.as_deref(),
+        &session.cwd,
+        &session.input_id,
         &dir,
         &provider_session,
         &environment,
@@ -1793,12 +1800,16 @@ fn stop_native_run(run_id: &RunId) -> Result<()> {
     if action_test::stop(run_id) {
         return Ok(());
     }
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, run_id.as_str())
-        .with_context(|| {
-            format!("cannot confirm Session Run {run_id} stopped: manifest unavailable")
-        })?;
-    crate::lf::commands::util::stop_provider_session(&dir, &manifest.harness)
+    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+        &crate::store::observability_database_path()?,
+    )
+    .context("cannot resolve the provider for this Session input")?;
+    let input = store
+        .input_snapshot(run_id.as_str())
+        .context("cannot resolve the provider for this Session input")?;
+    let dir =
+        local_session_run_dir(run_id).ok_or_else(|| anyhow!("invalid Session input {run_id}"))?;
+    crate::lf::commands::util::stop_provider_session(&dir, &input.harness)
 }
 
 pub(crate) async fn token_is_current(
@@ -2608,21 +2619,21 @@ mod tests {
     }
 
     #[test]
-    fn session_stop_requires_a_readable_run_manifest() {
+    fn session_stop_requires_retained_input_identity() {
         let _lock = crate::journal::test_env_lock();
         let home = AskHome::new();
         let run_id = RunId::new();
         assert!(super::stop_run(&run_id)
             .unwrap_err()
             .to_string()
-            .contains("manifest unavailable"));
+            .contains("cannot resolve the provider for this Session input"));
         let dir = crate::run_record::record_dir(home.home.path(), &run_id).unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manifest.json"), b"invalid manifest").unwrap();
         assert!(super::stop_run(&run_id)
             .unwrap_err()
             .to_string()
-            .contains("manifest unavailable"));
+            .contains("cannot resolve the provider for this Session input"));
         assert_eq!(
             std::fs::read(dir.join("manifest.json")).unwrap(),
             b"invalid manifest"

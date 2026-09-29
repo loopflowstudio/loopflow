@@ -257,6 +257,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             let report: serde_json::Value = serde_json::from_slice(&imported.stdout).unwrap();
             assert_eq!(report["failed"], serde_json::json!([]), "{report}");
             std::fs::remove_file(dir.join("provider-session.json")).unwrap();
+            std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -320,7 +321,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let mut second = command(home.path(), &["session", "open", id, "--json"])
+        let selector = if resume { &run_id[4..16] } else { id };
+        let mut second = command(home.path(), &["session", "open", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

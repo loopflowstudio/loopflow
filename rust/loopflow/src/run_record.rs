@@ -5,7 +5,7 @@ pub(crate) mod activity;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -368,6 +368,7 @@ pub struct RunUsage {
     pub cost_usd: Option<f64>,
 }
 
+#[cfg(test)]
 impl RunUsage {
     pub(crate) fn empty() -> Self {
         Self {
@@ -592,8 +593,8 @@ pub(crate) fn conversation_snapshot(
             }
         }
     }
-    let (usage, event_gaps) = reduce_usage_reader(events.as_slice())?;
-    gaps += event_gaps + usize::from(manifest.is_none());
+    let evidence = reduce_usage_reader(events.as_slice())?;
+    gaps += evidence.gaps + usize::from(manifest.is_none());
     let current = session.input_id == *input_id;
     let stored_text = |field: &str| {
         stored
@@ -644,6 +645,10 @@ pub(crate) fn conversation_snapshot(
     Ok(RunSnapshot {
         id: input_id.to_string(),
         parent_run_id: None, // Selected from the immutable input relation by the SQL reader.
+        task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
+            Some(RunFlowMembership::Step(step)) => step.task_pr_id.clone(),
+            _ => None,
+        }),
         repo: manifest
             .as_ref()
             .and_then(|m| m.repo.as_ref().map(|p| p.to_string_lossy().into_owned()))
@@ -669,10 +674,11 @@ pub(crate) fn conversation_snapshot(
             .map(|receipt| receipt.outcome.clone())
             .or_else(|| stored_text("outcome")),
         started: session.created_at,
+        first_provider_attempt_at: evidence.first_provider_attempt_at,
         ended: terminal
             .map(|receipt| receipt.ended_at.unix_timestamp())
             .or(stored_end),
-        usage,
+        usage: evidence.usage,
         evidence_gaps: gaps,
         harness: manifest
             .as_ref()
@@ -775,64 +781,6 @@ pub(crate) fn resolve_manifest(
             format!("Run prefix {selector} is ambiguous"),
         )),
     }
-}
-
-pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
-    let manifest = read_manifest(dir)?;
-    validate_manifest_path(dir, &manifest)?;
-    let mut evidence_gaps = usize::from(
-        !dir.join("prepared").is_file() && !context_ref_is_valid(dir, manifest.context.as_ref()),
-    );
-    let terminal = match fs::read(dir.join("terminal.json")) {
-        Ok(bytes) => match serde_json::from_slice::<TerminalReceipt>(&bytes) {
-            Ok(receipt)
-                if receipt.schema_version == SCHEMA_VERSION
-                    && matches!(
-                        receipt.outcome.as_str(),
-                        "completed" | "failed" | "interrupted"
-                    ) =>
-            {
-                Some(receipt)
-            }
-            Ok(_) | Err(_) => {
-                evidence_gaps += 1;
-                None
-            }
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => {
-            evidence_gaps += 1;
-            None
-        }
-    };
-    let evidence = reduce_events(&dir.join("events.jsonl"))?;
-    evidence_gaps += evidence.gaps;
-
-    Ok(RunSnapshot {
-        id: manifest.run_id.to_string(),
-        parent_run_id: manifest.parent_run_id.map(|id| id.to_string()),
-        task_pr_id: match manifest.flow {
-            Some(RunFlowMembership::Step(step)) => step.task_pr_id,
-            _ => None,
-        },
-        repo: manifest
-            .repo
-            .map(|path| path.to_string_lossy().into_owned()),
-        worktree: manifest
-            .worktree
-            .map(|path| path.to_string_lossy().into_owned()),
-        subjects: manifest.subjects,
-        skill: manifest.skill,
-        outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
-        started: manifest.created_at.unix_timestamp(),
-        first_provider_attempt_at: evidence.first_provider_attempt_at,
-        ended: terminal.map(|receipt| receipt.ended_at.unix_timestamp()),
-        usage: evidence.usage,
-        evidence_gaps,
-        harness: manifest.harness,
-        model: manifest.model,
-        surface: manifest.surface,
-    })
 }
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
@@ -1060,7 +1008,17 @@ pub(crate) fn write_provider_client(dir: &Path, pid: u32) -> std::io::Result<()>
             "provider client pid must identify a child process",
         ));
     }
-    read_manifest(dir)?;
+    let input = input_id_from_dir(dir)?;
+    if row_store(dir)
+        .map_err(std::io::Error::other)?
+        .session_for_run(&input)
+        .map_err(std::io::Error::other)?
+        .is_none()
+    {
+        return Err(std::io::Error::other(
+            "provider client has no admitted Session",
+        ));
+    }
     remove_provider_client_stop(dir, pid)?;
     let root = dir.join("provider-clients");
     fs::create_dir_all(&root)?;
@@ -1219,20 +1177,6 @@ pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
     Ok(title)
 }
 
-fn context_ref_is_valid(dir: &Path, context: Option<&RunContextRef>) -> bool {
-    let Some(context) = context else {
-        return true;
-    };
-    if context.path != "context.json" {
-        return false;
-    }
-    let Ok(bytes) = fs::read(dir.join(&context.path)) else {
-        return false;
-    };
-    bytes.len() as u64 == context.bytes
-        && hex::encode(Sha256::digest(&bytes)) == context.content_sha256
-}
-
 fn validate_manifest_path(dir: &Path, manifest: &RunManifest) -> std::io::Result<()> {
     RunId::parse(manifest.run_id.as_str()).map_err(std::io::Error::other)?;
     if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.run_id.as_str())
@@ -1291,22 +1235,7 @@ struct RunEvidence {
     first_provider_attempt_at: Option<i64>,
 }
 
-fn reduce_events(path: &Path) -> std::io::Result<RunEvidence> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(RunEvidence {
-                usage: RunUsage::empty(),
-                gaps: 0,
-                first_provider_attempt_at: None,
-            });
-        }
-        Err(error) => return Err(error),
-    };
-    reduce_usage_reader(BufReader::new(file))
-}
-
-fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<(RunUsage, usize)> {
+fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence> {
     let mut streams = BTreeMap::<String, UsageStream>::new();
     let mut gaps = 0;
     let mut envelope_seq = None;
@@ -2679,7 +2608,7 @@ mod tests {
     use std::io::Write;
 
     use super::{
-        read_provider_clients, read_provider_session, read_run_snapshot, remove_provider_client,
+        read_provider_clients, read_provider_session, remove_provider_client,
         write_provider_client, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
         SubjectAttribution, TerminalReceipt,
     };
@@ -2821,8 +2750,7 @@ mod tests {
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
-        let prepared = serde_json::to_value(read_run_snapshot(&dir).unwrap()).unwrap();
-        assert!(prepared["first_provider_attempt_at"].is_null());
+        assert!(!dir.join("events.jsonl").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let capture =
             CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
@@ -2853,9 +2781,11 @@ mod tests {
         assert_eq!(attempt, 2);
         fs::write(dir.join("events.jsonl"), format!("{events}\n")).unwrap();
 
-        let snapshot = serde_json::to_value(read_run_snapshot(&dir).unwrap()).unwrap();
-        assert_eq!(snapshot["started"], 1);
-        assert_eq!(snapshot["first_provider_attempt_at"], 10);
+        let evidence = super::reduce_usage_reader(
+            std::io::BufReader::new(fs::File::open(dir.join("events.jsonl")).unwrap()),
+        ).unwrap();
+        assert_eq!(super::read_manifest(&dir).unwrap().created_at.unix_timestamp(), 1);
+        assert_eq!(evidence.first_provider_attempt_at, Some(10));
     }
 
     #[test]
@@ -2897,9 +2827,11 @@ mod tests {
                 CaptureHandle::start_prepared(home.path(), &id, launch, &context).unwrap();
             capture.finish("completed").unwrap();
 
-            let snapshot = read_run_snapshot(&dir).unwrap();
-            assert_eq!(snapshot.task_pr_id, (!historical).then_some(original));
-            assert_eq!(snapshot.first_provider_attempt_at, None);
+            let manifest = super::read_manifest(&dir).unwrap();
+            let Some(super::RunFlowMembership::Step(step)) = manifest.flow else {
+                panic!("prepared membership retained");
+            };
+            assert_eq!(step.task_pr_id, (!historical).then_some(original));
         }
     }
 
@@ -2936,7 +2868,9 @@ mod tests {
 
         assert_eq!(after.id, session.id);
         assert_eq!(
-            super::read_run_snapshot(&capture.artifact_dir())
+            super::row_store(&capture.artifact_dir())
+                .unwrap()
+                .input_snapshot(capture.run_id().as_str())
                 .unwrap()
                 .outcome
                 .as_deref(),
@@ -3095,11 +3029,8 @@ mod tests {
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(parent.clone()))
             .unwrap();
         let (dir, prepared) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-        let snapshot = super::read_run_snapshot(&dir).unwrap();
-        assert_eq!(snapshot.id, id.as_str());
-        assert_eq!(snapshot.parent_run_id.as_deref(), Some(parent.as_str()));
-        assert_eq!(snapshot.outcome, None);
-        assert_eq!(snapshot.evidence_gaps, 0);
+        assert_eq!(prepared.run_id, id);
+        assert_eq!(prepared.parent_run_id.as_ref(), Some(&parent));
         assert!(!dir.join("terminal.json").exists());
         assert!(!dir.join("provider-clients").exists());
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "human prompt");
@@ -3109,15 +3040,25 @@ mod tests {
         assert_eq!(capture.run_id(), id);
         assert_eq!(launched.created_at, prepared.created_at);
         assert_eq!(launched.parent_run_id, Some(parent));
-        assert!(super::context_ref_is_valid(&dir, launched.context.as_ref()));
+        let context_ref = launched.context.as_ref().unwrap();
+        let context_bytes = fs::read(dir.join(&context_ref.path)).unwrap();
+        assert_eq!(context_ref.bytes, context_bytes.len() as u64);
+        assert_eq!(
+            context_ref.content_sha256,
+            hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&context_bytes))
+        );
         assert!(
             CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).is_err()
         );
         capture.mark_spawn_requested();
         capture.finish("completed").unwrap();
         assert_eq!(
-            super::read_run_snapshot(&dir).unwrap().outcome.as_deref(),
-            Some("completed")
+            serde_json::from_slice::<super::TerminalReceipt>(
+                &fs::read(dir.join("terminal.json")).unwrap()
+            )
+            .unwrap()
+            .outcome,
+            "completed"
         );
         assert_eq!(super::record_dirs(home.path()).unwrap().len(), 1);
     }
@@ -3164,23 +3105,8 @@ mod tests {
             context.pointer("/context/task/text").unwrap(),
             "authored task\n\nwith trailing space "
         );
-        assert_eq!(
-            read_run_snapshot(&capture.artifact_dir())
-                .unwrap()
-                .evidence_gaps,
-            0
-        );
-        fs::write(
-            capture.artifact_dir().join(&context_ref.path),
-            b"tampered context",
-        )
-        .unwrap();
-        assert_eq!(
-            read_run_snapshot(&capture.artifact_dir())
-                .unwrap()
-                .evidence_gaps,
-            1
-        );
+        // Interrupted/tampered context reconciliation is covered by
+        // reserved_publication_retains_conflicting_inputs.
         assert!(bytes
             .windows(b"engineering".len())
             .any(|window| window == b"engineering"));
@@ -3657,7 +3583,10 @@ mod tests {
         });
         capture.finish("completed").unwrap();
 
-        let run = read_run_snapshot(&capture.artifact_dir()).unwrap();
+        let run = super::row_store(&capture.artifact_dir())
+            .unwrap()
+            .input_snapshot(capture.run_id().as_str())
+            .unwrap();
         assert_eq!(run.outcome.as_deref(), Some("completed"));
         assert_eq!(run.usage.streams, 2);
         assert_eq!(run.usage.final_streams, 1);
@@ -3681,7 +3610,10 @@ mod tests {
             .write_all(b"{malformed}\n")
             .unwrap();
 
-        let error = read_run_snapshot(&dir).unwrap_err();
+        let error = super::reduce_usage_reader(std::io::BufReader::new(
+            fs::File::open(dir.join("events.jsonl")).unwrap(),
+        ))
+        .unwrap_err();
         assert!(error.to_string().contains("malformed complete Run event"));
     }
 
@@ -3697,8 +3629,10 @@ mod tests {
         assert_eq!(events.pop(), Some(b'\n'));
         fs::write(&path, events).unwrap();
 
-        let snapshot = read_run_snapshot(&dir).unwrap();
-        assert_eq!(snapshot.evidence_gaps, 1);
+        let snapshot = super::reduce_usage_reader(
+            std::io::BufReader::new(fs::File::open(&path).unwrap()),
+        ).unwrap();
+        assert_eq!(snapshot.gaps, 1);
         assert!(snapshot.first_provider_attempt_at.is_some());
     }
 
@@ -3723,18 +3657,22 @@ mod tests {
             .unwrap();
         // An otherwise valid attempt without a final newline is not committed evidence.
         fs::write(&path, serde_json::to_vec(&attempt).unwrap()).unwrap();
-        let snapshot = read_run_snapshot(&dir).unwrap();
+        let snapshot = super::reduce_usage_reader(
+            std::io::BufReader::new(fs::File::open(&path).unwrap()),
+        ).unwrap();
         assert_eq!(snapshot.first_provider_attempt_at, None);
-        assert_eq!(snapshot.evidence_gaps, 1);
+        assert_eq!(snapshot.gaps, 1);
         attempt.schema_version = 999;
         fs::write(
             &path,
             format!("{}\n", serde_json::to_string(&attempt).unwrap()),
         )
         .unwrap();
-        let snapshot = read_run_snapshot(&dir).unwrap();
+        let snapshot = super::reduce_usage_reader(
+            std::io::BufReader::new(fs::File::open(&path).unwrap()),
+        ).unwrap();
         assert_eq!(snapshot.first_provider_attempt_at, None);
-        assert_eq!(snapshot.evidence_gaps, 1);
+        assert_eq!(snapshot.gaps, 1);
     }
 
     #[test]
@@ -3749,7 +3687,7 @@ mod tests {
         manifest["schema_version"] = serde_json::json!(999);
         fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
 
-        let error = read_run_snapshot(&dir).unwrap_err();
+        let error = super::read_manifest(&dir).unwrap_err();
         assert!(error
             .to_string()
             .contains("unsupported Run manifest schema 999"));

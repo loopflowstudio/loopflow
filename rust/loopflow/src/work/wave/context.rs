@@ -451,7 +451,8 @@ mod tests {
     fn run_attribution_classifies_absent_context_and_hand_set_names() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let previous = std::env::var(WAVE_ID_ENV).ok();
-        let repo = crate::repo::find_repo_root().unwrap();
+        let fixture = loopflow_test_support::TestRepo::new();
+        let repo = fixture.path().to_path_buf();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(

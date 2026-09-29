@@ -1,6 +1,6 @@
 {
   "state": "unknown",
-  "reason": "Worker liveness is unknown; inspect its Run before recovery",
+  "reason": "Worker liveness is unknown; inspect its Session before recovery",
   "step": null,
   "captured": 12
 }

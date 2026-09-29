@@ -56,19 +56,21 @@ pub(crate) async fn task_execution_and_flow(
         }
     }
     if snapshot.state == TaskExecutionState::Running {
-        if let Some(run) = position
+        if let Some(attempt) = position
             .as_ref()
             .and_then(|flow| flow.current_attempt.as_ref())
-            .map(|attempt| &attempt.run_id)
         {
-            match crate::run_record::activity::read(&crate::store::lf_home_dir(), run).await {
+            let captured = attempt.captured;
+            match crate::run_record::activity::read(&crate::store::lf_home_dir(), &attempt.run_id)
+                .await
+            {
                 crate::run_record::activity::Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
-                    snapshot.reason = format!("Run {run} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
+                    snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
                 }
                 crate::run_record::activity::Activity::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
-                    snapshot.reason = format!("Run {run} is alive; activity samples are unavailable or stale. Inspect its Run before recovery.");
+                    snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before recovery.");
                 }
                 crate::run_record::activity::Activity::Running => {}
             }
@@ -113,7 +115,7 @@ fn project_execution(
     let Some(position) = position else {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
-            reason: "No active Task Flow; independent Runs may still be active".to_string(),
+            reason: "No active Task Flow; independent Sessions may still be active".to_string(),
             step: None,
             captured: None,
         };
@@ -155,7 +157,7 @@ fn project_execution(
             Some(ProcessIdentityEvidence::Unknown) => (
                 TaskExecutionState::Unknown,
                 format!(
-                    "Worker liveness is unknown at {}; inspect its Run before recovery",
+                    "Worker liveness is unknown at {}; inspect its Session before recovery",
                     step.step
                 ),
             ),

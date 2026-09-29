@@ -81,7 +81,7 @@ struct TaskFlowTests {
         #expect(stalled.execution == .stalled)
         #expect(flowNodeStates(stalled.graph, pinned: stalled)[0] == .stalled)
         #expect(FlowPalette.describe(.stalled).contains("interrupt then resume"))
-        #expect(stalled.reason.contains("run_9fc06d3999af4bcabf1398cc859d49a9"))
+        #expect(stalled.reason.contains("Session event 12"))
         // A preview only marks human boundaries.
         let preview = flowNodeStates(human.graph, pinned: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)

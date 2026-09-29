@@ -12,6 +12,20 @@ use loopflow::id::{ExecId, TraceId};
 use support::codex_app_server_script;
 use tempfile::TempDir;
 
+fn session_id_for_capture(home: &Path, artifact: &str) -> String {
+    rusqlite::Connection::open_with_flags(
+        home.join("loopflow.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap()
+    .query_row(
+        "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+        [artifact],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
 fn write_skill(repo: &Path, name: &str, content: &str) {
     let skills_dir = repo.join(".lf/skills");
     fs::create_dir_all(&skills_dir).unwrap();
@@ -624,7 +638,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|session| session["run_id"] == run_id.trim())
+            .find(|session| session["id"] == session_id_for_capture(home.path(), run_id.trim()))
             .unwrap();
         assert_eq!(
             session["work"],
@@ -814,7 +828,8 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert_eq!(sessions.len(), 1);
-    assert!(sessions[0]["run_id"].as_str().is_some());
+    assert!(sessions[0]["id"].as_str().is_some());
+    assert!(sessions[0].get("run_id").is_none());
     // A Flow about the Task names it on its review Run, and the first Run
     // that names a Task starts it, opened or not.
     assert_eq!(starts(), 1, "a review Run naming the Task starts it");
@@ -926,7 +941,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     );
     assert_eq!(runs[0]["harness"], "codex");
     assert_eq!(runs[0]["skill"], "history-work");
-    assert!(runs[0]["id"].as_str().unwrap().starts_with("run_"));
+    assert!(!session_id_for_capture(home.path(), runs[0]["id"].as_str().unwrap()).is_empty());
     assert!(runs[0]["started"].as_i64().is_some());
     let after_launch = events();
     assert!(read("INF-999").is_empty(), "another Task sees none of them");
@@ -978,7 +993,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|session| session["run_id"] == run_id)
+            .find(|session| session["id"] == session_id_for_capture(home.path(), run_id))
             .cloned()
             .unwrap_or_else(|| panic!("Session {run_id} is not listed"))
     };
@@ -1557,7 +1572,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     assert_eq!(session["flow_membership"]["flow"], "review-contribution");
     assert_eq!(session["flow_membership"]["occurrence"], "current");
     assert_eq!(session["flow_membership"]["node"], 0);
-    let run_id = session["run_id"].as_str().unwrap();
+    let session_id = session["id"].as_str().unwrap();
     let listed = run_lf(
         repo.path(),
         home.path(),
@@ -1566,11 +1581,22 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     );
     assert!(listed.status.success());
     let listed: Vec<serde_json::Value> = serde_json::from_slice(&listed.stdout).unwrap();
-    assert!(listed.iter().any(|run| run["id"] == run_id), "{listed:?}");
+    assert!(
+        listed.iter().any(
+            |run| session_id_for_capture(home.path(), run["id"].as_str().unwrap()) == session_id
+        ),
+        "{listed:?}"
+    );
     let renamed = run_lf(
         repo.path(),
         home.path(),
-        &["session", "rename", run_id, "Contribution review", "--json"],
+        &[
+            "session",
+            "rename",
+            session_id,
+            "Contribution review",
+            "--json",
+        ],
         Some(&path),
     );
     assert!(
@@ -1594,7 +1620,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     assert_eq!(opened["title"], "Contribution review");
-    assert_eq!(opened["run_id"], run_id);
+    assert_eq!(opened["id"], session_id);
+    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["work"], session["work"]);
     assert!(!home.path().join("prompts").exists());
     assert_eq!(

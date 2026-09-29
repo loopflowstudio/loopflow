@@ -26,6 +26,27 @@ for correction, exhaustion and delayed removed-command rejection; that closes th
 legitimate retry failure within that fixture only. Claude correlation has a native
 message fixture. No configured Claude or configured-account acceptance follows.
 
+## Captured-event CI repair
+
+Hosted `243e3edee`, run `36633600273`, passed Swift but Rust stopped at the
+stalled-status fixture with 907 tests unrun. Production and Rust/Swift fixtures
+now name the selected Session event. The first complete, non-fail-fast isolated
+materialized run exposed five more obsolete Flow assertions and two fixtures
+relying on ambient Git. Those fixtures now own their Git context; Flow tests
+resolve the real Session from captured history, retaining binding, Task identity,
+rename, open and complete-history assertions.
+
+`captured-ci-full.log` records 2,009 passes / seven failures / 16 skipped.
+All seven repairs pass in `captured-ci-repairs.log` (21 tests). The final entire
+matrix passes **2,016 tests, 16 skipped, none unrun** in `captured-ci-final.log`,
+with one nextest leaky-handle diagnostic on the prepared-input timing fixture,
+followed by all-target Clippy; formatting passes too. All logs are under
+`.lf/tmp/cut-i/`. This is a disposable materialized copy with development provenance
+and isolated data, using simulated provider/GitHub effects where applicable.
+The current Swift Task Flow proof passes within the separate in-progress history
+consumer build; that does not establish configured Desktop acceptance.
+No new hosted result or whole-design completion follows from these local checks.
+
 ## Captured-event cut
 
 Logs below are under `.lf/tmp/cut-i/`. These are source/disposable-copy checks,

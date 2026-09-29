@@ -30,7 +30,24 @@ Current managed worker, verified through Task status and OS-live `lf ps`:
   loop-decide → human-demo order. Intermediate concept review is not the goal's
   code-complete review. Supervisor chooses no Flow edge.
 
-No bounded contributor remains active. The Chapter CLI contributor returned
+The bounded Run-removal researcher returned exit0; tool handle `71697` is closed.
+Main now owns `scratch/research-final-run-removal.md` for checkpointing. Supervisor
+verified all twelve source hashes and checked importer, history projection, CRUD
+and trigger findings. Verified handback `023cdc33-045c-4aab-a915-e11447ed2b21`.
+The audit separates obsolete Run CRUD, historical SQL preservation, immutable
+input references and still-live file-backed lifecycle readers. No executable
+edit or behavioral test ran. Log `.lf/tmp/cut-i/run-removal-research.log`.
+
+One bounded native-retry research contribution is active: tool handle `4457`,
+Exec `da164d1d-ae27-48fa-9136-de7018966a6a`, PID48014 at launch. It owns only
+`scratch/research-native-retry-options.md` (max100 lines, atomic). It compares
+smallest repairs against the retained delayed-child and legitimate-retry failures;
+no code, experiment, process-control or policy change is assigned. Main retains
+implementation and builds. Verified scope comment
+`e6359bae-3d9c-429e-b02a-8df929db6193`; log
+`.lf/tmp/cut-i/native-retry-options-research.log`. Do not checkpoint before handback.
+
+The Chapter CLI contributor returned
 `tests/e2e/chapter_rotation.py` to main with exit0; tool handle `2564` is closed.
 Handback `.lf/tmp/cut-i/chapter-cli-handback.md` retains the original source hash;
 main subsequently formatted the fixture and added the nonempty PR assertion.
@@ -106,7 +123,22 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Current published head is **da19cf0b50138d04be5c75b3b4d4df6d1e17f2da**, based on
+Current published head is **24ea61517cc5cbcfc4cf29452364fe6efcd37123**, based on
+**d4b283a873804c18ef1894d49bb690d67f4d59f5** (#1343, Swift compilation reuse).
+GitHub, Task publication and Git merge-base agree; auto-merge is absent.
+CI **36533494844** finished with failure: 1,829 Rust passes, two failures,
+15 skips and 134 unrun tests. The Task Flow fixture still queries obsolete Run
+rows; the taskless decision stand-in lacks native caller authority. Verified
+direction `3e204ff4-cad2-4f9a-8df4-446478da0d29` preserves history/review/ancestry
+assertions and the production navigation check. Log `ci-24ea61517-rust.log`.
+Scratch-clear also fails on active notes; all other test/lint/install jobs pass,
+merge-proof is skipped and the aggregate tests-result fails. These failures do
+not establish the separate valid-native-retry repair. SQL-only history and the authorized
+checkout fixture are published; final all-target Clippy passed in
+`historical-sql-static-final.log` (15.30s). Main continues populated historical
+migration preservation before remaining Run deletion. Full scope stays open.
+
+The preceding published head **da19cf0b50138d04be5c75b3b4d4df6d1e17f2da** was based on
 **566fb3981d99b430c41358a2bad3559612999693**. GitHub, refreshed Task publication
 and Git merge-base agree; auto-merge is absent. CI **36531960032** finished with
 failure: 1,656 Rust passes, one failed checkout-identity test, 15 skips, 307 unrun.
@@ -241,7 +273,9 @@ SQL-only/replaced-input proofs passed before that extension. Separately,
 shared harness record/select a turn, and its original caller authorizes the
 child Task's decision in both upstream variants. Production navigation authority
 is unchanged. This fixture does not establish real native decision retry.
-Final static checks and checkpointing remain main's responsibility.
+Final all-target Clippy passes in `historical-sql-static-final.log` (15.30s);
+these changes are published in 24ea61517. Populated prior-schema preservation,
+missing Session members and exact historical Flow membership remain separate.
 
 The replaced-input public CLI proof passes in `historical-members.log`:
 two inputs retain separate outcome/account/usage evidence in one conversation,
@@ -354,6 +388,12 @@ text is not control authority. Exact historical operational recoveries and the
 retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
+
+Published **24ea61517 against d4b283a87**:
+**+15,501 / −29,637 = net −14,136**.
+Rust/Swift +14,451/−29,575; Python/shell +48/−62; SQL +1,002/−0.
+Receipt `.lf/tmp/execution-model/status-counts-24ea61517.json` reproduces the
+preceding da19 measurement first. Current migration edits are excluded.
 
 Published **da19cf0b5 against 566fb3981**:
 **+15,393 / −29,637 = net −14,244**.

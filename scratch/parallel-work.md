@@ -32,16 +32,16 @@ Current managed worker, verified through Task status and OS-live `lf ps`:
 
 No bounded contributor remains active. The Chapter CLI contributor returned
 `tests/e2e/chapter_rotation.py` to main with exit0; tool handle `2564` is closed.
-Handback `.lf/tmp/cut-i/chapter-cli-handback.md`; source SHA256
-`c73e5dccbe8e2af249f95ca636ce1f0c1f9d1fbe0b26f22a03e79590b9e36095` matches.
+Handback `.lf/tmp/cut-i/chapter-cli-handback.md` retains the original source hash;
+main subsequently formatted the fixture and added the nonempty PR assertion.
 It authors public second-Home sync and actual Project-default Task launch proof,
 requiring a scripted provider's completion consumed by the real worker. No
-execution state is seeded. No build, syntax check, formatter or fixture execution
-has run; main owns static checks and serialized Linux execution. Linux TLS and
-OS-account installation selection require a disposable account/container. Source
-review identified one assertion to tighten: require a nonempty synthetic PR row,
-so equal empty lists cannot count as PR preservation. Main owns the file and
-execution prerequisites now; log `.lf/tmp/cut-i/chapter-cli-contributor.log`.
+execution state is seeded. Ruff passes (`chapter-static-final.log`); Linux fixture
+execution remains outstanding. Main owns the file and serialized execution in a
+disposable account/container. CI's task-installation job does not run this fixture,
+and CI36527817576 provides no reusable CLI artifact. Its green installation result
+does not establish Chapter/default-Flow proof. Original contributor log:
+`.lf/tmp/cut-i/chapter-cli-contributor.log`.
 
 The Desktop contribution returned exit0;
 tool handle `50100` is closed. Verified handback
@@ -106,7 +106,54 @@ supervisor direction, never new decisions attributed to Jack.
 
 ## Current work and delivery
 
-Published **f60fcb3dedfca0f652d59f2e9904314a286e5c2b** on
+Current published head is **dd97558752f1262634ef9edba31857792a99c6e7**, based on
+**7e5f32ce607f7ed744c685b2f7639b304455460c**. GitHub, refreshed Task publication
+and Git merge-base agree; auto-merge is absent. The conflict-free rebase includes
+#1338's checkout-local Git build watches and #1339's combined landing/release PR
+observation. CI **36527817576** finished with failure: Rust reached 885 passes,
+one telemetry failure, 15 skips and 1,077 unrun; scratch-clear also failed on active
+notes. All other required jobs completed successfully, including Swift and the UI
+compile check. This is not rendered Desktop acceptance. Rust log:
+`.lf/tmp/cut-i/ci-dd9755875-rust.log`.
+
+The preceding import head **275589bee** was published and its CI36527468363
+reached 885 Rust passes, one failure, 15 skips and 1,076 unrun. The failing
+`telemetry_flow_op_runs_internal_scorecard` receives zero records: capture now
+admits AgentSession, but telemetry still queries Run rows. Verified diagnosis
+comment `c9e01d1c-f609-4825-bfc2-45d9efe14ebc` directs the remaining reader
+conversion while retaining tokens=12, missing cost, zero final streams and
+completed outcome. Log `ci-275589bee-rust.log`. That overall run was subsequently
+canceled by the next publication; its completed Rust failure remains evidence.
+Main is implementing this boundary: generic capture observations are being moved
+into AgentSession history and the readers switched to that owner. Two focused
+tests pass in `conversation-history-boundaries.log`: telemetry preserves 12 input
+tokens/unknown cost/completion with artifact files removed and zero Run rows;
+history lookup retains date-boundary/gap/parent behavior and excludes unrelated
+corrupt payload before decoding. These fixtures use one input per conversation.
+Supervisor review found that aggregating every input under current Session fields
+misattributes pre-bind usage and loses recent continuations of old conversations.
+Verified comment `93da8fb6-9d05-4d86-90aa-720bde3cbb1e` records the source
+counterexamples. The extended replaced-input public CLI proof now passes: unbound
+21-token failure versus bound zero-token success, original providers/outcomes,
+recent continuation of an old conversation, uncapped parent lookup, removed
+artifacts and zero Run rows. `conversation-readers-final.log` passes all four
+selected cases: that proof, telemetry, the history-window/gap test and landing's
+once-only repair conclusion. Earlier runs retain the missing input-prefix fixture
+failure (`conversation-attribution.log`) and mismatched fixture database failure
+(`conversation-readers.log`); main corrected setup and kept their assertions.
+This is local captured/imported-history proof, not native-only recovered usage,
+full CI, complete import or final wire/owner removal. Docs now name those limits.
+No runtime Run writer is to be restored to make the fixture pass.
+
+The replaced-input public CLI proof passes in `historical-members.log`:
+two inputs retain separate outcome/account/usage evidence in one conversation,
+pre-bind history stays unassigned, current name/feedback/input/Started remain,
+and replay is unchanged. Its setup uses current Session APIs plus legacy files;
+it does not establish released SQL-only multi-member migration or normalized
+usage totals. Finished/unopened reviews, SQL-only history, Chapter Linux execution
+and the native valid-decision retry remain unfinished.
+
+Earlier checkpoint **f60fcb3dedfca0f652d59f2e9904314a286e5c2b** on
 [PR1296](https://github.com/loopflowstudio/loopflow/pull/1296), based on
 **5402d93974dba3b6e94bea1d411951a9dfeb20d9**. GitHub and Task publication agree;
 auto-merge is absent. This checkpoint includes AgentSession admission and the
@@ -209,6 +256,13 @@ text is not control authority. Exact historical operational recoveries and the
 retained regression are in evidence.md and `unblock-quoted-output.md`.
 
 ## Comparable production measurement
+
+Published **275589bee against 7c2f53b9e**:
+**+15,009 / −29,615 = net −14,606**.
+Rust/Swift +13,960/−29,559; Python/shell +47/−56; SQL +1,002/−0.
+Receipt `.lf/tmp/execution-model/status-counts-275589bee.json` reproduces the
+preceding f60 measurement first. The subsequent replaced-input change and rebase
+are excluded; do not label this count as the current dirty-tree total.
 
 Published **f60fcb3ded against 5402d9397**:
 **+14,616 / −29,605 = net −14,989**.

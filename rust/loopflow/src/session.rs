@@ -27,13 +27,13 @@ pub enum SessionEventKind {
     Started,
     Usage,
     Completed,
-    /// Imported evidence without an exact native turn; cannot settle a Flow.
+    /// Evidence without an exact native turn; cannot settle a Flow.
     Observed,
 }
 
-/// Parsed offline evidence before its transaction; no execution identity or authority.
+/// Captured or imported evidence; no execution identity or authority.
 #[derive(Debug)]
-pub(crate) struct ImportedObservation {
+pub(crate) struct SessionObservation {
     pub input_id: RunId,
     pub source: String,
     pub observed_at: i64,

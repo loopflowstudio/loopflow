@@ -424,6 +424,7 @@ impl RunSnapshot {
 #[derive(Debug)]
 enum RecorderMessage {
     Event(EventEnvelope),
+    Terminal(TerminalReceipt),
     Drain(mpsc::Sender<()>),
 }
 
@@ -433,7 +434,17 @@ struct RunRecorder {
 }
 
 impl RunRecorder {
-    fn start(dir: &Path, run_id: &RunId) -> Self {
+    fn start(dir: &Path, manifest: &RunManifest) -> Self {
+        let run_id = &manifest.run_id;
+        let history = if manifest.harness == "loopflow" {
+            Ok(None)
+        } else {
+            row_store(dir).and_then(|store| {
+                let session = store.session_for_run(run_id)?;
+                Ok(session.map(|session| (store, session)))
+            })
+        };
+        let manifest = manifest.clone();
         let (sender, receiver) = mpsc::sync_channel(256);
         let writer_dir = dir.to_path_buf();
         let writer_run_id = run_id.clone();
@@ -441,11 +452,40 @@ impl RunRecorder {
             .name(format!("lf-run-recorder-{}", &run_id.as_str()[..8]))
             .spawn(move || {
                 let mut warned = false;
+                let history = match history {
+                    Ok(history) => history,
+                    Err(error) => {
+                        tracing::warn!(%error, "Session history unavailable");
+                        None
+                    }
+                };
+                let observe = |source: String, at: OffsetDateTime, evidence: serde_json::Value| {
+                    let Some((store, session)) = &history else { return Ok(()) };
+                    store.retain_session_observation(session, &crate::session::SessionObservation {
+                        input_id: writer_run_id.clone(), source: source.clone(),
+                        observed_at: at.unix_timestamp(), task_id: session.task_id.clone(),
+                        wave_id: session.wave_id.clone(),
+                        payload: serde_json::json!({"input_id": writer_run_id, "source": source, "evidence": evidence}),
+                    }).map_err(std::io::Error::other)
+                };
+                if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
+                    tracing::warn!(%error, "Session launch observation unavailable");
+                }
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
-                            append_json_line(&writer_dir.join("events.jsonl"), &event)
+                            let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
+                            if matches!(event.event, RunEvent::Usage { .. }
+                                | RunEvent::ProviderAttemptStarted { .. }
+                                | RunEvent::ProviderAttemptFinished { .. }
+                                | RunEvent::ProviderAccountSelected { .. }
+                                | RunEvent::ProviderSessionObserved { .. }) {
+                                result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
+                            } else {
+                                result
+                            }
                         }
+                        RecorderMessage::Terminal(receipt) => observe("terminal.json".into(), receipt.ended_at, serde_json::json!(receipt)),
                         RecorderMessage::Drain(acknowledge) => {
                             let result = sync_telemetry(&writer_dir);
                             let _ = acknowledge.send(());
@@ -506,32 +546,60 @@ impl RunRecorder {
     }
 }
 
-/// Listed Runs as snapshots: identity, parentage, Work, state and times from
-/// each row, usage and launch evidence from its record. A Run launched on
-/// another Home keeps its record there and is left out.
-pub(crate) fn run_snapshots(
-    lf_home: &Path,
-    runs: Vec<crate::store::sqlite::ListedRun>,
-) -> std::io::Result<Vec<(crate::session::Run, RunSnapshot)>> {
-    let mut snapshots = Vec::new();
-    for listed in runs {
-        let run = listed.run;
-        let dir = record_dir(lf_home, &run.id)
-            .ok_or_else(|| std::io::Error::other(format!("Run {} has an invalid id", run.id)))?;
-        let evidence = match read_run_snapshot(&dir) {
-            Ok(evidence) => evidence,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        let source = match run.work_source {
-            Some(crate::session::WorkSource::Inherited) => AttributionSource::Inherited,
-            _ => AttributionSource::Declared,
-        };
-        let subjects = [
-            ("wave", listed.wave),
-            ("project", listed.project),
-            ("task", listed.task),
-        ]
+/// The compatibility Runs/Usage projection of retained conversation input history.
+/// No current assignment, provider or completion can rewrite an earlier input.
+pub(crate) fn conversation_snapshot(
+    session: &crate::session::AgentSession,
+    input_id: &RunId,
+    history: &[crate::session::SessionEvent],
+    names: (Option<String>, Option<String>, Option<String>),
+) -> std::io::Result<RunSnapshot> {
+    let mut events = Vec::new();
+    let mut terminal: Option<TerminalReceipt> = None;
+    let mut manifest: Option<RunManifest> = None;
+    let mut gaps = 0;
+    for event in history {
+        if event.kind != crate::session::SessionEventKind::Observed {
+            continue;
+        }
+        let input = event.payload["input_id"].as_str();
+        let source = event.payload["source"].as_str().unwrap_or("");
+        let evidence = &event.payload["evidence"];
+        if source == "terminal.json" && input == Some(input_id.as_str()) {
+            match serde_json::from_value(evidence.clone()) {
+                Ok(receipt) => terminal = Some(receipt),
+                Err(_) => gaps += 1,
+            }
+        } else if source == "manifest.json" && input == Some(input_id.as_str()) {
+            match serde_json::from_value(evidence.clone()) {
+                Ok(saved) => manifest = Some(saved),
+                Err(_) => gaps += 1,
+            }
+        } else if source.starts_with("events.jsonl:") {
+            match serde_json::from_value::<EventEnvelope>(evidence.clone()) {
+                Ok(envelope) => {
+                    serde_json::to_writer(&mut events, &envelope)?;
+                    events.push(b'\n');
+                }
+                Err(_) => gaps += 1,
+            }
+        }
+    }
+    let (usage, event_gaps) = reduce_usage_reader(events.as_slice())?;
+    gaps += event_gaps + usize::from(manifest.is_none());
+    let current = session.input_id == *input_id;
+    let source = manifest
+        .as_ref()
+        .and_then(|m| m.subjects.first())
+        .map(|s| s.source)
+        .unwrap_or_else(|| {
+            if current && session.work_source == Some(crate::session::WorkSource::Inherited) {
+                AttributionSource::Inherited
+            } else {
+                AttributionSource::Declared
+            }
+        });
+    let subjects = [("wave", names.0), ("project", names.1), ("task", names.2)]
         .into_iter()
         .filter_map(|(kind, name)| {
             Some(SubjectAttribution {
@@ -540,21 +608,48 @@ pub(crate) fn run_snapshots(
             })
         })
         .collect();
-        let snapshot = RunSnapshot {
-            id: run.id.to_string(),
-            parent_run_id: run.caller_run_id.as_ref().map(ToString::to_string),
-            subjects,
-            skill: run.skill.clone(),
-            outcome: run.ended.as_ref().map(|end| end.outcome.clone()),
-            started: run.created_at,
-            ended: run.ended.as_ref().map(|end| end.at),
-            harness: run.provider.clone().unwrap_or(evidence.harness),
-            model: run.model.clone(),
-            ..evidence
-        };
-        snapshots.push((run, snapshot));
-    }
-    Ok(snapshots)
+    Ok(RunSnapshot {
+        id: input_id.to_string(),
+        parent_run_id: None, // Selected from the immutable input relation by the SQL reader.
+        repo: manifest
+            .as_ref()
+            .and_then(|m| m.repo.as_ref().map(|p| p.to_string_lossy().into_owned()))
+            .or_else(|| current.then(|| session.repo.clone()).flatten()),
+        worktree: manifest
+            .as_ref()
+            .map(|m| m.cwd.to_string_lossy().into_owned())
+            .or_else(|| current.then(|| session.cwd.to_string_lossy().into_owned())),
+        subjects,
+        skill: manifest
+            .as_ref()
+            .map(|m| m.skill.clone())
+            .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+        outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
+        started: session.created_at,
+        ended: terminal.map(|receipt| receipt.ended_at.unix_timestamp()),
+        usage,
+        evidence_gaps: gaps,
+        harness: manifest
+            .as_ref()
+            .map(|m| m.harness.clone())
+            .or_else(|| current.then(|| session.provider.clone()).flatten())
+            .unwrap_or_else(|| "unknown".into()),
+        model: manifest
+            .as_ref()
+            .map(|m| m.model.clone())
+            .unwrap_or_else(|| current.then(|| session.model.clone()).flatten()),
+        surface: manifest
+            .as_ref()
+            .map(|m| m.surface.clone())
+            .unwrap_or_else(|| {
+                if current && session.interactive {
+                    "interactive"
+                } else {
+                    "headless"
+                }
+                .into()
+            }),
+    })
 }
 
 pub(crate) fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -1122,11 +1217,14 @@ fn reduce_events(path: &Path) -> std::io::Result<RunEvidence> {
         }
         Err(error) => return Err(error),
     };
+    reduce_usage_reader(BufReader::new(file))
+}
+
+fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<(RunUsage, usize)> {
     let mut streams = BTreeMap::<String, UsageStream>::new();
     let mut gaps = 0;
     let mut envelope_seq = None;
     let mut first_provider_attempt_at = None;
-    let mut reader = BufReader::new(file);
     loop {
         let mut line = Vec::new();
         let read = reader.read_until(b'\n', &mut line)?;
@@ -1884,7 +1982,7 @@ impl RunCapture {
     }
 
     fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
-        let recorder = RunRecorder::start(&dir, &manifest.run_id);
+        let recorder = RunRecorder::start(&dir, &manifest);
         Self {
             driver: None,
             binding: None,
@@ -2078,15 +2176,16 @@ impl RunCapture {
                 format!("Run already settled as {settled}; refusing {outcome}"),
             ));
         }
-        write_terminal(
-            &self.dir,
-            &TerminalReceipt {
-                schema_version: SCHEMA_VERSION,
-                outcome: outcome.to_string(),
-                ended_at: OffsetDateTime::now_utc(),
-                result_ref: None,
-            },
-        )?;
+        let terminal = TerminalReceipt {
+            schema_version: SCHEMA_VERSION,
+            outcome: outcome.to_string(),
+            ended_at: OffsetDateTime::now_utc(),
+            result_ref: None,
+        };
+        write_terminal(&self.dir, &terminal)?;
+        if let Err(error) = self.recorder.record(RecorderMessage::Terminal(terminal)) {
+            self.warn_telemetry(error);
+        }
         self.settled_outcome = Some(outcome.to_string());
         self.binding = None;
         if self.attempt_started {

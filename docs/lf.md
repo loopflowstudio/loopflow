@@ -885,9 +885,10 @@ planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, execution, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs --task` selects the Task's Run rows from the Home's SQLite
-store and reads each selected Run's record for its evidence. The final indexed reader conversion and its measurement obligations are in
-the cutover status; this historical interface is not the target ownership API.
+events. `lf runs --task` selects retained AgentSession input history from the
+Home's SQLite store before decoding its evidence. Each input keeps its original
+Work attribution, provider, usage and outcome across conversation continuation.
+The historical command and JSON names remain during the coordinated wire cutover.
 
 `lf runs --active` discovers existing receipts once and checks current processes.
 Waiting native clients count while their owned process remains live; unfinished
@@ -961,10 +962,10 @@ route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
 managed login exists, the provider CLI uses its ambient default credentials.
 
-`lf usage` selects the same Home-local Run rows as `lf runs`, ordered newest
-first, and reads their provider usage evidence.
-`--days` filters by Run start time and defaults to 30; zero selects all recorded
-Runs. `--wave`, `--project`, and `--task` apply the same Work attribution drill
+`lf usage` selects the same Home-local conversation input history as `lf runs`,
+ordered newest first. `--days` filters by the recorded input start time and
+defaults to 30; zero selects all retained input history. A continuation in the
+window remains visible even when its conversation began earlier. `--wave`, `--project`, and `--task` apply the same Work attribution drill
 as `lf runs`; the table names the most specific Work on each row. JSON remains
 the filtered direct `RunSnapshot` array. Each row preserves provider-authored
 cumulative counters once per usage stream. Omitted counters stay unknown,
@@ -973,8 +974,10 @@ Run settlement never invents provider finality.
 
 Provider retries retain separate native starts, outcomes and usage in the same
 AgentSession. An Exec records the actual command result; a FlowSession consumes
-one authorized successful completion. Historical launch rows still back parts
-of this interface during the conversion. Neither historical identity nor a
+one authorized successful completion. The input references have no mutable
+lifecycle; listing projects their recorded history. General captured observations
+cannot authorize Flow advancement. Full historical import and native-only usage
+recovery remain part of the cutover obligations. Neither historical identity nor a
 causal link grants process signal authority.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is

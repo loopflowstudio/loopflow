@@ -435,6 +435,12 @@ mod tests {
             cache_read_tokens: None,
         });
         capture.finish("completed").unwrap();
+        let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+            &ledger.home().join("loopflow.db"),
+        )
+        .unwrap();
+        assert!(store.runs(None, None, None, None, 0).unwrap().is_empty());
+        std::fs::remove_dir_all(capture.artifact_dir()).unwrap();
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::write(

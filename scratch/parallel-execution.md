@@ -542,3 +542,55 @@ zero Run rows and no provider launch. This exercises retained input references
 using final admission APIs, not a newly demonstrated populated released upgrade
 or receipt-based usage aggregation. SQL rows with unavailable artifacts and
 finished/unopened review preservation still need completion.
+
+
+## Session history readers · iteration 10 continuation
+
+Base `dd97558752f1262634ef9edba31857792a99c6e7`; Task base `7e5f32ce6`.
+Hosted CI36527817576 stopped at telemetry after 885 passes, one failure,
+15 skips and 1,077 unrun tests. Admission created no Run row; the old telemetry
+reader still selected `runs`. This was a production reader boundary.
+
+Capture now retains launch, generic usage/account/lifecycle and terminal
+observations in AgentSession history through the same writer as offline import.
+Observed evidence cannot select or settle a native Flow turn. SQL input/history
+selection replaces Run reads for lists, usage, telemetry, activity and landing
+conclusions. Diagnostic artifacts remain available; these readers do not hydrate
+them or create Run rows. Existing wire names remain transitional.
+
+Review found a concrete error in the first projection: aggregating a conversation
+labeled pre-bind usage with its current Task and excluded recent continuations
+of old conversations. The revised projection uses each retained input's recorded
+Work, provider, start and terminal evidence. No input acquires mutable state or a
+new lifecycle. The replaced-input proof retains the unbound 21-token failure and
+bound zero-token success in both unfiltered and Task-filtered reports; seven-day
+selection includes only the recent continuation. Exact/prefix parent selection
+is uncapped, and unavailable artifact files no longer erase these rows.
+
+`conversation-telemetry.log` passed the original test. `conversation-attribution.log`
+passed telemetry and the public replaced-input case, but the window fixture's
+partial observation lacked its input receipt namespace. `conversation-readers.log`
+passed three cases and exposed the landing fixture inheriting the runner database
+while its landing reader used another store. Correcting the fixture's environment
+with the existing TestLedgerGuard retained the original assertions.
+`conversation-readers-final.log`: four passes (telemetry with artifacts removed
+and zero Runs; inclusive window/partial history/excluded corruption; landing
+conclusion exactly once; public replaced-input attribution/window/import replay).
+
+`conversation-native-usage.log` completed native retry but the added Python
+inspection omitted its timeout argument. The corrected `conversation-native-usage-2`
+passes on candidate `a1397de2c6f386b7afc362c3d152c48412ac6f3545cc5ba72555fd97b270597a`:
+real Codex 0.157.1 with scripted Responses/private Home, zero Run rows, retained
+failed/successful native turns, exact once-only consumption, and public usage
+40 input/10 output, unknown cost, one final stream. No configured-account,
+native-only driver-loss usage or valid decision-retry claim follows.
+
+`conversation-static.log`: all-target Clippy passes in 15.91s. Formatting and
+Ruff pass after wrapping the new fixture call. Production-prefix measurement
+versus dd9755875 is +363/-97, net +266 Rust lines; excludes cfg(test) tails,
+integration tests, Python fixtures, docs and scratch. Receipt:
+`.lf/tmp/cut-i/conversation-reader-lines.json`. The retained full obligations
+remain: native-only history usage, remaining detail/import consumers, complete
+released multi-member/SQL-only import and final Run deletion, dense measurements,
+all-provider recovery, public Chapter execution and configured/installed proof.
+The existing valid native decision retry failure remains separate.

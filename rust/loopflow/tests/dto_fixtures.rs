@@ -198,7 +198,16 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
 #[test]
 fn metric_portfolio_fixture_locks_every_tagged_payload() {
     let portfolio: MetricPortfolioDto = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    assert_eq!(portfolio.metrics.len(), 10);
+    assert_eq!(portfolio.metrics.len(), 11);
+    assert!(matches!(
+        &portfolio.metrics[10].evidence,
+        loopflow::work::wave::metrics::MetricEvidenceDto::Unknown {
+            cause: loopflow::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                ..
+            }
+        }
+    ));
     assert_eq!(portfolio.contract_issues.len(), 5);
     assert_eq!(
         portfolio.metrics[0].description,
@@ -225,6 +234,7 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
             "unknown",
             "unavailable",
             "untargeted",
+            "unknown",
         ]
     );
 

@@ -211,7 +211,10 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("metric_portfolio.json")
         let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
 
-        #expect(portfolio.metrics.count == 10)
+        #expect(portfolio.metrics.count == 11)
+        #expect(portfolio.metrics.contains {
+            if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
+        })
         #expect(portfolio.contractIssues.count == 5)
         #expect(
             portfolio.metrics[0].description

@@ -564,9 +564,14 @@ print(json.dumps({
         assert!(portfolio.metrics[0].instrumented);
         assert!(matches!(
             portfolio.metrics[0].evidence,
-            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+            MetricEvidenceDto::Unknown {
+                cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
+            }
         ));
         let prompt = crate::ops::metrics::metric_prompt_section("wave-metrics", Ok(portfolio));
-        assert!(prompt.contains("\"kind\":\"untargeted\",\"value\":1.0"));
+        assert!(prompt.contains("\"kind\":\"target_unavailable\",\"value\":1.0"));
     }
 }

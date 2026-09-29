@@ -22,10 +22,34 @@ an empty portfolio. Raw log: `.lf/tmp/execution-model/recovery-26a027-rust-ci.lo
 Source observation: the fixture creates a Wave but no PM snapshot; the current
 portfolio reader returns an empty list plus `ChapterUnavailable` when current
 Project resolution fails. Three neighboring metrics tests also omit that snapshot
-and were not reached. This trace is not a local reproduction or an accepted repair.
+and were not reached by that CI run. The initial source trace was not a local
+reproduction or an accepted repair.
 Resolve the contract without confusing unknown target planning with no target,
 or erasing retained observations. Main received the exact evidence in Task comment
 `30db73b7-3e6b-4400-87ec-dded72424d47`; docs-first work continues before the repair.
+
+After docs checkpoint `4bb44b999`, main reproduced all four affected failures in
+`.lf/tmp/cut-i/metric-planning-red.log`: one pass, four failures, 1.506s after a
+30.20s compile. The command selected `ops::metrics::tests` plus the telemetry Flow
+test, with isolated Home/authority. Each affected portfolio loses its expected
+rows. Source review also found Desktop's unavailable-plan headline depended on
+an empty metric list, and row targets said unset for any null target. Task comment
+`2059afb5-64b7-4095-99d8-da1ce9a66540` records that consumer dependency. The repair
+must preserve the reading and distinguish unavailable planning from known empty
+targets in Rust, mirrored DTOs and Desktop presentation. The next compile found
+a missing CLI enum match; review also found wildcard value rendering and null
+target rendering would hide the reading/uncertainty. Main fixed both, including
+Wave-specific target availability. `metric-planning-green-2.log` records 24/24
+Rust tests passing (1.540s), including all four reproduced failures and CLI
+fresh/stale/never-observed formatting. The first `metric-swift.log` records
+21/22 passing: the summary fixture still expected a normal target headline in
+the presence of `ChapterUnavailable`. Main is reconciling that expectation while
+retaining a separate known-plan assertion. The final `metric-swift-2.log` passes
+22/22 (0.018s), covering mirrored DTO decoding and row/summary presentation;
+unavailable-Wave matching keeps other Waves' row targets intact. This is a Swift
+presentation test, not rendered Desktop acceptance. `metric-final-rust.log`
+passes 26/26 (1.520s), adding the two shared DTO assertions to the focused Rust
+checks. Static checks and a new hosted result remain pending at this observation.
 
 Hosted run 36507832289 is complete and failed. Rust lint, migration, architecture,
 Python, website, smoke, Task installation, Swift and UI compile jobs passed.

@@ -4,9 +4,11 @@ use std::process::{Command, Output};
 
 use chrono::{Local, Timelike};
 use loopflow::durable::{CronReceiptId, HomeId};
+use loopflow::id::WaveId;
 use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::RunEventRow;
+use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
 
 fn run_lf(home: &Path, args: &[&str]) -> Output {
@@ -180,17 +182,24 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         "- op: doctor\n- op: __telemetry-scorecard\n",
     )
     .unwrap();
+    fs::create_dir_all(home.path().join("performance")).unwrap();
+    fs::create_dir_all(home.path().join("wave/product/metrics")).unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for file in ["scripts/lifecycle_scorecard.py", "performance/budgets.json"] {
+        fs::copy(source.join(file), home.path().join(file)).unwrap();
+    }
     fs::write(
-        home.path().join("scripts/lifecycle_scorecard.py"),
-        r#"import json
-import pathlib
-import sys
-
-pathlib.Path(sys.argv[2]).joinpath("scorecard-ran").write_text("reached")
-print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard reached\n"}))
-"#,
+        home.path().join("wave/product/metrics/task-loop-trust.md"),
+        "---\nschema: 1\nid: task-loop-trust\nstage: installed\ninstrument: lifecycle-scorecard\nunit: ratio\nwindow: 7d\nfreshness: 30h\n---\n\n# Task loops earn trust\n\nCount settled Task loops.\n",
     )
     .unwrap();
+    store
+        .create_wave(&Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            home.path().display().to_string(),
+        ))
+        .unwrap();
 
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
@@ -214,10 +223,10 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         String::from_utf8_lossy(&telemetry.stdout),
         String::from_utf8_lossy(&telemetry.stderr)
     );
-    assert_eq!(
-        fs::read_to_string(home.path().join("scorecard-ran")).unwrap(),
-        "reached"
-    );
+    let report = String::from_utf8_lossy(&telemetry.stdout);
+    assert!(report.contains("Lifecycle scorecard"), "{report}");
+    assert!(report.contains("Elapsed / Run"), "{report}");
+    assert!(report.contains("Land request → merge"), "{report}");
     let events_after_telemetry = store.list_run_events_since(0).unwrap();
     for original in original_events {
         assert!(events_after_telemetry.contains(&original));

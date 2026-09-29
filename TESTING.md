@@ -105,7 +105,7 @@ Read the same gate evidence through the daily operator flow:
 lf telemetry-daily
 ```
 
-The scorecard joins accepted provider Turn usage with pre-land phase records. It
+The scorecard joins current Run usage and duration with Task PR landing and pre-land phase records. It
 prints aggregate values and coverage only—never commands, prompts, output, or
 task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.

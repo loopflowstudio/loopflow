@@ -93,6 +93,14 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
     }
     let database = crate::store::database_path_from_env()
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
+    // Include Runs that started before the window but ended inside it. Python
+    // applies the policy window to this existing projection, never raw events.
+    let runs = crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), 0)
+        .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
+    let mut run_input = tempfile::NamedTempFile::new()
+        .map_err(|error| OpsError::Message(format!("create telemetry input: {error}")))?;
+    serde_json::to_writer(run_input.as_file_mut(), &runs)
+        .map_err(|error| OpsError::Message(format!("serialize telemetry Runs: {error}")))?;
     let mut command = std::process::Command::new("python3");
     command
         .arg(script)
@@ -100,6 +108,8 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg(repo)
         .arg("--database")
         .arg(database)
+        .arg("--runs")
+        .arg(run_input.path())
         .arg("--envelope");
     let output = command
         .output()
@@ -363,10 +373,17 @@ fn unsupported() -> OpsError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
+    use time::OffsetDateTime;
+
+    use super::{execute_flow_ops, TelemetryScorecardEnvelope};
     use crate::controller::wave::metrics::MetricEvidenceDto;
+    use crate::engine::flow::Op;
+    use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
+    use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
     use crate::store::{open_store, storage_config_from_env};
     use crate::work::wave::Wave;
 
@@ -384,8 +401,29 @@ mod tests {
 
     #[test]
     fn telemetry_flow_op_runs_internal_scorecard() {
-        let _ledger = crate::journal::TestLedgerGuard::new();
+        let ledger = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().expect("temp repo");
+        let capture = CaptureHandle::begin_at(
+            ledger.home(),
+            RunSpec {
+                harness: "codex".to_string(),
+                model: None,
+                surface: "headless".to_string(),
+                cwd: repo.path().to_path_buf(),
+                repo: Some(repo.path().to_path_buf()),
+                worktree: Some(repo.path().to_path_buf()),
+                skill: Some("implement".to_string()),
+                subjects: Vec::new(),
+                flow: RunFlowMembership::Independent,
+            },
+        )
+        .unwrap();
+        capture.record_stream_event(&StreamEvent::Usage {
+            input_tokens: Some(12),
+            output_tokens: None,
+            cache_read_tokens: None,
+        });
+        capture.finish("completed").unwrap();
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::write(
@@ -395,7 +433,8 @@ import pathlib
 import sys
 
 repo = pathlib.Path(sys.argv[2])
-repo.joinpath("scorecard-ran").write_text("envelope" if "--envelope" in sys.argv else "direct")
+runs = json.loads(pathlib.Path(sys.argv[sys.argv.index("--runs") + 1]).read_text())
+repo.joinpath("scorecard-ran").write_text(json.dumps(runs))
 print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard text\n"}))
 "#,
         )
@@ -407,11 +446,15 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
 
         execute_flow_ops(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("scorecard-ran"))
-                .expect("read scorecard receipt"),
-            "envelope"
-        );
+        let runs: Vec<crate::run_record::RunSnapshot> = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].usage.input_tokens, Some(12));
+        assert_eq!(runs[0].usage.cost_usd, None);
+        assert_eq!(runs[0].usage.final_streams, 0);
+        assert_eq!(runs[0].outcome.as_deref(), Some("completed"));
     }
 
     #[test]

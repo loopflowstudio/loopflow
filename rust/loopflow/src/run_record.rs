@@ -210,6 +210,12 @@ impl SubjectAttribution {
     }
 }
 
+pub(crate) fn find_subject<'a>(subjects: &'a [SubjectAttribution], kind: &str) -> Option<&'a str> {
+    subjects
+        .iter()
+        .find_map(|subject| subject.selector.strip_prefix(kind)?.strip_prefix(':'))
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AttributionSource {
@@ -442,10 +448,7 @@ impl RunSnapshot {
     }
 
     pub fn subject(&self, kind: &str) -> Option<&str> {
-        let prefix = format!("{kind}:");
-        self.subjects
-            .iter()
-            .find_map(|subject| subject.selector.strip_prefix(&prefix))
+        find_subject(&self.subjects, kind)
     }
 
     pub fn total_tokens(&self) -> Option<i64> {
@@ -551,22 +554,28 @@ impl RunRecorder {
 /// record cannot make unrelated execution history unavailable. Partial JSONL
 /// evidence remains visible through `evidence_gaps` on the owning Run.
 pub fn scan_runs_since(lf_home: &Path, since: i64) -> std::io::Result<Vec<RunSnapshot>> {
+    scan_runs_matching(lf_home, since, |_| true)
+}
+
+pub(crate) fn scan_runs_matching(
+    lf_home: &Path,
+    since: i64,
+    include: impl Fn(&RunManifest) -> bool,
+) -> std::io::Result<Vec<RunSnapshot>> {
     let records = record_dirs(lf_home)?;
     let mut runs = Vec::new();
     for record in records {
-        // Bound event parsing before reading history; all-history callers keep
-        // their single manifest read. Invalid manifests retain the reader's error.
-        if since != 0
-            && read_manifest(&record).is_ok_and(|manifest| {
-                manifest.created_at.unix_timestamp() < since
-                    && validate_manifest_path(&record, &manifest).is_ok()
-            })
-        {
-            continue;
-        }
-        match read_run_snapshot(&record) {
-            Ok(run) if run.started >= since => runs.push(run),
-            Ok(_) => {}
+        let snapshot = read_manifest(&record).and_then(|manifest| {
+            validate_manifest_path(&record, &manifest)?;
+            if manifest.created_at.unix_timestamp() >= since && include(&manifest) {
+                project_run(&record, manifest).map(Some)
+            } else {
+                Ok(None)
+            }
+        });
+        match snapshot {
+            Ok(Some(run)) => runs.push(run),
+            Ok(None) => {}
             Err(error) => tracing::warn!(
                 %error,
                 record = %record.display(),
@@ -708,6 +717,10 @@ pub(crate) fn resolve_manifest(
 pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     let manifest = read_manifest(dir)?;
     validate_manifest_path(dir, &manifest)?;
+    project_run(dir, manifest)
+}
+
+fn project_run(dir: &Path, manifest: RunManifest) -> std::io::Result<RunSnapshot> {
     let mut evidence_gaps = usize::from(
         !dir.join("prepared").is_file() && !context_ref_is_valid(dir, manifest.context.as_ref()),
     );

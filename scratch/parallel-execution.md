@@ -927,3 +927,40 @@ Rebase onto `359c9a6c3` conflicted only in CLI documentation while replaying the
 early spec rewrite. The final text retains the accepted owner model and upstream
 single-linear-commit preservation; upstream executable changes apply unchanged.
 No native decision or table-removal acceptance follows.
+
+### Unmapped SQL agent inputs (2026-09-29)
+
+Publication `9887f8c84` includes the interruption repair and obsolete Run CRUD
+removal. The next public import regression removed old input links and added a
+standalone SQL agent input with no artifacts. `historical-unmapped-red.log`
+reported only one of four retained inputs. `historical-unmapped.log` now passes
+(5.617s): preview writes nothing, applied/repeated imports retain all four,
+current selection/title/feedback survive, caller references and nullable native
+identity survive, conflicting SQL fails without rewriting history, and public
+usage remains after legacy rows are deleted. No provider launched.
+
+Import now restores missing references from recorded SQL ownership and creates
+standalone agent conversations using the existing input selector contract. It
+retains original SQL evidence and refuses conflicting Session/caller mappings.
+Unknown or mechanical rows do not become invented agent conversations.
+
+`historical-unmapped-canonical.log` passes the expanded populated pre-admission
+development proof (0.617s), including rollback on schema discrepancy, exact
+native/event references, Flow selection, existing Started=17, standalone agent
+attribution and repeat/preview. A fresh exact-source disposable copy owns the
+canonical registration; `canonical-unmapped-source.json` names its source hashes.
+The intentionally unclassified caller row remains present with no Session. This
+is a concrete remaining preservation boundary before table removal, not a pass
+for all SQL origins. Released Task-position and filesystem proofs retain their
+separate earlier receipts. Native retry and final readers remain outstanding.
+
+Indexed-discovery research is returned at `research-indexed-discovery.md`; its
+private schema measurements and nullable-membership counterexample do not prove
+full-schema density or authorize narrower discovery. No contributor remains active.
+
+All-target Clippy passes in `historical-unmapped-static.log` (16.38s); formatting
+and whitespace pass. This cut versus `9887f8c84` adds 91/removes 3 production
+Rust lines in the importer/Session store, excluding migration test code, CLI
+tests and docs. Review retained the existing history owner and input links; no
+new process or attempt owner. The Run table still holds unclassified/mechanical
+evidence and remains protected by its historical triggers.

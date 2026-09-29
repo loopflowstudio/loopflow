@@ -1182,10 +1182,18 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
     Ok((!report.trim().is_empty()).then_some(report))
 }
 
-fn main() -> anyhow::Result<()> {
-    let result = run();
-    loopflow::engine::agent::wait_for_interrupt_cleanup();
-    result
+fn main() -> std::process::ExitCode {
+    let result = journal::with_process(run);
+    let code = journal::command_exit_code(&result);
+    if let Err(error) = result {
+        if error
+            .downcast_ref::<loopflow::exec::CommandExit>()
+            .is_none()
+        {
+            eprintln!("Error: {error:?}");
+        }
+    }
+    std::process::ExitCode::from(code)
 }
 
 fn run() -> anyhow::Result<()> {
@@ -1210,7 +1218,14 @@ fn run() -> anyhow::Result<()> {
     // Reorder args so flags can appear after the skill name
     let args = reorder_args(normalize_ssh_args(std::env::args().collect()));
 
-    let mut cli = Cli::parse_from(args.clone());
+    let mut cli = match Cli::try_parse_from(args.clone()) {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+            let _ = error.print();
+            return Err(loopflow::exec::CommandExit(code).into());
+        }
+    };
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
     let bypasses_machine_startup_gate = matches!(&cli.command, Some(Commands::Install { .. }));
@@ -1231,6 +1246,17 @@ fn run() -> anyhow::Result<()> {
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
+
+    if matches!(
+        &cli.command,
+        Some(
+            Commands::Install { .. }
+                | Commands::Screenshot { .. }
+                | Commands::ScreenshotSupervisor { .. }
+        )
+    ) {
+        journal::observe_process(&args);
+    }
 
     // Screenshot capture owns no Home, repository, account, or Run state. Its
     // hidden supervisor must also be able to clean up after its public parent
@@ -1305,7 +1331,8 @@ fn run() -> anyhow::Result<()> {
     // Exec admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
-    with_runtime(&directory, &args, || {
+    journal::admit_process(&directory, &args);
+    {
         let explicit_wave = cli
             .wave
             .as_deref()
@@ -1363,7 +1390,7 @@ fn run() -> anyhow::Result<()> {
             account_selection,
             inherited_account_lease,
         )
-    })
+    }
 }
 
 fn dispatch(

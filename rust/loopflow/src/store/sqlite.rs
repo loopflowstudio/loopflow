@@ -584,6 +584,24 @@ impl SqliteStore {
         Ok(store)
     }
 
+    /// Append process evidence to an existing compatible store, never initialize it.
+    pub(crate) fn open_existing_run_ledger(path: &Path) -> StoreResult<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+        validate_run_events_schema(&conn)?;
+        // An older ledger without the current process owner is not a writable
+        // observation destination. Leave upgrade decisions to ordinary admission.
+        conn.prepare(
+            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code FROM execs LIMIT 0",
+        )?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
     pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,

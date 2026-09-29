@@ -238,8 +238,12 @@ Exec outcomes are succeeded, failed or interrupted when observed. Unobserved
 completion, exit code and signal stay unknown. The outer command owns terminal
 settlement, including interruption. Bootstrap/installation logging must not open
 or migrate an incompatible installed store before its authority preflight.
-Unavailable-store recording limitations are explicit. Agent admission still
-requires its rows and capture before provider launch.
+Help, parser errors and installation/screenshot entry paths append process evidence
+only to an existing compatible ledger, without creating a Home, seeding branch
+data or applying migrations. An attached ledger stays pinned through command
+completion. Missing or incompatible storage leaves an explicit recording gap;
+inspection and screenshot cleanup still work. Agent admission requires its Exec
+and conversation rows before provider launch, even when earlier observation failed.
 
 ### Flow outcomes and authority
 

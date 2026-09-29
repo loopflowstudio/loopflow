@@ -1,6 +1,7 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -53,6 +54,256 @@ async fn inspection_records_one_completed_exec_without_starting_work() {
         )
         .unwrap();
     assert_eq!(work, 0, "inspection must not reserve agent or Task work");
+}
+
+#[test]
+fn parser_returns_exact_status_without_admitting_an_early_store() {
+    for (args, code) in [
+        (vec!["--help"], 0),
+        (vec!["--version"], 0),
+        (vec!["session", "list", "--definitely-not-a-flag"], 2),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        // An incompatible existing target must not be opened or repaired for help.
+        std::fs::write(&database, b"retained incompatible store").unwrap();
+        let output = command(home.path(), home.path(), &args)
+            .env("PATH", "")
+            .env("RUST_LOG", "off")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains("Exec history unavailable: no compatible process ledger"));
+        assert_eq!(
+            std::fs::read(&database).unwrap(),
+            b"retained incompatible store"
+        );
+        assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 1);
+        if code == 0 {
+            assert!(!output.stdout.is_empty(), "{output:?}");
+        } else {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    drop(store);
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    let schema: String = conn
+        .query_row(
+            "SELECT group_concat(sql) FROM sqlite_master ORDER BY name",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for (args, code) in [
+        (vec!["--help"], 0),
+        (vec!["--version"], 0),
+        (vec!["session", "list", "--definitely-not-a-flag"], 2),
+    ] {
+        let output = command(home.path(), home.path(), &args)
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Exec history unavailable"),
+            "{output:?}"
+        );
+    }
+    let rows: Vec<(i32, String)> = conn
+        .prepare("SELECT exit_code,outcome FROM execs ORDER BY started_at,rowid")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (0, "succeeded".into()),
+            (0, "succeeded".into()),
+            (2, "failed".into())
+        ]
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT group_concat(sql) FROM sqlite_master ORDER BY name",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        schema
+    );
+}
+
+#[tokio::test]
+async fn early_observation_preserves_preflight_target_and_screenshot_child_ancestry() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    drop(store);
+    let target = home.path().join("incompatible.db");
+    std::fs::write(&target, b"unchanged preflight target").unwrap();
+    let output = command(
+        home.path(),
+        home.path(),
+        &[
+            "install",
+            "local-preflight",
+            "--store",
+            target.to_str().unwrap(),
+            "--json",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        b"unchanged preflight target"
+    );
+    // No browser executable is available; both actual lf processes still exist.
+    let output = command(
+        home.path(),
+        home.path(),
+        &["screenshot", "missing.html", "-o", "missing.png"],
+    )
+    .env("PATH", "")
+    .output()
+    .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    let (count, completed): (i64, i64) = conn
+        .query_row(
+            "SELECT count(*),count(completed_at) FROM execs",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((count, completed), (3, 3));
+    let (child, parent): (String,String) = conn.query_row(
+        "SELECT c.id,p.id FROM execs c JOIN execs p ON c.parent_exec_id=p.id WHERE c.command LIKE '%__screenshot-supervisor%'",
+        [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_ne!(child, parent);
+    assert!(!home.path().join("missing.png").exists());
+}
+
+#[test]
+fn remote_command_status_is_the_local_exec_status() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    // No real credential CLI, Keychain reader or remote transport participates.
+    for (name, script) in [
+        ("ssh", "#!/bin/sh\ncat >/dev/null\nexit 42\n"),
+        ("gh", "#!/bin/sh\nexit 1\n"),
+        ("security", "#!/bin/sh\nexit 1\n"),
+    ] {
+        let path = bin.join(name);
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let output = command(
+        home.path(),
+        repo.path(),
+        &["ssh", "proof@example.invalid", "catalog"],
+    )
+    .env_clear()
+    .env("HOME", home.path())
+    .env("LF_HOME", home.path())
+    .env("LF_DB_PATH", home.path().join("loopflow.db"))
+    .env(
+        "PATH",
+        format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+    )
+    .output()
+    .unwrap();
+    assert_eq!(output.status.code(), Some(42), "{output:?}");
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("Error:"),
+        "{output:?}"
+    );
+    assert_recorded_exit(home.path(), 42);
+}
+
+#[test]
+fn empty_release_check_returns_through_exec_completion() {
+    let repo = TestRepo::new();
+    let tagged = Command::new("git")
+        .args(["tag", "v0.9.0"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(tagged.status.success(), "{tagged:?}");
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = command(home.path(), repo.path(), &["release", "check"])
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No commits in the target area since the last tag."),
+        "{output:?}"
+    );
+    assert!(!stderr.contains("Error:"), "{output:?}");
+    assert_recorded_exit(home.path(), 1);
+}
+
+fn assert_recorded_exit(home: &Path, code: i32) {
+    let conn = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let rows: Vec<(String, Option<i32>, bool, Option<String>)> = conn
+        .prepare("SELECT outcome,exit_code,completed_at IS NOT NULL,signal FROM execs")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
+    let events: Vec<String> = conn
+        .prepare("SELECT event FROM run_events WHERE node='run' ORDER BY seq")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(events, ["started", "errored"]);
+    let work: (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(work, (0, 0));
 }
 
 #[test]

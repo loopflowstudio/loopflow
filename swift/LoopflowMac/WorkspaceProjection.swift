@@ -329,6 +329,8 @@ final class WorkspaceNavigation {
     var flowDrafts: [String: TaskFlowDraft] = [:]
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
+    /// Successful `task prepare` receipts, available before the next roadmap read.
+    var preparedTaskWorktrees: [String: String] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose recent Runs are disclosed; the Runs are read only then.

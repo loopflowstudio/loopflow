@@ -128,7 +128,7 @@ struct TaskMonitorProofTests {
         let taskWork = model.task(id: "issue-review")?.task.runtime?.workId
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
+        let data = try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow")
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
         var chapter = try #require(waves[0]["chapter"] as? [String: Any])
@@ -235,7 +235,7 @@ struct TaskMonitorProofTests {
     private func query(feed: ActiveRunsTestFeed = ActiveRunsTestFeed()) throws -> RegistryQuery {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
+        let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow"), as: UTF8.self)
         let records = """
         [{"id":"monitor-review","run_id":"monitor-review","kind":"interactive",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},

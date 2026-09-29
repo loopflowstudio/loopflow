@@ -148,7 +148,7 @@ struct RoadmapView: View {
                 task: selection.task.task,
                 reference: selection.task.reference,
                 runtime: selection.task.runtime,
-                repoPath: selection.wave.repo,
+                prURL: selection.task.activePr?.publication?.github?.url,
                 terminalStore: terminalStore,
                 initialSection: .changes
             )

@@ -80,6 +80,10 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tower-http = { version = "0.7", features = ["trace"] }
 tempfile = "3.27"
 
+# ARM file-selection latency includes hashing the executable for install authority.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2 = { version = "0.10", features = ["asm"] }
+
 [dev-dependencies]
 loopflow-test-support = { path = "../loopflow-test-support" }
 tokio = { version = "1", features = ["test-util"] }

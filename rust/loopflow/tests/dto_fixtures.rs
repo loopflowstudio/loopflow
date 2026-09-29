@@ -266,3 +266,23 @@ fn chapter_history_keeps_dated_task_evidence() {
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].source_project_id, snapshot.source_project_id);
 }
+
+#[test]
+fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Files {
+        changes: loopflow::ops::task::TaskChangesSnapshot,
+        diff: loopflow::ops::task::TaskDiffSnapshot,
+        file: loopflow::ops::task::TaskFileSnapshot,
+        save: loopflow::ops::task::TaskFileSave,
+    }
+    let json = include_str!("../../../tests/fixtures/dto/task_files.json");
+    let files: Files = serde_json::from_str(json).unwrap();
+    assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
+    assert_eq!(
+        serde_json::to_value(files).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

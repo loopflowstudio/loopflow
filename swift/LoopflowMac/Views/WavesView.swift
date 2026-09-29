@@ -12,6 +12,7 @@ enum RepoFilter: Hashable {
 
 struct WavesView: View {
     let portfolioService: PortfolioService
+    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
     /// window). Collapsed to its main worktree for reads — the on-disk `wave/`
@@ -283,11 +284,13 @@ struct WavesView: View {
                 onClose: { selectedWaveId = nil }
             )
             .id(waveSelectionId(wave))
+            .environment(sessionWorkspaces)
         } else {
             RoadmapView(
                 repoPath: roadmapRepoPath,
                 onOpenWave: openRoadmapWave
             )
+            .environment(sessionWorkspaces)
         }
     }
 

@@ -370,7 +370,10 @@ struct DesktopPerformanceTests {
             planning["rank"] = Double(index)
             planning["completed"] = false
             task["task"] = planning
-            var reference: [String: Any] = ["issue_url": NSNull(), "workspace": NSNull()]
+            var reference: [String: Any] = ["issue_url": NSNull(), "workspace": [
+                "slug": "benchmark", "branch": "benchmark",
+                "worktree": "/src/loopflow", "local_exists": true,
+            ]]
             if index == 1 {
                 reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty",
                                           "worktree": NSTemporaryDirectory(), "local_exists": true]

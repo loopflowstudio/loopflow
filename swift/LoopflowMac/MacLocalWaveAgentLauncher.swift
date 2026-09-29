@@ -181,9 +181,9 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd) else {
+        guard let result = run([lfPath] + subargs, cwd: cwd, input: input) else {
             throw LocalLfError(
                 errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
             )
@@ -240,13 +240,16 @@ enum LocalWaveAgentLauncher {
 
     private static func run(
         _ args: [String],
-        cwd: String? = nil
+        cwd: String? = nil,
+        input: String? = nil
     ) -> (status: Int32, stdout: String, stderr: String)? {
         let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin
 
         let outHandle = stdout.fileHandleForReading
         let errHandle = stderr.fileHandleForReading
@@ -267,8 +270,20 @@ enum LocalWaveAgentLauncher {
         queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
         queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
 
+        if let input, let stdin {
+            // lf can exit before reading; report the failed write instead of taking SIGPIPE.
+            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            queue.async(group: group) {
+                defer { try? stdin.fileHandleForWriting.close() }
+                do { try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
+                catch { collector.setInputError(error.localizedDescription) }
+            }
+        }
         process.waitUntilExit()
         group.wait()
+        if process.terminationStatus == 0, let error = collector.inputError {
+            return (1, "", "Could not send draft to lf: \(error)")
+        }
 
         return (
             process.terminationStatus,
@@ -284,6 +299,10 @@ private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var out = Data()
     private var err = Data()
+    private var inputFailure: String?
+
+    var inputError: String? { lock.withLock { inputFailure } }
+    func setInputError(_ message: String) { lock.withLock { inputFailure = message } }
 
     var stdout: Data { lock.withLock { out } }
     var stderr: Data { lock.withLock { err } }

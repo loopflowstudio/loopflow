@@ -158,7 +158,6 @@ private struct WavePlanView: View {
                     WaveWorkInspector(
                         selection: selection,
                         workMap: workMap,
-                        repoPath: repoPath,
                         onTellWave: onTellWave,
                         terminalStore: terminalStore
                     )
@@ -763,7 +762,6 @@ private struct WaveTaskWorkView: View {
 private struct WaveWorkInspector: View {
     let selection: WaveWorkSelection
     let workMap: WaveWorkMap
-    let repoPath: String
     let onTellWave: (WaveWorkSelection) -> Void
     @ObservedObject var terminalStore: TaskTerminalStore
 
@@ -809,7 +807,7 @@ private struct WaveWorkInspector: View {
                     task: task.task,
                     reference: task.reference,
                     runtime: task.runtime,
-                    repoPath: repoPath,
+                    prURL: task.prs.first { $0.id == task.activePr }?.publication?.github?.url,
                     terminalStore: terminalStore,
                     initialSection: .changes
                 )

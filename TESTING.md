@@ -232,6 +232,12 @@ For async model readers, keep generic values crossing actor boundaries
 toolchain; record `swift --version` with compile evidence when investigating
 concurrency diagnostics.
 
+Keep native code compatible with CI's Xcode toolchain in both SwiftPM and Xcode
+builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4
+cannot enable it even with an experimental feature flag. Put teardown that can
+run off-actor in a resource owner and exercise release from outside the main
+actor. A newer local compiler's pass does not establish older-toolchain support.
+
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing

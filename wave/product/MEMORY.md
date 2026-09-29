@@ -140,6 +140,68 @@ them, preserving layout, focus, zoom and shell-command replay ownership; its
 features through their state and undo model so unused bookkeeping disappears too.
 See [the reduction receipt](https://github.com/loopflowstudio/loopflow/blob/536b0fd56/scratch/compress-pane-state.md).
 
+## Task files beside the conversation (2026-09-28)
+
+[Read and edit task files beside the conversation · LOO-327](https://linear.app/loopflow/issue/LOO-327/read-and-edit-task-files-beside-the-conversation)
+implements Jack Heart's minimal native browser. Jack approved the updated demo
+and authorized queue preparation, publication and landing in the
+[recorded approval](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-approval.md).
+That supersedes earlier publication holds; approval alone does not establish
+merge, Task completion or individual scenario coverage. The
+[design and evidence ledger](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser.md)
+and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031e6798652a15b5d250ba0f132a4e8/scratch/file-browser-demo-feedback.md)
+preserve the failed attempts and superseded proposals. Current usage lives in
+[the Mac README](../../swift/README.md) and [CLI reference](../../docs/lf.md).
+
+- **Task placement owns both surfaces.** One `scratch/` and `diff` navigator
+  sits beside retained Ghostty, with the recorded PR link above only navigation
+  and aligned headers. Task context shows its recorded worktree without an
+  independent selector. One document per Task/path in the window's existing
+  workspace registry shares draft, selection and Undo across both sources,
+  File/Diff, sheets and Sessions. Browser visibility survives relaunch; unsaved
+  drafts remain window-local. This is a small editor, not a repository explorer.
+- **Comparison authority stays in `lf`.** Parent means the active Task PR's
+  recorded base, HEAD its resolved worktree commit. The exact SHA pins list and
+  patch reads; membership is net difference, including staged/untracked changes
+  and rename source paths. Read-only Diff includes the unsaved File draft without
+  modifying disk or index. Local reads use recorded placement directly, without
+  planning sync, Task reconciliation or Run creation.
+- **The filesystem is the shared editing protocol.** Jack chose autosave by
+  default, an explicit-save option, and disk winning overlapping edits without
+  a conflict dialog. Preserve disjoint local edits. Incoming revisions rebase
+  Undo around the surviving local draft, coalescing earlier fine-grained history
+  so Undo cannot restore replaced LLM text. IME defers application and Save.
+  Observe files and parents across atomic replacement/recreation; a quiet period
+  coalesces writes but cannot prove an arbitrary writer has finished. Deletion,
+  invalid bytes and I/O failures retain drafts and truthful unavailable/error state.
+- **Atomic exchange provides recovery, not compare-and-swap.** A writer with an
+  old descriptor can mutate the displaced inode after a successful revision
+  check. Deleting that inode can lose the later bytes. Retain displaced files,
+  submitted drafts and receipts under Git metadata; never automatically restore
+  over another writer. Recovery is uncapped and inspected explicitly, outside
+  ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
+  within the 1 MB bound; previews never authorize Save. No arbitrary-writer
+  exclusion, extended-attribute or power-loss guarantee follows from this design.
+- **Measure first selection without pre-reading the target.** Jack required
+  ordinary local file selection under 250 ms. Corrected review measured 54/54
+  selections at 60–97 ms for 72 B, 13,594 B and 265,764 B files at 520/800-point
+  widths after real startup reads. Exact bytes were checked after bitmap capture.
+  These are AppKit endpoints with unflushed OS caches, not physical clicks,
+  compositor frames or p95. Startup remained 4–5 seconds. Earlier 2,652 ms cold
+  command and 12/18 and 18/18 failing populations remain unexplained; later passes
+  do not erase them. ARM SHA acceleration reduced measured executable-hashing
+  cost while retaining install authority. Priority/QoS/load controls did not
+  explain the slow interval.
+- **Native primitives and overall approval have separate evidence.** TextKit
+  proved useful selection, Find, Undo and retained-terminal behavior; pathological
+  million-byte lines remained slow. CodeEditTextView's comparison failed endpoint
+  visibility and wrapped-line responsiveness, so no dependency or smaller file
+  bound was adopted. Real filesystem and configured CLI/native checks covered
+  reconciliation and Save. Physical IME/mouse, compositor performance and nested
+  provider Home continuity were not individually established by those checks or
+  Jack's overall demo approval. A wrapper's returned launch argv must retain its
+  Home context; successful initial launch does not prove nested commands do.
+
 ## Accepted calmer workspace (2026-09-25)
 
 Repo → Wave → Task → named Session is the public hierarchy. Project is internal

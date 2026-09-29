@@ -1,5 +1,9 @@
+mod file_save;
+pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
+
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -113,43 +117,59 @@ pub struct TaskSnapshot {
     pub actions: TaskActionModel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskChangedFile {
     pub path: String,
+    pub old_path: Option<String>,
     pub committed: bool,
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskChangesSnapshot {
+    pub recovery_directory: Option<String>,
     pub issue_identifier: String,
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
     pub files: Vec<TaskChangedFile>,
+    pub scratch: Vec<String>,
+    pub scratch_truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskDiffSnapshot {
     pub issue_identifier: String,
     pub task_id: String,
+    pub base_commit: String,
     pub path: Option<String>,
     pub patch: String,
     pub binary: bool,
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskFileState {
+    Text,
+    Binary,
+    UnsupportedEncoding,
+    Truncated,
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskFileSnapshot {
+    pub recoveries: Vec<TaskFileRecovery>,
     pub issue_identifier: String,
     pub task_id: String,
     pub path: String,
     pub content: Option<String>,
-    pub binary: bool,
+    pub state: TaskFileState,
+    pub revision: Option<String>,
     pub size_bytes: u64,
-    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -181,6 +201,37 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
             .ok_or_else(|| task_error("Task has no active PR"))
     })
+}
+
+// File access reads recorded placement without reconciling PR or execution state.
+fn file_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
+    #[cfg(test)]
+    let test_path = super::pm::PM_TEST_CONTEXT
+        .try_with(|context| context.path.clone())
+        .ok();
+    #[cfg(not(test))]
+    let test_path: Option<std::path::PathBuf> = None;
+    let path = match test_path {
+        Some(path) => path,
+        None => {
+            let crate::store::StorageConfig::Sqlite { path } =
+                crate::store::storage_config_from_env().map_err(|error| {
+                    task_error(format!("cannot resolve Task registry: {error}"))
+                })?;
+            path
+        }
+    };
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)
+        .map_err(|error| task_error(format!("cannot read Task registry: {error}")))?;
+    let task = store
+        .task_by_issue(issue)
+        .map_err(|error| task_error(format!("failed to read Task: {error}")))?
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    let pr = store
+        .active_task_pr(&task.id)
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| task_error("Task has no active PR"))?;
+    Ok((task, pr))
 }
 
 fn task_error(message: impl std::fmt::Display) -> OpsError {
@@ -576,7 +627,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     } else {
         args.extend([task.worktree.display().to_string(), pr.branch.clone()]);
     }
-    git_output_owned(&repo, &args)?;
+    git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     let events = store
         .task_events_after(&task.id, 0)
         .await
@@ -4334,10 +4385,17 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
     })
 }
 
-pub fn task_changes(issue: &str) -> OpsResult<TaskChangesSnapshot> {
-    let task = task_status(Some(issue))?;
-    let pr = active_pr(&task)?;
-    changes_snapshot(TaskWorkspace::new(&task, &pr))
+/// Maximum byte length for Task file content, drafts and returned patches.
+pub const MAX_FILE_BYTES: usize = 1_000_000;
+
+pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
+    let (task, pr) = file_context(issue)?;
+    let workspace = TaskWorkspace::new(&task, &pr);
+    let base = resolve_file_base(workspace, base)?;
+    changes_snapshot(TaskWorkspace {
+        base_commit: &base,
+        ..workspace
+    })
 }
 
 fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapshot> {
@@ -4374,36 +4432,71 @@ fn changes_snapshot(workspace: TaskWorkspace<'_>) -> OpsResult<TaskChangesSnapsh
     let head_commit = git_output(workspace.worktree, &["rev-parse", "HEAD"])?
         .trim()
         .to_string();
+    let net = net_changed_paths(workspace)?;
+    files.retain(|path, file| {
+        file.old_path = net.get(path).cloned().flatten();
+        net.contains_key(path) || file.untracked
+    });
+    let (scratch, scratch_truncated) = scratch_paths(workspace.worktree)?;
+    let recovery = file_save::recovery_directory(workspace)?;
     Ok(TaskChangesSnapshot {
+        recovery_directory: recovery
+            .exists()
+            .then(|| recovery.to_string_lossy().into_owned()),
         issue_identifier: workspace.issue_identifier.to_string(),
         task_id: workspace.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         head_commit,
         files: files.into_values().collect(),
+        scratch,
+        scratch_truncated,
     })
 }
 
-pub fn task_diff(issue: &str, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
-    let task = task_status(Some(issue))?;
-    let pr = active_pr(&task)?;
-    diff_snapshot(TaskWorkspace::new(&task, &pr), path)
+pub fn task_diff(
+    issue: &str,
+    path: Option<&str>,
+    base: &str,
+    draft: Option<&str>,
+) -> OpsResult<TaskDiffSnapshot> {
+    let (task, pr) = file_context(issue)?;
+    let workspace = TaskWorkspace::new(&task, &pr);
+    let base = resolve_file_base(workspace, base)?;
+    let workspace = TaskWorkspace {
+        base_commit: &base,
+        ..workspace
+    };
+    match draft {
+        Some(draft) => draft_snapshot(
+            workspace,
+            path.ok_or_else(|| task_error("Draft diff requires a path"))?,
+            draft,
+        ),
+        None => diff_snapshot(workspace, path),
+    }
 }
 
 fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<TaskDiffSnapshot> {
-    const MAX_PATCH_BYTES: usize = 1_000_000;
-
     let relative = path.map(validate_task_relative_path).transpose()?;
+    let old_path = match &relative {
+        Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
+        None => None,
+    };
     let mut args = vec![
-        "diff".to_string(),
-        "--no-ext-diff".to_string(),
-        "--no-color".to_string(),
-        workspace.base_commit.to_string(),
-        "--".to_string(),
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        workspace.base_commit,
+        "--",
     ];
-    if let Some(path) = &relative {
-        args.push(path.clone());
+    // Both sides of a rename are needed for Git to preserve its identity.
+    if let Some(old) = &old_path {
+        args.push(old);
     }
-    let mut patch = git_output_owned(workspace.worktree, &args)?;
+    if let Some(path) = &relative {
+        args.push(path);
+    }
+    let mut patch = git_output_bytes(workspace.worktree, &args)?;
     let untracked = untracked_paths(workspace.worktree)?;
     let include_untracked = untracked
         .into_iter()
@@ -4424,20 +4517,7 @@ fn diff_snapshot(workspace: TaskWorkspace<'_>, path: Option<&str>) -> OpsResult<
         }
         patch.extend_from_slice(&output.stdout);
     }
-    let truncated = patch.len() > MAX_PATCH_BYTES;
-    if truncated {
-        patch.truncate(MAX_PATCH_BYTES);
-    }
-    let patch = String::from_utf8_lossy(&patch).into_owned();
-    let binary = patch.contains("Binary files ") || patch.contains("GIT binary patch");
-    Ok(TaskDiffSnapshot {
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
-        path: relative,
-        patch,
-        binary,
-        truncated,
-    })
+    Ok(patch_snapshot(workspace, relative, &patch))
 }
 
 pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<String> {
@@ -4491,45 +4571,229 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
     ))
 }
 
-pub fn task_file(issue: &str, path: &str) -> OpsResult<TaskFileSnapshot> {
-    let task = task_status(Some(issue))?;
-    let pr = active_pr(&task)?;
-    file_snapshot(TaskWorkspace::new(&task, &pr), path)
+pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
+    let (task, pr) = file_context(issue)?;
+    let workspace = TaskWorkspace::new(&task, &pr);
+    let mut file = file_snapshot(workspace, path)?;
+    if inspect_recovery {
+        file.recoveries = file_save::recoveries(workspace, &file.path)?;
+    }
+    Ok(file)
 }
 
 fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFileSnapshot> {
-    const MAX_FILE_BYTES: usize = 1_000_000;
-
     let relative = validate_task_relative_path(path)?;
     let root = workspace
         .worktree
         .canonicalize()
         .map_err(|error| task_error(format!("cannot resolve Task worktree: {error}")))?;
-    let absolute = root
-        .join(&relative)
-        .canonicalize()
-        .map_err(|error| task_error(format!("cannot open Task file {relative:?}: {error}")))?;
+    let mut snapshot = TaskFileSnapshot {
+        recoveries: Vec::new(),
+        issue_identifier: workspace.issue_identifier.to_string(),
+        task_id: workspace.task_id.to_string(),
+        path: relative.clone(),
+        content: None,
+        state: TaskFileState::Missing,
+        revision: None,
+        size_bytes: 0,
+    };
+    let absolute = match root.join(&relative).canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(snapshot),
+        Err(error) => {
+            return Err(task_error(format!(
+                "cannot open Task file {relative:?}: {error}"
+            )))
+        }
+    };
     if !absolute.starts_with(&root) || !absolute.is_file() {
         return Err(task_error(format!(
             "Task file {relative:?} does not resolve to a file inside the Task worktree"
         )));
     }
-    let bytes = std::fs::read(&absolute)
+    let file = File::open(&absolute)
         .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
-    let size_bytes = bytes.len() as u64;
-    let binary = bytes.iter().take(8_192).any(|byte| *byte == 0);
+    snapshot.size_bytes = file.metadata()?.len();
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    snapshot.state = if bytes.len() > MAX_FILE_BYTES {
+        TaskFileState::Truncated
+    } else if bytes.contains(&0) {
+        TaskFileState::Binary
+    } else if let Ok(content) = String::from_utf8(bytes) {
+        snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));
+        snapshot.content = Some(content);
+        TaskFileState::Text
+    } else {
+        TaskFileState::UnsupportedEncoding
+    };
+    Ok(snapshot)
+}
+
+fn resolve_file_base(workspace: TaskWorkspace<'_>, selection: &str) -> OpsResult<String> {
+    let reference = match selection {
+        "parent" => workspace.base_commit,
+        "head" => "HEAD",
+        sha if sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) => sha,
+        _ => {
+            return Err(task_error(
+                "Comparison must be parent, head, or a resolved commit SHA",
+            ))
+        }
+    };
+    Ok(git_output(
+        workspace.worktree,
+        &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
+    )?
+    .trim()
+    .to_string())
+}
+
+fn net_changed_paths(workspace: TaskWorkspace<'_>) -> OpsResult<BTreeMap<String, Option<String>>> {
+    let output = git_output_bytes(
+        workspace.worktree,
+        &[
+            "diff",
+            "--name-status",
+            "--no-ext-diff",
+            "--find-renames",
+            "-z",
+            workspace.base_commit,
+            "--",
+        ],
+    )?;
+    let entries = nul_paths(&output);
+    let mut entries = entries.into_iter();
+    let mut paths = BTreeMap::new();
+    while let Some(status) = entries.next() {
+        let source = entries
+            .next()
+            .ok_or_else(|| task_error("Missing Git path"))?;
+        if status.starts_with('R') || status.starts_with('C') {
+            let destination = entries
+                .next()
+                .ok_or_else(|| task_error("Missing Git rename destination"))?;
+            paths.insert(destination, Some(source));
+        } else {
+            paths.insert(source, None);
+        }
+    }
+    Ok(paths)
+}
+
+fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
+    // Bound traversal as well as returned files. Never descend into symlinks.
+    let mut pending = vec![root.join("scratch")];
+    let mut paths = Vec::new();
+    let mut visited = 0;
+    while let Some(directory) = pending.pop() {
+        match std::fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        }
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            visited += 1;
+            if visited > 2_000 {
+                paths.sort();
+                return Ok((paths, true));
+            }
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
+                pending.push(entry.path());
+            } else if kind.is_file() {
+                paths.push(
+                    entry
+                        .path()
+                        .strip_prefix(root)
+                        .expect("scratch is under worktree")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    paths.sort();
+    Ok((paths, false))
+}
+
+fn patch_snapshot(
+    workspace: TaskWorkspace<'_>,
+    path: Option<String>,
+    bytes: &[u8],
+) -> TaskDiffSnapshot {
     let truncated = bytes.len() > MAX_FILE_BYTES;
-    let visible = &bytes[..bytes.len().min(MAX_FILE_BYTES)];
-    let content = (!binary).then(|| String::from_utf8_lossy(visible).into_owned());
-    Ok(TaskFileSnapshot {
+    let patch = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_FILE_BYTES)]).into_owned();
+    // Git's binary markers start a line; patch content is always prefixed.
+    let binary = patch
+        .lines()
+        .any(|line| line.starts_with("Binary files ") || line == "GIT binary patch");
+    TaskDiffSnapshot {
         issue_identifier: workspace.issue_identifier.to_string(),
         task_id: workspace.task_id.to_string(),
-        path: relative,
-        content,
+        base_commit: workspace.base_commit.to_string(),
+        path,
+        patch,
         binary,
-        size_bytes,
         truncated,
-    })
+    }
+}
+
+fn draft_snapshot(
+    workspace: TaskWorkspace<'_>,
+    path: &str,
+    draft: &str,
+) -> OpsResult<TaskDiffSnapshot> {
+    if draft.len() > MAX_FILE_BYTES {
+        return Err(task_error("Draft exceeds 1 MB"));
+    }
+    let path = validate_task_relative_path(path)?;
+    let changes = net_changed_paths(workspace)?;
+    let old_path = changes
+        .get(&path)
+        .and_then(Option::as_deref)
+        .unwrap_or(&path);
+    let spec = format!("{}:{old_path}", workspace.base_commit);
+    let exists = !git_output_bytes(
+        workspace.worktree,
+        &["ls-tree", "-z", workspace.base_commit, "--", old_path],
+    )?
+    .is_empty();
+    let original = if exists {
+        git_output_bytes(workspace.worktree, &["show", &spec])?
+    } else {
+        Vec::new()
+    };
+    // Private temporary files only: draft comparisons never touch the worktree or index.
+    // The a/ and b/ directories stand in for Git's prefixes so headers name the real paths.
+    let directory = tempfile::tempdir()?;
+    let before = format!("a/{old_path}");
+    let after = format!("b/{path}");
+    for (relative, bytes) in [(&before, original.as_slice()), (&after, draft.as_bytes())] {
+        let file = directory.path().join(relative);
+        std::fs::create_dir_all(file.parent().expect("prefixed path has a parent"))?;
+        std::fs::write(file, bytes)?;
+    }
+    let output = Command::new("git")
+        .current_dir(directory.path())
+        .args([
+            "diff",
+            "--no-index",
+            "--no-ext-diff",
+            "--no-color",
+            "--no-prefix",
+            "--",
+            &before,
+            &after,
+        ])
+        .output()?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(task_error(String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(patch_snapshot(workspace, Some(path), &output.stdout))
 }
 
 fn validate_task_relative_path(path: &str) -> OpsResult<String> {
@@ -4564,13 +4828,16 @@ fn record_changed_paths(
     mark: impl Fn(&mut TaskChangedFile),
 ) -> OpsResult<()> {
     for path in nul_paths(&git_output_bytes(worktree, args)?) {
-        let file = files.entry(path.clone()).or_insert(TaskChangedFile {
-            path,
-            committed: false,
-            staged: false,
-            unstaged: false,
-            untracked: false,
-        });
+        let file = files
+            .entry(path)
+            .or_insert_with_key(|path| TaskChangedFile {
+                path: path.clone(),
+                old_path: None,
+                committed: false,
+                staged: false,
+                unstaged: false,
+                untracked: false,
+            });
         mark(file);
     }
     Ok(())
@@ -4605,21 +4872,6 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
         return Err(task_error(format!(
             "git {} failed: {}",
             args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(output.stdout)
-}
-
-fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
-    let output = Command::new("git")
-        .current_dir(worktree)
-        .args(args)
-        .output()
-        .map_err(|error| task_error(format!("failed to run git diff: {error}")))?;
-    if !output.status.success() {
-        return Err(task_error(format!(
-            "git diff failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
@@ -5605,6 +5857,204 @@ mod tests {
             store.latest_task_event(&task.id).await.unwrap().unwrap().kind,
             TaskEventKind::Progress { summary } if summary.contains("restart-head")
         ));
+    }
+
+    #[test]
+    fn task_files_use_recorded_placement_without_lifecycle_reconciliation() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
+        let mut pr = runtime
+            .block_on(fixture.store.active_task_pr(&fixture.task.id))
+            .unwrap()
+            .unwrap();
+        pr.base_commit = super::git_output(repo.path(), &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .into();
+        rusqlite::Connection::open(&fixture.database_path)
+            .unwrap()
+            .execute(
+                "UPDATE task_prs SET base_commit=?2 WHERE id=?1",
+                rusqlite::params![pr.id.as_str(), pr.base_commit],
+            )
+            .unwrap();
+        std::fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        std::fs::write(repo.path().join("scratch/note.md"), "local note\n").unwrap();
+        let original_task = runtime
+            .block_on(fixture.store.get_task(&fixture.task.id))
+            .unwrap()
+            .unwrap();
+        let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        connection.execute_batch(
+            "CREATE TRIGGER no_file_task_update BEFORE UPDATE ON tasks BEGIN SELECT RAISE(FAIL,'file access cannot update Task'); END;
+             CREATE TRIGGER no_file_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'file access cannot reconcile PR'); END;"
+        ).unwrap();
+        crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+            crate::ops::pm::PmTestContext {
+                path: fixture.database_path.clone(),
+                store: fixture.store.clone(),
+                graphql_url: "http://127.0.0.1:1".into(),
+            },
+            || {
+                for issue in [
+                    "FILES-1",
+                    fixture.task.id.as_str(),
+                    fixture.task.plan.id.as_str(),
+                ] {
+                    let file = super::task_file(issue, "scratch/note.md", false).unwrap();
+                    assert_eq!(file.content.as_deref(), Some("local note\n"));
+                    let changes = super::task_changes(issue, "parent").unwrap();
+                    assert_eq!(changes.base_commit, pr.base_commit);
+                    assert_eq!(changes.scratch, ["scratch/note.md"]);
+                    let diff =
+                        super::task_diff(issue, Some("scratch/note.md"), "head", None).unwrap();
+                    assert!(diff.patch.contains("+local note"));
+                }
+                let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+                let saved = super::file_save::task_save(
+                    "FILES-1",
+                    "scratch/note.md",
+                    file.revision.as_deref().unwrap(),
+                    "saved\n",
+                )
+                .unwrap();
+                assert!(saved.published);
+                assert_eq!(saved.file.content.as_deref(), Some("saved\n"));
+            },
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.get_task(&fixture.task.id))
+                .unwrap()
+                .unwrap(),
+            original_task
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.active_task_pr(&fixture.task.id))
+                .unwrap()
+                .unwrap(),
+            pr
+        );
+    }
+
+    #[test]
+    fn task_files_compare_net_parent_head_and_revisioned_drafts() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            super::git_output(repo.path(), args)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        let commit = || {
+            git(&[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "fixture",
+            ]);
+        };
+        std::fs::write(repo.path().join("cancelled.txt"), "base\n").unwrap();
+        std::fs::write(repo.path().join("old.txt"), "rename me\n").unwrap();
+        git(&["add", "."]);
+        commit();
+        let parent = git(&["rev-parse", "HEAD"]);
+        std::fs::write(repo.path().join("cancelled.txt"), "committed\n").unwrap();
+        git(&["mv", "old.txt", "new.txt"]);
+        git(&["add", "."]);
+        commit();
+        std::fs::write(repo.path().join("cancelled.txt"), "base\n").unwrap();
+        std::fs::create_dir_all(repo.path().join("scratch/nested")).unwrap();
+        std::fs::write(
+            repo.path().join("scratch/nested/notes.md"),
+            "\u{feff}notes\r\n",
+        )
+        .unwrap();
+        let id = TaskId::new();
+        let workspace = super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+            base_commit: &parent,
+        };
+        let changes = super::changes_snapshot(workspace).unwrap();
+        assert!(!changes
+            .files
+            .iter()
+            .any(|file| file.path == "cancelled.txt"));
+        let renamed = changes
+            .files
+            .iter()
+            .find(|file| file.path == "new.txt")
+            .unwrap();
+        assert_eq!(renamed.old_path.as_deref(), Some("old.txt"));
+        assert_eq!(changes.scratch, ["scratch/nested/notes.md"]);
+        let patch = super::diff_snapshot(workspace, Some("new.txt")).unwrap();
+        assert!(patch.patch.contains("rename from old.txt"));
+        let head = super::resolve_file_base(workspace, "head").unwrap();
+        let head_changes = super::changes_snapshot(super::TaskWorkspace {
+            base_commit: &head,
+            ..workspace
+        })
+        .unwrap();
+        assert!(head_changes
+            .files
+            .iter()
+            .any(|file| file.path == "cancelled.txt"));
+        assert!(!head_changes.files.iter().any(|file| file.path == "new.txt"));
+        let file = super::file_snapshot(workspace, "scratch/nested/notes.md").unwrap();
+        assert_eq!(file.content.as_deref(), Some("\u{feff}notes\r\n"));
+        assert_eq!(file.revision.as_ref().unwrap().len(), 64);
+        let draft = super::draft_snapshot(workspace, "new.txt", "local draft\n").unwrap();
+        assert!(draft.patch.contains("--- a/old.txt\n+++ b/new.txt\n"));
+        assert!(draft.patch.contains("-rename me"));
+        assert!(draft.patch.contains("+local draft"));
+        let quoted = super::draft_snapshot(workspace, "new.txt", "Binary files differ\n").unwrap();
+        assert!(!quoted.binary);
+        std::fs::write(repo.path().join("new.txt"), "Binary files differ\n").unwrap();
+        assert!(
+            !super::diff_snapshot(workspace, Some("new.txt"))
+                .unwrap()
+                .binary
+        );
+        std::fs::write(repo.path().join("new.txt"), "rename me\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("new.txt")).unwrap(),
+            "rename me\n"
+        );
+        assert_eq!(
+            super::file_snapshot(workspace, "gone").unwrap().state,
+            super::TaskFileState::Missing
+        );
+        for (bytes, state) in [
+            (vec![0], super::TaskFileState::Binary),
+            (vec![255], super::TaskFileState::UnsupportedEncoding),
+            (vec![b'a'; 1_000_001], super::TaskFileState::Truncated),
+        ] {
+            std::fs::write(repo.path().join("edge"), bytes).unwrap();
+            let file = super::file_snapshot(workspace, "edge").unwrap();
+            assert_eq!(file.state, state);
+            assert!(file.content.is_none());
+            assert!(file.revision.is_none());
+        }
+        assert!(super::file_snapshot(workspace, "../outside").is_err());
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("private"), "outside").unwrap();
+            std::os::unix::fs::symlink(outside.path(), repo.path().join("scratch/link")).unwrap();
+            assert_eq!(
+                super::scratch_paths(repo.path()).unwrap().0,
+                ["scratch/nested/notes.md"]
+            );
+            assert!(super::file_snapshot(workspace, "scratch/link/private").is_err());
+        }
     }
 
     #[tokio::test]

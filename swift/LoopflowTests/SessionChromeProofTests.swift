@@ -92,8 +92,13 @@ struct SessionChromeProofTests {
                 .labelView().text().string()
             #expect(label.contains("feature / realign"))
         }
-        #expect(throws: Never.self, "worktree chip") {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+        #expect(throws: Never.self, "Task worktree location") {
+            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+                .text().string()
+            #expect(location == "loopflow")
+        }
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
         }
         #expect(throws: Never.self, "complete") {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
@@ -252,8 +257,8 @@ struct SessionChromeProofTests {
             fixtures.appendingPathComponent("task_flow.json"))) as? [[String: Any]])
         let pinned = try #require(flows[1]["record"] as? [String: Any])
         let invocation = try #require(pinned["invocation_id"] as? String)
-        var plan = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
+        var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
+            fixtures.appendingPathComponent("roadmap_snapshot.json")), at: "/src/loopflow")) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])
         let waveIndex = try #require(waves.firstIndex { wave in
             let tasks = wave["tasks"] as? [String: Any]

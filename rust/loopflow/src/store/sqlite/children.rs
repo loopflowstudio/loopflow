@@ -46,7 +46,7 @@ impl SqliteStore {
         insert_initial_task(&transaction, task, pr)?;
         insert_task_event_in(
             &transaction,
-            task,
+            &task.id,
             &TaskEventKind::WorktreeInitializing {
                 pr_id: pr.id.clone(),
                 sequence: pr.sequence,
@@ -148,7 +148,6 @@ impl SqliteStore {
             ));
         }
         validate_task_project(&transaction, task)?;
-        let task_work = task_on(&transaction, &task.id)?.ok_or(StoreError::NotFound)?;
         transaction.execute(
             &format!(
                 "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {}",
@@ -167,7 +166,7 @@ impl SqliteStore {
         )?;
         insert_task_event_in(
             &transaction,
-            &task_work,
+            &task.id,
             &TaskEventKind::Progress {
                 summary: format!("Task restarted from checkpoint {checkpoint_head}"),
             },
@@ -676,8 +675,7 @@ impl SqliteStore {
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = task_on(&transaction, task_id)?.ok_or(StoreError::NotFound)?;
-        let event = insert_task_event_in(&transaction, &task, kind)?;
+        let event = insert_task_event_in(&transaction, task_id, kind)?;
         transaction.commit()?;
         Ok(event)
     }
@@ -970,7 +968,7 @@ fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     }
     insert_task_event_in(
         conn,
-        task,
+        &task.id,
         &TaskEventKind::Completed {
             summary: "Task completed".to_string(),
         },
@@ -1842,18 +1840,22 @@ fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEve
 
 pub(super) fn insert_task_event_in(
     conn: &Connection,
-    task: &Task,
+    task_id: &TaskId,
     kind: &TaskEventKind,
 ) -> StoreResult<TaskEvent> {
     let created_at = now_unix();
-    conn.execute(
-        "INSERT INTO task_events (task_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
-        params![task.id.as_str(), serde_json::to_string(kind)?, created_at],
-    )?;
+    if conn.execute(
+        "INSERT INTO task_events (task_id, kind_json, created_at)
+         SELECT id,?2,?3 FROM tasks WHERE id=?1",
+        params![task_id.as_str(), serde_json::to_string(kind)?, created_at],
+    )? == 0
+    {
+        return Err(StoreError::NotFound);
+    }
     let event_id = conn.last_insert_rowid();
     Ok(TaskEvent {
         id: event_id,
-        task_id: task.id.clone(),
+        task_id: task_id.clone(),
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })

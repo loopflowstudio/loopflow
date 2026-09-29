@@ -1,496 +1,643 @@
-# Resolve Tasks across Homes and select the official worker runtime
+# Resolve Tasks through a synced local store and use the official worker runtime
 
-Status: design draft for LOO-334, 2026-09-29. No implementation or product
-approval is implied. Jack Heart's Task and four refinement comments are the
-product direction. Source inspection is against `a3820bf7e`.
+Status: design review approved by Jack Heart on 2026-09-29. Jack requested
+“mark review approved and complete / proceed with the flow”. Approval covers the
+current design, including repository-owned, worktree-sensitive Wave definitions,
+remote main as the shared baseline, per-Wave Initiatives and portable `A/B` names.
+It authorizes completion of this review Session and continuation through the saved
+Flow, not an Advance/Iterate verdict, Task completion or installation promotion.
+Remaining policy choices stay explicit in questions.md and do not block the first
+implementation slice. No implementation has begun. Source inspection is against
+`a3820bf7e`.
+Review feedback: [repository connection and Task validity](repository-planning-connection-review.md).
+Open choices: [questions](questions.md).
+Research: [Apollo, Relay, Realm and PowerSync](planning-store-sync-research.md).
+Command walkthrough: [Dave takes an idea to running work](idea-to-task-command-story.md).
+Wave mapping and remaining migration details: [Wave existence and Linear migration](wave-existence-and-linear-migration.md).
 
-## Problem
+## Command experience: start with an idea
 
-Jack cannot reliably find or continue work because the answering data directory
-determines whether Loopflow says a Task exists. LOO-298 has Linear and Git
-evidence but the official CLI says it does not exist. An inherited executable
-and database wrapper also keeps workers on an older installation.
-
-Jack selected two planning modes per Wave:
-
-- Connected to Linear: Linear owns Task existence, title, status, Project and
-  ordering. Git owns branches and commits; GitHub owns PR facts. Local planning
-  data is a replaceable observation of those authorities.
-- Unconnected: the local store owns Tasks. Linear is neither required nor
-  contacted for ordinary operations in that Wave.
-
-Execution has a different lifetime. Flow invocations, Runs, Sessions, claims,
-placement, unpushed work and delivery attempts cannot be reconstructed from
-Linear. They survive planning changes and remain attached by stable identity.
-
-Infrastructure's chapter KRs require a generic Session to find, create and
-advance Tasks without plumbing repairs or manual continuation. This design
-addresses the discovery and launch portions, not a claim to complete either KR.
-
-## The demo
-
-In a disposable OS account, create execution history in data directory A and
-select an official installation with directory B. From both directories,
-`lf task status DEM-334` shows the same Linear Task and Git PR, and identifies
-A as the location of its execution history, with a working reach command.
-Continue the Task, change the official installation between two Flow boundaries,
-and observe the next worker use the new executable while retaining the exact
-invocation, review and execution directory. An explicitly pinned Task stays on
-its chosen bytes and reports the pin.
-
-Repeat with a Wave that has no Linear connection: create, inspect and run a
-local Task without any Linear requests. B identifies the local Task in A when
-A is discoverable; it never pretends that a missing local copy establishes
-machine-wide absence.
-
-## Approach
-
-### Planning and execution are separate records
-
-Use TaskSpace and TaskOps as the planning and execution concepts named in Jack's
-steer, not new services, registries or public CLI namespaces. Reshape the
-existing Task model and PM resolver in place. One joined Task view contains:
-
-- Stable planning identity: a tagged Linear workspace/issue UUID or a local
-  Task identity scoped to its owning repository and data store. Human-readable
-  issue identifiers are lookup aliases, not execution primary keys.
-- Planning observation: authority, current facts when known, freshness and an
-  explicit result (`present`, confirmed removed, inaccessible/unresolved, or
-  unavailable). The last successful observation keeps its own timestamp.
-- Git evidence: repository identity, exact branch/ref and PR associations,
-  with independent freshness. A PR is optional; a planning-only Task is real.
-- Execution observations: zero or more located TaskOps records, each qualified
-  by data directory, Home identity, Task ID and inspection result. A local
-  execution projection is optional. Two divergent records stay two records.
-
-An empty execution observation is not an idle worker. An unavailable planning
-observation is not an absent Task. Never synthesize a worktree, claim, invocation,
-Project or successful outcome merely to fill a required DTO field.
-
-Persist execution once in the existing Task/execution tables. Local-mode Task
-planning is durable in that store; connected-mode planning uses the existing PM
-cache. Replace the unconditional `LinearIssueId` requirement with a tagged
-planning reference and migrate all consumers together. Keep existing Task IDs,
-Run foreign keys, invocation IDs and historical attribution. LOO-298 owns the
-execution schema replacement; do not implement a second invocation/session
-schema here. Its integration boundary is specified below.
-
-### Select a Wave's mode explicitly from its connection
-
-Use the existing `pm.linear_initiative` binding in Wave configuration as the
-current connection declaration, with the repository's `pm.linear_team` as
-provider scope. A valid binding selects Linear mode even when credentials,
-network, current chapter cache or Initiative access are unavailable. A malformed
-configuration is unresolved configuration, never permission to switch to local
-authority. Missing Team configuration reports the incomplete connection.
-
-No binding selects local mode for a known unconnected Wave. Missing Wave
-configuration for a record previously observed as connected is insufficient to
-disconnect it. Preserve that recorded binding as provenance and report the
-configuration discrepancy. Explicit connect/disconnect owns authority changes;
-a read, checkout switch or outage cannot do so. Connection must not publish
-preexisting local Tasks implicitly. On connection, unmatched local planning
-leaves the current connected plan; preserve execution and historical local facts.
-Disconnect requires an explicit choice of which observed planning facts become
-the local plan, without moving execution or automatically reopening work.
-
-Wave existence itself is not decided here. Jack explicitly left Git versus
-Linear versus local storage open. Proposed follow-up decision: connected Wave
-existence follows its Initiative; unconnected Wave existence follows the local
-store; Git owns authored GOAL/MEMORY content and connection configuration.
-That proposal needs Jack's decision and a connection-bootstrap design. LOO-334
-can resolve Tasks through existing bindings without rotating chapters or deleting
-Waves. Do not infer Wave death from a missing directory or inaccessible Initiative.
-
-### Resolve the issue before requiring local execution
-
-For an issue selector, query Linear directly using the existing
-`LinearClient::issue_ownership` operation, refactored so issue existence survives
-a missing Project or unresolved Wave mapping. Reuse `pm_resolve_task`'s direct
-lookup rather than `task_pm::resolve_task_async`'s cache-first search. An internal
-Task selector first resolves its retained planning reference, including locations
-outside the selected store, then uses the same authority-specific path.
-
-Return the issue even if its current Project is not registered locally, belongs
-to another known Wave, has multiple Initiative associations, or lacks a current
-chapter receipt. Resolve the relationship where evidence is singular; otherwise
-display the real issue and the unresolved relationship. Only a specific operation
-needing that relationship must obtain it. Existence does not depend on launch
-eligibility. Count only Initiative bindings belonging to this repository when
-mapping Waves; unrelated Initiative membership must not invalidate a read.
-
-Read Git worktrees/refs and GitHub PRs using the existing Git/PR operations.
-Associate by exact recorded branch and repository, or the existing PR Task link
-resolved to the issue identity. Issue-like branch names are candidates, never
-proof of ownership. Preserve ambiguity when multiple PRs or branches match;
-merged historical PRs are not automatically active successors. Unpushed branches
-remain visible through their owning checkout even when GitHub has no PR.
-
-Refresh the selected directory's connected planning cache after a successful
-read; that cache write must not allocate TaskOps. `task status` must stop
-completing Tasks as a side effect of observing a merged PR. Completion remains
-an explicit delivery/Task operation and, in connected mode, is not effective
-planning status until Linear confirms it.
-
-### Find execution without a machine-wide Task registry
-
-Build a transient set of candidate stores from the explicitly selected directory,
-existing installation selections and retained switch receipts, and already known
-Home routes. Reuse `machine_install::known_installations` and the read-only Work
-identity reader. Include the legacy standard store. Canonicalize filesystem
-aliases and deduplicate stores by file identity; Home ID alone is insufficient
-because branch snapshots preserve the same Home ID.
-
-For source-private directories not represented in installation receipts, include
-only the known development-directory layout owned by Loopflow, using the existing
-source data-root rules. Do not recursively search arbitrary user directories or
-introduce a persistent Task-to-store index. An arbitrary external directory must
-be explicitly selected or already reachable by a known route. Report the scope
-searched and any unreadable candidates; universal discovery of unknown paths is
-not possible without registration or a filesystem crawl.
-
-Read identity/location facts through the minimal read-only schema surface,
-without migration, provider login, copied credentials or foreign-store writes.
-An unsupported schema yields an uninspected location and reason, not an empty
-result. Do not require complete parent objects merely to locate a Task record.
-Detailed history is read by a compatible executable in its owning store.
-
-The result prints the exact data directory and Home ID separately. Its structured
-reach command uses the official installation entrypoint with explicit `LF_HOME`
-and `LF_DB_PATH`; remote destinations use existing `lf ssh` transport. For an
-incompatible historical store, return the verified retained executable/store
-command only if available and label it as explicit historical runtime selection.
-Otherwise report exactly which executable/schema is missing. Never recommend an
-unverified pair or silently select a store by modification time.
-
-Read-only discovery can show both A and B. Continuation follows an already bound
-invocation or an unambiguous existing execution record. If both contain independent
-unfinished execution, show both and accept explicit data-directory selection;
-do not merge, take over or launch a duplicate to eliminate ambiguity. An existing
-checkout remains usable even if its current planning membership changed.
-
-A local-only Task in another discoverable store is reported as local to that
-store, with a reach command and no automatic copy/import. If no accessible store
-contains it, say “not found in the inspected local stores,” naming inaccessible
-locations, rather than asserting global nonexistence. Explicit `--wave` can
-disambiguate a local Task name without probing Linear.
-
-### Make official runtime selection independent of execution placement
-
-Default Task runtime policy is `official`. At each worker boundary, resolve the
-current selected CLI artifact through machine installation state, not PATH,
-`current_exe`, the prior artifact's selection or inherited `LF_BIN` overrides.
-“Official” means the machine's selected installation, not an HTTP lookup for the
-newest version and not necessarily the published fallback.
-
-Keep the execution directory and saved invocation attached to the work. A new
-official executable does not choose a different Task database. Change installed
-startup so the selected official runtime can honor an explicitly addressed
-execution directory independently of its default directory. Reuse `LF_HOME` and
-`LF_DB_PATH` for this address, with conflict handling and canonicalization shared
-by startup and launch. Preserve branch-source isolation: arbitrary source bytes
-still cannot migrate or mutate installation-owned data.
-
-The launch boundary captures one resolved artifact/digest for the child and
-records it in existing Run evidence. Pinning bytes for the duration of that
-process avoids mid-launch substitution; it does not pin later boundaries.
-`LF_CONTROL_*` remains same-Run authority and is not a future runtime policy.
-Vendor tool wrappers use that Run's executable/store pair. Next-step launch
-reloads policy and official selection even when the parent process is old.
-
-Proposed explicit public controls, integrated into existing `task run` options:
+The primary walkthrough follows one fictional technical founder/CTO, Dave, who
+can use the CLI directly but usually delegates mechanics to his agent. The
+[full script](idea-to-task-command-story.md) selects commands through a single
+invoice-export feature:
 
 ```sh
-lf task run DEM-334                         # persisted policy, official by default
-lf task run DEM-334 --lf-bin /absolute/lf   # explicit pin, future boundaries too
-lf task run DEM-334 --official-lf           # clear the pin without replacing Flow
+lf skill design                 # creates a design worktree automatically
+lf skill launch-plan            # carries the design into one Task and starts it
+lf task status APP-42           # the returned Task ID gives work a handle
+lf task comment APP-42 "Use the current date filter for the export."
+lf task run APP-42              # continue when the saved Flow needs resuming
+# Only when an account blocks work:
+lf auth status
+# Once work is running and Dave wants visibility:
+lf runs --active --task APP-42
+lf usage --task APP-42
+# After delivery reveals two continuing responsibilities:
+lf wave status billing
+lf wave status self-service
+```
+
+This is the target command experience, not a claim that automatic design placement
+already works. `lf wt create invoice-export` is the explicit alternative first
+step; design reuses a suitable existing worktree. The design session must make
+its working context and next command usable without assuming a parent-shell
+`cd`. Launch-plan verifies that the real design reaches the Task checkout before
+launch; it does not restart planning or create competing execution.
+
+Teach accounts and monitoring when work supplies a reason to inspect them.
+The existing spellings are `auth`, `runs`, `usage` and `top`; this story does not
+select namespace renames. Provider connection and store/runtime internals stay
+behind ordinary Task commands. The same commands serve Dave and his agent.
+The story ends after delivery: Dave asks for future work on billing accuracy and
+customer self-service, then inspects their Wave plans. The script proposes
+`lf wave create <name> --objective "..."` for missing owners, followed by ordinary
+planning-only Task creation and Wave status. That creation surface is not present
+in current source; its spelling/bootstrap semantics remain a product proposal.
+Waves inherit the repository connection. Each owns a durable beneficiary/outcome,
+a current plan and future Tasks; the original Task stays completed in its history.
+Do not equate this scene with approval of a Wave-existence migration.
+
+A companion cancellation case keeps `lf flow code "Prototype a printable invoice
+summary"` usable in the checkout without reviving a canceled Task. It no longer
+interrupts the successful story's ending.
+
+## Intended experience
+
+Task operations always use a local planning store. When a repository uses Linear,
+Linear is the source of truth for what planning exists and sync maintains the
+local representation. Without Linear, the local store owns planning. Connection
+belongs to the repository; Waves do not select independent planning modes.
+
+An explicit Task selector must resolve to a real planning record before work
+starts. A branch, PR or old execution record cannot manufacture a current Task.
+A fresh connected store refreshes from Linear before declaring a Task missing.
+A network or permission failure means unresolved evidence, not confirmed absence.
+
+Managed Task execution requires a valid Task and a matching plan. If the Task is
+missing or execution no longer matches the plan, report it as invalid and stop
+managed progression. Jack explicitly cut automatic reconciliation and continuing
+mismatched Task execution from this change. Keep ordinary Flow execution available
+in any worktree regardless of Task status; that execution does not advance the
+invalid Task Flow.
+
+Workers use the machine's official selected lf at each new step, unless explicitly
+pinned. Selecting a new runtime must preserve the execution directory and exact
+saved invocation. A release installed between steps is picked up at the next step.
+
+## Sharing boundaries
+
+Jack explicitly selected three product layers:
+
+| Layer | What is shared | Owner |
+|---|---|---|
+| Open-source Loopflow without Linear | Wave goals, memory, Flows and Skills through the repository | Authored repository files; Git integrates changes. |
+| Loopflow with Linear | Planning: the Wave's shared Tasks, priorities and progress | Linear; each local store is its synchronized representation. |
+| Paid layer | Shared execution and coordination between participants | Outside this open-source Task's scope. |
+
+Shared Flows and Skills are authored definitions. Sharing them does not share
+captured invocations, cursors, claims, Runs or Sessions. Ordinary Git updates to
+definitions do not rewrite already-captured execution.
+
+Without Linear, each operator can maintain a private local plan and run Tasks.
+Cloning or pulling the repo brings goals, memory, Flows and Skills; it does not
+import someone else's backlog, Task status, claims, Runs or Sessions. Do not build
+a Git-exported planning database or a Task-plan merge policy. Git handles these
+authored files through its ordinary review/merge workflow; the local database
+cannot silently overwrite those shared files during import.
+
+Connecting Linear introduces shared planning. Any publication of an existing
+private plan remains an explicit, previewed migration; authentication alone does
+not publish it. A colleague can then discover the same provider planning without
+inheriting another person's worker, execution ownership or account state.
+
+Cross-Home discovery in LOO-334 finds one operator's existing work across their
+known execution locations. It does not add teammate worker visibility, distributed
+Task claiming, fleet scheduling or execution handoff. Linear Task status is shared
+planning evidence, not cross-user execution authority. The paid execution layer
+is neither implemented nor designed by this change.
+
+## Why the current system fails
+
+The reported LOO-298 incident had a Linear issue, PR #1296 and a checkout, but the
+official CLI said no Task existed. Its record was in another installation's store.
+The incident also reported a wrapper retaining older executable and data-directory
+settings, divergent account/usage data, and a worker arriving after its caller had
+withdrawn the claim at a ten-second deadline.
+
+Source inspection establishes:
+
+- `ops/task.rs::task_status` demands a local execution Task before consulting
+  provider planning. It can also complete a Task after observing a merged PR.
+- `ops/task_pm.rs::resolve_task_async` requires cached Wave membership before
+  refresh. Sync cannot help a selector that is rejected before it runs.
+- `pm/linear.rs::OwnedIssueNode::into_ownership` rejects an existing issue without
+  a Project. Direct provider lookup exists, but its decoder conflates existence
+  with complete ownership.
+- Repository `engine/config.rs::PmConfig` already has provider and Linear Team
+  fields. `ops/pm.rs::read_repository_team` reads them. Wave Initiative mapping
+  can remain distinct from repository connection ownership.
+- `engine/process.rs::resolve_current_home_lf_binary` can retain the current
+  executable's installation rather than choose the machine's current selection.
+  `ops/task_destination.rs` couples runtime and database selection and refuses
+  differing local/installed Task IDs.
+- `ops/task.rs::launch_task_process` releases its claim after startup-wait failure;
+  `ops/child.rs::CHILD_STARTUP_GRACE` is ten seconds. A late child can become stale
+  without another worker competing with it.
+
+The first two findings require better synchronization and separate planning from
+execution requirements. They do not justify accepting arbitrary explicit Tasks.
+
+## Accepted decisions
+
+Jack subsequently requested a narrative in command selection: start with
+`lf wt create` or `lf skill design` automatically creating a worktree, continue
+through `lf skill launch-plan`, then introduce Task commands and later accounts
+and monitoring. Jack suggested ending with Waves that organize future work around
+two aspects of the initial feature. One composite persona/story replaces parallel
+persona tours.
+The linked walkthrough records the placement gaps and makes no shipment claim.
+
+
+Jack placed the connection at repository level, then clarified: “if we are using
+Linear as a source of truth it should be the source of truth for what planning
+there is”. Jack subsequently selected one local store interface, synchronized to
+Linear when available, and refusal of explicit Tasks absent from the applicable
+planning store. The Apollo analogy describes the desired local-store simplicity;
+it does not select a library, an offline mutation queue or a new sync service.
+
+Jack also selected invalidation of execution that does not match the plan, and
+continued ability to run an ordinary Flow in a worktree regardless of Task status.
+These decisions remove the kickoff's proposal to keep progressing historical
+Task execution through planning disagreement. Official worker runtime by default
+and deliberate visible pinning remain the original Task direction.
+
+## One planning store interface
+
+Reshape existing planning storage and operations in place. Task commands, generic
+Session Task selection, Wave views and the app use one local planning reader.
+Provider synchronization supplies that reader; do not retain a competing direct
+provider command path that bypasses the local model.
+
+Use stable provider identity for synced records (repository/provider scope and
+Linear issue UUID), with issue identifiers as aliases. Local Tasks have genuine
+local identities, not fabricated Linear UUIDs. Preserve existing Task IDs and Run
+foreign keys when attaching planning to execution. Planning can exist without a
+checkout, invocation, claim or Session. Syncing an issue allocates planning only.
+
+Use the existing PM cache and local planning machinery as the implementation
+starting point, consolidating duplicate readers/writers. TaskSpace and TaskOps
+remain conceptual planning/execution boundaries, not additional services or CLI
+namespaces. LOO-298 owns the replacement execution schema; integrate with its
+surviving Task owner rather than introducing a temporary second schema.
+
+Normalize planning into entity records within the
+existing SQLite store. Issue lookup, Wave listing, confirmed mutations and webhook
+ingestion update the same Task by stable identity. Lists hold membership and order;
+they do not own additional title/status copies. Today's serialized per-Wave
+snapshots cannot remain an independent planning source beside normalized records.
+Migrate their consumers together. This follows Apollo's shared-entity pattern;
+it does not select Apollo as a dependency or require a general GraphQL cache.
+
+Separate acquisition policy, stored freshness and managed Task validity. Missing
+cached data requests a fetch; stale data requests refresh; a confirmed missing or
+ineligible Task refuses managed work. Reuse bounded PM refresh mechanisms rather
+than duplicating policies in CLI, workers and Swift. Offline managed execution
+remains an open product choice.
+
+### Research translated into implementation
+
+The [source comparison](planning-store-sync-research.md) supplies the rationale
+and evidence limits. The implementation adopts these concrete contracts:
+
+| Research lesson | Loopflow contract | Verification |
+|---|---|---|
+| Apollo shares entities across queries | One planning record per stable Task identity; lists reference it. Detail, bulk sync, mutation and webhook use the same writer. | Detail/list order and mutation results agree without duplicate records. |
+| Apollo separates storage from acquisition | Existing SQLite remains the local reader; repository connection selects the sync source. Reuse bounded refresh policy centrally. | The same reader works with and without Linear; empty connected stores fetch before absence. |
+| Relay separates presence from freshness | Missing cached data, stale observations and invalid Task planning remain distinct. Cache eviction is never provider deletion. | Failed refresh retains dated data; partial lists never establish removal. |
+| Apollo watches committed cache changes | App and CLI share the Rust store. Existing view refresh/subscription paths consume committed changes. | Task detail and Wave views agree after sync; Swift has no independent planning writer. |
+| Apollo distinguishes optimistic from confirmed state | Connected mutations govern execution only after provider confirmation and local ingestion. | Rejected/pending Task creation cannot launch managed work. |
+| Realm and PowerSync require additional offline write semantics | No durable offline mutation queue, automatic conflict merging or new sync service in this scope. | Failed writes remain failed/pending attempts, never successful planning or launch authority. |
+
+Keep entity facts and query coverage separate: a fetched page establishes its
+returned items, not the absence of all others. Apply returned fields without
+clearing values omitted by partial responses. Prefer explicit domain updates or
+complete entity refreshes to a generic GraphQL field-merging framework. Reuse
+provider revision/order evidence to avoid old observations overwriting newer
+facts; where ordering is unknown, refetch instead of declaring a winner.
+
+Use existing webhook ingestion as an update/invalidation input and bounded fetch
+as repair. Neither webhook arrival nor paginated API traversal is a transactional
+server checkpoint. Do not reproduce PowerSync's checkpoint protocol without a
+provider contract supporting it. Ordinary reads may reuse fresh local data;
+explicit refresh and misses acquire provider facts before the shared reader.
+Managed admission remains distinct from reading cached data.
+
+### Repository connection and sync
+
+Reuse repository `.lf/config.yaml` PM configuration for provider and Team scope.
+Move connection controls/documentation to the repository owner. Wave Initiative
+bindings map Waves into the provider hierarchy; a missing mapping cannot make
+one Wave fall back to local authority inside a connected repository.
+
+Connected planning represents Linear's Tasks, membership, title, status and
+ordering. Local execution facts do not compete with those fields. Sync refreshes
+planning through narrow writes that cannot accidentally overwrite claims, Runs
+or invocation state. Do not describe this as replacing a separately authored
+connected plan: Linear defines that plan.
+
+On an explicit lookup, reuse a sufficiently fresh local record or refresh the
+requested issue according to the shared acquisition policy. A connected cache
+miss must attempt the existing direct issue query inside sync before reporting
+absence. Do not require a preexisting
+PM snapshot, local execution row or chapter receipt. Commit the observation to
+the local planning store, then use the shared reader. Use existing bulk sync,
+webhook and freshness paths for lists; avoid one network request per rendered row.
+Keep the last successful observation's timestamp on failed refresh.
+
+An issue with missing Project or unresolved Wave membership still has a planning
+record and can be inspected. Managed Task launch needs enough valid planning to
+supply its work and ownership; missing relationships report that limitation.
+Only repository-bound Initiative associations participate in Wave mapping.
+
+A provider outage does not disconnect the repository. Malformed or missing
+connection configuration in a checkout previously known as connected is a
+configuration discrepancy, not permission to author independent local planning.
+Repository definitions establish the Wave set; connection bootstrap details remain open.
+
+### Wave mapping selected; existence and migration details under review
+
+Jack's mapping concern includes hundreds of provider objects. The
+[scale findings](wave-existence-and-linear-migration.md#initiative-size-limits--verified-boundary)
+find no published Project/Initiative count cap; actual capacity remains unverified.
+Jack clarified that outgoing chapter Projects must be completed so they leave
+the active plan. Chapter rollover transfers started unfinished Tasks with their
+identity intact, settles backlog under the existing cancellation policy, then
+completes the predecessor Project and retains its history. Completion closes the
+chapter; it does not claim that every KR succeeded or complete transferred Tasks.
+Keep the existing archival behavior after closure. Current source archives
+predecessors in `ops/chapter.rs` but does not explicitly set their provider status
+to completed there; integrate this requirement in that existing operation.
+
+For 100 Waves over 12 chapters, the settled result is 100 current Projects and
+1,100 historical Projects, not 1,200 active Projects. Current-plan reads must
+exclude completed/archived predecessors and load history only when requested.
+Retain complete pagination and incremental refresh. No documented evidence says
+completion removes an object from any provider storage quota; the accepted
+benefit is a bounded active plan under either Initiative mapping.
+
+Jack selected one Initiative per Wave, including subwaves, after considering
+one for the repository. Each Initiative groups that Wave's current and completed
+chapter Projects. The [comparison](wave-existence-and-linear-migration.md#alternative-one-initiative-for-the-repository)
+retains the alternative as decision context, not an implementation option.
+
+Use path names consistently: `A`, `A/B`, `A/B/C`. Each path names a distinct Wave
+and Initiative. When the Linear account supports sub-initiatives, also set the
+corresponding native parent relationship. Without that feature, the same names
+and Loopflow hierarchy work with flat Linear Initiatives. Native hierarchy is
+optional enrichment, not a prerequisite or a different Wave tree. Interpret
+Jack's “parent status” as the parent relationship, not lifecycle status. Keep
+stable provider UUIDs across renames; naming does not replace identity.
+
+Prove slash-name creation, lookup, hierarchy and retry on accounts with and
+without the feature. Provider depth limits must not restrict Loopflow's path
+hierarchy. Missing capability is distinct from permission, network or mutation
+failure; report those failures instead of claiming a native link succeeded.
+Keep direct Project membership separate from descendant aggregation. Existing
+company names or multiple native parents need adoption rules; this decision
+does not authorize rewriting them. Discovery and migration details remain open.
+
+Jack then steered the design toward creating Waves in Loopflow and publishing
+or linking them to Linear, rather than deriving all Waves from workspace
+Initiatives. This supersedes the earlier automatic Initiative-is-Wave proposal.
+The [connection design](wave-existence-and-linear-migration.md) follows that direction:
+
+- Repository-authored definitions establish Waves in both local and connected
+  mode. Git shares goals, memory, Flows, Skills and stable Initiative bindings.
+  A fresh clone sees the same Wave set and reuses those bindings.
+- Linear owns shared chapter/Task planning for connected Waves. The local store
+  syncs their mapped provider records. Reading unrelated Initiatives may suggest
+  link/import candidates; it must not add Waves automatically.
+- Creating a Wave while connected creates its corresponding Initiative through
+  the explicit create operation, or links an explicitly selected existing one.
+  Reads, login and Git pulls do not implicitly publish or duplicate Initiatives.
+  Preserve an unsuccessful publication as incomplete setup, not a successful
+  shared plan or a fallback independent local plan.
+- Connecting existing local Waves previews link/create and Project/Task mappings.
+  Reuse provider UUIDs on retry and across clones; names are not identity.
+  Importing an existing company Initiative is an explicit operation, not automatic
+  workspace adoption. Do not rewrite its existing planning to force a chapter.
+- Linear remains authoritative for connected Tasks, their status and membership;
+  repository authority over Wave definitions does not make a Git Task-plan replica.
+  Unavailable/missing mapped Initiatives are connection discrepancies, not grounds
+  to delete Wave definitions or recreate provider objects during reads.
+- Migration transfers planning references, never execution authority. Invalid Task
+  execution stays invalid; ordinary worktree Flows remain available.
+
+Exact connection/import controls, existing Project selection, disconnect and
+Wave deletion semantics remain open. The mapping direction does not authorize
+provider writes in this review or implicit publication of existing private plans.
+
+### Wave definitions follow worktree context
+
+Jack clarified that the local store owns Loopflow's Wave view, importing definitions
+from the repository. With an owning worktree, use its complete current files,
+including uncommitted additions, edits and deletions. Without an owning worktree,
+use the configured remote-main definition (normally the last fetched `origin/main`).
+Jack proposed this baseline after ruling out dirty main as definition input. The
+[context contract and proof](worktree-wave-definitions.md)
+specify the conceptual resolver `waves(repo, worktree=None)`.
+
+Do not merge main's Wave set into a branch view: a deleted Wave must stay absent
+there. Keep main and other worktree answers independent even when one store serves
+them. Refresh imports before returning API results; no manual sync or commit is
+needed. Preserve stable Wave identities, provider mappings and shared planning;
+contextual definitions do not create a separate Task-plan writer per branch.
+All Wave lists, detail and selection use the same resolved context. Invalid or
+unreadable files are not an empty successful import or a fallback to main.
+
+A branch deletion changes that view immediately but does not delete provider
+planning, historical execution or another worktree's Wave. Linear sync cannot
+restore a Wave absent from the selected repository view. Ordinary worktree Flows
+remain available. The proposed shared baseline uses the remote-tracking commit,
+excluding unpublished local main commits and dirty main files. Ordinary reads
+use the last fetched ref rather than claiming live remote freshness. Main should
+stay clean; reads do not perform cleanup. Local-only repositories with no remote
+baseline, explicit main-checkout context and refresh cadence need final policy.
+Outward synchronization of edited mapped definitions remains open; API reads do
+not imply provider writes.
+
+### Planning writes
+
+Local repositories create/edit/complete/delete Tasks in the same planning store
+without calling Linear. Extend Linear-only Task and Project reference types so
+local records use real local identities. Keep the one-current-Project invariant
+and reuse existing Wave setup/chapter operations; no fake provider snapshots.
+
+Connected writes go to Linear and update the local representation from confirmed
+results. An attempted write is not current planning truth. Retain existing
+idempotent creation markers; after an ambiguous response, inspect remote state
+before retrying. Do not add a general offline mutation queue in this change.
+
+Task creation must not require rotating a chapter just to populate a local
+receipt. Resolve an existing, uniquely identified provider Project; if genuinely
+ambiguous, show candidates and allow explicit selection for that operation.
+Do not infer a chapter from an In Progress label or rewrite chapter history.
+
+## Explicit Tasks and ordinary Flows
+
+| Situation | Behavior |
+|---|---|
+| Connected issue exists, local planning is empty | Sync it into planning, then resolve normally. Do not allocate execution during status. |
+| Explicit Task absent after conclusive resolution | Refuse managed Task work with a clear missing-Task error. Do not invent a Task from a branch or PR. |
+| Linear unavailable, uncached selector | Report unable to resolve; do not launch or claim confirmed absence. |
+| Task or execution attachment no longer matches the plan | Report invalid and stop managed progression. No automatic reparenting, reconciliation or historical-plan continuation. |
+| Canceled/completed Task with a checkout | Report planning status; do not automatically reopen it or launch managed progression. |
+| Ordinary Flow requested in that worktree | Run it without requiring a valid Task or settling the Task's managed invocation. |
+| GitHub unavailable | Keep planning visible, with unavailable/dated PR evidence. |
+
+Validate at managed launch/resume and subsequent worker boundaries so continued
+Task work cannot bypass current planning validity. Use existing authority and
+claim settlement; do not create another watchdog or cancellation ledger. This
+Task does not implement proactive termination of an already-running provider
+when remote planning changes. Invalidation must not advance the managed cursor.
+
+Ordinary Flow selection must bypass implicit Task launch routing when a checkout
+has an invalid or terminal Task. Retained attribution may remain historical where
+supported; it grants no Task advancement authority. Cover both CLI and generic
+Session entry points, rather than merely adding a new escape flag.
+
+No cleanup or deletion of authored files/history is requested. Leaving bytes
+untouched does not require recovery UI or make an invalid execution eligible.
+The exact treatment of cached planning during an outage remains a review question.
+
+## Cross-Home discovery
+
+Planning and execution have different placement needs. Connected stores can each
+sync the same Linear planning without creating duplicate workers. Local-mode
+planning stays with its owning store. Locate existing execution before allocating
+new execution, and report its directory and how to reach it when necessary.
+
+Build transient candidates from the selected directory, existing installation
+selections/retained receipts, known Home routes and Loopflow's known development
+layout, including the legacy standard store. Reuse `known_installations` and the
+minimal read-only Work identity reader. No machine-wide Task registry, recursive
+search of arbitrary directories, copied credentials or foreign-store migration.
+Canonicalize aliases and deduplicate by file identity: copied stores can share a
+Home ID. Report uninspected locations and the bounded search scope.
+
+Inspect minimal identity/location facts without requiring complete historical
+parents. Unsupported schemas are uninspected, not empty. Detailed reads use a
+compatible executable at the owning location. Reach commands address executable,
+`LF_HOME` and `LF_DB_PATH` explicitly; remote paths use existing transport.
+Recommend a retained historical pair only when its artifact/store is verified.
+
+If multiple divergent records exist, show locations and require explicit selection
+for ambiguous writes. Do not merge them or pick the newest. Location selection
+cannot make planning-invalid execution valid. A local Task found elsewhere can
+be reached in its owning store without importing it.
+
+Git/GitHub supply branch and PR evidence, never substitute planning records.
+Associate exact recorded repository/branch or explicit PR Task links; issue-like
+branch names are candidates only. Preserve unpushed refs and distinguish merged
+history from an active successor. `task status` may sync planning and observe PRs,
+but must not complete a Task as a side effect.
+
+## Official worker runtime
+
+At every worker boundary, resolve the machine's selected installation, independently
+of execution-store placement. Official does not mean an HTTP check for the newest
+release. Inherited `LF_BIN`, PATH and the parent's retained installation do not
+constitute deliberate pins.
+
+Capture one verified artifact/digest for each child and record it in existing Run
+evidence. Keep that process's executable stable; choose again at the next boundary.
+Same-Run tool wrappers use that Run's executable/store pair. Preserve exact
+invocation, claim and pending review while changing runtime bytes.
+
+Proposed controls in existing Task run options:
+
+```sh
+lf task run DEM-334
+lf task run DEM-334 --lf-bin /absolute/lf
+lf task run DEM-334 --official-lf
 lf task status DEM-334 --json
 ```
 
-The two flags are mutually exclusive. Save a pin on the existing TaskOps record,
-including the canonical artifact path and digest, without replacing the captured
-Flow. Status exposes policy, explicit pin, last attempted/used executable, and
-currently resolved next executable separately. A changed/missing pinned file
-reports the precise failure; never silently follow a new symlink target.
-Historical Run executable evidence remains unchanged. Migration defaults to
-official and does not reinterpret inherited environment as deliberate consent
-to pin. A live worker keeps its authority until settlement.
+Pin/clear flags are mutually exclusive and persist on the existing execution
+owner without replacing its Flow. A pin contains canonical artifact path/digest;
+changed or missing bytes fail explicitly. Status distinguishes policy, pin,
+last attempted runtime and next resolved runtime. Default migrated policy is
+official; inherited environment never becomes a recorded pin.
 
-No-installation source operation remains possible using the invoking source
-runtime and private store, visibly reported as source execution. When an official
-selection exists, an old environment wrapper cannot select that fallback.
+Installed startup must honor an explicitly addressed compatible execution store
+independently of its default store. Share path canonicalization with launch.
+Retain branch-source isolation: arbitrary source binaries cannot migrate the
+installed host store. Unknown private drafts remain a compatibility failure,
+with pending work preserved; no downgrade or silent database switch.
 
-Schema compatibility remains real: a released runtime cannot execute a private
-store containing unknown drafts. Status still discovers the Task and names the
-location and exact incompatibility. It can provide a verified explicit pin/reach
-command; it must not downgrade, merge, discard, or silently migrate private
-history. Supported store advancement stays with existing installation/migration
-operations. The release-between-steps proof must include a compatible release;
-an incompatible release must preserve the pending boundary and report failure.
+Without a selected installation, source execution may use its private store and
+invoking runtime, visibly reported. When an installation exists, stale wrappers
+cannot force that fallback. Account and quota consolidation remain out of scope.
 
-### Treat planning and execution mismatches as ordinary states
+## Slow startup
 
-| Observation | Required behavior |
-|---|---|
-| Linear has Task; no TaskOps here | Render the Task, find Git evidence and known execution locations. Allocate execution only on an explicit run/checkout operation, reusing existing placement where found. |
-| Linear canceled/completed Task; TaskOps has unpushed work | Show Linear's exact state plus retained checkout/history. Keep files, refs, review feedback and Runs. Do not infer completion from cancellation or automatically delete/publish/reopen. Read/edit/save remain available; new managed progression must respect current planning intent. |
-| Task left the current Wave/Project | Show its new Linear membership and the old execution attachment separately. Refresh planning without rewriting historical Run ancestry. Resolve current operations against current membership instead of refusing because the old parent differs. |
-| Explicit provider trash/deletion confirmation | Remove it from the active connected plan; retain TaskOps and last-known planning as history. Do not kill a process from planning evidence alone. |
-| Missing issue, missing portfolio membership, permission error or partial GraphQL error | Report unresolved/inaccessible as appropriate, preserving positive history. None proves deletion. |
-| Both sides disagree on title/status/ordering | Fresh Linear facts replace the planning cache. Execution facts neither compete with nor overwrite those fields. |
-| Linear unreachable | Retain connected mode, show dated cached facts and local execution. Local inspection and file work continue. Provider writes report unavailable and retain their input/attempt evidence; no automatic local-mode success. |
-| Local edit awaiting write-back | Treat it as an attempted operation with input and outcome, never current planning truth. Read Linear before retry after an ambiguous response; do not replay stale edits over fresh remote changes. |
-| GitHub unavailable but Linear available | Render the Task and local refs, label cached PR facts with their age. Do not collapse the Task read into a PR error. |
-| Multiple local execution copies | Show all locations and their own evidence. Continue exact bound work or require an explicit location for an ambiguous write; no timestamp winner. |
-
-The preservation interpretation of “throw away anything that doesn't match”
-applies to active connected planning, not destruction of execution or authored
-work. This is a conservative design assumption pending Jack's confirmation.
-Do not perform destructive migration based on that interpretation.
-
-Keep pending provider changes within existing write-back/operation evidence;
-do not invent an offline planning replica or general synchronization queue.
-Connected creation commits to Linear before reporting success, retaining existing
-idempotent creation markers. Local creation needs a real local planning identity,
-not a fake Linear issue UUID. Local run/edit/complete/delete and PR presentation
-must all work without provider context or a fabricated Linear chapter.
-
-Keep the one-current-Project invariant in local mode. The existing chapter
-operation persists a real local plan and local Project identity without calling
-Linear; Task creation uses that plan. Extend the Project planning reference as
-well as the Task reference where its current Linear-only type prevents this.
-Do not add a Project operator, sibling current Projects or a second chapter
-rotation implementation. Initial local plan setup belongs to the existing Wave
-setup/chapter path; local-mode tests must exercise it before Task creation rather
-than seed a fake provider snapshot. This is required integration work, not a
-claim that local lifecycle already works in the current source.
-
-### Preserve admission when startup is slow
-
-The observed 10-second startup failure is supported by source: the caller releases
-the worker claim whenever `wait_until_running` times out. A child arriving at
-11 seconds can therefore be stale without ever having competed with another child.
-
-Return `starting` after the bounded observation deadline, preserving the exact
-claim and launch evidence. Release on a proven failed spawn or proven death under
-existing claim/process fencing, not elapsed time. Concurrent retry observes the
-same child; a late child cannot regain a claim replaced after proven death.
-Keep this repair at Task admission, coordinated with LOO-298's Exec/Run ownership.
-Increasing the timeout alone is not the repair.
-
-## De-risking
-
-| Question | Finding | Impact on design |
-|---|---|---|
-| Can an issue be read without a local PM snapshot? | `pm/linear.rs::issue_ownership` already queries `issue(id: $id)` by identifier/UUID. `ops/pm.rs::pm_resolve_task` already uses it. | Extend this path; remove cache membership as the lookup prerequisite. |
-| Is direct lookup enough as written? | `OwnedIssueNode::into_ownership` requires a Project; `resolve_owned_issue` requires exactly one Initiative and a local Wave directory. | Decode issue presence before resolving optional ownership edges. Preserve issue facts on edge failure. |
-| Why does status say absent? | `ops/task.rs::task_status` unwraps `get_task_by_issue` before any provider lookup. The official CLI reproduced `Error: no Task exists for "LOO-298"` on 2026-09-29. | Change the status return model and all consumers, not only error wording. |
-| Does sync repair missing chapters? | `ops/chapter.rs::current_project` requires a local chapter receipt before using PM data. `ProjectContent` contains KRs/targets/Flow, not an authoritative current-chapter pointer. | Issue reads must not require that receipt. Current-Project creation needs separate resolution; never start a new chapter to fix discovery. |
-| Are there existing location sources? | `known_installations` reads selected/retained artifact/store pairs; `WorkCatalog::load_at` reads minimal identities without migration. It currently requires parents during catalog construction. | Reuse location sources and decouple Task identity reads from complete ancestry. No new registry. |
-| Why can an older installed worker remain selected? | `resolve_current_home_lf_binary` first asks `selection_for_current_executable`; retained selections are matched by requested store and executable digest. `start_work_session` then captures that binary. | Resolve current machine selection for next-step policy; retain current-process pin only inside its Run. |
-| Can the selected binary simply change while carrying the old claim? | Store selection and executable authority are coupled in startup; `task_destination::check_task` compares local/installed Task IDs and rejects disagreement. | Separate runtime selection from execution-store placement before changing workers. Delete the identity-equality refusal after routing uses real planning identity and exact execution ownership. |
-| Is local mode already complete? | TaskPlan requires `LinearIssueId`; create/prepare selects PM ownership and a chapter; Task is documented as one Linear Task. | Local mode requires model and operation changes, not a network fallback branch. |
-| Can a short wait safely release a launched claim? | `launch_task_process` releases after `wait_until_running` error; its deadline is `CHILD_STARTUP_GRACE = 10s`. | Test an actual delayed child and return starting without withdrawing authority. |
-| Can fixtures be isolated with LF_HOME alone? | TESTING.md and machine_install use the OS account's fixed installation root. | Use the disposable-account/container installation harness; no branch executable against installed host data. |
-| Has LOO-298 coordination completed? | Corrected request through official `lf --as task:LOO-298 -b : ...` failed before launch: `Task "LOO-298" is not registered`. | Record the blocker; no auth repair, copied store or edits in its branch. Coordinate again before touching shared execution migrations. |
-
-Linear's official documentation confirms identifier lookup, partial GraphQL
-success with errors, and default exclusion of archived objects from paginated
-results. These support direct lookup and explicit uncertainty; they do not prove
-configured credentials or the specific live issue's payload. See
-[GraphQL API](https://linear.app/developers/graphql). Bounded reads should retain
-rate-limit feedback and use existing webhook/caching paths for repeated lists,
-not issue-by-issue polling; see
-[rate limiting](https://linear.app/developers/rate-limiting).
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|---|---|---|
-| Merge all Homes into one machine Task registry | Makes identity lookup local but requires conflict resolution, credential merging and execution takeover across divergent live stores. | Recreates a planning authority beside Linear and expands the incident's risk. |
-| Keep current tables authoritative and sync every Wave before lookup | Smaller patch; can hide an empty cache when providers are healthy. | Still confuses planning with execution, cannot represent partial ownership, and makes local-only operation or provider failure a mode accident. |
-| Resolve planning directly and join optional execution/Git evidence | Changes DTOs and launch/store boundaries; preserves each source's ownership. | Selected. Reuses provider lookup, installation receipts and execution tables while removing hard prerequisites. |
-
-Wild success: Jack stops choosing a data directory merely to discover a Task;
-private work remains private, and a newly installed release is used at the next
-step without restarting the Flow. Wild failure: an outage looks like deletion,
-or a runtime upgrade silently switches databases and forks a Task. The absence
-model, execution-location display and release-between-boundaries proof directly
-target those failures.
-
-## Key decisions
-
-1. Planning authority is per Wave, not per command, account or network outcome.
-2. Execution attaches by stable identity and outlives planning membership.
-3. The joined view represents partial knowledge; a read does not allocate or
-   complete execution.
-4. Discovery is transient over existing locations and explicit addresses.
-5. Official executable selection and execution-store selection are independent.
-   Explicit pinning is recorded intent, never inferred from an inherited wrapper.
-6. Preserve authored work, stopped boundaries and failed attempts. No implicit
-   merge of diverged histories or account/usage catalogs.
-7. Wave-existence policy remains an explicit product question; no hidden choice
-   is smuggled in through the Task resolver.
-
-## Scope
-
-- In scope: Task authority modes; direct issue resolution; optional execution
-  joins; Git/PR discovery; location/reach output; connected planning replacement;
-  local Task lifecycle; official runtime default and explicit pins; slow startup
-  admission; shared DTO/read/action integration and disposable public-CLI proof.
-- Out of scope: merging live stores; sharing credentials/routes/usage between
-  Homes; remote fleet discovery; provider-account refresh repair; rewriting
-  LOO-298's execution model; Wave deletion/existence migration; automatic chapter
-  rotation; promotion of this branch; editing or controlling LOO-298's branch.
-- The filing failure must become truthful and recoverable: Task reads do not
-  depend on a chapter; creation can adopt a uniquely identified existing provider
-  Project without inventing a rotation receipt. When several current Projects
-  are plausible, expose the candidates and allow an explicit Project selection
-  for that operation. Do not select “most recent” or label any In Progress
-  Project the current chapter without evidence. LOO-298's repo-wide chapter
-  proposal remains its owner's scope.
+After the bounded startup observation deadline, report starting and retain the
+exact claim. Release on proven spawn failure or process death using existing
+process fencing, not elapsed time. Concurrent retry observes the same child; a
+late worker can publish under the retained claim. Proven-death replacement must
+still reject stale late children. Coordinate this boundary with LOO-298's Run/Exec
+ownership rather than building a parallel liveness mechanism.
 
 ## Integration and deletion path
 
-| Owner today | Change and consumers |
-|---|---|
-| `planning.rs`, `work/task/mod.rs`, PM snapshot and Task store writers | Separate authoritative local planning/reference from connected cached facts and retained execution. Forward migration preserves IDs and history. Narrow planning refresh writes cannot overwrite execution. |
-| `ops/pm.rs`, `ops/task_pm.rs`, `pm/linear.rs` | One direct planning resolver; remove snapshot-membership prerequisite and all-or-nothing ownership decoding for reads. Keep mutation-specific provider semantics. |
-| `ops/task.rs`, `task_execution.rs`, `task_actions.rs` | Join optional planning/execution; local lifecycle; remove status-triggered completion; adapt run/checkout/edit/save/delete/complete to their owning authority. |
-| `machine_install.rs`, `store/mod.rs`, `store/branch_data.rs`, `engine/process.rs`, `ops/task_destination.rs`, `ops/run.rs` | Reuse installation selection/location evidence; separate official runtime from explicit execution store; replace branch/installed Task-ID comparison with resolution; retain source isolation. |
-| `controller/task`, `durable`, execution store claims | Preserve exact invocation/claim settlement and starting state; agree schema edits with LOO-298. No parallel claim ledger. |
-| CLI Task renderer and direct `--as task:` resolution; Wave status/roadmap; Run/Session/usage attribution | Share planning identity and the partial joined result. Historical attribution remains queryable after planning removal. Generic Session lookup must not remain cache-first. |
-| Swift Task models, CLI service decoding, Task panes/actions, DTO fixtures | Represent absent execution, planning uncertainty, multiple locations and runtime policy. No empty-string worktrees or implicit idle defaults; one shared wire contract. |
-| `docs/lf.md`, planning/Homes architecture docs, TESTING.md | Replace documentation that treats Task as necessarily Linear-backed or a status read as a private-copy truth. Document explicit pins, location reach commands and bounded discovery. |
+The command walkthrough additionally requires verifying design auto-placement,
+reuse of an explicit worktree, session working-context continuity and launch-plan's
+artifact handoff. Current `wt create` requires a name, and current launch-plan
+cannot adopt arbitrary unbound implementation checkouts. Implement or explicitly
+resolve these gaps before demonstrating the opening sequence; do not manufacture
+a second design or Task to make the story appear continuous.
 
-Before execution migration work, obtain LOO-298's current contract through the
-authorized ordinary Work Run. The attempted Run is blocked by Task discovery,
-so this draft uses the supplied Wave memory only as prior design evidence.
-Preserve its proposed Run/Session/invocation IDs and ownership boundaries; do not
-claim its schema is integrated. Rebase through `lf` when that work is available,
-then attach the planning reference and runtime policy to the surviving Task
-owner. No temporary mirrored execution schema may ship. Planning lookup and
-read-result work can proceed locally without editing that branch.
+1. Consolidate planning readers behind normalized entities in the synced local
+   store. Migrate `pm_snapshots` payload consumers to entity/membership reads and
+   remove the old payload writer/read path when migrated; do not dual-write two
+   planning representations. Preserve migration history. Rework direct provider
+   decoding to retain issue existence with incomplete ownership. Delete cached
+   Wave-membership rejection before refresh and direct command read alternatives.
+   Detail, bulk sync, confirmed mutations and webhook ingestion share updates.
+2. Adapt Task/Project identities and planning writes for local operation. Preserve
+   IDs and execution through forward migration; coordinate with LOO-298 first.
+3. Update Task operations, direct `--as task:` resolution, Session selection,
+   Wave views and Swift DTO/actions together. Represent optional execution and
+   planning freshness explicitly, without fabricated idle/worktree defaults.
+4. Enforce managed Task validity while keeping ordinary worktree Flows independent.
+   Delete the kickoff's mismatch-continuation and automatic reparenting proposals.
+5. Reuse location evidence for discovery and runtime/store routing. Replace the
+   local/installed Task-ID equality refusal with actual resolution and selection.
+6. Persist runtime policy on the surviving execution owner and repair startup
+   admission. Update CLI, planning/Homes docs and TESTING.md alongside consumers.
 
-## Done when
+Before shared execution migrations, obtain LOO-298's current contract through the
+authorized ordinary Work Run. The kickoff attempt through official
+`lf --as task:LOO-298 -b : ...` failed as unregistered before launch. No owner reply
+exists. Supplied Wave memory is prior design evidence, not integration agreement.
+Do not edit its branch, repair auth or copy stores. Planning work can proceed
+without shared execution migrations; use `lf rebase` when integrated work exists.
 
-Extend `scripts/test_task_installation.py` and the existing real-CLI fixture
-support. Use a disposable OS account/container, two data stores with distinct
-writes, a Git repository/local bare remote, simulated Linear/GitHub endpoints,
-and distinguishable installed binaries. No host installation, credentials or
-data directories are mounted. Simulation of providers must be labeled.
+## Proof and finish line
 
-Run the public command path, asserting observable JSON/text and retained data:
+Extend `scripts/test_task_installation.py` and existing real-CLI fixture support.
+Use a disposable OS account/container with two stores, a Git repository/local bare
+remote, simulated Linear/GitHub and distinguishable installed artifacts. Mount no
+host installation or credentials. Provider simulation is not configured live proof.
 
-1. A contains the only TaskOps record; B starts without PM snapshots or a chapter.
-   From A and B, status by identifier/UUID finds the same provider facts and real
-   branch/PR evidence, with A's exact location. The printed reach command works.
-   Repeat from a source-private invocation; discovery does not mutate foreign
-   DB/WAL content or create a second TaskOps row.
-2. A planning-only issue and an issue with no Project still exist in status.
-   A moved issue remains visible. Permission denial, timeout, partial GraphQL
-   errors, archive omission and confirmed deletion produce distinct outcomes.
-3. Change Linear title/status/order/Project against contradictory cached facts.
-   Reads agree with Linear; cancellation/deletion preserves unpushed files,
-   commits, active review evidence and failed Run history. Lost-response retries
-   preserve pending input and do not duplicate creation or overwrite newer edits.
-4. Create/edit/run/complete a local Task with Linear absent. Discover its owning
-   store from the second directory; same-name local Tasks do not collapse. A
-   connection failure never turns a connected Wave into this local path.
-5. Run two worker boundaries. Between them select official artifact R2 instead
-   of R1 using the normal disposable installation operation. The second worker's
-   recorded executable digest is R2, while invocation ID, cursor, execution
-   directory and review feedback continue unchanged. Poison PATH and inherited
-   LF_BIN/LF_CONTROL_BIN with R1 so the original defect would fail the proof.
-6. Explicitly pin R1, switch official selection, and prove both worker execution
-   and status retain that pin. Clear it with `--official-lf`; the next boundary
-   uses R2. Missing/modified pin and incompatible store preserve pending work.
-7. Hold actual child startup beyond 10 seconds. The caller reports starting;
-   the late worker publishes under the same claim. A concurrent retry launches
-   no second worker. Separate proven-death/replacement evidence rejects a stale
-   late child. A printed argv or version-only helper is insufficient.
-8. Two divergent execution copies, one unreadable store, and filesystem aliases
-   produce honest locations and uncertainty without migration or timestamp-based
-   takeover. Cross-Home and same-Home-ID/different-directory cases stay distinct.
-9. Rust/Swift fixture decoding and Task panes/actions agree on planning-only,
-   execution-only, unavailable, canceled-with-work and pinned states. Exercise
-   generic Session Task selection through the same resolver; CLI status alone
-   cannot satisfy the chapter's Session experience.
+1. A owns execution; B starts without planning snapshots or a chapter. Public
+   status by identifier/UUID in both syncs the same provider Task, finds its exact
+   branch/PR and locates A. The reach command works. B gains planning, not a second
+   worker/invocation. Source-private lookup does not modify foreign DB/WAL bytes.
+2. Planning-only and Project-less issues are stored and inspectable. Unresolved
+   relationships prevent only operations requiring them. Permission denial,
+   timeout, partial GraphQL errors, archive omission and confirmed removal remain
+   distinguishable; pagination omission is never conclusive deletion.
+3. Two Waves share repository authority. Missing one Initiative mapping never
+   enables local fallback. In an unconnected repository, exercise real local plan
+   setup and Task create/edit/run/complete without any Linear requests. Discover
+   its owning store from B; same-name local Tasks do not collapse.
+4. Fresh Linear changes control stored title/status/order/membership. Confirmed
+   absent Tasks and mismatched execution refuse Task run/resume/next-step launch
+   without creating a claim or advancing the cursor. A nonexistent explicit
+   selector creates nothing. Ambiguous provider write retries neither duplicate
+   Tasks nor overwrite newer planning.
+5. In the very same checkout, run an ordinary Flow with missing, canceled or
+   mismatched Task planning. Prove execution reaches its intended work without
+   resuming or settling the invalid Task invocation. Merely accepting CLI syntax
+   is insufficient. Cover the generic Session selection path too.
+6. Run two actual worker boundaries. Select R2 through normal disposable install
+   between them; the next worker consumes its claim with R2's digest and unchanged
+   invocation/execution directory/review. Poison PATH and inherited LF_BIN and
+   LF_CONTROL_BIN with R1 so the original defect would fail the proof.
+7. Pin R1, change official selection and prove execution/status retain the pin.
+   Clear it and prove R2 runs next. Modified/missing pin and incompatible store
+   preserve the pending boundary and report failure.
+8. Delay an actual child beyond ten seconds. The caller reports starting and the
+   late child consumes the same claim. Concurrent retry launches no duplicate.
+   Separate proven-death/replacement evidence rejects a stale child.
+9. Divergent execution copies, unreadable stores and filesystem aliases produce
+   honest locations without migration or timestamp takeover. Equal Home IDs do
+   not collapse distinct stores. Invalid execution remains invalid after routing.
+10. Rust/Swift DTO fixtures and Task actions agree on planning-only, unavailable,
+    invalid, terminal-with-checkout and pinned states. Migration tests preserve
+    populated historical IDs and execution records. Status never completes work.
+11. List-then-detail and detail-then-list share one planning identity. Confirmed
+    mutations update both views. Partial responses/lists cannot clear unrelated
+    fields or imply deletion, and older observations cannot resurrect confirmed
+    removed planning. Failed refresh preserves last-good data and observation age.
 
-Primary end-to-end command: `uv run python scripts/test_task_installation.py`
-after its extension. Focused proofs belong beside provider resolution, launch
-selection and Task startup. Run affected integration suites/DTO checks once at
-gate, plus `cargo fmt` and `cargo clippy --all-targets -- -D warnings` for Rust
-changes. Add forward-migration preservation tests against populated prior data.
-No behavioral checks have run for this design-only kickoff.
+12. Replay the linked command story from design to launch-plan to one Task, then
+    status/steering/continuation and ordinary Flow after Task invalidation. Prove
+    auto-created and explicitly created worktrees converge on the same design
+    handoff. Accounts/monitoring enter only at their story moments. The final Wave
+    scene plans two future outcomes without launching or duplicating the completed
+    Task. Proposed Wave creation/bootstrap must be resolved before claiming that
+    scene works; its inclusion does not establish current implementation scope.
+    Source checks alone are not an end-to-end demonstration.
 
-## Forbidden outcomes
+13. Two independent local-only users of one repository receive the same committed
+    Wave goals, memory, Flows and Skills and retain separate private plans and execution. Pulling
+    goal, memory, Flow and Skill definitions updates imports no Tasks, worker claims or history. With Linear,
+    both can read the shared plan, but no execution control transfers with it.
 
-- Reporting “no Task exists” because this store lacks execution or a PM snapshot.
-- Quietly creating an execution row during status to satisfy today's Task DTO.
-- Treating canceled, deleted, inaccessible and provider-unavailable as one state.
-- Erasing unpushed work, Run/Session history, exact claims or pending reviews when
-  replacing connected planning facts.
-- Reconstructing ownership from branch naming, choosing a store by timestamp, or
-  merging divergent claims because their issue UUIDs match.
-- Defaulting to old LF_BIN/PATH bytes, or switching execution databases merely
-  because the official executable changed.
-- Testing only executable selection while the child fails to consume its claim.
-- Using copied provider accounts or a global Task registry to repair discovery.
-- Writing a branch binary into the installed host Home, or calling fixture
-  provider traffic a live configured proof.
-- Shipping a TaskSpace/TaskOps wrapper over two competing planning writers or a
-  second execution schema alongside LOO-298.
+14. Prove [worktree-specific Wave imports](worktree-wave-definitions.md): main and
+    two worktrees share one local store yet return their own definitions. Dirty
+    add/delete/edit and revert affect the owning view immediately; read order,
+    branch switches and Linear refresh cannot overwrite another view or resurrect
+    locally removed Waves. Context-free reads use main. No provider mutation or
+    execution allocation follows from definition import.
 
-## Internal slices
+Primary end-to-end command after extension:
+`uv run python scripts/test_task_installation.py`. Use one focused behavioral proof
+per changed boundary; affected suites once at gate. Rust changes require
+`cargo fmt` and `cargo clippy --all-targets -- -D warnings`. No behavioral checks
+have run for this design review.
 
-1. **Planning lookup and partial Task result.** Refactor direct provider lookup,
-   connection-mode resolution and identity joins; update CLI/DTO/Swift readers
-   together. Remove status completion and cache-gated existence. This slice
-   proves an issue without TaskOps is observable without allocating execution.
-2. **Planning writers and local operation.** Migrate tagged identities and local
-   planning, preserve execution through mismatches, adapt local lifecycle and
-   connected write-back. Integrate with the surviving LOO-298 Task owner before
-   changing shared execution schema.
-3. **Execution discovery and continuation routing.** Reuse installation receipts,
-   minimal reads, explicit directories and existing routes; prove A/B lookup,
-   reachable history, unknown schemas and divergent copies.
-4. **Worker runtime and admission.** Persist explicit policy, select official
-   bytes per boundary while preserving owning data, fix late startup and expose
-   policy/provenance through status. Prove real child claim consumption.
-5. **End-to-end reconciliation.** Exercise the full matrix, remove obsolete
-   paths/documentation and run the affected gate. This is one coherent delivery;
-   intermediate slices do not meet LOO-334's Done when.
+## Scope and implementation handoff
 
-## This slice
+In scope: repository connection, one synced planning store, explicit Task validity,
+local lifecycle, worktree-sensitive Wave imports with a remote-main baseline,
+per-Wave Initiative mapping and chapter closure, cross-Home location, independent
+ordinary Flows, official runtime and pins, slow startup, consumers and public-CLI proof. Internal slices do not
+individually meet the full Task's finish line.
 
-Kickoff only: establish this design and evidence, preserve product questions and
-the blocked LOO-298 coordination. The first implementation cut is slice 1:
-`lf task status` returns a provider Task with no local TaskOps or chapter and
-does not create execution or change disposition. Its focused proof includes a
-missing Project and a provider error so the partial-result contract is exercised.
+Out of scope: shared execution between participants (the paid layer); Git export,
+import or merging of private Task plans; reconciling execution that disagrees with
+planning; continuing an
+invalid Task Flow; merging stores/accounts/quotas; a new sync service or offline
+mutation queue; remote fleet discovery; replacing LOO-298's execution schema;
+Wave deletion policy; automatic chapter rotation; host promotion.
 
-## Slice ledger
+Current first slice: refresh an explicit connected issue into local planning and
+read it through the shared store without allocating execution. Prove a missing
+Project, truly missing selector and unavailable provider, then wire managed
+validity and ordinary Flow independence. Jack approved proceeding with this
+architecture. The cached-Task outage policy and connection-transition semantics
+remain explicit in questions.md; they must not be silently inferred from library
+behavior. They do not prevent the first slice. No Flow navigation is selected here.
 
-- 2026-09-29: clean worktree at kickoff. Read repository guide, Infrastructure
-  goal/memory and source paths above. No earlier scratch design existed.
-- Official entrypoint `/Users/jack/.local/bin/lf task status LOO-298 --json`
-  returned `Error: no Task exists for "LOO-298"`. No branch executable was used.
-- Ambient `lf --help` exposed the obsolete run/ops surface. The official absolute
-  entrypoint exposed current Task/Session commands. This is direct evidence that
-  PATH is not a reliable official-runtime selector in this session.
-- Coordination first used an invalid untyped `--as LOO-298`; corrected to
-  `--as task:LOO-298`, which failed as unregistered before launch. No owner reply
-  was received and no LOO-298 branch was edited.
-- Source inspection and official Linear documentation support the de-risking
-  findings. No live Linear/GitHub request, store migration, implementation,
-  publication, installation promotion or acceptance demonstration was performed.
-- Design review caught three false shortcuts and removed them: treating Home ID
-  as data-copy identity, assuming Project membership is necessary for existence,
-  and changing executable without preserving the claim's execution directory.
-  Current-chapter reconstruction and arbitrary-directory discovery remain bounded
-  explicitly rather than hidden behind a sync instruction.
-- A second review exposed the Linear-only Project reference beneath local Task
-  creation. Local-mode scope now explicitly includes a genuine local chapter
-  plan through the existing chapter operation; a fake Linear snapshot would not
-  satisfy the private-work requirement.
+## Retained observations and evidence limits
+
+- At kickoff, official `/Users/jack/.local/bin/lf task status LOO-298 --json`
+  returned `Error: no Task exists for "LOO-298"`. Ambient help exposed an older
+  command surface; the official entrypoint exposed current Task/Session commands.
+- The first coordination request used an invalid untyped selector. The corrected
+  `--as task:LOO-298` request failed before launch; no reply established the current
+  execution-schema contract. No LOO-298 branch was edited.
+- Earlier source inspection and Linear documentation supported direct issue
+  lookup, partial GraphQL errors and archive exclusion from default lists:
+  [GraphQL API](https://linear.app/developers/graphql) and
+  [rate limiting](https://linear.app/developers/rate-limiting). These are retained
+  kickoff findings, not fresh provider verification or evidence of live payloads.
+- Kickoff review caught Home-ID aliasing, Project-required existence, runtime/store
+  coupling and Linear-only Project identity under local creation. Those constraints
+  remain; the direct-read architecture and mismatch-continuation proposal do not.
+- No implementation, live provider request, migration, publication, promotion or
+  acceptance demonstration was performed in this review.

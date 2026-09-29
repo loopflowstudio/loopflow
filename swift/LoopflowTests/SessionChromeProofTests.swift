@@ -92,7 +92,21 @@ struct SessionChromeProofTests {
                 .labelView().text().string()
             #expect(label.contains("feature / realign"))
         }
-        #expect(throws: Never.self, "Task worktree location") {
+        #expect(throws: Never.self, "Session worktree location") {
+            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+                .menu().labelView().find(text: "loopflow")
+            #expect(try location.string() == "loopflow")
+        }
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+        }
+        #expect(throws: Never.self, "complete") {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
+        }
+
+        model.navigation.selectedSessionId = nil
+        try await settle(window)
+        #expect(throws: Never.self, "Task-only worktree location") {
             let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
                 .text().string()
             #expect(location == "loopflow")
@@ -100,9 +114,8 @@ struct SessionChromeProofTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
         }
-        #expect(throws: Never.self, "complete") {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
-        }
+        model.navigation.selectedSessionId = "release"
+        try await settle(window)
 
         // Two panes: a strip each, no trio at rest, none on the unfocused pane's hover.
         for pane in panes {

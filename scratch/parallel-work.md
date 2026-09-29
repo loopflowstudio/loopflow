@@ -20,7 +20,7 @@ binary access to the installed Home are not.
   `1f9ba70e-f0e9-41d4-9722-948d7bc4ce8c`, implement iteration10.
   Verified worker Exec `ef8e22ec-9e08-4762-b166-5033132405e7`, PID79038,
   Codex80014. Numeric Flow wire and landing helper admission are published;
-  Exec discovery and OpenCode native history are published at6c0981dbd; main is integrating Desktop controls. Recheck status/ps before treating these as live.
+  Exec discovery, OpenCode native history and Desktop controls are published at59ed94ea5. Local7dcdee5ef removes the alternate runs --resume entry. Recheck status/ps before treating these as live.
 - Supervisor owns this index and isolated read-only inspections; no second
   executable writer or competing builds. Control Session
   `run_9c16dbbe2b04440db8469e9b4964912c` has human title `loopflow`.
@@ -164,6 +164,98 @@ and proving the shared adapter.
 The main-owned handoff misattributed contributor/supervisor proposal/review/release
 actions to Jack; verified comment `666c4261-88a3-4412-873f-65c18f4ae3ab` requests
 attribution correction before publication, without changing authorized scope.
+
+## Latest integration and review (2026-09-29)
+
+Published59ed94ea5 includes Desktop controls and the native-history conformance
+repair (11 focused passes). Current source checkpoint7dcdee5ef removes public
+runs --resume in favor of Session connect; three focused command/history/review
+checks pass per main's handoff. This is not full provider reconnect acceptance.
+
+Hosted CI36600147964 rust-test109515111201 fails with660 passed,2 failed,15
+skipped,1321 unrun (37.122s). Generic headless launch and immutable replay still
+seed fake OpenCode executables that print old one-shot result JSON and exit;
+serve therefore exits0 before readiness. Exact log
+`.lf/tmp/cut-i/ci-59ed94ea5-rust-clean.log`. Verified direction
+`a22e9c27-4f2d-46eb-9401-aba582b6718b` requests adjacent fake-provider audit,
+meaningful assertions retained, and affected suites with no-fail-fast before
+coherent publication. No production fallback or synthetic idle completion.
+
+Metadata contributor tool27771 exited0; Run612a5d2f is completed and Exec82595041
+is absent. [Handback](proposal-metadata-discovery.md) is released, unapplied:
+SHA1b44d1173d41f08632ba8c341591715aa23215eaa268393c5d112602ff68a4d8;
+private `.lf/tmp/metadata-discovery-proposal/metadata-discovery.patch`
+SHA62431e5a89e3d5744e9feb586de3e9f0bd7415b6dafaddf5b29b2793ff303ff5.
+Supervisor verified16 original/proposed files and read-only applicability at7dc.
+Proposal+405/-6 production; SQL-expression replay/parsing only, no application
+compile/test. It removes capture/history decoding from inventory and retains
+exact-action validation. The plan still scans Flow metadata in a correlated
+pending-review predicate before pagination; dense review/no-match/deep-page proof
+must distinguish that cost. Final Flow inventory, wire/paging and CLI/Desktop
+latency remain. Prior Session cache proposal stays unapplied.
+
+Import source review found a reachable classification loss: old tui manifests
+without a native reference, or earlier Flow-review manifests outside the active
+boundary, go through headless(), forcing interactive=false and completed_at=None.
+That path omits session-resolution.json from history. Existing four-origin tests
+seed earlier members as headless or the retained active review, so do not prove
+those two cases. Verified direction733cc662-ee78-41d0-8e65-8eb95950b322 asks for
+actual CLI red/green proof, same identity/membership, retained closure without
+invented native success/Exec, repeated import and removal of retired input files.
+Private `.lf/tmp/import-surface-review/` retains source hash and finding; source
+evidence only, not a new installed-Home failure or executed behavioral proof.
+
+Published59ed94ea5 versus base6e718: **+17,916 / −30,633 = net−12,717**
+production by the same corrected-prefix method; tests/docs and working changes
+excluded. Receipt `.lf/tmp/execution-model/status-counts-59ed94ea5.json`.
+GitHub main still6e718 at that publication inspection. No full-green CI, landing,
+promotion, configured recovery or code-complete concept review follows.
+
+Swift CI109515111628 also failed:286 tests,5 issues,148.733s. SessionChrome
+expects Task-worktree text and no Session worktree menu at both widths, contrary
+to the new selected-Session workspace branch. TaskMonitor separately loses its
+retained Task Run text during Chapter transfer (TaskMonitorProofTests157); its
+cause remains unclassified. Verified direction347547ba requests meaningful chrome
+assertions and Task-only coverage; subsequent full-log direction names the Monitor
+failure without weakening history preservation. Full log download is complete;
+18MB diagnostic values must not enter prompts. Bounded findings:
+`.lf/tmp/cut-i/ci-59ed94ea5-swift-summary.json`. Other hosted jobs passed except
+Rust, scratch-clear and aggregate. Main acknowledged fake-provider repair.
+
+Main's private fresh-engine Codex retry discriminator failed with native -32600:
+failed thread still has an active writer after unsubscribe while original engine
+and sibling remain. Main retained `.lf/tmp/execution-model/native-rehost-failed/`
+and made no production handoff change. This narrows the existing native obstacle;
+it does not justify killing a shared engine or selecting another decision API.
+
+Supervisor SQL density follow-up measured the released metadata proposal against
+20,003 Sessions and 5,001 Flows on Python SQLite 3.50.4. Three warm in-memory
+samples: first 100 rows, 0.51–0.61 ms; offset 4,500, 273.43–274.37 ms;
+offset 5,100 (empty), 2,221.51–2,260.62 ms. A private pending_session_id/state
+index yields 0.37–0.41 ms, 1.27–1.33 ms and 3.09–3.43 ms respectively, with
+identical returned-ID hashes. No production schema changed.
+`.lf/tmp/metadata-discovery-density-review/results.json` retains exact query,
+plans and scope; reproduce.py retains the equivalent fixture. Verified direction
+4eb99cc9-e18f-4029-9e28-a707b32e2f5d requests the simplest justified lookup and
+bundled SQLite/dense checks, not a new cache. These SQL-only timings do not
+establish CLI/Desktop or controlled cold-cache latency.
+
+Supervisor inspected the completed native-rehost log: -32600 active writer at
+thread/resume and both exact fixture engine exits0. It fails before proving
+sibling completion or valid decision recovery. No broader negative is inferred.
+
+Main's CI repair now retains both Session-owned and Task-only worktree chrome
+assertions. Monitor waits for its first attributed stream frame before beginning
+Chapter transfer; retained Run text, terminal surfaces, draft and companion
+assertions remain. Supervisor read the diff and final mounted log:
+`desktop-ci-proof-final.log` passes two tests in two suites, including both chrome
+sizes (4.683 s). This is fixture transport with actual mounted PTYs, not installed
+acceptance. Replay now uses the shared native OpenCode server fixture and preserves
+its account-free scope; `command-provider-replay-native.log` passes one focused
+case in 1.105 s. Earlier command fixture passes/failures remain retained. The final
+`command-provider-native-shared.log` passes two public native-fixture checks
+(taskless decision and automatic retry with earlier-caller rejection) in 7.536 s.
+This does not establish all command fixtures or fresh hosted CI passing.
 
 ## Recovery and prompt size
 

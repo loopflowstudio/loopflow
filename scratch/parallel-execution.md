@@ -1864,3 +1864,16 @@ and old TUI Flow-member cases through the public CLI. Production importer edits
 wait for coordination with the private metadata-summary proposal; its active
 contribution has no publication hold. Preserve the existing NULL-title synthetic
 counterexample as unproven released reachability, not a real-Home defect.
+
+
+## Command/provider and mounted CI repair (2026-09-29)
+
+Current cut removes obsolete fixture protocol assumptions and retains the original
+store across native-stop publication. Native replay and shared OpenCode decisions/
+retry pass; mounted Session/Task workspace and Chapter-transfer history proofs pass.
+All-target Clippy passes (16.08s), formatting and whitespace checks pass. This cut
+changes zero production lines. [Evidence](evidence.md#commandprovider-and-mounted-ci-repair-2026-09-29)
+retains failed attempts, exact counts and the Monitor race hypothesis limits.
+The preceding resume-entry deletion is included in publication. Metadata proposal
+is released but unapplied; review its dense scan counterexample with the importer
+surface/closure regressions next. Full remaining-work scope stays open.

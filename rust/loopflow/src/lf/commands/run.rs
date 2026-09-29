@@ -1349,7 +1349,7 @@ mod tests {
         std::fs::create_dir(&bin).unwrap();
         let evidence = home.path().join("provider-run");
         let implicit_evidence = home.path().join("implicit-provider-run");
-        let provider = bin.join("opencode");
+        let provider = bin.join("claude");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
@@ -1412,7 +1412,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             config: Config::default(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: Some("opencode".to_string()),
+                agent: Some("claude".to_string()),
                 cwd: Some(home.path().to_path_buf()),
                 skip_permissions: true,
                 env,
@@ -1426,7 +1426,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             components: PromptComponents::default(),
             context,
             prompt: task.to_string(),
-            harness: "opencode".to_string(),
+            harness: "claude".to_string(),
             model: None,
             skill_name: Some("implement".to_string()),
             log_name: "generic-run-proof".to_string(),
@@ -1538,7 +1538,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 config: Config::default(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: Some("opencode".to_string()),
+                    agent: Some("claude".to_string()),
                     cwd: Some(repo.to_path_buf()),
                     skip_permissions: true,
                     env,
@@ -1552,7 +1552,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 components: PromptComponents::default(),
                 context: crate::trace::PreparedTurnContext::from_prompts("", task),
                 prompt: task.to_string(),
-                harness: "opencode".to_string(),
+                harness: "claude".to_string(),
                 model: None,
                 skill_name: Some("research".to_string()),
                 log_name: log_name.to_string(),
@@ -1565,12 +1565,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
-        let provider = bin.join("opencode");
+        let provider = bin.join("claude");
         std::fs::write(
             &provider,
             r#"#!/bin/sh
 if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' 'opencode test'
+  printf '%s\n' 'claude test'
   exit 0
 fi
 sleep "$LF_TEST_RESEARCH_DELAY"

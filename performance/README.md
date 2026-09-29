@@ -65,25 +65,40 @@ reason evidence is incomplete. `FAIL` outranks missing coverage when an
 observed value already breaches a budget. `PASS` requires complete coverage
 and at least 20 samples; smaller complete sets are `COLLECTING`.
 
-Four lifecycle rows read durable owner facts rather than artifacts or observer
-timestamps:
+The Rust telemetry operation supplies the current `RunSnapshot` projection from
+its selected Home. Python reads that projection, Task PR owner facts, and gate
+receipts. It does not query retired SQL Runs/Turns or reduce provider streams.
 
 | Row | Eligible fact | Measured value |
 |---|---|---|
-| `task_first_progress_seconds` | Ended Task Run, windowed by `ended_at` | First material provider event minus Run start |
-| `land_to_merge_seconds` | Explicitly requested Task PR, windowed by GitHub `merged_at` | GitHub `merged_at` minus first merge-request time |
-| `avoidable_repairs` | Same requested-and-merged Task PR | `1` for a typed avoidable rebase-agent incident; tracked absence is `0` |
-| `manual_git_repairs` | Same requested-and-merged Task PR | `1` for a typed raw-sequencer adoption incident; tracked absence is `0` |
+| `run_elapsed_seconds` | Recorded Run ending inside the window | Run end minus start, including Runs that began before the window |
+| `run_total_input_tokens`, `run_output_tokens`, `run_cost_usd` | Same ended Run | Direct provider usage with final receipts and no recorded gaps |
+| `task_pr_to_merge_seconds` | Requested-and-merged Task PR in the window | GitHub merge time minus Task PR creation |
+| `publication_to_merge_seconds` | Same Task PR | GitHub merge time minus publication request |
+| `land_to_merge_seconds` | Same Task PR | GitHub merge time minus merge request |
+| `avoidable_repairs`, `manual_git_repairs` | Same Task PR | Typed incident is `1`; tracked absence is `0` |
 
-Historical rows are never backfilled. Until a complete scorecard window lies
-after the lifecycle-authority cutover, clean rows remain `UNKNOWN`; an observed
-budget breach still reports `FAIL`. A missing or conflicting GitHub merge time
-also remains unmeasured. Merge correctness does not depend on performance
-evidence.
+Run values are per Run, not per Turn. Their budgets start unset because Turn
+budgets do not apply to this unit. Complete samples without a configured budget
+are `UNBUDGETED`, not a performance pass. Missing provider cost is never priced
+or replaced with zero; unfinished Runs are outside this ended-Run cohort.
 
-PRs still open at cutover begin merge tracking immediately, but not repair
-tracking: their future GitHub merge boundary is coverable, while their earlier
-repair history may already be incomplete.
+Task PR intervals require per-PR tracking and accepted GitHub merge evidence.
+Missing/conflicting merge times remain unmeasured; when the time is missing,
+`updated_at` includes the settled record in the coverage denominator only, never
+as a substitute endpoint. Repository ownership comes from the Task's Wave, so
+removing its worktree does not discard its history. These rows cover locally
+recorded requested Task PRs, not standalone PRs or every GitHub diff.
+
+Task PR creation is not implementation start. Current Run Flow membership does
+not identify a specific PR, so implementation-to-merge remains unmeasured.
+First material progress and complete Task-loop intervals also lack current owner
+facts: first-progress stays `UNKNOWN`, and the Task-loop trust instrument emits
+`unavailable`. No Epoch-based history is recreated or inferred from Work state.
+
+Coverage counts describe the selected recorded cohort. They do not prove the
+completeness of all execution history. Compare equivalent units and cohorts
+before attributing a change in duration to an optimization.
 
 Generated reports are runtime evidence and stay out of source control. Examples
 and fixtures must be synthetic; repository history owns only metric definitions,

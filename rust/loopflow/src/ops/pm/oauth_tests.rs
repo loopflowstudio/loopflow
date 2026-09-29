@@ -160,8 +160,8 @@ async fn pm_read_linear_oauth_recovers() {
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"
         }]}}})),
         json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
-            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"",
-            "content":"## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
+            "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
+            "content":"flow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
             "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}],
             "pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
@@ -181,10 +181,23 @@ async fn pm_read_linear_oauth_recovers() {
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap(),
         stored_wave
     );
-    assert_eq!(
-        fixture.store.get_project(&project.id).await.unwrap(),
-        Some(project.clone())
-    );
+    let refreshed = fixture
+        .store
+        .get_project(&project.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(refreshed.id, project.id);
+    assert_eq!(refreshed.wave_id, project.wave_id);
+    assert_eq!(refreshed.iteration, project.iteration);
+    assert_eq!(refreshed.abandon_intent, project.abandon_intent);
+    assert_eq!(refreshed.created_at, project.created_at);
+    assert!(refreshed.updated_at >= project.updated_at);
+    assert_eq!(refreshed.plan.id, project.plan.id);
+    assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
+    assert_eq!(refreshed.plan.flow, "feature");
+    assert!(refreshed.plan.prompt_context.contains("Fresh proof"));
+    assert!(refreshed.plan.pm_snapshot_synced_at > project.plan.pm_snapshot_synced_at);
     assert_eq!(
         fixture
             .store

@@ -5,10 +5,21 @@ import subprocess
 import tarfile
 from pathlib import Path
 
+PROOFS = {
+    "task_resume_revokes_auto_merge_before_returning_to_human_review": "pr_tests",
+    "direct_open_preserves_another_installations_development_store": "task_initialization_tests",
+    "incompatible_branch_data_recommends_only_a_verified_retained_pair": (
+        "task_initialization_tests"
+    ),
+    "task_review_completion_consumes_only_installed_readiness": "task_initialization_tests",
+    "task_operation_starts_with_durable_history_after_claim_only_failure": "flow_tests",
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="rust:1.89-bookworm")
+    parser.add_argument("--test", choices=PROOFS, help="run one named proof")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
@@ -55,6 +66,13 @@ def main() -> None:
             copy.stdin.close()
             if copy.wait() != 0:
                 raise RuntimeError("copy disposable source snapshot")
+        selected = {args.test: PROOFS[args.test]} if args.test else PROOFS
+        targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
+        checks = "\n".join(
+            f"timeout 180 cargo test -p loopflow --test {target} {name} "
+            "-- --exact --ignored --nocapture"
+            for name, target in selected.items()
+        )
         command = r"""
 set -eu
 useradd --create-home lf-task-proof
@@ -62,22 +80,12 @@ chown -R lf-task-proof:lf-task-proof /source
 chown -R lf-task-proof:lf-task-proof /usr/local/cargo/registry
 runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
     LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 \
-    CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
+    CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=4 \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
-        cargo test -p loopflow --test pr_tests --test task_initialization_tests --no-run
-        timeout 180 cargo test -p loopflow --test pr_tests \
-            task_resume_revokes_auto_merge_before_returning_to_human_review \
-            -- --exact --ignored --nocapture
-        timeout 180 cargo test -p loopflow --test task_initialization_tests \
-            direct_open_preserves_another_installations_development_store \
-            -- --exact --ignored --nocapture
-        timeout 180 cargo test -p loopflow --test task_initialization_tests \
-            incompatible_branch_data_recommends_only_a_verified_retained_pair \
-            -- --exact --ignored --nocapture
-        timeout 180 cargo test -p loopflow --test task_initialization_tests \
-            task_review_completion_consumes_only_installed_readiness \
-            -- --exact --ignored --nocapture'
+        nice -n 10 cargo test -p loopflow TARGETS --no-run
+        CHECKS'
 """
+        command = command.replace("TARGETS", targets).replace("CHECKS", checks)
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
         )

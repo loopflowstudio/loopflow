@@ -96,16 +96,63 @@ The final tests cover missing, empty, targeted and ambiguous planning over one
 saved observation, plus per-Wave unavailable target rendering. This is fixture
 and presentation-model evidence, not a rendered Desktop or full hosted result.
 
-Published docs/metrics head: `fa263c19d`, PR1296 open with auto-merge null.
-New whole-boundary RED: `flow-operation-owner-red.log` runs the public CLI with
-two harmless in-process `rebase --plan` operations in a disposable repository/Home.
-The command succeeds but SQL counts are `(runs=2, agent_sessions=0, execs=1)`;
-the contract assertion expects `(0,0,1)`. The test retains its subsequent expected
-Flow start/result history assertions; those have not run past the first failure.
-Retained edit: `flow_tests.rs::mechanical_flow_boundaries_belong_to_flow_history_and_one_actual_exec`.
-No production conversion edit yet. Main advanced to `c3e8372a3`; integrate via
-pinned `lf rebase` before widening this change. This RED is intentional unfinished
-acceptance work, not a passing checkpoint or permission to discard the test.
+Published docs/metrics head was `fa263c19d`. Rebase onto `aab595e6a`
+completed at `81b57c91f`, preserving telemetry's finished-in-window reader and
+missing-evidence behavior. PR1296 is published with auto-merge off. Hosted Rust
+36510330745 stopped after 928 passes at the OAuth fixture's absent Project status;
+other substantive hosted jobs passed, while active scratch remains outstanding.
+
+Current retained conversion moves mechanical starts/results from Run capture to
+Flow history in the shared Task/taskless executor. One actual process retains one
+Exec across several boundaries. A forward draft preserves historical mechanical
+Run receipts and unknown start/Exec evidence; earlier Run bytes remain for the
+full import. Claims alone write no Started; beginning operation history sets it
+atomically. Version/claim/start/Exec checks fence results; an absent completion
+stays unknown and requires inspection or explicit retry. Agent publication,
+selection membership and verdict/route authority still depend on Run.
+
+Proofs under `.lf/tmp/cut-i/`: `flow-operation-owner-red.log` observed two Runs
+for two in-process operations. `flow-operation-owner-green.log` then passed the
+public taskless ownership/history proof. `flow-operation-boundaries.log` passed
+interruption/retry, OAuth recovery and taskless CLI; the managed CLI refused at
+installation routing before executing the worker. `flow-operation-store-2.log`
+passed populated migration preservation, exact native selection, interruption
+and OAuth, then exposed an obsolete managed two-Run assertion and a malformed
+telemetry command in the failure fixture. `flow-operation-error-observation.log`
+prints the latter's actual parser refusal: no missing-generator effect was reached.
+The fixture now uses the existing `__telemetry-scorecard` spelling. The managed
+reducer now checks no Runs, separate results, claim/release non-Started and set-once
+Started. `flow-operation-store-3.log` passes all seven checks, including both public CLI cases.
+
+The managed public proof is ignored in ordinary suites with its precise disposable
+OS requirement and wired into `scripts/test_task_installation.py --test
+task_operation_starts_with_durable_history_after_claim_only_failure`.
+`flow-operation-managed-os.log` records Docker's ten-second preflight timeout;
+no container was created and no installed Home was accessed. This remains unproven.
+Migration namespace/history check passes: 24 drafts, 55 shipped files unchanged.
+`canonical-operation.log` passes six selected checks after materializing all 24
+drafts into a disposable 0.12.25 source copy. The later comment-only correction
+in flows.rs does not change those tested operations. Formatting and Ruff pass;
+all-target Clippy passes (`flow-operation-clippy.log`). The source-snapshot architecture check passes
+(36 APIs, 5 process boundaries, 35 SQLite owners, 6 projections, 6 providers,
+25 subprocess edges, 3 seams); receipt `operation-architecture-source.json`.
+
+Independent actual-CLI crash/retry proof inspected:
+`.lf/tmp/execution-model/supervisor-mechanical-crash-1/results.json`, candidate
+SHA256 `33be09c872e4c82c786237a1b21f23d59c024c33a56a1be247fe95f548182467`.
+Private telemetry writes an effect, then the fixture kills its exact lf group.
+With the template deleted, ordinary resume refuses and retains one effect;
+explicit retry completes with two total effects, zero Runs/AgentSessions and the
+original Exec outcome/exit still null. This proves public standalone recovery
+with synthetic local effects, not the outstanding managed OS installation path.
+
+Production delta against `81b57c91f`: +218/-64 (net +154), including +59 SQL;
+receipt `operation-line-counts.json`. Counts strip Rust test modules and exclude
+tests/docs/proof scripts. Removed `run_op`'s RunSpec/CaptureHandle/publication and
+operation input sidecar writes, plus the synthesized interrupted Run outcome.
+No file is deleted by this cut and agent Run ownership remains. Review corrected
+the early claim-only Started writer, obsolete ownership assertions and hidden
+telemetry spelling. No full-conversion or configured acceptance claim.
 
 Next resume execution owners and the full remaining-work matrix: publication,
 decision membership and mechanical results to final Session owners; offline

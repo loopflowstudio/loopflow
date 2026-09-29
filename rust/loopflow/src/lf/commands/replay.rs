@@ -162,11 +162,7 @@ mod tests {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-r#"#!/bin/sh
-context_file=$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | sed -n 's/.*"instructions":\["\([^"]*\)"\].*/\1/p')
-printf '%s\n' "$LF_RUN_ID|$LF_PARENT_RUN_ID|$(cat "$context_file")|$*" > "$LF_TEST_REPLAY_EVIDENCE"
-printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":5,"output_tokens":2}}'
-"#,
+            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();

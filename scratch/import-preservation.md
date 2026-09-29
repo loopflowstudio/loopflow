@@ -65,8 +65,11 @@ Started event (`released-started-evidence-red.log`). The forward draft restores
 assignment presence at explicitly inferred conversion time; the old event keeps
 its timestamp. Source proof passes; `materialized-sql-upgrade.log` also passes
 the released-position and admission cases while failing development-prefix
-adoption. A historical NULL Task title still fails the earlier review migration;
-its supported-input classification remains open.
+adoption. The retained NULL-title review seed fails, but Supervisor's released-writer
+audit found no supported path producing that combination. Preserve its synthetic
+red receipt separately from the corrected populated fixture; no runtime title
+fallback or applied-migration rewrite follows. See
+`.lf/tmp/historical-title-review/classification.md`. Broader import proof remains owed.
 
 `materialized-sql-upgrade-rollback.log` passes four focused cases after the
 adoption repair: populated pre-admission members, retained Projects/unreleased

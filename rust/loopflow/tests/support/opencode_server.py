@@ -130,6 +130,12 @@ class Server(BaseHTTPRequestHandler):
                 _save(sessions)
             self._json({"id": session})
         elif self.path.endswith("/prompt_async"):
+            if evidence := os.environ.get("LF_TEST_REPLAY_EVIDENCE"):
+                Path(evidence).write_text(json.dumps({
+                    "input": os.environ["LF_RUN_ID"],
+                    "parent": os.environ.get("LF_PARENT_RUN_ID"),
+                    "request": body,
+                }))
             self._json({})
             threading.Thread(target=_launch, args=(self.path.split("/")[2], body["messageID"], body["parts"]), daemon=True).start()
         elif self.path.startswith("/permission/"):

@@ -117,6 +117,12 @@ struct TaskMonitorProofTests {
         try view.inspect().find(ViewType.Button.self, where: {
             try $0.accessibilityIdentifier() == "task-show-monitor-issue-review"
         }).tap()
+        try await waitForActiveRuns {
+            model.activeRuns.value?.runs.contains {
+                $0.work == .task(id: "ts_review00000000000000000000000000")
+                    && $0.label == "Retained Task Run"
+            } == true
+        }
         try await settle(window)
         let monitorPane = multiplexer.focusedPaneId
         try #require(multiplexer.focusedPane.content == .monitor(taskId: "issue-review"))

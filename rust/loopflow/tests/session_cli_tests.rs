@@ -43,9 +43,14 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
     assert!(help.contains("complete"));
+    assert!(help.contains("connect"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
+
+    let removed = run(home.path(), &["runs", "historical-input", "--resume"]);
+    assert!(!removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
         &["session", "ready"][..],
@@ -58,7 +63,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
 
     for args in [
-        &["session", "open", "missing-session", "--json"][..],
+        &["session", "connect", "missing-session", "--json"][..],
         &["session", "complete", "missing-session"],
     ] {
         let output = run(home.path(), args);

@@ -854,6 +854,10 @@ lf doctor                       # audit continuity, identity, lineage, coverage,
 lf doctor --json                # machine-readable audit
 ```
 
+Continue a conversation with `lf session connect SESSION`. The obsolete
+`lf runs INPUT --resume` entry is removed; `lf runs` only inspects history.
+`lf replay INPUT` separately launches its immutable recorded request.
+
 Session replacement and native client stopping require readable process evidence.
 If inspection fails, retry after it is available; the command leaves termination
 unconfirmed and preserves native history. Saved Ask or Flow feedback survives a

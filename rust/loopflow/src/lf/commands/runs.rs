@@ -196,23 +196,6 @@ pub fn list(
     Ok(())
 }
 
-pub fn resume_run(selector: &str) -> Result<()> {
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let provider_session = crate::run_record::read_provider_session(&dir)
-        .map_err(|error| anyhow!("Run events unavailable: {error}"))?
-        .ok_or_else(|| anyhow!("Run {} has no provider session to resume", manifest.run_id))?;
-    crate::lf::commands::util::resume_session(
-        &manifest.harness,
-        manifest.model.as_deref(),
-        &manifest.cwd,
-        &manifest.run_id,
-        &dir,
-        &provider_session,
-    )
-}
-
 pub fn observe_provider_session() -> Result<()> {
     let run_dir = std::env::var_os(crate::run_record::RUN_DIR_ENV)
         .map(PathBuf::from)

@@ -1757,7 +1757,6 @@ fn execute_command(
             parent,
             events,
             final_answer,
-            resume,
             task,
             wave,
             project,
@@ -1766,7 +1765,6 @@ fn execute_command(
             None if *active => {
                 loopflow::lf::commands::runs::list_active(*json, *watch, task.as_deref())
             }
-            Some(run) if *resume => loopflow::lf::commands::runs::resume_run(run),
             Some(run) => loopflow::lf::commands::runs::inspect(run, *events, *final_answer, *json),
             None => loopflow::lf::commands::runs::list(
                 *json,

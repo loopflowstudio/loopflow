@@ -35,10 +35,11 @@ fn write_gh_failed_release_script() -> &'static str {
 }
 
 fn write_gh_candidate_release_script(log_path: &str, conclusion: &str) -> String {
+    // Candidate proofs start after the release PR merged. Merge recovery has
+    // dedicated fixtures; repeating its real poll here hides these tests' cost.
     format!(
         r#"#!/bin/sh
 log="{log_path}"
-armed="{log_path}.armed"
 dispatched="{log_path}.dispatched"
 dispatch_count_file="{log_path}.dispatch-count"
 branch_file="{log_path}.branch"
@@ -104,22 +105,11 @@ case "$1 $2" in
     case " $* " in
       *' --head '*)
         head="$(git rev-parse HEAD)"
-        printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head"
+        printf '[{{"number":1176,"state":"MERGED","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head" "$head"
         ;;
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
-    head="$(git rev-parse HEAD)"
-    if [ -f "$armed" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
-    else
-      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
-    fi
-    exit 0;;
-  'pr checks') echo '[]'; exit 0;;
-  'api graphql') echo 'false'; exit 0;;
-  'pr merge') : > "$armed"; exit 0;;
   'run download') exit 0;;
   'release view')
     if [ "$3" = v0.9.1 ]; then

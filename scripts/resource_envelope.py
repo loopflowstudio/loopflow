@@ -328,6 +328,8 @@ def recover_resources(
         if bytes_used + source.bytes > policy.maximum_recovery_bytes:
             continue
         action = _prune_old_gate_artifacts(source, policy, now)
+        if action is None:
+            continue
         actions.append(action)
         roots_used += 1
         bytes_used += action.removed_bytes
@@ -641,7 +643,7 @@ def _prune_old_gate_artifacts(
     source: ResourceSource,
     policy: ResourcePolicy,
     now: float,
-) -> RecoveryAction:
+) -> Optional[RecoveryAction]:
     gate_root = source.root / GATE_RELATIVE_PATH
     if source.paths != (gate_root,):
         return RecoveryAction(
@@ -666,6 +668,8 @@ def _prune_old_gate_artifacts(
                 child.unlink()
             removed_paths.append(str(child))
             removed_bytes += measured
+    if not removed_paths:
+        return None
     return RecoveryAction(
         source.id,
         source.owner,

@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/resource_envelope.py"
 
@@ -51,6 +53,8 @@ def _source(
     budget: int = 100,
 ) -> "resources.ResourceSource":
     paths = (root / "target",) if kind == "build" else (root,)
+    if kind == "gate":
+        paths = (root / resources.GATE_RELATIVE_PATH,)
     return resources.ResourceSource(
         id=id,
         kind=kind,
@@ -176,6 +180,47 @@ def test_recovery_root_limit_is_a_hard_bound(tmp_path: Path) -> None:
 
     assert len(actions) == 1
     assert sum((root / "target").exists() for root in roots) == 1
+
+
+@pytest.mark.parametrize("old_entry", [None, "file", "empty-directory"])
+def test_recent_gate_roots_leave_recovery_capacity_for_stale_builds(
+    tmp_path: Path, old_entry: str | None
+) -> None:
+    policy = _policy(maximum_recovery_roots=1, build_cache_retention_hours=24)
+    gates = [tmp_path / f"worker-{index}" for index in range(8)]
+    for root in gates:
+        gate = root / resources.GATE_RELATIVE_PATH
+        gate.mkdir(parents=True)
+        (gate / "recent.log").write_text("recent verification evidence")
+    if old_entry is not None:
+        expired = gates[0] / resources.GATE_RELATIVE_PATH / "expired"
+        if old_entry == "file":
+            expired.write_text("expired output")
+        else:
+            expired.mkdir()
+        old = time.time() - 8 * 24 * 3600
+        os.utime(expired, (old, old))
+    sources = [_source(root, id=f"gate:{root.name}", kind="gate") for root in gates]
+    if old_entry is None:
+        assert not resources.recover_resources(policy, _snapshot(policy, sources, free=500))
+
+    stale = tmp_path / "stale"
+    (stale / "target").mkdir(parents=True)
+    artifact = stale / "target/artifact"
+    artifact.write_bytes(b"x" * 4096)
+    old = time.time() - 48 * 3600
+    for path in (artifact, stale / "target"):
+        os.utime(path, (old, old))
+    sources.append(_source(stale, id="build:stale"))
+
+    actions = resources.recover_resources(policy, _snapshot(policy, sources, free=500))
+
+    assert len(actions) == 1
+    assert artifact.exists() == (old_entry is not None)
+    assert actions[0].source == ("build:stale" if old_entry is None else "gate:worker-0")
+    assert all((root / resources.GATE_RELATIVE_PATH / "recent.log").exists() for root in gates)
+    if old_entry is not None:
+        assert not expired.exists()
 
 
 def test_cleanup_reclaims_stale_builds_before_emergency_reserve(tmp_path: Path) -> None:

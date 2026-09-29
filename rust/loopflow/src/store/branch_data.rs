@@ -58,6 +58,61 @@ pub fn isolate_branch_data() -> io::Result<()> {
     {
         return Ok(());
     }
+    let (destination, database, source) = private_data_paths()?;
+    if let Some(source) = &source {
+        seed_store(source, &database)?;
+    }
+    let context_changed = source.is_some()
+        || !canonicalize_with_missing_tail(&super::authority_home_dir())
+            .is_ok_and(|home| home == destination)
+        || !super::observability_database_path()
+            .and_then(|path| same_database_file(&path, &database))
+            .unwrap_or(false)
+        || std::env::var_os("LF_RUN_DIR").is_some_and(|dir| {
+            !canonicalize_with_missing_tail(&PathBuf::from(dir))
+                .is_ok_and(|dir| dir.starts_with(destination.join("runs")))
+        });
+    if context_changed {
+        clear_inherited_execution();
+    }
+    for name in ["LF_HOME", super::CONTROL_HOME_ENV] {
+        std::env::set_var(name, &destination);
+    }
+    for name in ["LF_DB_PATH", super::CONTROL_DB_PATH_ENV] {
+        std::env::set_var(name, &database);
+    }
+    if let Some(source) = source {
+        eprintln!(
+            "Branch lf is using data directory {}; installed store {} is unchanged.",
+            destination.display(),
+            source.display()
+        );
+    }
+    Ok(())
+}
+
+/// Select the same private destination without creating, copying or migrating it.
+pub(crate) fn observation_database_path() -> io::Result<PathBuf> {
+    let selection =
+        crate::machine_install::selection_for_current_executable().map_err(io::Error::other)?;
+    let path = if crate::build_info::provenance().is_release() || selection.is_some() {
+        super::database_path_from_env()?
+    } else {
+        private_data_paths()?.1
+    };
+    if is_owned_store(&path, &owned_stores()?)?
+        && !selection
+            .as_ref()
+            .is_some_and(|selection| same_database_file(&path, &selection.store).unwrap_or(false))
+    {
+        return Err(io::Error::other(
+            "process ledger belongs to another installation",
+        ));
+    }
+    Ok(path)
+}
+
+fn private_data_paths() -> io::Result<(PathBuf, PathBuf, Option<PathBuf>)> {
     let ordinary_home = std::env::var_os("LF_HOME").filter(|value| !value.is_empty());
     let home = ordinary_home
         .clone()
@@ -86,7 +141,7 @@ pub fn isolate_branch_data() -> io::Result<()> {
         .unwrap_or_else(|| home.join("loopflow.db"));
     let stores = owned_stores()?;
     let source = inherited_store(&home, &database, &stores)?;
-    let (destination, database) = if let Some(source) = &source {
+    let (destination, database) = if source.is_some() {
         let destination = super::default_lf_home_dir_for(
             &super::machine_home_dir(),
             crate::build_info::BuildProvenance::Development,
@@ -99,38 +154,11 @@ pub fn isolate_branch_data() -> io::Result<()> {
                 destination.display()
             )));
         }
-        seed_store(source, &database)?;
         (destination, database)
     } else {
         (home, database)
     };
-    let context_changed = source.is_some()
-        || !canonicalize_with_missing_tail(&super::authority_home_dir())
-            .is_ok_and(|home| home == destination)
-        || !super::observability_database_path()
-            .and_then(|path| same_database_file(&path, &database))
-            .unwrap_or(false)
-        || std::env::var_os("LF_RUN_DIR").is_some_and(|dir| {
-            !canonicalize_with_missing_tail(&PathBuf::from(dir))
-                .is_ok_and(|dir| dir.starts_with(destination.join("runs")))
-        });
-    if context_changed {
-        clear_inherited_execution();
-    }
-    for name in ["LF_HOME", super::CONTROL_HOME_ENV] {
-        std::env::set_var(name, &destination);
-    }
-    for name in ["LF_DB_PATH", super::CONTROL_DB_PATH_ENV] {
-        std::env::set_var(name, &database);
-    }
-    if let Some(source) = source {
-        eprintln!(
-            "Branch lf is using data directory {}; installed store {} is unchanged.",
-            destination.display(),
-            source.display()
-        );
-    }
-    Ok(())
+    Ok((destination, database, source))
 }
 
 fn clear_inherited_execution() {

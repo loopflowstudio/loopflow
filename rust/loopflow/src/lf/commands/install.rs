@@ -704,10 +704,10 @@ fn serde_authority(authority: MigrationAuthority) -> &'static str {
     }
 }
 
-/// Run `lf install preflight`. Read-only: opens the store only through the
-/// read-only preview and emits no journal event, so a frontier-incompatible
-/// candidate reaches the refusal here rather than failing in trace/store
-/// capture. Exits non-zero on a refusal so a caller can gate on it.
+/// Validate through a read-only preview. The CLI may append its Exec to an
+/// existing compatible process ledger, but observation never initializes or
+/// migrates it. A frontier-incompatible candidate still reaches this refusal.
+/// Exits non-zero on refusal so a caller can gate on it.
 pub fn preflight(json: bool) -> Result<()> {
     let preview = build_preview(&crate::store::production_database_path());
     if json {

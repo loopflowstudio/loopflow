@@ -303,12 +303,14 @@ fn run_with_env(
         &extra_env,
     );
     let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
-    // `process::exit` skips destructors. Close the broker and remove its local
-    // socket before preserving a nonzero remote command's exact exit code.
+    // Release the broker before reporting the remote command's result.
     drop(broker);
     match outcome {
         SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
         SshOutcome::ConnectionFailure => {
             unreachable!("run_ssh returns transport failures as errors")
         }

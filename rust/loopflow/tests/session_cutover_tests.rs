@@ -1138,6 +1138,104 @@ impl LockedStore {
 }
 
 #[test]
+fn inspection_execs_leave_an_existing_task_unstarted() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        fixture.repo.path(),
+        "inspection-only",
+        &fixture.repo.head_sha(),
+    );
+    for args in [
+        vec!["session", "list", "--task", "INF-123", "--json"],
+        vec!["usage", "--task", "INF-123", "--json"],
+    ] {
+        let output = fixture.run(&args);
+        assert!(output.status.success(), "{output:?}");
+    }
+    let started: Option<i64> = fixture
+        .db()
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(started, None);
+    assert_eq!(fixture.count("agent_sessions"), 0);
+    let completed: i64 = fixture.db().query_row(
+        "SELECT count(*) FROM execs WHERE outcome='succeeded' AND exit_code=0 AND completed_at IS NOT NULL",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(completed, 2);
+}
+
+#[test]
+fn failed_exec_observation_cannot_admit_a_provider() {
+    let fixture = Fixture::new(false);
+    let initialized = fixture.run(&["session", "list", "--all", "--json"]);
+    assert!(initialized.status.success(), "{initialized:?}");
+    // Fail just the process observation. The conversation store remains writable.
+    fixture
+        .db()
+        .execute_batch(
+            "CREATE TRIGGER refuse_fixture_exec BEFORE INSERT ON execs
+         BEGIN SELECT RAISE(ABORT, 'fixture refuses Exec observation'); END;",
+        )
+        .unwrap();
+    for args in [
+        LAUNCH.as_slice(),
+        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+    ] {
+        let output = fixture.run(args);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            fixture.launches().is_empty(),
+            "a writable Session store cannot replace Exec admission"
+        );
+    }
+    assert_eq!(
+        fixture.count("execs"),
+        1,
+        "retain the earlier inspection only"
+    );
+}
+
+#[test]
+fn malformed_caller_cannot_use_library_agent_admission() {
+    let fixture = Fixture::new(false);
+    for args in [
+        LAUNCH.as_slice(),
+        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+    ] {
+        let output = fixture
+            .command(args)
+            .env("LF_AGENT_CALLER", "not-json")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("agent launch requires an admitted Exec"),
+            "{output:?}"
+        );
+        assert!(
+            fixture.launches().is_empty(),
+            "no provider starts without process admission"
+        );
+    }
+    // A diagnostic command is still usable. Invalid provenance never becomes
+    // a fabricated root/direct Exec merely to make logging succeed.
+    let output = fixture
+        .command(&["session", "list", "--all", "--json"])
+        .env("LF_AGENT_CALLER", "not-json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(fixture.count("execs"), 0);
+}
+
+#[test]
 fn agent_admission_requires_the_store_before_provider_launch() {
     let fixture = Fixture::new(false);
     let store = LockedStore::new(&fixture);

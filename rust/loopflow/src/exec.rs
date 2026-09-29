@@ -6,6 +6,11 @@ use crate::id::ExecId;
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
 
+/// A command already rendered its diagnostic and selected its process status.
+#[derive(Debug, thiserror::Error)]
+#[error("command exited with status {0}")]
+pub struct CommandExit(pub u8);
+
 /// Stable provenance installed in one provider conversation's tool environment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {

@@ -6,7 +6,7 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -114,6 +114,10 @@ thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
 }
 
+// Only the executable entry point sets this. Library calls retain their own
+// outer with_runtime scope; inherited environment cannot opt into or out of it.
+static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
+
 #[derive(Debug, Clone)]
 struct RunContext {
     run_id: TraceId,
@@ -123,10 +127,14 @@ struct RunContext {
     /// Time this command entered the runtime, independent of OS inspection.
     started_at: i64,
     process_started_at: Option<i64>,
+    cwd: PathBuf,
+    ledger_path: PathBuf,
+    /// Early observation retains a noninitializing connection through completion.
+    ledger: Option<SqliteStore>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
-    /// File-journal directory. Written in any git checkout; None only when the
-    /// journal can't be git-excluded. The SQLite ledger records every run.
+    /// Optional repository trace journal. Early process observation uses only
+    /// SQLite; ordinary dispatch also writes this when Git exclusion succeeds.
     run_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
@@ -181,6 +189,7 @@ pub struct LfEventFields {
     pub index: Option<u32>,
     pub error: Option<String>,
     pub signal: Option<String>,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -220,16 +229,82 @@ pub fn emit(repo_root: &Path, node: LfNode, event: LfEventType, fields: LfEventF
     }
 }
 
+/// Own the actual CLI return, without opening a store before command admission.
+///
+/// # Panics
+/// Panics if called more than once in the same process.
+pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
+    PROCESS_STARTED_AT
+        .set(OffsetDateTime::now_utc().unix_timestamp())
+        .expect("one lf entry point per process");
+    let result = run();
+    if current_context().is_none() {
+        observe_process(&std::env::args().collect::<Vec<_>>());
+    }
+    crate::engine::agent::wait_for_interrupt_cleanup();
+    if let Some(context) = current_context() {
+        finish_runtime(&context.cwd, &result);
+    } else {
+        eprintln!("Exec history unavailable: no compatible process ledger for this process");
+    }
+    result
+}
+
+/// Observe an early command without creating a Home, migrating, or requiring Git.
+/// Failure to observe never prevents help, installation recovery or screenshot cleanup.
+pub fn observe_process(command: &[String]) {
+    if current_context().is_some() {
+        return;
+    }
+    let observe = || -> anyhow::Result<()> {
+        let path = crate::store::observation_database_path()?;
+        let ledger = SqliteStore::open_existing_run_ledger(&path)?;
+        let directory = std::env::current_dir()?;
+        let fields = LfEventFields {
+            command: Some(command.to_vec()),
+            worktree: Some(directory.display().to_string()),
+            ..LfEventFields::default()
+        };
+        create_run_context(&directory, &fields, path, Some(ledger))?;
+        try_emit(&directory, LfNode::Run, LfEventType::Started, fields)?;
+        Ok(())
+    };
+    if let Err(error) = observe() {
+        debug!(%error, "early Exec observation unavailable");
+    }
+}
+
+pub fn command_exit_code<T>(result: &anyhow::Result<T>) -> u8 {
+    match result {
+        Ok(_) => 0,
+        Err(error) => error
+            .downcast_ref::<crate::exec::CommandExit>()
+            .map_or(1, |exit| exit.0),
+    }
+}
+
+pub(crate) fn is_cli_process() -> bool {
+    PROCESS_STARTED_AT.get().is_some()
+}
+
 pub fn with_runtime<T>(
     repo_root: &Path,
     command: &[String],
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    // Session completion and Flow recovery may enter this wrapper in-process.
-    // Only the outer command owns the actual lf process's lifecycle.
-    if current_context().is_some() {
+    // The executable owns admission and completion, even when observation
+    // failed. Nested library wrappers cannot mint another Exec to recover it.
+    if is_cli_process() || current_context().is_some() {
         return run();
     }
+    admit_process(repo_root, command);
+    let result = run();
+    finish_runtime(repo_root, &result);
+    result
+}
+
+/// Attach ordinary command observation after installation/data selection.
+pub fn admit_process(repo_root: &Path, command: &[String]) {
     let attribution = crate::work::wave::context::run_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
@@ -250,25 +325,28 @@ pub fn with_runtime<T>(
             ..LfEventFields::default()
         },
     );
-    let result = run();
-    match &result {
-        Ok(_) => emit(
-            repo_root,
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        ),
-        Err(error) => emit(
-            repo_root,
-            LfNode::Run,
-            LfEventType::Errored,
-            LfEventFields {
-                error: Some(format!("{error:#}")),
-                ..LfEventFields::default()
-            },
-        ),
-    }
-    result
+}
+
+fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
+    let code = command_exit_code(result);
+    emit(
+        directory,
+        LfNode::Run,
+        if code == 0 {
+            LfEventType::Completed
+        } else {
+            LfEventType::Errored
+        },
+        LfEventFields {
+            error: result
+                .as_ref()
+                .err()
+                .filter(|_| code != 0)
+                .map(|error| format!("{error:#}")),
+            exit_code: Some(i32::from(code)),
+            ..LfEventFields::default()
+        },
+    );
 }
 
 pub fn runs_root(worktree: &Path) -> PathBuf {
@@ -324,6 +402,7 @@ fn try_emit(
         return Ok(());
     }
 
+    let exit_code = fields.exit_code;
     let event = LfEvent {
         run_id: context.run_id.clone(),
         ts: if is_run_started {
@@ -351,7 +430,7 @@ fn try_emit(
     }
 
     let seq = next_seq();
-    ledger_insert(&context, &event, seq, repo_root);
+    ledger_insert(&context, &event, seq, repo_root, exit_code);
 
     if matches!(node, LfNode::Run)
         && matches!(
@@ -371,9 +450,15 @@ fn try_emit(
 }
 
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
-/// run: a locked or missing store degrades to a debug log line. Local-only —
+/// run: the first failure warns, and later failures log at debug. Local-only —
 /// the ledger never leaves the machine.
-fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Path) {
+fn ledger_insert(
+    context: &RunContext,
+    event: &LfEvent,
+    seq: i64,
+    repo_root: &Path,
+    exit_code: Option<i32>,
+) {
     let row = RunEventRow {
         run_id: event.run_id.as_str().to_string(),
         process_id: context.process_id.as_str().to_string(),
@@ -399,14 +484,18 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         error: event.error.clone(),
     };
 
-    match open_ledger() {
+    match context
+        .ledger
+        .clone()
+        .map_or_else(|| SqliteStore::new(&context.ledger_path), Ok)
+    {
         Ok(store) => {
-            let exit_code = match (event.node, event.event) {
+            let exit_code = exit_code.or(match (event.node, event.event) {
                 (LfNode::Run, LfEventType::Completed) => Some(0),
                 (LfNode::Run, LfEventType::Errored) => Some(1),
                 (LfNode::Run, LfEventType::Escalated) => Some(130),
                 _ => None,
-            };
+            });
             if let Err(err) = store.insert_run_event(
                 &row,
                 context.started_at,
@@ -493,20 +582,40 @@ fn ensure_run_context(
         return Ok(Some(context));
     }
 
-    let main_repo = main_repo_root(repo_root).ok();
-    let attribution = crate::work::wave::context::run_attribution(main_repo.as_deref());
-    let wave_name = attribution.wave;
-    if let Some(failure) = attribution.failure.as_deref() {
-        debug!(
-            error = failure,
-            repo = %repo_root.display(),
-            "ambient wave identity failed validation; run attributed to no wave, \
-             not inferred from the worktree"
-        );
-    }
+    create_run_context(
+        repo_root,
+        fields,
+        ledger_db_path().map_err(std::io::Error::other)?,
+        None,
+    )
+}
 
-    let agent_caller = std::env::var(AGENT_CALLER_ENV)
-        .ok()
+fn create_run_context(
+    repo_root: &Path,
+    fields: &LfEventFields,
+    ledger_path: PathBuf,
+    ledger: Option<SqliteStore>,
+) -> Result<Option<RunContext>, std::io::Error> {
+    let early = ledger.is_some();
+    let same_store = ledger_db_path()
+        .is_ok_and(|path| crate::store::same_database_file(&path, &ledger_path).unwrap_or(false));
+    let main_repo = (!early).then(|| main_repo_root(repo_root).ok()).flatten();
+    let wave_name = if early {
+        None
+    } else {
+        let attribution = crate::work::wave::context::run_attribution(main_repo.as_deref());
+        if let Some(failure) = attribution.failure.as_deref() {
+            debug!(
+                error = failure,
+                "ambient wave identity failed validation; Exec has no wave"
+            );
+        }
+        attribution.wave
+    };
+
+    let agent_caller = same_store
+        .then(|| std::env::var(AGENT_CALLER_ENV).ok())
+        .flatten()
         .map(|value| serde_json::from_str::<AgentCaller>(&value))
         .transpose()
         .map_err(std::io::Error::other)?;
@@ -514,7 +623,11 @@ fn ensure_run_context(
     // edge that admitted it. Provider launches install their own fresh caller.
     std::env::remove_var(AGENT_CALLER_ENV);
     let agent_parent = agent_caller.as_ref().and_then(|caller| {
-        match open_ledger().and_then(|store| store.agent_parent(caller)) {
+        match ledger
+            .clone()
+            .map_or_else(open_ledger, Ok)
+            .and_then(|store| store.agent_parent(caller))
+        {
             Ok(parent) => parent,
             Err(error) => {
                 warn!(%error, "agent caller could not be resolved");
@@ -527,7 +640,7 @@ fn ensure_run_context(
             .as_ref()
             .and_then(|(_, trace)| TraceId::parse(trace).ok())
     } else {
-        configured_run_id(repo_root)
+        same_store.then(|| configured_run_id(repo_root)).flatten()
     };
     let (run_id, minted_run_id) = match inherited_trace {
         Some(run_id) => (run_id, false),
@@ -567,25 +680,29 @@ fn ensure_run_context(
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
     // git-excluded (e.g. not a git repo).
-    let run_dir = match crate::repo::discover_repo_root(repo_root)
-        .map_err(std::io::Error::other)
-        .and_then(|root| {
-            root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
-        })
-        .and_then(|root| {
-            ensure_journal_ignored(&root)?;
-            let dir = runs_root(&root).join(run_id.as_str());
-            fs::create_dir_all(&dir)?;
-            Ok(dir)
-        }) {
-        Ok(dir) => Some(dir),
-        Err(err) => {
-            debug!(
-                error = %err,
-                repo = %repo_root.display(),
-                "file journal unavailable; recording to ledger only"
-            );
-            None
+    let run_dir = if early {
+        None
+    } else {
+        match crate::repo::discover_repo_root(repo_root)
+            .map_err(std::io::Error::other)
+            .and_then(|root| {
+                root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
+            })
+            .and_then(|root| {
+                ensure_journal_ignored(&root)?;
+                let dir = runs_root(&root).join(run_id.as_str());
+                fs::create_dir_all(&dir)?;
+                Ok(dir)
+            }) {
+            Ok(dir) => Some(dir),
+            Err(err) => {
+                debug!(
+                    error = %err,
+                    repo = %repo_root.display(),
+                    "file journal unavailable; recording to ledger only"
+                );
+                None
+            }
         }
     };
 
@@ -604,14 +721,20 @@ fn ensure_run_context(
         process_id,
         parent_process_id,
         agent_caller,
-        started_at: OffsetDateTime::now_utc().unix_timestamp(),
+        started_at: PROCESS_STARTED_AT
+            .get()
+            .copied()
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp()),
         process_started_at,
+        cwd: repo_root.to_path_buf(),
+        ledger_path,
+        ledger,
         command: fields
             .command
             .as_ref()
             .and_then(|argv| serde_json::to_string(argv).ok()),
         run_dir,
-        repo: Some(repo),
+        repo: (!early).then_some(repo),
         wave: wave_name.clone(),
         seq: Arc::new(AtomicI64::new(0)),
         finished: Arc::new(AtomicBool::new(false)),
@@ -645,12 +768,16 @@ fn ensure_run_context(
             &event,
             interrupted.seq.fetch_add(1, Ordering::Relaxed),
             &directory,
+            Some(130),
         );
     });
-    if let Err(error) = write_exec_process_receipt(&context) {
-        debug!(error = %error, exec_id = %context.process_id, "live Exec receipt unavailable");
-    } else {
-        crate::engine::agent::register_interrupt_cleanup(remove_exec_process_receipt);
+    // Never write process-control receipts into a different inherited Home.
+    if same_store {
+        if let Err(error) = write_exec_process_receipt(&context) {
+            debug!(error = %error, exec_id = %context.process_id, "live Exec receipt unavailable");
+        } else {
+            crate::engine::agent::register_interrupt_cleanup(remove_exec_process_receipt);
+        }
     }
 
     if let Some(wave_name) = wave_name {

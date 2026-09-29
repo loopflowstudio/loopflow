@@ -1323,7 +1323,7 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 
     if changes.commits.is_empty() {
         eprintln!("No commits in the target area since the last tag.");
-        std::process::exit(1);
+        return Err(crate::exec::CommandExit(1).into());
     }
 
     let is_tty = std::io::stdout().is_terminal();

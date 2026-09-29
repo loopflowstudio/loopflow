@@ -1239,10 +1239,18 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
     Ok((!report.trim().is_empty()).then_some(report))
 }
 
-fn main() -> anyhow::Result<()> {
-    let result = run();
-    loopflow::engine::agent::wait_for_interrupt_cleanup();
-    result
+fn main() -> std::process::ExitCode {
+    let result = journal::with_process(run);
+    let code = journal::command_exit_code(&result);
+    if let Err(error) = result {
+        if error
+            .downcast_ref::<loopflow::exec::CommandExit>()
+            .is_none()
+        {
+            eprintln!("Error: {error:?}");
+        }
+    }
+    std::process::ExitCode::from(code)
 }
 
 fn run() -> anyhow::Result<()> {
@@ -1266,10 +1274,21 @@ fn run() -> anyhow::Result<()> {
 
     // Reorder args so flags can appear after the skill name
     let normalized = loopflow::lf::navigation::normalize_args(std::env::args().collect())
-        .unwrap_or_else(|error| error.exit());
+        .map_err(|error| {
+            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+            let _ = error.print();
+            loopflow::exec::CommandExit(code)
+        })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
-    let mut cli = Cli::parse_from(args.clone());
+    let mut cli = match Cli::try_parse_from(args.clone()) {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+            let _ = error.print();
+            return Err(loopflow::exec::CommandExit(code).into());
+        }
+    };
     if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
         return finish_command(result);
     }
@@ -1293,6 +1312,17 @@ fn run() -> anyhow::Result<()> {
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
+
+    if matches!(
+        &cli.command,
+        Some(
+            Commands::Install { .. }
+                | Commands::Screenshot { .. }
+                | Commands::ScreenshotSupervisor { .. }
+        )
+    ) {
+        journal::observe_process(&args);
+    }
 
     // Screenshot capture owns no Home, repository, account, or Run state. Its
     // hidden supervisor must also be able to clean up after its public parent
@@ -1367,7 +1397,8 @@ fn run() -> anyhow::Result<()> {
     // Exec admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
-    with_runtime(&directory, &args, || {
+    journal::admit_process(&directory, &args);
+    {
         let explicit_wave = cli
             .wave
             .as_deref()
@@ -1425,7 +1456,7 @@ fn run() -> anyhow::Result<()> {
             account_selection,
             inherited_account_lease,
         )
-    })
+    }
 }
 
 fn dispatch(
@@ -1792,7 +1823,9 @@ fn execute_command(
 fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     if let Err(error) = &result {
         if let Some(error) = error.downcast_ref::<clap::Error>() {
-            error.exit();
+            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+            let _ = error.print();
+            return Err(loopflow::exec::CommandExit(code).into());
         }
         if matches!(
             error.downcast_ref::<loopflow::engine::LoadError>(),
@@ -1802,7 +1835,10 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                     | loopflow::engine::LoadError::FlowNotFound(_)
             )
         ) {
-            clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string()).exit();
+            let error = clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
+            let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+            let _ = error.print();
+            return Err(loopflow::exec::CommandExit(code).into());
         }
     }
     result

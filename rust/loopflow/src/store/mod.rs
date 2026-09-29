@@ -27,6 +27,7 @@ pub mod sqlite;
 mod token_crypto;
 
 pub use branch_data::isolate_branch_data;
+pub(crate) use branch_data::observation_database_path;
 
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` into the local store.
@@ -369,7 +370,7 @@ fn may_apply_migrations(
     Ok(advance == FrontierAdvance::Authorized)
 }
 
-fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
+pub(crate) fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
     if canonicalize_with_missing_tail(left)? == canonicalize_with_missing_tail(right)? {
         return Ok(true);
     }

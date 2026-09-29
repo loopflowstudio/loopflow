@@ -262,6 +262,12 @@ fn session_history_retains_receipts_and_unknown_driver() {
     assert!(events[1].exec_id.is_none());
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
+        events[2].kind,
+        loopflow::session::SessionEventKind::Observed
+    );
+    assert!(events[2].provider_turn.is_none());
+    assert!(events[2].provider_thread.is_none());
+    assert_eq!(
         serde_json::to_value(events).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );

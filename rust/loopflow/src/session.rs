@@ -10,8 +10,8 @@ use crate::id::WaveId;
 pub struct SessionEvent {
     pub seq: i64,
     pub session_id: String,
-    pub provider_thread: String,
-    pub provider_turn: String,
+    pub provider_thread: Option<String>,
+    pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,
     pub exec_id: Option<String>,
@@ -27,6 +27,18 @@ pub enum SessionEventKind {
     Started,
     Usage,
     Completed,
+    /// Imported evidence without an exact native turn; cannot settle a Flow.
+    Observed,
+}
+
+/// Parsed offline evidence before its transaction; no execution identity or authority.
+#[derive(Debug)]
+pub(crate) struct ImportedObservation {
+    pub source: String,
+    pub observed_at: i64,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub payload: serde_json::Value,
 }
 
 impl SessionEventKind {
@@ -35,6 +47,7 @@ impl SessionEventKind {
             Self::Started => "started",
             Self::Usage => "usage",
             Self::Completed => "completed",
+            Self::Observed => "observed",
         }
     }
 }

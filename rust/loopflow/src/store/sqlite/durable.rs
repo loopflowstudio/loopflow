@@ -1476,7 +1476,7 @@ mod durable_store_tests {
         let events = store.session_history("orphan", 0, 0).unwrap();
         assert!(events
             .iter()
-            .filter(|event| event.provider_turn == "active")
+            .filter(|event| event.provider_turn.as_deref() == Some("active"))
             .all(|event| event.task_id.is_none()));
         assert_eq!(
             events.last().unwrap().task_id.as_deref(),

@@ -32,3 +32,11 @@ input-to-conversation references required for earlier-input lookup after retry;
 it has no result, state, ordinal or resumable lifecycle. Provider outcomes remain
 Session events, command outcomes remain Execs. This does not replace the remaining
 import-preservation proof or authorize deleting historical inputs.
+
+2026-09-28 · Historical import retains legacy input and provider observations as
+subordinate AgentSession history. An imported observation is not a native turn
+completion: unknown native thread/turn and Exec identity remain nullable, and
+Flow success selection continues to require exact native completion evidence.
+Original source/input keys namespace replay comparison; no imported input gains
+an ordinal, mutable outcome, or resumable lifecycle. Retain original artifacts
+until the complete preservation obligations pass.

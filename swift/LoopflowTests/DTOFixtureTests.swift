@@ -13,6 +13,9 @@ struct DTOFixtureTests {
         let events = try JSONDecoder().decode([SessionEvent].self, from: data)
         #expect(events[1].kind == .completed)
         #expect(events[1].execID == nil)
+        #expect(events[2].kind == .observed)
+        #expect(events[2].providerThread == nil)
+        #expect(events[2].providerTurn == nil)
         #expect(events[0].payload == .object([
             "total": .object(["inputTokens": .integer(40), "outputTokens": .integer(10)]),
             "last": .object(["inputTokens": .integer(20), "outputTokens": .integer(5)]),

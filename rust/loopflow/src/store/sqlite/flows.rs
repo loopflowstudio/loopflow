@@ -681,7 +681,78 @@ fn claim_task_worker_in(
     Ok(TaskWorkerClaimOutcome::Claimed(claim))
 }
 
+pub(super) fn import_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResult<bool> {
+    if let Some(saved) = flow_in(conn, flow.id())? {
+        if saved.invocation != flow.invocation
+            || saved.task_id != flow.task_id
+            || saved.wave_id != flow.wave_id
+            || saved.cwd != flow.cwd
+            || saved.message != flow.message
+            || saved.model != flow.model
+        {
+            return Err(invalid(format!(
+                "Flow {} conflicts with its recorded capture",
+                flow.id()
+            )));
+        }
+        return Ok(false);
+    }
+    if flow.claim.is_some() {
+        return Err(invalid(
+            "historical capture cannot acquire a live worker claim",
+        ));
+    }
+    if let Some(task) = &flow.task_id {
+        let wave = super::runs::task_wave_in(conn, task)?;
+        if flow.wave_id.as_ref() != Some(&wave) {
+            return Err(invalid("historical Flow Task and Wave disagree"));
+        }
+    }
+    conn.execute(
+        "INSERT INTO flow_sessions(id,task_id,wave_id,cwd,message,model,invocation_json,
+            step_index,iteration,position_version,worker_generation,failure_json,
+            updated_at,review_json,state,ended_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11,?12,?13,?14,?15)",
+        params![
+            flow.id(),
+            flow.task_id.as_ref().map(TaskId::as_str),
+            flow.wave_id.as_ref().map(WaveId::as_str),
+            flow.task_id.is_none().then(|| flow.cwd.to_string_lossy()),
+            flow.message,
+            flow.model,
+            serde_json::to_string(&flow.invocation)?,
+            i64::try_from(flow.cursor.index).map_err(invalid)?,
+            flow.cursor.iteration,
+            i64::try_from(flow.version).map_err(invalid)?,
+            flow.failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            flow.updated_at.unix_timestamp(),
+            serde_json::to_string(&flow.cursor)?,
+            if flow.finished {
+                "completed"
+            } else {
+                "current"
+            },
+            flow.finished.then_some(flow.updated_at.unix_timestamp())
+        ],
+    )?;
+    Ok(true)
+}
+
 impl SqliteStore {
+    /// Historical capture is independent of today's cursor and launch eligibility.
+    pub(crate) fn import_flow(&self, flow: &FlowSession, dry_run: bool) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = import_flow_in(&tx, flow)?;
+        if !dry_run {
+            tx.commit()?;
+        }
+        Ok(changed)
+    }
+
     pub fn create_flow(&self, flow: &FlowSession) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

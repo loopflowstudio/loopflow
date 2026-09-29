@@ -46,7 +46,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     println!(
                         "{} {} {} {}",
                         event.seq,
-                        event.provider_turn,
+                        event.provider_turn.as_deref().unwrap_or("unknown-turn"),
                         event.kind.as_str(),
                         event.payload
                     );
@@ -128,12 +128,13 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 return Ok(());
             }
             println!(
-                "{} {} interactive, {} Ask, {} Flow review and {} Task review Sessions; {} already stored.",
+                "{} {} interactive, {} Ask, {} Flow review and {} Task review Sessions; {} other Flow captures; {} already stored.",
                 if *dry_run { "Would store" } else { "Stored" },
                 report.interactive,
                 report.ask,
                 report.flow_review,
                 report.task_review,
+                report.flow,
                 report.unchanged
             );
             for failure in &report.failed {

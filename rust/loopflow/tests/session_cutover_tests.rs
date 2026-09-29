@@ -1445,6 +1445,130 @@ fn importing_after_bind_does_not_report_the_task_started_again() {
 
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
+fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() {
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use serde_json::json;
+
+    let fixture = Fixture::new(false);
+    let step = ConcreteStep::Skill(ConcreteSkill {
+        skill: Skill {
+            content: Some("Retained source".into()),
+            ..Skill::named("implement")
+        },
+        policy: OccurrencePolicy::default(),
+        flow_parents: vec![],
+    });
+    let mut paths = Vec::new();
+    for finished in [false, true] {
+        let id = uuid::Uuid::new_v4().to_string();
+        let path = fixture
+            .home
+            .path()
+            .join("flows")
+            .join(&id)
+            .join("position.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let cursor = ExecutionCursor {
+            index: usize::from(finished),
+            ..Default::default()
+        };
+        let failure = (!finished).then(|| {
+            json!({
+                "run_id": null, "reason": "provider failed", "restart_required": false,
+                "observed_at": "2026-09-20T20:05:00Z"
+            })
+        });
+        let saved = json!({
+            "id": id, "flow": "captured", "cwd": fixture.repo.path(), "steps": [step],
+            "cursor": cursor, "message": "Keep original input", "model": "opencode",
+            "wave": null, "task": null, "as_work": null, "active": null,
+            "failure": failure, "finished": finished
+        });
+        std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+        paths.push((path, saved));
+    }
+    let planned = fixture.json(&["session", "import", "--dry-run", "--json"]);
+    assert_eq!(planned["flow"], 2, "{planned}");
+    assert_eq!(fixture.count("flow_sessions"), 0);
+    let imported = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(imported["flow"], 2, "{imported}");
+    assert_eq!(imported["failed"], json!([]));
+    let again = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(again["unchanged"], 2, "{again}");
+    for (path, saved) in &paths {
+        let (graph, cursor, state, failure): (String, String, String, Option<String>) = fixture.db().query_row(
+            "SELECT invocation_json,review_json,state,failure_json FROM flow_sessions WHERE id=?1",
+            [saved["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&graph).unwrap()["steps"],
+            saved["steps"]
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&cursor).unwrap(),
+            saved["cursor"]
+        );
+        assert_eq!(
+            state,
+            if saved["finished"] == true {
+                "completed"
+            } else {
+                "current"
+            }
+        );
+        assert_eq!(
+            failure.map(|s| serde_json::from_str::<Value>(&s).unwrap()),
+            saved["failure"]
+                .is_object()
+                .then(|| saved["failure"].clone())
+        );
+        let mut changed = saved.clone();
+        changed["steps"][0] = json!(ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named("different"),
+            policy: OccurrencePolicy::default(),
+            flow_parents: vec![],
+        }));
+        std::fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        let rejected = fixture.json(&["session", "import", "--json"]);
+        assert!(
+            !rejected["failed"].as_array().unwrap().is_empty(),
+            "{rejected}"
+        );
+        let retained: String = fixture
+            .db()
+            .query_row(
+                "SELECT invocation_json FROM flow_sessions WHERE id=?1",
+                [saved["id"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, graph);
+        std::fs::remove_file(path).unwrap();
+    }
+    assert_eq!(fixture.count("agent_sessions"), 0);
+    assert_eq!(
+        fixture.count("session_events"),
+        0,
+        "import invents no native turns"
+    );
+    let fabricated: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT count(*) FROM execs WHERE caller_session_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        fabricated, 0,
+        "import commands are actual Execs, never old agent processes"
+    );
+    assert!(fixture.launches().is_empty());
+}
+
+/// One Session of each origin, as an old Home kept them in files.
+#[test]
 fn import_stores_each_old_session_once_with_its_name() {
     use loopflow::durable::{FlowSession, RunId};
     use loopflow::engine::invocation::QueuedInvocation;
@@ -1656,10 +1780,24 @@ fn import_stores_each_old_session_once_with_its_name() {
         json!([{"selector": "wave:task-pr-tests", "source": "declared"}]),
         json!(interactive),
     );
+    let past_flow = uuid::Uuid::new_v4().to_string();
+    sources.borrow_mut().push(write(
+        home.join("flows").join(&past_flow).join("position.json"),
+        json!({
+            "id": past_flow, "flow": "historical", "cwd": sibling.worktree,
+            "steps": [ConcreteStep::Skill(ConcreteSkill {
+                skill: Skill::named("implement"), policy: OccurrencePolicy::default(), flow_parents: vec![]
+            })],
+            "cursor": ExecutionCursor { index: 1, ..Default::default() },
+            "message": null, "model": "opencode", "wave": null,
+            "task": sibling.id, "as_work": null, "active": null,
+            "failure": null, "finished": true
+        }),
+    ));
     let step = settled(
         json!({
-            "kind": "step", "task_id": null, "boundary_key": "0", "invocation_id": invocation,
-            "flow": "design", "step": "implement", "node": "0", "iterations": [[]]
+            "kind": "step", "task_id": null, "boundary_key": "0", "invocation_id": past_flow,
+            "flow": "historical", "step": "implement", "node": "0", "iterations": [[]]
         }),
         json!([{"selector": "task:INF-124", "source": "inherited"}]),
         Value::Null,
@@ -1674,8 +1812,19 @@ fn import_stores_each_old_session_once_with_its_name() {
         .collect();
 
     let names = || -> Vec<(String, String, String)> {
-        let mut names: Vec<_> = fixture
-            .sessions()
+        let mut sessions = fixture.sessions();
+        sessions.extend(
+            serde_json::from_value::<Vec<Value>>(fixture.json(&[
+                "session",
+                "list",
+                "--all",
+                "--interactive",
+                "false",
+                "--json",
+            ]))
+            .unwrap(),
+        );
+        let mut names: Vec<_> = sessions
             .iter()
             .map(|session| {
                 (
@@ -1694,18 +1843,42 @@ fn import_stores_each_old_session_once_with_its_name() {
         "before the import only the stored Task review lists"
     );
 
+    let started = || {
+        fixture
+            .db()
+            .query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.task.id.as_str()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+    };
+    let original_started = started();
+    assert!(original_started.is_some());
     let planned = fixture.json(&["session", "import", "--dry-run", "--json"]);
     assert_eq!(
         fixture.count("agent_sessions"),
         1,
         "a dry run stores nothing"
     );
+    assert_eq!(
+        fixture.count("flow_sessions"),
+        1,
+        "dry-run writes no captured graph"
+    );
+    assert_eq!(
+        fixture.count("session_events"),
+        0,
+        "dry-run writes no history"
+    );
     let first = fixture.json(&["session", "import", "--json"]);
+    assert_eq!(started(), original_started);
     for report in [&planned, &first] {
         for (kind, count) in [
             ("interactive", 1),
             ("ask", 1),
             ("flow_review", 1),
+            ("flow", 1),
             ("task_review", 1),
             ("run", 2),
             ("unchanged", 0),
@@ -1730,7 +1903,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         ("flow_review", 0),
         ("task_review", 0),
         ("run", 0),
-        ("unchanged", 4),
+        ("unchanged", 7),
     ] {
         assert_eq!(again[kind], count, "{kind}: {again}");
     }
@@ -1746,90 +1919,96 @@ fn import_stores_each_old_session_once_with_its_name() {
             ),
             ("Release target".to_string(), "ask".to_string(), asked),
             ("Task review".to_string(), "flow".to_string(), task_review),
+            (
+                "implement".to_string(),
+                "conversation".to_string(),
+                headless.clone(),
+            ),
+            (
+                "implement".to_string(),
+                "conversation".to_string(),
+                step.clone(),
+            ),
         ];
         expected.sort();
         expected
     };
     assert_eq!(names(), expected);
-    assert_eq!(fixture.count("agent_sessions"), 4);
-    assert_eq!(fixture.count("runs"), 6);
-    // (session, invocation, caller, provider, outcome, ended) of an imported Run.
-    type Imported = (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-        i64,
+    assert_eq!(fixture.count("agent_sessions"), 6);
+    assert_eq!(
+        fixture.count("runs"),
+        0,
+        "import does not recreate Run owners"
     );
-    let imported = |run: &str| -> Imported {
-        fixture
+    let membership =
+        |input: &str| -> (Option<String>, Option<i64>, Option<String>, Option<String>) {
+            fixture.db().query_row(
+            "SELECT s.flow_session_id,s.node,s.iterations,i.caller_input_id FROM agent_sessions s
+             JOIN agent_session_inputs i ON i.input_id=s.input_id WHERE s.input_id=?1", [input],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap()
+        };
+    assert_eq!(
+        membership(&headless),
+        (None, None, None, Some(interactive.clone()))
+    );
+    assert_eq!(
+        membership(&step),
+        (Some(past_flow), Some(0), Some("[[]]".into()), None),
+        "recorded membership survives the later cursor"
+    );
+    for (input, task_id, source) in [
+        (&headless, None, "declared"),
+        (&step, Some(sibling.id.to_string()), "inherited"),
+        (&interactive, Some(sibling.id.to_string()), "declared"),
+    ] {
+        let parents: (Option<String>, String, String) = fixture
             .db()
             .query_row(
-                "SELECT session_id, invocation_id, caller_run_id, provider, outcome, ended_at
-                 FROM runs WHERE id=?1",
-                [run],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                },
+                "SELECT task_id,wave_id,work_source FROM agent_sessions WHERE input_id=?1",
+                [input],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap_or_else(|error| panic!("Run {run} has no row: {error}"))
-    };
-    let ended = 1_789_934_700;
-    assert_eq!(
-        imported(&headless),
-        (
-            None,
-            None,
-            Some(interactive.clone()),
-            "opencode".to_string(),
-            "failed".to_string(),
-            ended
-        )
-    );
-    assert_eq!(
-        fixture.run_parents(&headless),
-        (
-            None,
-            Some(task.task.wave_id.to_string()),
-            Some("declared".to_string())
-        )
-    );
-    assert_eq!(imported(&step).1, None, "its invocation has moved on");
-    assert_eq!(
-        fixture.run_parents(&step),
-        (
-            Some(sibling.id.to_string()),
-            Some(sibling.wave_id.to_string()),
-            Some("inherited".to_string()),
-        )
-    );
-    let listed = fixture.json(&["runs", "--task", "INF-124", "--json"]);
-    let mut listed: Vec<&str> = listed
+            .unwrap();
+        assert_eq!(
+            parents,
+            (task_id, task.task.wave_id.to_string(), source.into())
+        );
+    }
+    let history = fixture.json(&["session", "history", &headless, "--json"]);
+    let terminal = history
         .as_array()
         .unwrap()
         .iter()
-        .map(|run| run["id"].as_str().unwrap())
+        .find(|event| event["payload"]["source"] == "terminal.json")
+        .unwrap();
+    assert_eq!(terminal["payload"]["evidence"]["outcome"], "failed");
+    assert_eq!(terminal["observed_at"], 1_789_934_700);
+    assert_eq!(terminal["kind"], "observed");
+    assert!(terminal["provider_turn"].is_null() && terminal["exec_id"].is_null());
+    let mut sessions = Vec::new();
+    for mode in ["true", "false"] {
+        sessions.extend(
+            serde_json::from_value::<Vec<Value>>(fixture.json(&[
+                "session",
+                "list",
+                "--all",
+                "--interactive",
+                mode,
+                "--task",
+                "INF-124",
+                "--json",
+            ]))
+            .unwrap(),
+        );
+    }
+    let mut listed: Vec<&str> = sessions
+        .iter()
+        .map(|session| session["run_id"].as_str().unwrap())
         .collect();
     listed.sort();
-    let mut expected_runs = vec![interactive.as_str(), step.as_str()];
-    expected_runs.sort();
-    assert_eq!(listed, expected_runs);
-    assert_eq!(
-        fixture.run_parents(&interactive),
-        (
-            Some(sibling.id.to_string()),
-            Some(sibling.wave_id.to_string()),
-            Some("declared".to_string()),
-        )
-    );
+    let mut expected_inputs = vec![interactive.as_str(), step.as_str()];
+    expected_inputs.sort();
+    assert_eq!(listed, expected_inputs);
     let feedback: String = fixture
         .db()
         .query_row(
@@ -1839,6 +2018,34 @@ fn import_stores_each_old_session_once_with_its_name() {
         )
         .unwrap();
     assert_eq!(feedback, "Keep the old parser");
+
+    let terminal_path = fixture.run_dir(&headless).join("terminal.json");
+    let original_terminal = std::fs::read(&terminal_path).unwrap();
+    let mut changed: Value = serde_json::from_slice(&original_terminal).unwrap();
+    changed["outcome"] = json!("completed");
+    std::fs::write(&terminal_path, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let conflict = fixture.json(&["session", "import", "--json"]);
+    assert!(
+        conflict["failed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|failure| failure["reason"]
+                .as_str()
+                .unwrap()
+                .contains("conflicting terminal.json evidence")),
+        "{conflict}"
+    );
+    assert_eq!(
+        fixture.json(&["session", "history", &headless, "--json"]),
+        history,
+        "a conflicting replay cannot rewrite retained failure evidence"
+    );
+    std::fs::write(&terminal_path, original_terminal).unwrap();
+    assert!(
+        fixture.launches().is_empty(),
+        "offline import never starts a provider"
+    );
 
     // The files stay as evidence and nothing reads them again.
     for (path, bytes) in &evidence {

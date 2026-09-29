@@ -4,6 +4,18 @@ use crate::session::{AgentSession, Run, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub(crate) async fn import_session(
+        &self,
+        session: AgentSession,
+        review: Option<FlowSession>,
+        history: Vec<crate::session::ImportedObservation>,
+        dry_run: bool,
+    ) -> StoreResult<bool> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.import_session(session, review.as_ref(), &history, dry_run)
+        })
+        .await
+    }
     pub async fn agent_work(
         &self,
         exec: &crate::id::ExecId,

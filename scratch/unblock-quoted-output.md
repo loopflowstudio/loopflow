@@ -27,7 +27,7 @@ changing access grants would not resolve this observation.
 
 The supervisor reports that public
 `lf runs run_fe7ae2c0bf9941caa2550d950e4f3d62 --final` succeeds, the completed
-[concept review](concept-review.md) is retained, and the prior worker/provider
+[concept review](https://github.com/loopflowstudio/loopflow/blob/aa43c6829c431a1687c5fd69f9fbb30bdea2db31/scratch/concept-review.md) is retained in branch history, and the prior worker/provider
 are absent. Those checks were not repeated here. The earlier inspection's
 `AttributeError` was also corrected: retained `flow_events` rows are lists.
 The related earlier failure and remaining classifier repair are recorded in

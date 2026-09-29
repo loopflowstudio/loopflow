@@ -760,6 +760,13 @@ pub enum MetricEvidenceDto {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricUnknownCauseDto {
     Never,
+    TargetUnavailable {
+        value: f64,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_start: OffsetDateTime,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_end: OffsetDateTime,
+    },
     RevisionMismatch {
         expected_contract_revision: String,
         observed_contract_revision: String,
@@ -899,11 +906,12 @@ pub fn derive_metric_portfolio(
 
 /// Join reviewed contracts to registered producers and accepted observations.
 /// Invalid contracts and producer mismatches remain isolated from valid siblings.
+/// `None` targets means unavailable planning; `Some(&[])` proves no targets.
 pub fn compose_metric_portfolio(
     discovery: MetricContractDiscovery,
     registered_instruments: &BTreeMap<MetricIdentity, String>,
     observations: &BTreeMap<MetricIdentity, MetricObservationEvidence>,
-    targets: &[crate::pm::ChapterMetricTarget],
+    targets: Option<&[crate::pm::ChapterMetricTarget]>,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto, MetricError> {
     let mut metrics = Vec::new();
@@ -925,12 +933,30 @@ pub fn compose_metric_portfolio(
             .get(&contract.identity)
             .cloned()
             .unwrap_or_default();
-        let target = targets
-            .iter()
-            .find(|target| target.metric_id == contract.identity.metric_id)
-            .map(|target| &target.target);
-        let reading =
+        let target = targets.and_then(|targets| {
+            targets
+                .iter()
+                .find(|target| target.metric_id == contract.identity.metric_id)
+                .map(|target| &target.target)
+        });
+        let mut reading =
             derive_metric_reading_from_evidence(&contract, &persisted, target, evaluation_time)?;
+        if targets.is_none() {
+            if let MetricEvidenceDto::Untargeted {
+                value,
+                source_window_start,
+                source_window_end,
+            } = reading.evidence
+            {
+                reading.evidence = MetricEvidenceDto::Unknown {
+                    cause: MetricUnknownCauseDto::TargetUnavailable {
+                        value,
+                        source_window_start,
+                        source_window_end,
+                    },
+                };
+            }
+        }
         if contract.stage == MetricStage::Graduated && !persisted.graduation_qualified {
             contract_issues.push(MetricContractIssueDto::InvalidGraduation {
                 wave_id: contract.identity.wave_id.clone(),

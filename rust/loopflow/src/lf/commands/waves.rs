@@ -1655,7 +1655,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
             .then(left.name.cmp(&right.name))
     });
     for metric in official {
-        append_metric_lines(&mut lines, metric, "Wave", "    ");
+        append_metric_lines(&mut lines, metric, portfolio, "    ");
     }
 
     let mut candidates = portfolio
@@ -1667,7 +1667,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
     if !candidates.is_empty() {
         lines.push("    Instrumenting".to_string());
         for metric in candidates {
-            append_metric_lines(&mut lines, metric, "Wave", "      ");
+            append_metric_lines(&mut lines, metric, portfolio, "      ");
         }
     }
     if !portfolio.contract_issues.is_empty() {
@@ -1682,7 +1682,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
 fn append_metric_lines(
     lines: &mut Vec<String>,
     metric: &MetricReadingDto,
-    owner: &str,
+    portfolio: &MetricPortfolioDto,
     indent: &str,
 ) {
     lines.push(format!(
@@ -1691,9 +1691,9 @@ fn append_metric_lines(
         metric_evidence_label(&metric.evidence),
     ));
     lines.push(format!(
-        "{indent}  Owner {owner} · Value {value} · Target {target} over {window} · {freshness}",
+        "{indent}  Owner Wave · Value {value} · Target {target} over {window} · {freshness}",
         value = metric_value(metric),
-        target = metric_target(metric),
+        target = metric_target(metric, portfolio),
         window = metric.window,
         freshness = metric_freshness(&metric.freshness),
     ));
@@ -1726,10 +1726,13 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         | MetricEvidenceDto::Met { value, .. }
         | MetricEvidenceDto::Missed { value, .. } => Some(*value),
         MetricEvidenceDto::Unknown { cause } => match cause {
-            MetricUnknownCauseDto::Incomplete { value, .. }
+            MetricUnknownCauseDto::TargetUnavailable { value, .. }
+            | MetricUnknownCauseDto::Incomplete { value, .. }
             | MetricUnknownCauseDto::WindowMismatch { value, .. }
             | MetricUnknownCauseDto::StaleObservation { value, .. } => Some(*value),
-            _ => None,
+            MetricUnknownCauseDto::Never
+            | MetricUnknownCauseDto::RevisionMismatch { .. }
+            | MetricUnknownCauseDto::StaleUnavailable { .. } => None,
         },
         MetricEvidenceDto::Unavailable { .. } => None,
     };
@@ -1738,7 +1741,15 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn metric_target(metric: &MetricReadingDto) -> String {
+fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
+    if portfolio.contract_issues.iter().any(|issue| {
+        matches!(issue,
+            MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
+            if wave_id == &metric.identity.wave_id
+        )
+    }) {
+        return "unavailable for this chapter".into();
+    }
     match metric.target {
         None => "unset for this chapter".into(),
         Some(MetricTarget::AtLeast { value }) => {
@@ -1786,6 +1797,9 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
         )),
         MetricEvidenceDto::Unknown { cause } => Some(match cause {
             MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
+            MetricUnknownCauseDto::TargetUnavailable { .. } => {
+                "chapter target planning is unavailable".to_string()
+            }
             MetricUnknownCauseDto::RevisionMismatch {
                 expected_contract_revision,
                 observed_contract_revision,
@@ -2250,6 +2264,73 @@ mod tests {
             "\u{2026}fix/alpha"
         );
         assert_eq!(truncate_start("beta", 10), "beta");
+    }
+
+    #[test]
+    fn text_metrics_preserve_values_when_chapter_targets_are_unavailable() {
+        let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/metric_portfolio.json"
+        ))
+        .unwrap();
+        let observed = fixture
+            .metrics
+            .iter()
+            .find(|metric| {
+                matches!(
+                    metric.evidence,
+                    MetricEvidenceDto::Unknown {
+                        cause: MetricUnknownCauseDto::TargetUnavailable { .. }
+                    }
+                )
+            })
+            .unwrap();
+        for cause in [
+            MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::StaleObservation {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::Never,
+        ] {
+            let never = matches!(cause, MetricUnknownCauseDto::Never);
+            let mut metric = observed.clone();
+            metric.evidence = MetricEvidenceDto::Unknown { cause };
+            let portfolio = MetricPortfolioDto {
+                contract_issues: vec![
+                    crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                        wave_id: metric.identity.wave_id.clone(),
+                        reason: "current Project is ambiguous".into(),
+                    },
+                ],
+                metrics: vec![metric],
+            };
+            let text = metric_portfolio_text(&portfolio);
+            assert!(text.contains("Target unavailable for this chapter"));
+            assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
+            assert!(!text.contains("unset for this chapter"));
+        }
+        let mut known_empty = observed.clone();
+        known_empty.evidence = MetricEvidenceDto::Untargeted {
+            value: 1.0,
+            source_window_start: OffsetDateTime::UNIX_EPOCH,
+            source_window_end: OffsetDateTime::UNIX_EPOCH,
+        };
+        let text = metric_portfolio_text(&MetricPortfolioDto {
+            metrics: vec![known_empty],
+            contract_issues: vec![
+                crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                    wave_id: "another-wave".into(),
+                    reason: "no saved plan".into(),
+                },
+            ],
+        });
+        assert!(text.contains("[no target]"));
+        assert!(text.contains("Target unset for this chapter"));
     }
 
     #[test]

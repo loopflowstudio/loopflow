@@ -68,6 +68,9 @@ class Handler(BaseHTTPRequestHandler):
             }
         elif "mutation UpdateInitiative" in query:
             data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
+        elif "mutation RenameProject" in query:
+            project["name"] = variables["name"]
+            data = {"projectUpdate": {"success": True}}
         elif "mutation UpdateProject" in query:
             project.update({key: variables[key] for key in ["name", "description", "content"]})
             data = {"projectUpdate": {"project": {"id": variables["id"]}}}

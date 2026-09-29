@@ -4,6 +4,44 @@ import Foundation
 import SwiftUI
 import Testing
 #if canImport(GhosttyKit)
+    @Test("An off-window representable cannot steal a displayed terminal")
+    @MainActor
+    func offWindowTerminalMount() async throws {
+        _ = NSApplication.shared
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.shell("off-window-proof")
+        let terminal = pool.view(for: identity)
+        let content = GhosttyTerminalView(
+            workingDirectory: NSTemporaryDirectory(), argv: ["/bin/cat"], env: [:],
+            terminal: identity, surfacePool: pool, isFocused: true
+        )
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 600, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let live = NSHostingView(rootView: content)
+        window.contentView = live
+        defer { window.contentView = nil; pool.release(identity) }
+        live.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let surface = try #require(terminal.surface)
+        try #require(terminal.window === window)
+        #expect(window.makeFirstResponder(terminal))
+        // SwiftUI may prepare a replacement subtree without ever displaying it.
+        autoreleasepool {
+            let speculative = NSHostingView(rootView: content)
+            speculative.frame = live.frame
+            speculative.layoutSubtreeIfNeeded()
+            _ = speculative.fittingSize
+            speculative.layoutSubtreeIfNeeded()
+            #expect(terminal.window === window)
+            #expect(terminal.isDescendant(of: live))
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(terminal.window === window)
+        #expect(terminal.isDescendant(of: live))
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+    }
+
     @Test("Dismantling an old mount keeps the retained terminal in its new mount")
     @MainActor
     func retainedTerminalRemount() async throws {

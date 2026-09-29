@@ -855,6 +855,7 @@ mod durable_store_tests {
 
     fn autonomous_position(task_id: &TaskId) -> FlowSession {
         FlowSession {
+            parent_id: None,
             invocation: crate::durable::test_flow_invocation(
                 "task",
                 0,
@@ -1583,6 +1584,7 @@ mod durable_store_tests {
         .unwrap();
         store
             .create_flow(&crate::durable::FlowSession {
+                parent_id: None,
                 invocation: about.clone(),
                 cursor: ExecutionCursor::default(),
                 version: 0,

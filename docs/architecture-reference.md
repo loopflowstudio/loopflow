@@ -589,10 +589,17 @@ cursor and return counts. Definition changes affect new Sessions, never saved
 execution. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
-Runtime loop entry creates a child FlowSession for that pass with the same nullable
-Task. Parent wait and child completion settle under the existing claim transaction.
-Retry uses the same child; another loop pass creates another child. Task and
-Taskless launch use one driver and need no synthetic planning records.
+Taking an Iterate edge creates a child FlowSession for that repeated pass with
+the same nullable Task. Initial forward execution stays in the original session;
+template composition and XOR routing alone create no child. The parent waits at
+its deciding boundary. The child returns there, and another Iterate creates a
+sibling pass. This also preserves overlapping backward edges.
+
+Parent wait, exact child completion and continuation settle in the existing
+version/claim transaction. Retry retains the child. A Task's one managed pointer
+continues to name the root, while execution and review reads follow its active
+child. All passes share the root's driver lock. Task and taskless launch use one
+driver and need no synthetic planning records.
 
 A decision records Advance or Iterate for its selected successful agent completion.
 Failure or interruption cannot submit a verdict. A keyed unblock Ask returns

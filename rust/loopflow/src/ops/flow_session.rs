@@ -206,6 +206,7 @@ mod tests {
             );
             let flow = store
                 .create_flow(FlowSession {
+                    parent_id: None,
                     invocation: QueuedInvocation::new("review", steps).unwrap(),
                     cursor: ExecutionCursor {
                         child: Some(Box::new(NestedCursor::Xor {

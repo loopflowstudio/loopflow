@@ -365,6 +365,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let position = loopflow::durable::FlowSession {
+        parent_id: None,
         task_id: Some(task.task.id.clone()),
         wave_id: Some(task.task.wave_id.clone()),
         cwd: task.task.worktree.clone(),
@@ -714,6 +715,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             })
             .expect("pursue has an implementation decision boundary");
         let position = FlowSession {
+            parent_id: None,
             invocation,
             cursor: loopflow::engine::ExecutionCursor {
                 index: decision_index,

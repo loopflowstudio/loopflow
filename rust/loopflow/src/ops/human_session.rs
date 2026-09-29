@@ -3196,6 +3196,7 @@ mod tests {
 
     fn position() -> FlowSession {
         FlowSession {
+            parent_id: None,
             invocation: crate::durable::test_flow_invocation(
                 "review",
                 1,

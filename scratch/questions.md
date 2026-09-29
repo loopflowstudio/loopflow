@@ -43,3 +43,40 @@ proposals remain in [committed history](https://github.com/loopflowstudio/loopfl
 No additional product decision is needed to continue implementation. The
 [remaining work](remaining-work.md) and [import obligations](import-preservation.md)
 retain acceptance and preservation requirements.
+
+- **Discovery surface:** use `flow list/show --sessions` for saved FlowSessions,
+  keeping the proposal's `sessions` and `inspect` names available as templates.
+  Session inventory has an explicit page mode for Desktop; ordinary alphabetical
+  inspection remains. These are implementation choices, not attributed decisions.
+
+2026-09-29 · **A launch is an Exec: decided, and part of LOO-298.** Jack Heart
+asked "why not have lf flows actually launch skill execs?", said it "makes the
+hierarchy way better and clearer", and then directed: "this is part of 298" and
+"rearrange the tasks around this -- it's central and we should do the deepest
+cuts first." Each Flow step runs as its own `lf` process. The Flow driver keeps
+the claim and spawns one child `lf` per step; mechanical steps that are already
+lf commands run as child Execs too. No new object: a step is an ordinary Exec.
+The operator had filed LOO-335 for this minutes earlier, before Jack's
+direction; it is superseded by LOO-298 and awaits Jack's word on deletion.
+Open for the design: whether the launch event in Session history collapses into
+the Exec, given that imported launches have no Exec and that a reserved launch
+can outlive the process that reserved it.
+
+2026-09-29 · **Vocabulary: prefer Exec.** Jack Heart: "if a launch is an exec,
+we should also try to use the word exec instead of launch (or run etc) where
+possible." This supersedes the operator's suggested word "launch" and the
+assumed event kind `captured`/`launched`. Names, CLI text, docs and wire fields
+that mean one agent start under one lf process say Exec. Where no lf process
+exists, as with imported history, the name must not claim one.
+
+2026-09-29 · **After Exec-per-step: simplify attribution and the parent tree.**
+Jack Heart: "Make sure that we simplify and clarify attribution and the parent
+tree after this." This is a required follow-on inside LOO-298, directly after
+the Exec-per-step cut. It is a reduction: name the one place each fact lives,
+derive the rest, and delete the copies.
+
+2026-09-29 · **Requirement kept through the simplification.** Jack Heart: "to be
+clear i still want being called by an agent process to give you the right
+parent-lf process as your lf exec parent." An lf command issued by an agent
+records, as its parent Exec, the lf process that is driving that agent. The
+provider and shell processes in between are not Execs and are skipped.

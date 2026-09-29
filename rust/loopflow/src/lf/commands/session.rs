@@ -61,6 +61,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             history,
             limit,
             offset,
+            page,
+            after,
             task,
             search,
         } => {
@@ -80,6 +82,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     history: *history,
                     limit: *limit,
                     offset: *offset,
+                    after: page.then(|| after.clone().unwrap_or_default()),
                 },
             )
             .await
@@ -203,6 +206,32 @@ async fn list(
     json: bool,
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<()> {
+    if filter.after.is_some() {
+        anyhow::ensure!(
+            filter.limit > 0,
+            "paged Session inventory requires a positive limit"
+        );
+        let mut selection = filter.clone();
+        selection.limit = filter
+            .limit
+            .checked_add(1)
+            .context("Session page limit is too large")?;
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
+        let next = if entries.len() > filter.limit {
+            entries.pop();
+            entries.last().map(|session| session.id.clone())
+        } else {
+            None
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ops::human_session::SessionPage {
+                entries,
+                next
+            })?
+        );
+        return Ok(());
+    }
     let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);

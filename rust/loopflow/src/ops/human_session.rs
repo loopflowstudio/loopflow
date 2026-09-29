@@ -197,6 +197,12 @@ fn require_session_action(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionPage {
+    pub entries: Vec<SessionRecord>,
+    pub next: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
     pub kind: SessionKind,
@@ -3785,5 +3791,21 @@ mod binding_preview_tests {
             missing.as_object_mut().unwrap().remove(key);
             assert!(serde_json::from_value::<SessionBindingPreview>(missing).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::SessionPage;
+
+    #[test]
+    fn session_page_preserves_the_continuation_and_required_entries() {
+        let json = include_str!("../../../../tests/fixtures/dto/session_page.json");
+        let page: SessionPage = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            serde_json::to_value(page).unwrap(),
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        );
+        assert!(serde_json::from_str::<SessionPage>(r#"{"next":null}"#).is_err());
     }
 }

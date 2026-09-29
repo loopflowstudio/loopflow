@@ -7,6 +7,20 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Session page retains complete enumeration and requires entries")
+    func sessionPageFixture() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/session_page.json")
+        let data = try Data(contentsOf: url)
+        let page = try JSONDecoder().decode(SessionPage.self, from: data)
+        #expect(page.entries.count == 1)
+        #expect(page.next == nil)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(SessionPage.self, from: Data(#"{"next":null}"#.utf8))
+        }
+    }
+
     @Test("Exec pages retain command outcomes, caller evidence and continuation")
     func execPageFixture() throws {
         let data = try loadFixtureData("exec_page.json")

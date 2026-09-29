@@ -10,6 +10,27 @@ and [handoff](parallel-execution.md). This replaces chronology, not obligations.
 The complete [remaining matrix](remaining-work.md), [import contract](import-preservation.md),
 [Chapters](chapters.md) and [native tradeoff](native-turn-retry-tradeoff.md) remain binding.
 
+## Discovery checkpoint
+
+`discovery-full-green.log` passes the complete isolated materialized Rust matrix:
+2,029 passed (one slow), 16 skipped, none unrun, fail-fast disabled.
+`discovery-swift-green.log` passes all 291 Swift tests. All-target Clippy, formatting,
+migration history, architecture and generated HTML checks pass. Rust/Swift/test
+bytes match the full-run source receipt `.lf/tmp/discovery/source.json`.
+
+The preceding full Rust run had 2,027 passes and two new fixture setup failures:
+a completed Flow lacked ended_at, and a parent-filter fixture tried to mutate
+immutable parentage. Corrected fixtures pass focused checks and the full rerun.
+Swift's intermediate array mocks and hidden-row click failures were repaired;
+its final suite includes both hosted MockWaveFixture failures from `142314682`.
+These are local repairs, not a new hosted result.
+
+[Discovery design](discovery.md) records public paging/template collision proofs,
+5,000-row whole-command timings and mounted terminal retention across partial,
+failed and successful refresh. Providers are scripted; terminal proof uses cat.
+Configured acceptance and the deepest-first [remaining work](remaining-work.md)
+stay open. The next cut gives each Flow step its own actual Exec.
+
 ## Published evidence
 
 At `d6dc8c43b`, hosted run `36629797823` passes Rust, Swift, UI, Python, website,

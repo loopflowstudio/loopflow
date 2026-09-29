@@ -198,15 +198,15 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
-    /// Sessions in this repository.
-    public func sessions(includingHeadless: Bool = false, cwd: String? = nil) async throws -> [SessionRecord] {
-        // One SQL selection retains a complete inventory despite concurrent
-        // rename/completion; separate offset pages could skip or duplicate IDs.
-        var args = ["session", "list", "--json"]
+    /// One bounded page, ordered by stable Session identity.
+    public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
+                            cwd: String? = nil) async throws -> SessionPage {
+        var args = ["session", "list", "--json", "--page"]
         if includingHeadless { args += ["--interactive", "all"] }
-        args += ["--limit", "0"]
+        args += ["--limit", "100"]
+        if let after { args += ["--after", after] }
         let stdout = try await run(args, cwd)
-        return try Self.decode([SessionRecord].self, from: stdout)
+        return try Self.decode(SessionPage.self, from: stdout)
     }
 
     /// Open one Session and return its terminal command.

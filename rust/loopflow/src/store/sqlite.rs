@@ -24,6 +24,7 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod execs;
+mod flow_inventory;
 mod flows;
 mod metrics;
 mod pr_landings;

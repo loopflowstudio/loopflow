@@ -167,7 +167,7 @@ private actor RenameSource {
         }
         switch verb {
         case "list":
-            return String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+            return #"{"entries":\#(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)),"next":null}"#
         case "rename":
             renames.append(args)
             if let rejection { throw RegistryQueryError(rejection) }

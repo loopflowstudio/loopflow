@@ -45,7 +45,7 @@ struct WorkspaceNavigationProofTests {
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
@@ -163,7 +163,7 @@ struct WorkspaceNavigationProofTests {
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return await source.list()
+            case "session": return #"{"entries":\#(await source.list()),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
             }
@@ -300,7 +300,7 @@ struct WorkspaceNavigationProofTests {
             case ("roadmap", _): return await planning.list()
             case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return try await named.list()
+            case ("session", "list"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
             case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
@@ -332,6 +332,43 @@ struct WorkspaceNavigationProofTests {
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
             == "Show the all-wave roadmap and launch or attach")
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").text().string() == "Independent")
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-second").button().tap()
+        try await settle(window)
+        // The selected second Session arrives on the second page. An
+        // incomplete or failed inventory must not detach either native pane.
+        for failing in [true, false] {
+            await named.pauseSecondPage(failing: failing)
+            let refresh = Task { await model.refreshSessions() }
+            await named.waitForPage()
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            await named.releasePage()
+            await refresh.value
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            if failing {
+                guard case .unavailable(_, let reason) = model.sessions else {
+                    Issue.record("Failed page lost its unavailable state")
+                    return
+                }
+                #expect(reason == "Second page unavailable")
+            }
+        }
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+        try await settle(window)
 
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
         try await settle(window)
@@ -584,7 +621,7 @@ struct WorkspaceNavigationProofTests {
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return sessionJSON
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
         }
@@ -669,7 +706,7 @@ struct WorkspaceNavigationProofTests {
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "session" where args.dropFirst().first == "complete":
                 if rejected { throw RegistryQueryError("Completion rejected") }
                 return "Session completed"
@@ -693,7 +730,7 @@ struct WorkspaceNavigationProofTests {
         if rejected {
             // An ordinary inventory refresh must not erase a rejected action.
             let store = workspace.sessionStore(repoPath: "/tmp", query: query)
-            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
             #expect(store.sessions.first?.state == .live)
             #expect(store.sessions.first?.resolutionError == "Completion rejected")
             try await settle(window)
@@ -745,7 +782,7 @@ struct WorkspaceNavigationProofTests {
         """
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "session": throw RegistryQueryError("Decision rejected")
             default: throw RegistryQueryError("Unexpected read in decision proof")
             }
@@ -764,7 +801,7 @@ struct WorkspaceNavigationProofTests {
             let accepted = await store.complete("review-decision")
             #expect(!accepted)
             #expect(store.sessions.first?.state == .live)
-            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
             try await settle(window)
             #expect(store.sessions.first?.state == .live)
             #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
@@ -895,7 +932,7 @@ struct WorkspaceNavigationProofTests {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
-                return cwd == "/src/context" ? otherRecords : records
+                return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
             case "session" where args == ["session", "complete", "navigation-split"]:
                 for await _ in completionResponses { break }
                 return "Session completed"
@@ -1132,6 +1169,32 @@ private actor NamedSessionSource {
     private(set) var renames = 0
     private var rejectRename = false
     private var holdRename = false
+    private var paged = false
+    private var failPage = false
+    private var pendingPage: CheckedContinuation<Void, Never>?
+    private var pageWaiter: CheckedContinuation<Void, Never>?
+
+    func pauseSecondPage(failing: Bool) { paged = true; failPage = failing }
+    func waitForPage() async {
+        if pendingPage != nil { return }
+        await withCheckedContinuation { pageWaiter = $0 }
+    }
+    func releasePage() { pendingPage?.resume(); pendingPage = nil }
+    func page(_ args: [String]) async throws -> String {
+        if paged && !args.contains("--after") {
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[0]], "next": "first"]), as: UTF8.self)
+        }
+        if paged {
+            await withCheckedContinuation { pendingPage = $0; pageWaiter?.resume(); pageWaiter = nil }
+            paged = false
+            if failPage { throw RegistryQueryError("Second page unavailable") }
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[1]], "next": NSNull()]), as: UTF8.self)
+        }
+        return #"{"entries":\#(try list()),"next":null}"#
+    }
+
     private var pendingRename: CheckedContinuation<Void, Never>?
 
     func rejectNextRename() { rejectRename = true }

@@ -25,3 +25,10 @@ No new Jack decision is needed to continue exact Flow history selection, Run
 removal, complete import, indexed discovery or coordinated Desktop conversion.
 Historical questions, superseded exceptions and unattributed early approvals are
 preserved in the [archive](parallel-work.md), not reattributed to Jack.
+
+2026-09-28 · Iteration 10 implementation choice: AgentSession owns its current
+captured input and publication. `agent_session_inputs` retains only the immutable
+input-to-conversation references required for earlier-input lookup after retry;
+it has no result, state, ordinal or resumable lifecycle. Provider outcomes remain
+Session events, command outcomes remain Execs. This does not replace the remaining
+import-preservation proof or authorize deleting historical inputs.

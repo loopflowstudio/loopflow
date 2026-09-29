@@ -707,7 +707,7 @@ mod durable_store_tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
 
-    use super::super::runs::{insert_run_in, read_run};
+    use super::super::runs::insert_run_in;
     use crate::durable::{
         FlowSession, ProjectId, RunId, TaskFlowBlocker, TaskId, TaskWorkerClaim,
         TaskWorkerClaimOutcome, TaskWorkerOwner,
@@ -904,7 +904,7 @@ mod durable_store_tests {
         let flow = store.start_task_flow(task, position).unwrap();
         let flow = store.reserve_task_review(flow.id(), flow.version).unwrap();
         let session_id = crate::ops::human_session::flow_id(&flow).unwrap();
-        let run = store.session(&session_id).unwrap().unwrap().1.id;
+        let run = store.session(&session_id).unwrap().unwrap().input_id;
         store
             .publish_review_run(&session_id, &run, flow.version, "codex", None)
             .unwrap();
@@ -945,8 +945,41 @@ mod durable_store_tests {
         }
     }
 
+    fn conversation(
+        flow_session_id: Option<String>,
+        task_id: Option<TaskId>,
+        wave_id: Option<WaveId>,
+    ) -> crate::session::AgentSession {
+        crate::session::AgentSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            input_id: RunId::new(),
+            caller_input_id: None,
+            input_published: false,
+            cwd: "/repo".into(),
+            skill: Some("implement".into()),
+            provider: None,
+            model: None,
+            node: None,
+            iterations: None,
+            task_id,
+            wave_id,
+            flow_session_id,
+            work_source: Some(WorkSource::Declared),
+            bound_at: None,
+            kind: crate::session::SessionKind::Conversation,
+            interactive: false,
+            repo: None,
+            title: "Implementation".into(),
+            title_source: crate::session::TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: 100,
+        }
+    }
+
     #[test]
-    fn run_constructor_infers_ancestors_and_rejects_conflicts_atomically() {
+    fn session_admission_infers_ancestors_and_rejects_conflicts_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let position = store
@@ -969,31 +1002,12 @@ mod durable_store_tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO flow_sessions(id,invocation_json,step_index,iteration,
+            "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
             position_version,worker_generation,updated_at,state)
-            VALUES(?1,?2,0,0,1,0,1,'current')",
+            VALUES(?1,?2,'/repo',0,0,1,0,1,'current')",
             rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
         )
         .unwrap();
-        let new_run = |invocation_id, task_id, wave_id| Run {
-            id: RunId::new(),
-            session_id: None,
-            invocation_id,
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id,
-            wave_id,
-            work_source: Some(WorkSource::Declared),
-            created_at: 100,
-            published: false,
-            cwd: "/repo".into(),
-            skill: Some("implement".into()),
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
-        };
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
             (
@@ -1036,39 +1050,37 @@ mod durable_store_tests {
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .unwrap();
-            let saved = insert_run_in(&tx, new_run(invocation, task_input, wave_input)).unwrap();
+            let saved = super::super::sessions::reserve_session_in(
+                &tx,
+                conversation(invocation, task_input, wave_input),
+                None,
+            )
+            .unwrap();
             assert_eq!(saved.task_id, expected_task);
             assert_eq!(saved.wave_id, expected_wave);
             tx.commit().unwrap();
-            let read = conn
-                .query_row(
-                    &format!(
-                        "SELECT {} FROM runs WHERE id=?1",
-                        crate::store::sqlite::runs::RUN_COLUMNS
-                    ),
-                    [saved.id.as_str()],
-                    |row| read_run(row, 0),
-                )
+            let read = super::super::sessions::session_in(&conn, &saved.id)
                 .unwrap()
                 .unwrap();
             assert_eq!(read, saved);
         }
         let run_count: i64 = conn
-            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
         // Callers cannot publish a Run under a different node or loop pass.
         for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
-            let mut requested = new_run(Some(position.invocation.id.clone()), None, None);
+            let mut requested = conversation(Some(position.invocation.id.clone()), None, None);
             requested.node = node;
             requested.iterations = iterations;
             {
                 let tx = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .unwrap();
-                assert!(insert_run_in(&tx, requested).is_err());
+                assert!(super::super::sessions::reserve_session_in(&tx, requested, None).is_err());
             }
             assert_eq!(
-                conn.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
+                conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+                    .get::<_, i64>(0))
                     .unwrap(),
                 run_count
             );
@@ -1081,29 +1093,27 @@ mod durable_store_tests {
             (None, Some(TaskId::new()), None),
             (None, None, Some(WaveId::new())),
         ] {
-            let mut requested = new_run(invocation, task_input, wave_input);
-            requested.session_id = Some("failed-conversation".into());
+            let mut requested = conversation(invocation, task_input, wave_input);
+            requested.id = "failed-conversation".into();
             {
                 let tx = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .unwrap();
-                tx.execute(
-                    "INSERT INTO agent_sessions(id,current_run_id,title,title_source,created_at)
-                    VALUES('failed-conversation',?1,'Must roll back','generated',100)",
-                    [requested.id.as_str()],
-                )
-                .unwrap();
-                assert!(insert_run_in(&tx, requested).is_err());
+                assert!(super::super::sessions::reserve_session_in(&tx, requested, None).is_err());
             }
-            assert_eq!(
-                conn.query_row("SELECT count(*) FROM runs", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                run_count
-            );
             assert_eq!(
                 conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
                     .get::<_, i64>(0))
                     .unwrap(),
+                run_count
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM agent_sessions WHERE id='failed-conversation'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
                 0
             );
         }
@@ -1368,33 +1378,22 @@ mod durable_store_tests {
             )
             .unwrap();
         let open = |id: &str, wave: Option<WaveId>| {
-            let run = Run {
-                id: RunId::new(),
-                session_id: Some(id.to_string()),
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
+            let session = crate::session::AgentSession {
+                caller_input_id: None,
                 task_id: None,
                 wave_id: wave,
-                work_source: None,
-                created_at: 1,
-                published: true,
-                cwd: "/repo".into(),
-                skill: None,
-                provider: None,
-                model: None,
-                caller_run_id: None,
-                ended: None,
-            };
-            let session = crate::session::AgentSession {
-                task_id: None,
-                wave_id: None,
                 flow_session_id: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),
-                current_run_id: run.id.clone(),
+                input_id: RunId::new(),
+                input_published: true,
+                cwd: "/repo".into(),
+                skill: None,
+                provider: None,
+                model: None,
+                node: None,
+                iterations: None,
                 kind: crate::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
@@ -1405,20 +1404,21 @@ mod durable_store_tests {
                 completed_at: None,
                 created_at: 1,
             };
-            store.create_session(session, run, None, None).unwrap().1
+            store.create_session(session, None, None).unwrap()
         };
         let first = open("orphan", None);
         let replacement = store
-            .replace_session_run(
-                &first.id,
-                Run {
-                    id: RunId::new(),
+            .replace_session_input(
+                &first.input_id,
+                crate::session::AgentSession {
+                    caller_input_id: None,
+                    input_id: RunId::new(),
                     ..first.clone()
                 },
             )
             .unwrap();
         let elsewhere = open("elsewhere", Some(other_wave));
-        let old_runs = store.session_runs("orphan").unwrap();
+        let old_runs = store.session_inputs("orphan").unwrap();
         store
             .record_session_event(
                 "orphan",
@@ -1438,21 +1438,22 @@ mod durable_store_tests {
             )
             .unwrap();
         let earlier = store.session_history("orphan", 0, 0).unwrap();
-        assert!(store.bind_session("orphan", &first.id, &task_id).is_err());
-        let (bound, current) = store
-            .bind_session("orphan", &replacement.id, &task_id)
+        assert!(store
+            .bind_session("orphan", &first.input_id, &task_id)
+            .is_err());
+        let bound = store
+            .bind_session("orphan", &replacement.input_id, &task_id)
             .unwrap();
-        assert_eq!(current.id, replacement.id);
+        assert_eq!(bound.input_id, replacement.input_id);
         assert_eq!(bound.task_id, Some(task_id.clone()));
         assert_eq!(bound.wave_id, Some(task.wave_id.clone()));
         assert!(bound.bound_at.is_some());
-        assert_eq!(store.session_runs("orphan").unwrap(), old_runs);
+        assert_eq!(store.session_inputs("orphan").unwrap(), old_runs);
         assert_eq!(store.session_history("orphan", 0, 0).unwrap(), earlier);
         assert_eq!(
             store
-                .bind_session("orphan", &replacement.id, &task_id)
-                .unwrap()
-                .0,
+                .bind_session("orphan", &replacement.input_id, &task_id)
+                .unwrap(),
             bound
         );
         // A late cumulative observation belongs to the old turn, never the new bind.
@@ -1484,27 +1485,35 @@ mod durable_store_tests {
             Some(task_id.as_str())
         );
         let future = store
-            .replace_session_run(
-                &replacement.id,
-                Run {
-                    id: RunId::new(),
-                    ..replacement.clone()
+            .replace_session_input(
+                &replacement.input_id,
+                crate::session::AgentSession {
+                    caller_input_id: None,
+                    input_id: RunId::new(),
+                    ..bound.clone()
                 },
             )
             .unwrap();
         assert_eq!(future.task_id, Some(task_id.clone()));
         assert_eq!(future.work_source, Some(WorkSource::Bound));
-        assert_eq!(store.run(&first.id).unwrap().unwrap(), first);
+        assert!(store
+            .session_inputs("orphan")
+            .unwrap()
+            .contains(&first.input_id));
+        assert_eq!(store.session_history("orphan", 0, 0).unwrap(), events);
         let refused = store
-            .bind_session("elsewhere", &elsewhere.id, &task_id)
+            .bind_session("elsewhere", &elsewhere.input_id, &task_id)
             .unwrap_err();
         assert!(refused.to_string().contains("another Wave"), "{refused}");
-        assert_eq!(store.session("elsewhere").unwrap().unwrap().0.task_id, None);
+        assert_eq!(store.session("elsewhere").unwrap().unwrap().task_id, None);
         let listed = store
-            .runs(None, None, Some(task_id.as_str()), None, 0)
+            .sessions(&crate::session::SessionFilter {
+                task: Some(task_id.to_string()),
+                ..Default::default()
+            })
             .unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].run.id, future.id);
+        assert_eq!(listed[0].input_id, future.input_id);
     }
 
     #[test]
@@ -1542,29 +1551,12 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(store.task_flow(&task_id).unwrap(), Some(managed.clone()));
 
-        // Its Runs name the Task, filled from the invocation, and list under it.
-        let new_run = |invocation: &str, task: Option<TaskId>| Run {
-            id: RunId::new(),
-            session_id: None,
-            invocation_id: Some(invocation.to_string()),
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id: task,
-            wave_id: None,
-            work_source: Some(WorkSource::Declared),
-            created_at: 100,
-            published: true,
-            cwd: "/repo".into(),
-            skill: Some("review-design".into()),
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
-        };
-        let run = store.create_run(new_run(&about.id, None), None).unwrap();
-        assert_eq!(run.task_id, Some(task_id.clone()));
-        assert_eq!(run.wave_id, Some(task.wave_id.clone()));
+        // Attributed conversations inherit this Flow's Task without changing its managed selection.
+        let session = store
+            .create_session(conversation(Some(about.id.clone()), None, None), None, None)
+            .unwrap();
+        assert_eq!(session.task_id, Some(task_id.clone()));
+        assert_eq!(session.wave_id, Some(task.wave_id.clone()));
         let other_task = TaskId::new();
         store.conn.lock().unwrap().execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
@@ -1573,11 +1565,20 @@ mod durable_store_tests {
         )
         .unwrap();
         assert!(store
-            .create_run(new_run(&about.id, Some(other_task.clone())), None)
+            .create_session(
+                conversation(Some(about.id.clone()), Some(other_task.clone()), None),
+                None,
+                None
+            )
             .is_err());
         assert_eq!(
             store
-                .runs(None, None, Some(task_id.as_str()), None, 0)
+                .sessions(&crate::session::SessionFilter {
+                    task: Some(task_id.to_string()),
+                    interactive: None,
+                    history: true,
+                    ..Default::default()
+                })
                 .unwrap()
                 .len(),
             1
@@ -1713,15 +1714,15 @@ mod durable_store_tests {
             )
             .unwrap();
         let (reserved, run) = store.reserve_review_run(&position).unwrap();
-        assert_eq!(store.session(&session_id).unwrap().unwrap().1, run);
-        assert!(!run.published);
+        assert_eq!(store.session(&session_id).unwrap().unwrap(), run);
+        assert!(!run.input_published);
 
         store
-            .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
+            .publish_review_run(&session_id, &run.input_id, reserved.version, "codex", None)
             .unwrap();
         assert!(store.task_started(&task_id).unwrap());
         store
-            .ready_session(&session_id, &run.id, "approved scope")
+            .ready_session(&session_id, &run.input_id, "approved scope")
             .unwrap();
         let position = store.task_flow(&task_id).unwrap().unwrap();
         store
@@ -1748,24 +1749,24 @@ mod durable_store_tests {
                 crate::session::TitleSource::Human,
             )
             .unwrap();
-        let first_attempt = store.session(&session_id).unwrap().unwrap().1;
+        let first_attempt = store.session(&session_id).unwrap().unwrap();
         assert_eq!(first_attempt.work_source, Some(WorkSource::Inherited));
         let mut runs = vec![first_run];
         for _ in 0..2 {
             let stale = position.clone();
             let (reserved, run) = store.reserve_review_run(&position).unwrap();
-            assert!(!run.published);
+            assert!(!run.input_published);
             assert_eq!(run.task_id, first_attempt.task_id);
             assert_eq!(run.wave_id, first_attempt.wave_id);
-            assert_eq!(run.invocation_id, first_attempt.invocation_id);
+            assert_eq!(run.flow_session_id, first_attempt.flow_session_id);
             assert_eq!(run.work_source, Some(WorkSource::Inherited));
             assert_eq!(
                 store
-                    .session_runs(&session_id)
+                    .session_inputs(&session_id)
                     .unwrap()
                     .iter()
-                    .find(|run| run.id == first_attempt.id),
-                Some(&first_attempt)
+                    .find(|input| **input == first_attempt.input_id),
+                Some(&first_attempt.input_id)
             );
             assert!(store.reserve_review_run(&stale).is_err());
             assert!(store
@@ -1784,12 +1785,12 @@ mod durable_store_tests {
                 )
                 .is_err());
             store
-                .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
+                .publish_review_run(&session_id, &run.input_id, reserved.version, "codex", None)
                 .unwrap();
             assert!(store
-                .publish_review_run(&session_id, &run.id, reserved.version, "codex", None)
+                .publish_review_run(&session_id, &run.input_id, reserved.version, "codex", None)
                 .is_err());
-            runs.push(run.id);
+            runs.push(run.input_id);
             position = store.task_flow(&task_id).unwrap().unwrap();
             assert_eq!(
                 position.ready_summary.as_deref(),
@@ -1804,31 +1805,16 @@ mod durable_store_tests {
                 crate::session::TitleSource::Generated,
             )
             .unwrap();
-        let (session, current) = store.session(&session_id).unwrap().unwrap();
+        let session = store.session(&session_id).unwrap().unwrap();
+        let current = session.clone();
         assert_eq!(session.title, "Parser review");
-        assert_eq!(current.id, *runs.last().unwrap());
-        let history = store.session_runs(&session_id).unwrap();
-        let attempts = store
-            .position_runs(
-                &position.invocation.id,
-                current.node.unwrap(),
-                current.iterations.as_ref().unwrap(),
-            )
-            .unwrap();
-        assert_eq!(
-            attempts
-                .iter()
-                .map(|run| run.id.clone())
-                .collect::<Vec<_>>(),
-            runs
-        );
-        assert_eq!(
-            attempts.iter().map(|run| run.attempt).collect::<Vec<_>>(),
-            [Some(1), Some(2), Some(3)]
-        );
+        assert_eq!(current.input_id, *runs.last().unwrap());
+        let history = store.session_inputs(&session_id).unwrap();
+        assert_eq!(current.node, first_attempt.node);
+        assert_eq!(current.iterations, first_attempt.iterations);
         assert_eq!(history.len(), 3);
         for run in &runs {
-            assert!(history.iter().any(|saved| &saved.id == run));
+            assert!(history.contains(run));
         }
 
         // Checkpointing execution cannot replace or erase conversation state.
@@ -1841,11 +1827,8 @@ mod durable_store_tests {
                 None,
             )
             .unwrap();
-        assert_eq!(
-            store.session(&session_id).unwrap(),
-            Some((session.clone(), current.clone()))
-        );
-        assert_eq!(store.session_runs(&session_id).unwrap(), history);
+        assert_eq!(store.session(&session_id).unwrap(), Some(session.clone()));
+        assert_eq!(store.session_inputs(&session_id).unwrap(), history);
 
         // An unrelated malformed autonomous capture remains an identified error,
         // while direct Session discovery does not deserialize that invocation.
@@ -1870,7 +1853,7 @@ mod durable_store_tests {
             store
                 .sessions(&crate::session::SessionFilter::default())
                 .unwrap(),
-            vec![(session.clone(), current)]
+            vec![session.clone()]
         );
         assert!(store
             .task_flow(&broken)
@@ -1887,10 +1870,10 @@ mod durable_store_tests {
         assert!(store
             .ready_session(&session_id, runs.last().unwrap(), "after completion")
             .is_err());
-        let (completed, _) = store.session(&session_id).unwrap().unwrap();
+        let completed = store.session(&session_id).unwrap().unwrap();
         assert!(completed.completed_at.is_some());
         assert_eq!(completed.ready_summary, session.ready_summary);
-        assert_eq!(store.session_runs(&session_id).unwrap(), history);
+        assert_eq!(store.session_inputs(&session_id).unwrap(), history);
         assert!(store
             .sessions(&crate::session::SessionFilter::default())
             .unwrap()
@@ -2039,14 +2022,14 @@ mod durable_store_tests {
             let (reserved, replacement) = store.reserve_review_run(&recovered).unwrap();
             assert_eq!(reserved.cursor, recovered.cursor);
             assert_eq!(replacement.node, Some(1));
-            assert_eq!(replacement.iterations, original.1.iterations);
-            assert_eq!(replacement.attempt, Some(2));
-            let (session, _) = store.session(&session_id).unwrap().unwrap();
-            assert_eq!(session.id, original.0.id);
-            assert_eq!(session.title, original.0.title);
-            assert_eq!(session.ready_summary, original.0.ready_summary);
-            assert_eq!(session.current_run_id, replacement.id);
-            assert_eq!(store.session_runs(&session_id).unwrap().len(), 2);
+            assert_eq!(replacement.iterations, original.iterations);
+            assert_ne!(replacement.input_id, original.input_id);
+            let session = store.session(&session_id).unwrap().unwrap();
+            assert_eq!(session.id, original.id);
+            assert_eq!(session.title, original.title);
+            assert_eq!(session.ready_summary, original.ready_summary);
+            assert_eq!(session.input_id, replacement.input_id);
+            assert_eq!(store.session_inputs(&session_id).unwrap().len(), 2);
             let retained: String = store
                 .conn
                 .lock()
@@ -2270,11 +2253,12 @@ mod durable_store_tests {
         assert!(store.recover_flow(position.id(), None).is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
         assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
-        let recovered = store
+        assert!(store
             .recover_flow(position.id(), Some(&replacement))
-            .unwrap();
-        assert!(recovered.claim.is_none());
-        assert_eq!(recovered.failure.unwrap().run_id, Some(run));
+            .is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
+        assert_eq!(before.current_attempt.unwrap().run_id, run);
+        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
     }
 
     #[test]
@@ -2321,7 +2305,7 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(
-            Some(&sessions[0].1.id),
+            Some(&sessions[0].input_id),
             saved
                 .current_attempt
                 .as_ref()
@@ -2573,21 +2557,17 @@ mod durable_store_tests {
             .end_flow(id, position.version, Some(&first_claim), "")
             .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        let attempts = store
-            .position_runs(&position.invocation.id, node, &tuple)
-            .unwrap();
+        let session = store.session_for_run(&second).unwrap().unwrap();
         assert_eq!(
-            attempts.iter().map(|run| &run.id).collect::<Vec<_>>(),
-            [&first, &second]
+            store.session_for_run(&first).unwrap().unwrap().id,
+            session.id
         );
-        assert_eq!(
-            attempts.iter().map(|run| run.attempt).collect::<Vec<_>>(),
-            [Some(1), Some(2)]
-        );
-        assert!(attempts
-            .iter()
-            .all(|run| run.session_id == attempts[0].session_id));
-        assert!(attempts[0].session_id.is_some());
+        assert_eq!(session.node, Some(node));
+        assert_eq!(session.iterations.as_ref(), Some(&tuple));
+        let inputs = store.session_inputs(&session.id).unwrap();
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.contains(&first) && inputs.contains(&second));
+        let history = store.session_history(&session.id, 0, 0).unwrap();
         store
             .record_flow_decision(id, failed.version, &second_actor, &verdict)
             .unwrap();
@@ -2601,46 +2581,35 @@ mod durable_store_tests {
             )
             .unwrap();
         assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert_eq!(
-            store
-                .position_runs(&position.invocation.id, node, &tuple)
-                .unwrap(),
-            attempts
-        );
+        assert_eq!(store.session_inputs(&session.id).unwrap(), inputs);
         assert!(store
             .end_flow(id, failed.version, Some(&second_claim), "")
             .is_err());
 
-        // The launch named the provider the claim could not know, and the
-        // Run's end is its row. Both attempts list once under their Task.
-        let end = crate::session::RunEnd {
-            outcome: "completed".into(),
-            at: 9,
-        };
-        store.end_run(&second, &end).unwrap();
         let listed = store
-            .runs(None, None, Some(task.plan.identifier.as_str()), None, 0)
+            .sessions(&crate::session::SessionFilter {
+                task: Some(task.plan.identifier.clone()),
+                interactive: None,
+                history: true,
+                ..Default::default()
+            })
             .unwrap();
-        assert_eq!(listed.len(), 2);
-        for listed in &listed {
-            assert_eq!(listed.run.task_id, Some(task_id.clone()));
-            assert_eq!(listed.run.wave_id, Some(task.wave_id.clone()));
-            assert_eq!(
-                listed.run.invocation_id.as_ref(),
-                Some(&position.invocation.id)
-            );
-            assert_eq!(listed.task.as_deref(), Some(task.plan.identifier.as_str()));
-        }
-        let settled = listed
-            .iter()
-            .find(|listed| listed.run.id == second)
-            .unwrap();
-        assert_eq!(settled.run.provider.as_deref(), Some("codex"));
-        assert_eq!(settled.run.ended, Some(end));
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].task_id, Some(task_id));
+        assert_eq!(listed[0].wave_id, Some(task.wave_id));
+        assert_eq!(
+            listed[0].flow_session_id.as_ref(),
+            Some(&position.invocation.id)
+        );
+        assert_eq!(listed[0].provider.as_deref(), Some("codex"));
+        let retained = store.session_history(&session.id, 0, 0).unwrap();
+        assert_eq!(&retained[..history.len()], history.as_slice());
+        assert_eq!(retained.last().unwrap().payload["status"], "completed");
+        assert!(store.run(&first).unwrap().is_none() && store.run(&second).unwrap().is_none());
     }
 
     #[test]
-    fn a_claim_reserves_the_step_run_before_its_launch() {
+    fn a_claim_reserves_conversation_input_before_its_launch() {
         let (_dir, store, work) = store_with_task();
         let position = store
             .start_task_flow(&work, &autonomous_position(&work))
@@ -2649,12 +2618,15 @@ mod durable_store_tests {
         let conn = store.conn.lock().unwrap();
         let reserved: i64 = conn
             .query_row(
-                "SELECT count(*) FROM runs WHERE invocation_id=?1 AND published=0",
+                "SELECT count(*) FROM agent_sessions WHERE flow_session_id=?1 AND input_published=0",
                 [&position.invocation.id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(reserved, 1, "the claim stores the step's Run unpublished");
+        assert_eq!(
+            reserved, 1,
+            "the claim reserves the conversation's input before publication"
+        );
         drop(conn);
         assert!(store.task_started(&work).unwrap());
         // The launch publishes that Run under the claim; nothing else can.
@@ -2676,7 +2648,12 @@ mod durable_store_tests {
         );
         assert_eq!(
             store
-                .runs(None, None, Some(work.as_str()), None, 0)
+                .sessions(&crate::session::SessionFilter {
+                    task: Some(work.to_string()),
+                    interactive: None,
+                    history: true,
+                    ..Default::default()
+                })
                 .unwrap()
                 .len(),
             1

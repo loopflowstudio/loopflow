@@ -403,13 +403,16 @@ fn task_review_completion_consumes_only_installed_readiness() {
     let (_, review) = runtime
         .block_on(task.store.reserve_review_run(&position))
         .unwrap();
-    Connection::open(home.path().join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE runs SET published=1, provider='claude', model='sonnet' WHERE id=?1",
-            [review.id.as_str()],
-        )
-        .unwrap();
+    assert_eq!(
+        Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET input_published=1, provider='claude', model='sonnet' WHERE input_id=?1",
+                [review.input_id.as_str()],
+            )
+            .unwrap(),
+        1
+    );
     let installation = installation::Installation::new(home.path());
     let command = |cli: &std::path::Path, selected_home: &std::path::Path, args: &[&str]| {
         let mut command = Command::new(cli);
@@ -487,21 +490,21 @@ fn task_review_completion_consumes_only_installed_readiness() {
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
         assert_eq!(status["agent"], expected);
     }
-    // The private snapshot has no installed Run bundle or completion authority.
+    // The private snapshot has no installed input bundle or completion authority.
     let branch_store = runtime
         .block_on(loopflow::store::open_store(
             &loopflow::store::StorageConfig::sqlite(branch_data.join("loopflow.db")),
         ))
         .unwrap();
     let session_id = position.pending_session_id.as_ref().unwrap();
-    let (session, run) = runtime
+    let session = runtime
         .block_on(task.store.session(session_id))
         .unwrap()
         .unwrap();
     runtime
         .block_on(branch_store.ready_session(
             &session.id,
-            &run.id,
+            &session.input_id,
             "Branch-only feedback must stay private",
         ))
         .unwrap();
@@ -793,42 +796,15 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             )
         };
         let session = keyed(&before);
-        let ask_run = |session: &str, caller: RunId| loopflow::session::Run {
-            id: RunId::new(),
-            session_id: Some(session.to_string()),
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id: Some(task.task.id.clone()),
-            wave_id: None,
-            work_source: Some(loopflow::session::WorkSource::Inherited),
-            created_at: 1,
-            published: true,
-            cwd: repo.path().to_path_buf(),
-            skill: Some("unblock".to_string()),
-            provider: Some("claude".to_string()),
-            model: Some("sonnet".to_string()),
-            caller_run_id: Some(caller),
-            ended: None,
-        };
-        let ask_session = |run: &loopflow::session::Run| loopflow::session::AgentSession {
-            task_id: None,
-            wave_id: None,
-            flow_session_id: None,
-            work_source: None,
-            bound_at: None,
-            id: run.session_id.clone().unwrap(),
-            current_run_id: run.id.clone(),
-            kind: loopflow::session::SessionKind::Ask,
-            interactive: true,
-            repo: None,
-            title: "Choose a consumer".to_string(),
-            title_source: loopflow::session::TitleSource::Generated,
-            request: Some("Choose a consumer".to_string()),
-            ready_summary: None,
-            completed_at: None,
-            created_at: 1,
+        let ask_session = |session: &str, caller: RunId| loopflow::session::AgentSession {
+            id: session.to_string(), input_id: RunId::new(), caller_input_id: Some(caller),
+            input_published: true, cwd: repo.path().into(), skill: Some("unblock".into()),
+            provider: Some("claude".into()), model: Some("sonnet".into()), node: None, iterations: None,
+            task_id: Some(task.task.id.clone()), wave_id: Some(task.task.wave_id.clone()),
+            flow_session_id: None, work_source: Some(loopflow::session::WorkSource::Inherited), bound_at: None,
+            kind: loopflow::session::SessionKind::Ask, interactive: true, repo: None,
+            title: "Choose a consumer".into(), title_source: loopflow::session::TitleSource::Generated,
+            request: Some("Choose a consumer".into()), ready_summary: None, completed_at: None, created_at: 1,
         };
         let read = |args: &[&str]| {
             let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -847,16 +823,16 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         };
         let status_args = ["task", "status", "INF-123", "--json"];
         // A waiting Ask from an earlier Run cannot repaint this worker.
-        let stale = ask_run(&session, RunId::new());
+        let stale = ask_session(&session, RunId::new());
         runtime
-            .block_on(task.store.create_session(ask_session(&stale), stale.clone(), None))
+            .block_on(task.store.create_session(stale.clone(), None))
             .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
         let current = runtime
             .block_on(
                 task.store
-                    .replace_session_run(&stale.id, ask_run(&session, run.clone())),
+                    .replace_session_input(&stale.input_id, ask_session(&session, run.clone())),
             )
             .unwrap();
         let status = read(&status_args);
@@ -883,11 +859,11 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         runtime
             .block_on(
                 task.store
-                    .ready_session(&session, &current.id, "Switch the reader"),
+                    .ready_session(&session, &current.input_id, "Switch the reader"),
             )
             .unwrap();
         runtime
-            .block_on(task.store.complete_session(&session, &current.id))
+            .block_on(task.store.complete_session(&session, &current.input_id))
             .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         assert_eq!(
@@ -905,9 +881,9 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             } else {
                 historical.cursor.iteration += 1;
             }
-            let other = ask_run(&keyed(&historical), run.clone());
+            let other = ask_session(&keyed(&historical), run.clone());
             runtime
-                .block_on(task.store.create_session(ask_session(&other), other.clone(), None))
+                .block_on(task.store.create_session(other, None))
                 .unwrap();
             assert_eq!(read(&status_args)["execution"]["state"], "running");
         }

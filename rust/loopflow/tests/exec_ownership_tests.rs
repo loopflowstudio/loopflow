@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use loopflow::durable::RunId;
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{AgentSession, Run, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, SessionKind, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -383,7 +383,15 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
-                current_run_id: run_id.clone(),
+                input_id: run_id,
+                caller_input_id: None,
+                input_published: false,
+                cwd: repo.into(),
+                skill: None,
+                provider: Some("codex".into()),
+                model: None,
+                node: None,
+                iterations: None,
                 kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
@@ -393,25 +401,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 ready_summary: None,
                 completed_at: None,
                 created_at: 1,
-            },
-            Run {
-                id: run_id,
-                session_id: Some(session_id.into()),
-                invocation_id: None,
-                node: None,
-                iterations: None,
-                attempt: None,
-                task_id: None,
-                wave_id: None,
-                work_source: None,
-                created_at: 1,
-                published: false,
-                cwd: repo.into(),
-                skill: None,
-                provider: Some("codex".into()),
-                model: None,
-                caller_run_id: None,
-                ended: None,
             },
             None,
             None,

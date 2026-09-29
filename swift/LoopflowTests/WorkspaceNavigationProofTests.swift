@@ -271,6 +271,7 @@ struct WorkspaceNavigationProofTests {
             value["state"] = "active"
             value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
             value["terminal_ids"] = [shells[index]]
+            value["wave_id"] = "wave-1"
             value["open_argv"] = ["must-not-launch"]
             return value
         }))
@@ -293,9 +294,10 @@ struct WorkspaceNavigationProofTests {
         items[taskIndex]["flow"] = flows[1]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
+        let planning = SidebarSessionSource(list: roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return roadmap
+            case ("roadmap", _): return await planning.list()
             case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.list()
@@ -341,6 +343,41 @@ struct WorkspaceNavigationProofTests {
         #expect(await named.renames == 1)
         #expect(workspace.multiplexer.layout == layout)
         #expect(terminals[0].surface == surfaces[0])
+
+        // Current planning can disappear while the same conversations and
+        // native surfaces remain. The draft typed above must survive this too.
+        let selection = model.selection
+        let focusedPane = workspace.multiplexer.focusedPaneId
+        var missingPlan = plan
+        var missingWaves = waves
+        missingWaves[waveIndex]["tasks"] = ["state": "unavailable", "reason": "planning offline"]
+        missingWaves[waveIndex]["unavailable_tasks"] = []
+        missingPlan["waves"] = missingWaves
+        let unavailable = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        missingPlan["waves"] = []
+        let absent = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        for reading in [unavailable, absent, roadmap] {
+            await planning.replace(reading)
+            await model.refresh()
+            try await settle(window)
+            let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+            #expect(crumb.taskWork == task)
+            #expect(crumb.waveWork == .wave(id: "wave-1"))
+            #expect(crumb.siblings.map(\.id) == ["first", "second"])
+            #expect(model.selection == selection)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.focusedPaneId == focusedPane)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[0])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            if reading != roadmap {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
+                #expect(model.workspace.orphanSessions(search: "").isEmpty)
+            } else {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
+                    == "Show the all-wave roadmap and launch or attach")
+            }
+        }
 
         func clickTerminal(_ index: Int) throws {
             let terminal = terminals[index]

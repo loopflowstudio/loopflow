@@ -5808,8 +5808,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].1.task_id, Some(task.id.clone()));
-        assert!(!sessions[0].1.published);
+        assert_eq!(sessions[0].task_id, Some(task.id.clone()));
+        assert!(!sessions[0].input_published);
         assert_eq!(stored.session_run_id(), None);
         assert_eq!(stored, position);
         assert_eq!(

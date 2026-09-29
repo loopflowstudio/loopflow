@@ -599,7 +599,12 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                store.run(&capture.run_id()).await.unwrap().unwrap().task_id,
+                store
+                    .session_for_run(&capture.run_id())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .task_id,
                 Some(task.id.clone())
             );
             let previous = [

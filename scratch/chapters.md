@@ -58,9 +58,17 @@ Authored successor content, legacy response loss, ambiguous/current conflicts,
 unobserved second-Home work and archived history also pass. These exercise Rust
 operations against simulated Linear; they do not run the CLI or live provider.
 
+The bounded 2026-09-28 contributor returned new assertions in
+`ops/chapter_tests.rs`: work reservation establishes non-null Started; the
+transfer matrix compares the exact timestamp; a separate second-store case
+adopts through `pm_sync` alone and retains Task/PR/capture/Started while provider
+state stays unchanged. Main's `agent-admission-focused.log` now passes all 15
+Chapter tests, including this case and the transfer matrix's exact timestamp
+assertion. Supervisor inspected both source and log. These are operation-level
+proofs against simulated Linear, not public CLI or configured-provider acceptance.
+
 Remaining proof is specific: second private Home adopts by public sync alone
-(the matrix calls rotate); exact Started timestamp survives transfer (the matrix
-does not assert that column); Project Flow drives an actual Task launch with no
+(the new operation test calls `pm_sync` directly); Project Flow drives an actual Task launch with no
 override (the selector has a unit test); populated draft/canonical upgrade retains
 Projects through the final execution schema. Reuse unchanged covered behavior
 and rerun affected cases only where subsequent owner changes require it. See

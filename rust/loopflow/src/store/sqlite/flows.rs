@@ -17,7 +17,7 @@ use crate::engine::invocation::QueuedInvocation;
 use crate::engine::transitions::FlowVerdict;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
-use crate::session::Run;
+
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::{Task, TaskEventKind};
@@ -31,12 +31,11 @@ pub(super) const TASK_INVOCATION: &str = "id=(SELECT current_invocation_id FROM 
 const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index, f.iteration,
     f.updated_at, f.position_version, f.task_id, f.wave_id, COALESCE(f.cwd, t.worktree),
     f.message, f.model, f.current_run_id,
-    (SELECT published FROM runs WHERE id=f.current_run_id),
-    CASE WHEN f.selected_start IS NULL THEN (SELECT outcome FROM runs WHERE id=f.current_run_id)
-    ELSE (SELECT json_extract(done.payload,'$.status') FROM session_events start
+    (SELECT input_published FROM agent_sessions WHERE input_id=f.current_run_id),
+    (SELECT json_extract(done.payload,'$.status') FROM session_events start
         JOIN session_events done ON done.session_id=start.session_id
             AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
-            AND done.kind='completed' WHERE start.seq=f.selected_start) END,
+            AND done.kind='completed' WHERE start.seq=f.selected_start),
     f.pending_session_id,
     (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
     f.worker_generation, f.claim_json, f.failure_json, f.state
@@ -441,83 +440,32 @@ fn end_flow_in(
 /// this position is kept: a reservation the launcher has not published, or a
 /// completed candidate the driver is about to settle.
 fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<()> {
-    if matches!(flow.current_step(), Some(ConcreteStep::Op(_))) {
+    if flow.current_attempt.is_some() || matches!(flow.current_step(), Some(ConcreteStep::Op(_))) {
         return Ok(());
     }
-    if flow.current_attempt.is_some() {
-        return Ok(());
+    if flow.is_human() {
+        return super::sessions::reserve_task_review_in(tx, flow);
     }
-    let step = flow
-        .current_checked()
-        .ok_or_else(|| invalid("Flow position has no current step"))?;
-    let run_id = RunId::new();
-    let session = if !flow.is_human() {
-        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT s.id FROM runs r JOIN agent_sessions s ON s.id=r.session_id
-             WHERE r.invocation_id=?1 AND r.node=?2 AND r.iterations=?3
-             AND s.kind='conversation' ORDER BY r.attempt DESC LIMIT 1",
-                params![flow.id(), node, serde_json::to_string(&iterations)?],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match existing {
-            Some(session) => Some(session),
-            None => {
-                let session = format!("session_{}", uuid::Uuid::new_v4().simple());
-                let repo = if flow.cwd.is_dir() {
-                    crate::repo::discover_repo_root(&flow.cwd)
-                        .map_err(invalid)?
-                        .map(|root| {
-                            crate::repository::CanonicalRepo::discover(&root)
-                                .map(|repo| repo.to_string())
-                        })
-                        .transpose()
-                        .map_err(invalid)?
-                } else {
-                    None
-                };
-                tx.execute(
-                    "INSERT INTO agent_sessions(id,current_run_id,kind,title,title_source,created_at,interactive,repo)
-                     VALUES(?1,?2,'conversation',?3,'generated',?4,0,?5)",
-                    params![session, run_id.as_str(), step.step, now_unix(), repo],
-                )?;
-                Some(session)
-            }
-        }
+    let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
+    let existing: Option<String> = tx.query_row(
+        "SELECT id FROM agent_sessions WHERE flow_session_id=?1 AND node=?2 AND iterations=?3 AND kind='conversation'",
+        params![flow.id(),node,serde_json::to_string(&iterations)?],|row| row.get(0)).optional()?;
+    let session = if let Some(id) = existing {
+        let mut session = super::sessions::session_in(tx, &id)?.ok_or(StoreError::NotFound)?;
+        session.input_id = RunId::new();
+        session.input_published = false;
+        super::sessions::replace_input_in(tx, &session)?;
+        session
     } else {
-        None
+        super::sessions::reserve_flow_conversation_in(
+            tx,
+            flow,
+            format!("session_{}", uuid::Uuid::new_v4().simple()),
+            crate::session::SessionKind::Conversation,
+            flow.current().step,
+        )?
     };
-    let run = super::runs::insert_run_in(
-        tx,
-        Run {
-            id: run_id,
-            session_id: session.clone(),
-            invocation_id: Some(flow.id().to_owned()),
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id: flow.task_id.clone(),
-            wave_id: flow.wave_id.clone(),
-            work_source: flow.declared_work().map(|work| work.source),
-            created_at: now_unix(),
-            published: false,
-            cwd: flow.cwd.clone(),
-            skill: Some(step.step),
-            provider: None,
-            model: None,
-            caller_run_id: None,
-            ended: None,
-        },
-    )?;
-    if let Some(session) = session {
-        tx.execute(
-            "UPDATE agent_sessions SET current_run_id=?2 WHERE id=?1",
-            params![session, run.id.as_str()],
-        )?;
-    }
-    super::runs::select_attempt_in(tx, flow.id(), flow.version, &run.id)
+    super::sessions::select_input_in(tx, flow, &session)
 }
 
 /// The Flow retains the exact successful native receipt in the same transaction
@@ -723,14 +671,8 @@ fn claim_task_worker_in(
                     [&flow.invocation.id],
                 )?;
             }
-            // Its launched Run has no process left; the new worker settles it.
-            Some(attempt) if attempt.outcome.is_none() => {
-                tx.execute(
-                    "UPDATE runs SET outcome='interrupted', ended_at=?2 WHERE id=?1
-                     AND NOT EXISTS(SELECT 1 FROM flow_sessions WHERE current_run_id=?1 AND selected_start IS NOT NULL)",
-                    params![attempt.run_id.as_str(), now_unix()],
-                )?;
-            }
+            // A dead driver cannot establish the provider's outcome. Native
+            // history and connection recovery retain that unresolved evidence.
             _ => {}
         }
     }
@@ -811,9 +753,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let launch: Option<(String, String)> = conn
             .query_row(
-                "SELECT f.id,s.id FROM flow_sessions f JOIN runs r ON r.id=f.current_run_id
-             JOIN agent_sessions s ON s.id=r.session_id
-             WHERE r.id=?1 AND r.published=1 AND f.state='current' AND s.kind='conversation'",
+                "SELECT f.id,s.id FROM flow_sessions f JOIN agent_sessions s ON s.input_id=f.current_run_id
+             WHERE s.input_id=?1 AND s.input_published=1 AND f.state='current' AND s.kind='conversation'",
                 [run.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -1080,7 +1021,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE runs SET published=1, provider=?5, model=?6 WHERE id=?2 AND published=0
+            "UPDATE agent_sessions SET input_published=1, provider=?5, model=?6 WHERE input_id=?2 AND input_published=0
              AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?1 AND current_run_id=?2
                 AND position_version=?3 AND state='current' AND claim_json IS ?4)",
             params![
@@ -1603,7 +1544,7 @@ impl SqliteStore {
     }
 
     pub(crate) fn test_flow_turn(&self, run: &RunId) -> crate::id::ExecId {
-        let (session, _) = self.session_for_run(run).unwrap().unwrap();
+        let session = self.session_for_run(run).unwrap().unwrap();
         let driver = self
             .session_driver(&session.id)
             .unwrap()
@@ -1664,7 +1605,6 @@ mod tests {
     use crate::engine::{
         ConcreteOp, ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill,
     };
-    use crate::session::{Run, RunEnd};
     use crate::store::sqlite::SqliteStore;
 
     fn step(id: &str, from: Option<&str>) -> ConcreteStep {
@@ -1686,7 +1626,12 @@ mod tests {
         }
     }
 
-    fn attempt(store: &SqliteStore, invocation: &str, _skill: Option<&str>, provider: &str) -> Run {
+    fn attempt(
+        store: &SqliteStore,
+        invocation: &str,
+        _skill: Option<&str>,
+        provider: &str,
+    ) -> crate::session::AgentSession {
         let flow = store.flow(invocation).unwrap().unwrap();
         let flow = store
             .reserve_attempt(invocation, flow.version, None)
@@ -1695,7 +1640,7 @@ mod tests {
         store
             .publish_attempt(invocation, flow.version, &run, None, provider, None)
             .unwrap();
-        store.session_for_run(&run).unwrap().unwrap().1
+        store.session_for_run(&run).unwrap().unwrap()
     }
 
     fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowSession {
@@ -1737,7 +1682,7 @@ mod tests {
             .reserve_attempt(flow.id(), flow.version, None)
             .unwrap();
         let run = &flow.current_attempt.as_ref().unwrap().run_id;
-        let (session, _) = store.session_for_run(run).unwrap().unwrap();
+        let session = store.session_for_run(run).unwrap().unwrap();
         store
             .publish_attempt(flow.id(), flow.version, run, None, "codex", None)
             .unwrap();
@@ -1921,7 +1866,7 @@ mod tests {
             .unwrap();
         let retry_run = &retry.current_attempt.as_ref().unwrap().run_id;
         assert_eq!(
-            store.session_for_run(retry_run).unwrap().unwrap().0.id,
+            store.session_for_run(retry_run).unwrap().unwrap().id,
             session.id
         );
         store
@@ -2035,8 +1980,8 @@ mod tests {
         assert_eq!(unknown, (None, None));
         drop(conn);
         assert!(
-            store.run(run).unwrap().unwrap().ended.is_none(),
-            "native success cannot invent a Run outcome"
+            store.run(run).unwrap().is_none(),
+            "native success cannot invent a Run"
         );
     }
 
@@ -2049,13 +1994,14 @@ mod tests {
             .reserve_attempt(flow.id(), flow.version, None)
             .unwrap();
         let first = reserved.current_attempt.as_ref().unwrap();
-        let (session, run) = store
+        let session = store
             .session_for_run(&first.run_id)
             .unwrap()
             .expect("agent admission reserves its conversation before provider launch");
+        let run = session.clone();
         assert!(!session.interactive);
         assert_eq!(session.flow_session_id.as_deref(), Some(flow.id()));
-        assert!(!run.published);
+        assert!(!run.input_published);
         assert!(
             reserved.pending_session_id.is_none(),
             "headless work is not a review"
@@ -2063,40 +2009,49 @@ mod tests {
         store
             .rename_session(
                 &session.id,
-                Some(&run.id),
+                Some(&run.input_id),
                 "Investigation",
                 crate::session::TitleSource::Human,
             )
             .unwrap();
         store
-            .publish_attempt(flow.id(), reserved.version, &run.id, None, "codex", None)
-            .unwrap();
-        store
-            .end_run(
-                &run.id,
-                &RunEnd {
-                    outcome: "failed".into(),
-                    at: 2,
-                },
+            .publish_attempt(
+                flow.id(),
+                reserved.version,
+                &run.input_id,
+                None,
+                "codex",
+                None,
             )
             .unwrap();
+        let actor = store.test_flow_turn(&run.input_id);
+        store.test_finish_flow_turn(&actor, "failed");
         store.recover_flow(flow.id(), None).unwrap();
         let retry = store.retry_flow(flow.id(), None).unwrap();
         let retry = store
             .reserve_attempt(flow.id(), retry.version, None)
             .unwrap();
         let second = retry.current_attempt.unwrap();
-        let (same, replacement) = store.session_for_run(&second.run_id).unwrap().unwrap();
+        let same = store.session_for_run(&second.run_id).unwrap().unwrap();
+        let replacement = same.clone();
         assert_eq!(same.id, session.id);
         assert_eq!(same.title, "Investigation");
-        assert_eq!(same.current_run_id, replacement.id);
-        assert_ne!(run.id, replacement.id);
-        assert_eq!(
-            store.run(&run.id).unwrap().unwrap().ended.unwrap().outcome,
-            "failed"
-        );
+        assert_eq!(same.input_id, replacement.input_id);
+        assert_ne!(run.input_id, replacement.input_id);
+        assert!(store.run(&run.input_id).unwrap().is_none());
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        assert!(history
+            .iter()
+            .any(|event| event.payload["status"] == "failed"));
         assert!(store
-            .publish_attempt(flow.id(), reserved.version, &run.id, None, "codex", None)
+            .publish_attempt(
+                flow.id(),
+                reserved.version,
+                &run.input_id,
+                None,
+                "codex",
+                None
+            )
             .is_err());
 
         let op = launched(
@@ -2170,7 +2125,7 @@ mod tests {
         // Navigation names the selected native turn through the tool's Exec.
         let run = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(run.node, Some(1));
-        let actor = store.test_flow_turn(&run.id);
+        let actor = store.test_flow_turn(&run.input_id);
         let iterate = verdict(FlowDecision::Iterate);
         assert!(store
             .record_flow_decision(&id, 1, &crate::id::ExecId::new(), &iterate)
@@ -2204,15 +2159,6 @@ mod tests {
 
         // A failed native turn blocks the Flow with its candidate cleared; retry opens
         // the position for the next attempt.
-        store
-            .end_run(
-                &run.id,
-                &RunEnd {
-                    outcome: "failed".into(),
-                    at: 2,
-                },
-            )
-            .unwrap();
         store.test_finish_flow_turn(&actor, "failed");
         let blocked = store.recover_flow(&id, None).unwrap();
         assert!(blocked
@@ -2233,19 +2179,10 @@ mod tests {
 
         // The second attempt completes; its decision survives to the settled edge.
         let second = attempt(&store, &id, Some("loop-decide"), "codex");
-        assert_eq!(second.attempt, Some(2));
-        let successor = store.test_flow_turn(&second.id);
+        assert_eq!(store.session_inputs(&second.id).unwrap().len(), 2);
+        let successor = store.test_flow_turn(&second.input_id);
         store
             .record_flow_decision(&id, retried.version, &successor, &iterate)
-            .unwrap();
-        store
-            .end_run(
-                &second.id,
-                &RunEnd {
-                    outcome: "completed".into(),
-                    at: 3,
-                },
-            )
             .unwrap();
         store.test_finish_flow_turn(&successor, "completed");
         let settled = store.recover_flow(&id, None).unwrap();

@@ -50,6 +50,78 @@ selected complete AgentSession admission/publication and SQL-reader conversion
 through ordinary launches, TaskLauncher, reviews and Asks. Native transport is
 separate. These diagnostic repairs do not complete the implementation slice.
 
+### Active admission conversion (unfinished)
+
+The new `agent_session_admission` draft moves captured input/publication metadata
+onto AgentSession, removes its Run FK and its SQL reader's Run join, and retains
+immutable input references as subordinate history without outcomes or ordinals.
+Ordinary capture and Flow reservation/publication write the conversation directly;
+review/Ask consumers now read it. This is retained unfinished implementation,
+not a completed slice. Historical Run import and test consumers still need
+conversion, populated preservation and saved-answer/refused-publication proof.
+The new empty schema replay passed; it is not populated migration proof.
+
+`agent-admission-build.log` builds the real CLI. Candidate SHA256
+`d2cdd28d5bc0ec3bee424d1b40ee598827afee7fa54f9a15713c9ee95520286e`
+passes the formerly red ordinary automatic-retry target in
+`agent-admission-native-zero-run-2.log` and
+`.lf/tmp/execution-model/agent-admission-native-zero-run-2/results.json`:
+zero Run rows, failed then successful native turn, retained 40/10 token usage,
+one Session/thread/provider generation/Exec, selected events 1/3 and consumed
+successful event 6 exactly once. Real Codex uses synthetic Responses and a
+private Home; no configured-provider acceptance follows. The first harness
+invocation lacked its `websockets` dependency and never ran the fixture;
+`uv run --with websockets` corrected setup. Native decision retry remains red.
+Later source edits have removed the unused Run selector and dead-driver outcome
+fabrication; those edits postdate the candidate and need focused validation.
+
+Admission now has populated source and canonical preservation proof. The four
+checks in `agent-admission-canonical.log` pass after all 26 drafts are materialized
+in an ordinary disposable source copy; `canonical-admission-source.json` records
+the exact source hashes. They preserve existing Session fields, native/Flow
+history, immutable input/caller references and historical Run evidence. That
+copy has no Git metadata and proves only the selected migration/store cases.
+
+The focused 73-case run passed 71 and exposed two obsolete outcome assertions
+(two passing cases also leaked). The separate 28-case store/migration run passed
+21 and exposed seven issues, including real Flow provenance loss. Correcting
+inherited provenance and preserving unknown driver outcomes, plus repairing
+fixture construction, produced 2/2 then 5/5 focused passes. All Chapter cases
+passed, including exact non-null Started and second-store sync-only adoption.
+Those use operations and simulated provider data, not public CLI/default launch.
+
+The first CLI recovery run retained 17 passes, 12 assertion failures and one
+owned Ask fixture interrupted after 158 seconds. Its SQL poll suppressed a
+removed-column error; the corrected helper retries only absent rows/busy locks
+and terminates its owned child on other failures. The five affected cutover
+cases now pass in `agent-admission-cutover-fixtures.log`: interactive reopen,
+Ask answer recovery, saved review replacement, SQL-only review discovery and
+scoped inventory. The earlier Session CLI suite passes 6/6. The current exact
+stale/current Ask status proof also passes using SQL caller input identity, with
+no artifact payload prerequisite. Review completion now checks the selected
+input directly on FlowSession; it no longer calls the Run module's fence.
+
+Still incomplete: import comparison/preservation and legacy Run discovery,
+usage/activity, final wire/history conversion, all-provider recovery and native
+decision retry. The CLI failures in these areas remain evidence, not fixture
+successes. The returned Desktop changes pass all 25 WorkspaceNavigation tests and the
+one mounted named-Session terminal proof (4.590 seconds). The latter removes and
+restores planning while retaining surfaces, focus, siblings, layout and draft
+text; Ghostty used timer rendering because CoreVideo display-link creation was
+unavailable. This is fixture-mounted behavior, not configured Desktop acceptance.
+Active-process attribution now reads the owning AgentSession, avoiding a missing
+Task after zero-Run admission. Review completion and corrupt-neighbor/replacement
+checks pass after their last Run-module settlement fence was deleted. Ask launch
+also reads its caller input from SQL rather than reopening its own input payload.
+The checkpoint candidate `88b2b834d230a644fb15ddd01c7de482645c9753992218bf87d467002bec7eae`
+repeats the public automatic-retry proof with zero Runs, retained failure/success,
+40/10 usage and exact single consumption in `agent-admission-native-checkpoint`.
+Formatting and all-target Clippy pass (`agent-admission-static-2.log`, 15.50s);
+the earlier static run caught two test-only manual-contains lints, now corrected.
+The pinned rebase plan selects direct rebase. No full matrix repeat or completed
+slice follows. Historical discovery/import and all-provider/native decision
+recovery remain implementation work after this admission checkpoint.
+
 ## Decision pass 10 · 2026-09-28
 
 Reassessment after the completed operational unblock in

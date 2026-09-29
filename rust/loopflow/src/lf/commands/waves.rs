@@ -885,8 +885,7 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        let recommended =
-            recommended_flow(&planning.projects, item.project_id.as_deref().unwrap_or(""));
+        let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         details.push(
             snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
         );
@@ -962,10 +961,10 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
     }
 }
 
-fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
+fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>) -> String {
     projects
         .iter()
-        .find(|project| project.id == project_id)
+        .find(|project| Some(project.id.as_str()) == project_id)
         .map_or("feature", |project| project.flow.as_str())
         .to_string()
 }

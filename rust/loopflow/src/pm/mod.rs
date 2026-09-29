@@ -233,8 +233,10 @@ fn validate_snapshot_ownership(
                 item.identifier
             )));
         }
-        let project = projects_by_id
-            .get(item.project_id.as_deref().unwrap_or(""))
+        let project = item
+            .project_id
+            .as_deref()
+            .and_then(|id| projects_by_id.get(id))
             .ok_or_else(|| {
                 PmError::Message(format!(
                     "Linear task {} in wave/{wave} points to missing Project {:?}",

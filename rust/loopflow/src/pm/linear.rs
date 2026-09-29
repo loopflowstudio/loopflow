@@ -1795,35 +1795,28 @@ struct IssueOwnershipData {
     issue: Option<OwnedIssueNode>,
 }
 
+// Detail observations must include nullable fields; omission is not a value to store.
 #[derive(Deserialize)]
 struct OwnedIssueNode {
     id: String,
     identifier: String,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     url: Option<String>,
     title: String,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     description: Option<String>,
     #[serde(rename = "prioritySortOrder")]
     priority_sort_order: f64,
     #[serde(rename = "sortOrder")]
     sort_order: f64,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     assignee: Option<IdNode>,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     state: Option<WorkflowStateRef>,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     team: Option<IdNode>,
-    #[serde(deserialize_with = "_deserialize_nullable")]
+    #[serde(deserialize_with = "Option::deserialize")]
     project: Option<ProjectNode>,
-}
-
-fn _deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
 }
 
 impl OwnedIssueNode {

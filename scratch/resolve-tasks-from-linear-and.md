@@ -44,6 +44,26 @@ The authorized LOO-298 coordination retry through official lf again failed with
 Shared execution migrations remain blocked; none were authored in this slice.
 Planning normalization does not alter Task/Run/claim identities or execution tables.
 
+PM operations and managed Task resolution now share the same ownership resolver;
+PM writes still force a fresh planning observation and preserve execution-ID aliases.
+Wave reads use the store's Project-membership join directly, without a second
+slug filter. Nullable detail fields use Serde's existing deserializer while
+remaining required in complete observations. Test fixtures use typed planning
+values and status assertions no longer copy an already-built snapshot.
+The repository matrix now expresses conflicting Initiative owners on one Project;
+conflicting snapshot copies converge in normalized storage and cannot represent
+that case. Its previous checkout reached Git fetch and failed authentication;
+the corrected fixture rejects ownership before checkout and passes.
+
+Verification after reduction: the PM module run passed 49 tests and ignored its
+subprocess entry point. Its unchanged
+`linear_oauth_proactive_failure_tracing_is_secret_free` test failed to capture the
+expected log in that grouped run, then passed alone; the grouped failure remains
+an unresolved verification limit. All six planning-lookup proofs, the public CLI
+planning-only status case, and the corrected repository matrix passed.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
+`git diff --check` passed. No live Linear or full command-story proof was added.
+
 Remaining implementation, preserving the approved single-PR delivery boundary:
 
 - Provider revision ordering and webhook convergence still need integration. The

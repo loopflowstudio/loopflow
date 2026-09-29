@@ -944,8 +944,7 @@ fn serial_task_pr_publication_restores_task_context() {
         .expect("reconcile Task PR")
         .execution
         .expect("execution");
-    let snapshot = persisted_task.clone();
-    assert!(!matches!(snapshot.status, WorkStatus::Done));
+    assert!(!matches!(persisted_task.status, WorkStatus::Done));
     assert!(
         matches!(
             persisted_task.observation,
@@ -1443,10 +1442,9 @@ fn observed_merge_does_not_complete_a_task_from_status() {
             persisted_task.observation,
             loopflow::work::task::Observation::Fresh { .. }
         ),
-        "completion should use the bounded REST observation: {persisted_task:?}"
+        "status should use the bounded REST observation: {persisted_task:?}"
     );
-    let snapshot = persisted_task.clone();
-    assert!(matches!(snapshot.status, WorkStatus::Ready));
+    assert!(matches!(persisted_task.status, WorkStatus::Ready));
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1492,8 +1490,7 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
         .expect("reconcile watched PR merge")
         .execution
         .expect("execution");
-    let snapshot = persisted_task.clone();
-    assert!(!matches!(snapshot.status, WorkStatus::Done));
+    assert!(!matches!(persisted_task.status, WorkStatus::Done));
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1535,11 +1532,10 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .expect("mark PR as completing");
 
     let first = task_status(repo.path(), Some("INF-123"))
-        .expect("first completed status")
+        .expect("first merged-PR status")
         .execution
         .expect("execution");
-    let first_snapshot = first.clone();
-    assert_eq!(first_snapshot.status, WorkStatus::Ready);
+    assert_eq!(first.status, WorkStatus::Ready);
     let first_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("read first Task events");
@@ -1551,27 +1547,26 @@ fn repeated_status_of_merged_task_never_completes_work() {
             [task.task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("read completed Work");
+        .expect("read Work state");
     let second = task_status(repo.path(), Some("INF-123"))
-        .expect("repeated completed status")
+        .expect("repeated merged-PR status")
         .execution
         .expect("execution");
-    let second_snapshot = second.clone();
     let second_state: (String, Option<i64>) = conn
         .query_row(
             "SELECT work_state, work_terminal_at FROM tasks WHERE id=?1",
             [task.task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("reread completed Work");
+        .expect("reread Work state");
     let second_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("reread Task events");
 
-    assert_eq!(second_snapshot.status, WorkStatus::Ready);
+    assert_eq!(second.status, WorkStatus::Ready);
     assert_eq!(
         second_state, first_state,
-        "terminal Work must not be mutated"
+        "status must not mutate Work state"
     );
     assert_eq!(
         second_events, first_events,

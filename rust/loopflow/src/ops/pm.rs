@@ -15,6 +15,7 @@ use futures_util::future::try_join_all;
 use crate::engine::config::load_repo_config;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
+use crate::ops::task_pm::ResolvedTask;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
@@ -1061,28 +1062,13 @@ pub(crate) async fn pm_show_async(
 ) -> OpsResult<PmShowResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
-    let snapshot = row.snapshot;
-    let projects = snapshot.projects;
-    let slugs: BTreeSet<_> = projects
-        .iter()
-        .map(|project| project.slug.as_str())
-        .collect();
-    let items = snapshot
-        .items
-        .into_iter()
-        .filter(|item| {
-            item.project
-                .as_deref()
-                .is_some_and(|slug| slugs.contains(slug))
-        })
-        .collect();
     Ok(PmShowResult {
         wave,
         provider: row.provider.parse().map_err(pm_to_ops)?,
         initiative: row.initiative,
         synced_at: row.synced_at,
-        projects,
-        items,
+        projects: row.snapshot.projects,
+        items: row.snapshot.items,
     })
 }
 
@@ -1107,7 +1093,11 @@ pub(crate) async fn task_comment_async(
         return Err(OpsError::Message("Task comment cannot be empty".into()));
     }
     let repository = resolve_repository_context(repo).await?;
-    let (owning_wave, _, item, _) = resolve_owned_issue(repo, &repository, issue).await?;
+    let ResolvedTask {
+        wave: owning_wave,
+        item,
+        ..
+    } = resolve_owned_issue(repo, issue).await?;
     if let Some(wave) = wave {
         if owning_wave != wave {
             return Err(OpsError::Message(format!(
@@ -1269,8 +1259,7 @@ pub(crate) async fn pm_update_async(
     options: &PmUpdateOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
-    let repository = resolve_repository_context(repo).await?;
-    let (wave, _, item, _) = resolve_owned_issue(repo, &repository, &options.id).await?;
+    let ResolvedTask { wave, item, .. } = resolve_owned_issue(repo, &options.id).await?;
     if options
         .wave
         .as_deref()
@@ -1486,9 +1475,13 @@ pub(crate) async fn pm_link_pr_async(
             }
         }
     };
-    match resolve_owned_issue(repo, &ctx.repository, &request.issue_id).await {
-        Ok((owning_wave, _, _, _)) if owning_wave == wave => {}
-        Ok((owning_wave, _, _, _)) => {
+    match resolve_owned_issue(repo, &request.issue_id).await {
+        Ok(ResolvedTask {
+            wave: owning_wave, ..
+        }) if owning_wave == wave => {}
+        Ok(ResolvedTask {
+            wave: owning_wave, ..
+        }) => {
             return PrLinkageOutcome {
                 ids: prior.clone(),
                 error: Some(format!(
@@ -1626,7 +1619,7 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
     } else {
         // Retained identity must not authorize deleting an issue that moved to
         // another repository. Fresh ownership is required before the mutation.
-        let (wave, _, item, _) = resolve_owned_issue(repo, &repository, issue).await?;
+        let ResolvedTask { wave, item, .. } = resolve_owned_issue(repo, issue).await?;
         let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1791,9 +1784,13 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
 }
 
 async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
-    let repository = resolve_repository_context(repo).await?;
-    let (wave, initiative_id, mut item, mut project) =
-        resolve_owned_issue(repo, &repository, issue).await?;
+    let ResolvedTask {
+        wave,
+        mut item,
+        mut project,
+        ..
+    } = resolve_owned_issue(repo, issue).await?;
+    let initiative_id = singular_project_initiative(&project)?;
     let title_path = canonical_wave_title_path_async(repo, &wave).await?;
     project.name = canonical_project_name(&title_path, &wave, &project.name)?;
     project.slug = crate::pm::project_slug(&project.name);
@@ -1807,30 +1804,14 @@ async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolved
     })
 }
 
-async fn resolve_owned_issue(
-    repo: &Path,
-    repository: &RepositoryPmContext,
-    issue: &str,
-) -> OpsResult<(String, String, PmItem, PmProject)> {
+async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask> {
     let task = pm_store()
         .await?
         .get_task_by_issue(issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let issue = task.as_ref().map_or(issue, |task| task.plan.id.as_str());
-    let record = read_task_planning_async(repo, issue, PmRefresh::Force).await?;
-    let item = record.item;
-    let project = record.project.ok_or_else(|| OpsError::Message(format!("Linear issue {} has no Project; planning remains inspectable but this operation requires ownership", item.identifier)))?;
-    if item.team_id != repository.team_id {
-        return Err(OpsError::Message(format!(
-            "Linear task {} belongs to Team {}, not repository {} Team {}",
-            item.identifier, item.team_id, repository.repo_id, repository.team_id
-        )));
-    }
-    let initiative_id = singular_project_initiative(&project)?;
-    let wave = wave_for_initiative(repo, &initiative_id)?;
-    validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
-    Ok((wave, initiative_id, item, project))
+    crate::ops::task_pm::resolve_task_async(repo, issue, PmRefresh::Force).await
 }
 
 pub(crate) fn singular_project_initiative(project: &PmProject) -> OpsResult<String> {

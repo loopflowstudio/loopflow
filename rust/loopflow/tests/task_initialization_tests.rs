@@ -1118,11 +1118,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status(&missing_path, Some("INF-123"))
+    let snapshot = task_status(&missing_path, Some("INF-123"))
         .expect("status survives the absent worktree")
         .execution
         .expect("execution");
-    let snapshot = status.clone();
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot

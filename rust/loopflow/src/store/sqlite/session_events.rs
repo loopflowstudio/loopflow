@@ -357,6 +357,71 @@ mod tests {
     }
 
     #[test]
+    fn first_provider_attempt_follows_original_input_order_after_import() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.conn.lock().unwrap().execute_batch(
+            "INSERT INTO agent_sessions(id,input_id,title,title_source,created_at,kind,interactive,input_published,cwd)
+             VALUES('conversation','run_00000000000000000000000000000001','Retained','human',1,'conversation',1,1,'/fixture');
+             INSERT INTO agent_session_inputs(input_id,session_id) VALUES('run_00000000000000000000000000000001','conversation');"
+        ).unwrap();
+        let input = crate::durable::RunId::parse("run_00000000000000000000000000000001").unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        assert_eq!(
+            store
+                .input_snapshot(input.as_str())
+                .unwrap()
+                .first_provider_attempt_at,
+            None
+        );
+        let pr = crate::work::task::TaskPrId::new();
+        let manifest = json!({"schema_version":1,"run_id":input,
+            "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
+            "cwd":"/fixture","subjects":[],"host":"fixture",
+            "flow":{"kind":"step","task_pr_id":pr,"invocation_id":"retained",
+                "flow":"feature","step":"review"}});
+        store
+            .retain_session_observation(
+                &session,
+                &crate::session::SessionObservation {
+                    input_id: input.clone(),
+                    source: "manifest.json".into(),
+                    observed_at: 1,
+                    task_id: None,
+                    wave_id: None,
+                    payload: json!({"input_id":input,"source":"manifest.json","evidence":manifest}),
+                },
+            )
+            .unwrap();
+        for seq in [1, 0] {
+            let source = format!("events.jsonl:{seq}");
+            let time = time::OffsetDateTime::from_unix_timestamp(10 + seq * 10).unwrap();
+            let evidence = json!({"schema_version":1,"seq":seq,
+                "observed_at":time.format(&time::format_description::well_known::Rfc3339).unwrap(),
+                "type":"provider_attempt_started","attempt_key":format!("attempt-{seq}"),
+                "provider":"codex","model":null});
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        input_id: input.clone(),
+                        source: source.clone(),
+                        observed_at: 100 + seq,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                    },
+                )
+                .unwrap();
+        }
+        let snapshot = store.input_snapshot(input.as_str()).unwrap();
+        assert_eq!(snapshot.task_pr_id, Some(pr));
+        assert_eq!(snapshot.started, 1);
+        assert_eq!(snapshot.first_provider_attempt_at, Some(10));
+        assert_eq!(snapshot.usage.gaps, 0);
+    }
+
+    #[test]
     fn summary_reads_usage_without_hydrating_conversation_text() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

@@ -774,15 +774,20 @@ pub(crate) fn conversation_snapshot(
             }
         } else if source == "runs" && input == Some(input_id.as_str()) {
             stored = Some(evidence);
-        } else if source.starts_with("events.jsonl:") {
-            match serde_json::from_value::<EventEnvelope>(evidence.clone()) {
-                Ok(envelope) => {
-                    events.push(envelope);
-                }
-                Err(_) => gaps += 1,
+        } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
+            match (
+                ordinal.parse::<u64>(),
+                serde_json::from_value::<EventEnvelope>(evidence.clone()),
+            ) {
+                (Ok(ordinal), Ok(envelope)) => events.push((ordinal, envelope)),
+                _ => gaps += 1,
             }
         }
     }
+    // Earlier input observations may be imported after later ones. Keep the
+    // original event order for first-attempt timing and cumulative evidence.
+    events.sort_by_key(|(ordinal, _)| *ordinal);
+    let mut events: Vec<_> = events.into_iter().map(|(_, envelope)| envelope).collect();
     gaps += recover_native_usage(&mut events, history);
     let mut encoded = Vec::new();
     for event in events {
@@ -2987,10 +2992,17 @@ mod tests {
         assert_eq!(attempt, 2);
         fs::write(dir.join("events.jsonl"), format!("{events}\n")).unwrap();
 
-        let evidence = super::reduce_usage_reader(
-            std::io::BufReader::new(fs::File::open(dir.join("events.jsonl")).unwrap()),
-        ).unwrap();
-        assert_eq!(super::read_manifest(&dir).unwrap().created_at.unix_timestamp(), 1);
+        let evidence = super::reduce_usage_reader(std::io::BufReader::new(
+            fs::File::open(dir.join("events.jsonl")).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(
+            super::read_manifest(&dir)
+                .unwrap()
+                .created_at
+                .unix_timestamp(),
+            1
+        );
         assert_eq!(evidence.first_provider_attempt_at, Some(10));
     }
 
@@ -3835,48 +3847,34 @@ mod tests {
         assert_eq!(events.pop(), Some(b'\n'));
         fs::write(&path, events).unwrap();
 
-        let snapshot = super::reduce_usage_reader(
-            std::io::BufReader::new(fs::File::open(&path).unwrap()),
-        ).unwrap();
+        let snapshot =
+            super::reduce_usage_reader(std::io::BufReader::new(fs::File::open(&path).unwrap()))
+                .unwrap();
         assert_eq!(snapshot.gaps, 1);
         assert!(snapshot.first_provider_attempt_at.is_some());
     }
 
     #[test]
     fn reader_does_not_invent_an_attempt_from_incomplete_or_unsupported_evidence() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.mark_spawn_requested();
-        capture.finish("completed").unwrap();
-        let dir = capture.artifact_dir();
-        let path = dir.join("events.jsonl");
-        let events = fs::read_to_string(&path).unwrap();
-        let mut attempt = events
-            .lines()
-            .map(|line| serde_json::from_str::<super::EventEnvelope>(line).unwrap())
-            .find(|envelope| {
-                matches!(
-                    envelope.event,
-                    super::RunEvent::ProviderAttemptStarted { .. }
-                )
-            })
-            .unwrap();
+        let mut attempt = super::EventEnvelope {
+            schema_version: 1,
+            seq: 0,
+            observed_at: time::OffsetDateTime::from_unix_timestamp(10).unwrap(),
+            event: super::RunEvent::ProviderAttemptStarted {
+                provider: "codex".into(),
+                model: None,
+                account_id: None,
+                attempt_key: "first".into(),
+            },
+        };
         // An otherwise valid attempt without a final newline is not committed evidence.
-        fs::write(&path, serde_json::to_vec(&attempt).unwrap()).unwrap();
-        let snapshot = super::reduce_usage_reader(
-            std::io::BufReader::new(fs::File::open(&path).unwrap()),
-        ).unwrap();
+        let incomplete = serde_json::to_vec(&attempt).unwrap();
+        let snapshot = super::reduce_usage_reader(incomplete.as_slice()).unwrap();
         assert_eq!(snapshot.first_provider_attempt_at, None);
         assert_eq!(snapshot.gaps, 1);
         attempt.schema_version = 999;
-        fs::write(
-            &path,
-            format!("{}\n", serde_json::to_string(&attempt).unwrap()),
-        )
-        .unwrap();
-        let snapshot = super::reduce_usage_reader(
-            std::io::BufReader::new(fs::File::open(&path).unwrap()),
-        ).unwrap();
+        let unsupported = format!("{}\n", serde_json::to_string(&attempt).unwrap());
+        let snapshot = super::reduce_usage_reader(unsupported.as_bytes()).unwrap();
         assert_eq!(snapshot.first_provider_attempt_at, None);
         assert_eq!(snapshot.gaps, 1);
     }

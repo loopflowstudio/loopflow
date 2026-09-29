@@ -1468,3 +1468,39 @@ chapter-public-cli-3-results plus its exact source snapshot. The first missing-i
 and second obsolete-completion-join failures remain separate receipts. All three
 owned containers were removed. This closes this synthetic public CLI boundary,
 not configured planning/account or installed migration acceptance. Ruff passes.
+
+
+Rebase checkpoint5275c93d6 onto6e7189926 completed at0d7ec1565 through lf.
+The resolver reconciled upstreamPR1350 exact Task-PR attribution/first-attempt
+telemetry andPR1351 capture verification changes with conversation ownership.
+Its two focused file/reducer passes do not establish the complete SQL projection.
+The added SQL ordering proof fails Some(20) versus Some(10) in
+rebase-first-attempt-order-red.log: later imported earlier events must retain their
+original JSONL ordinal. The shared conversation reducer now uses that order.
+rebase-attribution-and-timing.log passes7/8 including the new timing test,
+telemetry, native usage and Rust wave-detail fixture. The eighth fails before its
+assertion because the asynchronous recorder's file is absent; that unsupported/
+incomplete-byte reducer fixture now supplies explicit bytes without a provider or
+background recorder. A separate prepared-PR check now also reads the SQL snapshot.
+Python lifecycle scorecard passes9. Publication and final static/Swift checks are
+pending. Native decision transport and complete cutover requirements are unchanged.
+Numeric-wire proposal remains untracked and excluded until supervisor handback.
+
+rebase-retained-pr-and-partial-evidence.log passes the explicit incomplete/schema
+fixture but fails the added SQL assertion with NotFound. That prepared-input unit
+fixture intentionally has no admitted Flow Session, so it cannot establish SQL
+reader behavior. Its existing immutable-file assertion remains; the SQL timing
+fixture now carries an admitted input plus recorded Task PR and checks both
+fields through input_snapshot. This setup correction adds no runtime fallback.
+
+rebase-sql-pr-and-first-attempt.log passes the admitted SQL projection(0.416s).
+rebase-wave-wire-swift.log executes the actual Swift Testing Wave-detail fixture
+once(0.004s); its XCTest zero-test stanza is not the result. Together with the
+retained seven focused Rust passes and explicit partial-byte pass, this verifies
+the reconciled fields at their selected boundaries. No broad matrix repeated.
+
+All-target Clippy passes in rebase-exec-usage-static.log(17.15s); fmt and diff checks
+pass. The architecture status table now states early-ledger coverage and limits.
+The root Python environment lacks fasthtml; rerunning the architecture generator
+through the existing website environment succeeds, with no generated diff.
+This checkpoint preserves numeric-wire proposal exclusion pending handback.

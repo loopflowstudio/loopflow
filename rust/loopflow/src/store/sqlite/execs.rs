@@ -72,6 +72,42 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    /// Read one command without decoding its event history or provider payloads.
+    pub fn exec(&self, id: &ExecId) -> StoreResult<Option<crate::exec::Exec>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
+                e.caller_provider_generation,e.caller_flow_turn,e.command,e.repo,e.cwd,
+                e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,
+                (SELECT wave FROM run_events WHERE process_id=e.id AND node='run' AND wave IS NOT NULL
+                 ORDER BY seq LIMIT 1)
+             FROM execs e WHERE e.id=?1",
+                [id],
+                |row| {
+                    Ok(crate::exec::Exec {
+                        id: row.get(0)?,
+                        trace_id: row.get(1)?,
+                        parent_exec_id: row.get(2)?,
+                        via_agent: row.get(3)?,
+                        caller_session_id: row.get(4)?,
+                        caller_provider_generation: row.get(5)?,
+                        caller_flow_turn: row.get(6)?,
+                        command: row.get(7)?,
+                        repo: row.get(8)?,
+                        cwd: row.get(9)?,
+                        started_at: row.get(10)?,
+                        completed_at: row.get(11)?,
+                        outcome: row.get(12)?,
+                        exit_code: row.get(13)?,
+                        signal: row.get(14)?,
+                        wave: row.get(15)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
     pub fn agent_work(&self, exec: &ExecId) -> StoreResult<Option<crate::session::RunWork>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         agent_work_in(&conn, exec)

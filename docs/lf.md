@@ -949,9 +949,10 @@ processes. Completed calls and launches disappear. Unclaimed providers remain
 separate because Loopflow has no exact authority to attach or signal them.
 Elapsed time never implies death.
 
-Both commands open the live Home ledger and ownership registry read-only. This
-also applies under `scripts/dev-lf`: source builds can inspect real activity
-without gaining migration or write authority over the installed database.
+Both commands read process identity from the selected Exec ledger and ownership
+registry without migration. They do not replay command journals to reconstruct
+Execs or treat a recorded command outcome as current OS liveness. Source builds
+retain the same private-data selection as other commands.
 `lf prune` is the separate write boundary. It removes dead Exec receipts and
 reaps only OpenCode process groups whose registered owner is absent. It never
 kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.

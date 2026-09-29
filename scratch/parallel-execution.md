@@ -1504,3 +1504,36 @@ pass. The architecture status table now states early-ledger coverage and limits.
 The root Python environment lacks fasthtml; rerunning the architecture generator
 through the existing website environment succeeds, with no generated diff.
 This checkpoint preserves numeric-wire proposal exclusion pending handback.
+
+
+Published31cd4d5e1 through pinned lf; numeric proposal stayed excluded. Next
+complete consumer boundary is live ps/top identity: replace journal replay with
+one shared typed Exec row query, retain exact receipt/OS liveness and command
+context. Trace events remain trace evidence; no SQL outcome implies OS death.
+A real-schema proof will require an Exec with no command journal payload to be
+visible, while a journal-only identity cannot manufacture an Exec. This is exact
+Exec detail/query ownership, not complete paged Exec inventory or dense proof.
+
+exec-owner-live-reader.log passes all7 process-view checks(0.407s), including the
+new actual-schema reader case. Review narrowed Wave context to command-level
+journal metadata; Skill work cannot relabel the command. exec-reader-context-and-cli.log
+passes the two public private-store/no-Git checks, but the enhanced fixture fails
+before assertions: it authored node=tool although the journal permits run/flow/skill.
+The fixture now uses skill; no schema/production relaxation. Earlier pass and this
+setup failure remain separate. Typed Exec detail retains unknown caller/end/signal;
+observed exit42 does not override exact OS-live receipt selection.
+
+exec-reader-command-context.log passes the corrected exact-owner/context case
+(0.402s). Public ps scope checks already passed2/2 in the preceding receipt.
+Review retains the trace's first command-level Wave context, ignores Skill
+context, and removes collect_execs journal reconstruction. No payload history is
+decoded for identity. The shared query reads actual start/outcome/exit and nullable
+caller fields; live selection still requires exact process receipts and OS facts.
+Measurement versus31cd4d5e1: +80/-43, net+37 production
+lines, tests/docs excluded, no renames; exec-reader-count.json retains method.
+Paged inventory, public Exec wire/Swift mirror and density remain outstanding.
+
+exec-owner-reader-static.log passes all-target Clippy(16.05s); fmt/whitespace
+pass. The new reader adds no migration/index, no process authority and no
+provider launch. Exact live identity is now an Exec projection, while the
+remaining historical inventory and final wire obligations stay open.

@@ -753,8 +753,9 @@ SQL agent inputs retain their recorded conversation even when an old input link
 is absent. A standalone agent input keeps its original input ID as its Session
 selector; recorded command outcome does not become a successful native turn.
 Named mechanical boundaries with a captured Flow retain their SQL evidence in
-Flow history. Import reports each unresolved SQL input in `failed`, retaining
-its original row. An operation counts as preserved only when its complete SQL
+Flow history. The forward migration retains original SQL in the immutable input
+catalog and removes the Run lifecycle table. Import reports each unresolved input
+in `failed`, retaining its original evidence. An operation counts as preserved only when its complete SQL
 evidence, captured boundary and recorded completion match Flow history.
 `lf runs INPUT --json` reads retained input history even when its manifest is
 missing; exact Session IDs select current input. Prefixes must be unambiguous.

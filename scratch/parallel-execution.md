@@ -1228,3 +1228,57 @@ a manifest fallback or timeout change. Production delta is zero; only the Swift
 test and notes changed after c1f1b8c82. Rust bytes retain that checkpoint's Clippy
 result. Whitespace and Rust formatting checks pass. Historical unresolved rows,
 final table removal and the complete remaining-work contract remain open.
+
+### Retire the Run table without discarding unknown inputs (2026-09-29)
+
+Published `003fa792f` includes the admitted Swift transport repair and explicit
+unresolved-input reporting. The next forward draft moves every old SQL column
+into the existing immutable-input catalog, with nullable conversation attachment,
+then drops `runs`. Unknown inputs remain import failures rather than invented
+Sessions/Execs. Original source payloads cannot change or disappear; generated
+foreign-key fields retain Task/Wave/Flow/Session relationships without a second
+lifecycle writer. Surviving Started and ancestry triggers use that evidence.
+Historical drafts are unchanged. Public import uses the same classification and
+exact Flow-operation comparison over this retained source; repeated import works
+with the old table absent.
+
+Supervisor review found that shared historical attachment had broadened ordinary
+replacement to allow an old input again. Ordinary replacement now keeps its
+original unique INSERT; the existing binding proof rejects A→B→A even with changed
+cwd/provider/model and preserves B. Historical attachment alone can fill unknown
+membership. This was a source counterexample, not a claimed executed race.
+
+`historical-table-removal.log` passes the first populated development conversion.
+`historical-table-public.log` retains an intervening compile error from using a
+nonexistent SharedStore convenience method in the hosted fixture repair. The
+repair instead keeps its actual database pin through the final history read.
+`historical-table-public-2.log` passes six selected checks: public SQL-only import
+and replay, prior-input rejection/binding, serialized ancestry, interrupted Op,
+reserved Started status, and deleted-Task refusal/history (7.618s total).
+Current-schema fixtures now assert table absence, not zero rows in a retained
+lifecycle table. The native Python probe's assertion was converted but not rerun.
+
+`historical-table-canonical.log` passes two distinct populated upgrades in one
+freshly materialized disposable source copy: released Task positions (0.881s) and
+pre-admission development members (0.905s). It compares all original SQL columns,
+retains exact Started17/native sequence/selected-success references, preserves
+unclassified callers without Execs, checks immutable evidence and post-drop
+ancestry/foreign keys, permits same-Wave transfer, rejects changed Wave/Task
+ancestry and preserves schema/ledger rollback on an injected discrepancy.
+Snapshot scope is `canonical-input-evidence-source.json`; the copy lacks Git
+metadata and the selected SQLite proofs require none.
+
+All-target Clippy passes (`historical-table-static.log`), as do formatting, Ruff,
+migration history and generated-doc checks. Architecture initially rejected
+duplicate ownership of the input/history tables in the new projection row; the
+row now references the AgentSession owner rather than remapping its tables, and
+the checker passes. Two website checks pass. Production delta versus003fa792f,
+including the new draft and excluding tests/docs with the retained corrected
+prefix method: Rust+56/-42, SQL+81/-0 (net+95); receipt historical-table-count.json.
+
+The Run lifecycle table is removed on this local tree. This does not complete
+Run product/wire removal: selected input column/API naming, immutable launch and
+process receipt consumers, native-only recovered usage, Exec entry coverage and
+dense discovery remain. The valid native decision retry/OpenCode failures and all
+remaining-work/import/Chapter obligations are unchanged. No configured-provider,
+installed migration, code-complete or shipment claim follows.

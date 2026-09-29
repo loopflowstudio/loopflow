@@ -809,7 +809,7 @@ fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
 }
 
 #[test]
-fn reserved_run_starts_task_in_status_and_roadmap_without_publication() {
+fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
     let home = tempfile::tempdir().unwrap();
     seed_persisted_merge_request_without_copy(home.path());
     let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -822,8 +822,8 @@ fn reserved_run_starts_task_in_status_and_roadmap_without_publication() {
         if assigned {
             connection
                 .execute(
-                    "INSERT INTO runs(id,task_id,wave_id,created_at,cwd,published)
-                     SELECT ?1,t.id,p.wave_id,1,t.worktree,0
+                    "INSERT INTO agent_sessions(id,input_id,title,title_source,task_id,wave_id,created_at,cwd,input_published)
+                     SELECT ?1,?1,'Reserved work','generated',t.id,p.wave_id,1,t.worktree,0
                      FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?2",
                     rusqlite::params![loopflow::durable::RunId::new().as_str(), PERSISTED_TASK_ID],
                 )

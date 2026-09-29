@@ -46,7 +46,11 @@ async fn inspection_records_one_completed_exec_without_starting_work() {
         .expect("every parsed lf command has an Exec row");
     assert_eq!((count, completed), (1, 1));
     let work: i64 = connection
-        .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(work, 0, "inspection must not reserve agent or Task work");
 }
@@ -94,7 +98,7 @@ fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(events, ["started", "completed"]);
-        let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM runs)", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs')", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(facts, (1, 0));
         let recorded_cwd: String = conn
             .query_row("SELECT cwd FROM execs", [], |row| row.get(0))

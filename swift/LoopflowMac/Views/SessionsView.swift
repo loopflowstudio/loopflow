@@ -1126,6 +1126,7 @@ private struct SessionPaneView: View {
     private var stateDot: Color {
         guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
         switch state {
+        case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
         case .waiting, .ready: return TerminalPalette.stateDot(.human)
         case .closed: return TerminalPalette.stateDot(.stopped)

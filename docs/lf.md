@@ -749,6 +749,10 @@ repeated attempts survive; unrelated conversations never merge by title or path.
 Ordinary reads use SQLite and neither import nor fall back to files. Import
 reports conflicts and unresolved evidence, supports interruption/retry, and does
 not infer an actual lf process from an old provider-launch record alone.
+SQL agent inputs retain their recorded conversation even when an old input link
+is absent. A standalone agent input keeps its original input ID as its Session
+selector; recorded command outcome does not become a successful native turn.
+Mechanical and unclassified SQL rows remain retained for the remaining cutover.
 
 ## Placing Work and Reaching Homes
 

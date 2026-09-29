@@ -5542,6 +5542,7 @@ mod tests {
         let prior = crate::durable::RunId::new();
         let current = crate::durable::RunId::new();
         let caller = crate::durable::RunId::new();
+        let standalone = crate::durable::RunId::new();
         let capture =
             crate::durable::test_flow_invocation("retained", 0, "review", Some("review"), true);
         conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
@@ -5593,6 +5594,11 @@ mod tests {
             .unwrap(),
             17
         );
+        // A sessionless agent input has known Work and caller, but no native
+        // process or exact successful turn. It was never linked by admission.
+        conn.execute("INSERT INTO runs(id,task_id,wave_id,created_at,published,cwd,skill,provider,caller_run_id,work_source,outcome,ended_at)
+            VALUES(?1,?2,?3,20,1,'/missing-original-checkout','research','claude',?4,'inherited','failed',21)",
+            rusqlite::params![standalone.as_str(),task.as_str(),wave,caller.as_str()]).unwrap();
         conn.execute_batch("COMMIT").unwrap();
         // Canonical adoption applies the unrecorded suffix before validating
         // the resulting schema. A failure must roll back SQL and both ledgers.
@@ -5630,11 +5636,13 @@ mod tests {
         assert_eq!(native.len(), 5);
         for dry_run in [true, false, false] {
             let members = store.historical_session_inputs().unwrap();
-            assert_eq!(members.len(), 2);
+            assert_eq!(members.len(), 3);
             for (session, observation) in members {
-                assert_eq!(observation.payload["evidence"]["invocation_id"], capture.id);
-                assert_eq!(observation.payload["evidence"]["node"], 0);
-                assert_eq!(observation.payload["evidence"]["iterations"], "[[2]]");
+                if observation.input_id != standalone {
+                    assert_eq!(observation.payload["evidence"]["invocation_id"], capture.id);
+                    assert_eq!(observation.payload["evidence"]["node"], 0);
+                    assert_eq!(observation.payload["evidence"]["iterations"], "[[2]]");
+                }
                 store
                     .import_session(session, None, &[observation], dry_run)
                     .unwrap();
@@ -5643,6 +5651,39 @@ mod tests {
             assert_eq!(&history[..5], native);
             assert_eq!(history.len(), if dry_run { 5 } else { 7 });
             assert_eq!(store.session("retained").unwrap().unwrap(), saved);
+            if dry_run {
+                assert!(store.session(standalone.as_str()).unwrap().is_none());
+                assert!(store.session_for_run(&standalone).unwrap().is_none());
+            } else {
+                let session = store.session_for_run(&standalone).unwrap().unwrap();
+                assert_eq!(session.id, standalone.as_str());
+                assert_eq!(session.task_id.as_ref(), Some(&task));
+                assert_eq!(session.wave_id.as_ref(), Some(&wave));
+                assert_eq!(
+                    session.work_source,
+                    Some(crate::session::WorkSource::Inherited)
+                );
+                assert_eq!(session.caller_input_id.as_ref(), Some(&caller));
+                assert_eq!(session.completed_at, None);
+                let history = store.session_history(&session.id, 0, 100).unwrap();
+                assert_eq!(history.len(), 1);
+                assert_eq!(history[0].kind, crate::session::SessionEventKind::Observed);
+                assert_eq!(history[0].payload["evidence"]["outcome"], "failed");
+                assert_eq!(history[0].provider_turn, None);
+                assert_eq!(history[0].exec_id, None);
+            }
+            // The caller row lacks agent/mechanical classification. Preserve
+            // it as unresolved SQL evidence; it does not justify a Session.
+            assert!(store.session_for_run(&caller).unwrap().is_none());
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM runs WHERE id=?1",
+                    [caller.as_str()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
         }
         assert_eq!(
             conn.query_row("SELECT selected_start FROM flow_sessions", [], |r| r

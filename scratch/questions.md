@@ -50,3 +50,9 @@ history/recovery and provider costs with native tools and upstream reload repair
 [native retry options](research-native-retry-options.md). No alternative transport,
 upstream action or retry-contract change is selected. Existing decision failures
 remain requirements, and independent Run removal, import and reader work continues.
+
+- 2026-09-29, SQL preservation: a sessionless row with a named skill or provider
+  other than `loopflow` supplies agent classification; preserve it under its old
+  input selector. A row with no Session, skill or provider remains unclassified
+  SQL evidence. The populated fixture contains such a caller. Do not fabricate
+  an AgentSession/Exec or drop its bytes while finishing the cutover.

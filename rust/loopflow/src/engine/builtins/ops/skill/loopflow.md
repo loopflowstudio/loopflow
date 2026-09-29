@@ -28,8 +28,12 @@ status` is already single-Wave and repo-resolved.
 
 When the User selects a Session, run `lf session open <session-id> --json`.
 It prepares or recovers the boundary's ordinary provider Run and returns its
-exact native resume command for the desktop app. Explain waiting and active
-states plainly.
+`open_argv` for the app or requested terminal. Execute that argv unchanged: it
+carries the executable and owning data together. JSON preparation does not mean
+the conversation opened; verify provider readiness in the requested terminal.
+Explain waiting and active states plainly. Listing reads the selected
+installation's store; a missing Session does not prove deletion from retained
+installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an

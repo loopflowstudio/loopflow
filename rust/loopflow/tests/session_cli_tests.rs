@@ -12,6 +12,11 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env_remove("LF_RUN_ID")
         .env_remove("LF_RUN_DIR")
+        .env_remove("LF_RUN_CONTEXT")
+        .env_remove("LF_TRACE_ID")
+        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_FLOW_STEP")
+        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -107,6 +112,8 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_ID",
             "LF_RUN_DIR",
             "LF_RUN_CONTEXT",
+            "LF_TRACE_ID",
+            "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
             "LF_FLOW_STEP",
         ] {
@@ -134,12 +141,11 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     );
     let listed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let argv = listed[0]["open_argv"].as_array().unwrap();
-    assert_eq!(
-        std::fs::canonicalize(argv[0].as_str().unwrap()).unwrap(),
-        std::fs::canonicalize(env!("CARGO_BIN_EXE_lf")).unwrap()
-    );
+    let other_home = tempfile::tempdir().unwrap();
     let reopened = command(argv[0].as_str().unwrap())
         .args(argv[1..].iter().map(|arg| arg.as_str().unwrap()))
+        .env("LF_HOME", other_home.path())
+        .env("LF_DB_PATH", other_home.path().join("loopflow.db"))
         .arg("--json")
         .output()
         .unwrap();
@@ -150,6 +156,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     );
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["id"], id);
+    assert!(!other_home.path().join("loopflow.db").exists());
 }
 
 #[test]
@@ -277,6 +284,29 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
     )
     .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !resume {
+            let rejected = bin.join("rejecting-lf");
+            std::fs::write(
+                &rejected,
+                "#!/bin/sh\necho 'unexpected argument --tui' >&2\nexit 2\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let failed = command(home.path(), &["session", "open", id])
+                .env("LF_BIN", &rejected)
+                .output()
+                .unwrap();
+            assert!(!failed.status.success());
+            let error = String::from_utf8_lossy(&failed.stderr);
+            assert!(error.contains(rejected.to_str().unwrap()), "{error}");
+            assert!(error.contains("sha256"), "{error}");
+            assert!(
+                error.contains(home.path().join("loopflow.db").to_str().unwrap()),
+                "{error}"
+            );
+            assert!(error.contains("before becoming resumable"), "{error}");
+            assert!(!error.contains("Local proof"), "prompt leaked: {error}");
+        }
         let evidence = home.path().join("resumed");
         let mut first = command(home.path(), &["session", "open", id])
             .env(
@@ -349,6 +379,24 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert_eq!(manifest["run_id"], run_id);
             assert!(manifest["context"].is_object());
             assert!(!dir.join("prepared").exists());
+            let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            let failure: String = database
+                .query_row(
+                    "SELECT error FROM run_events WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(failure.contains(run_id), "{failure}");
+            assert!(failure.contains("sha256"), "{failure}");
+            assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
+            assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
+            let saved: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(sessions.join(format!("{id}.json"))).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(saved["status"], "waiting");
+            assert!(saved["ready_summary"].is_null());
         }
     }
 }

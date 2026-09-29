@@ -252,7 +252,7 @@ pub fn with_runtime<T>(
             LfNode::Run,
             LfEventType::Errored,
             LfEventFields {
-                error: Some(error.to_string()),
+                error: Some(format!("{error:#}")),
                 ..LfEventFields::default()
             },
         ),

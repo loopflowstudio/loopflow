@@ -335,7 +335,7 @@ lf task run DES-123                              # drive the saved Flow
 lf --as wave:product : "Which KR owns this?"      # ordinary agent perspective
 lf ask "Review this proof with me"                    # block on a human session
 lf session list --json                                # unresolved human Sessions
-lf session open <session-id> --json                  # reopen the exact boundary
+lf session open <session-id> --json                  # prepare the exact boundary
 lf session complete <session-id>                     # return review or Ask feedback
 lf session rename <session-id> "Release notes"        # suggestions preserve human names
 lf task edit DES-123 --title "Rename the flag" --notes "Preserve existing options"
@@ -353,6 +353,14 @@ lf wave relocate wave_... --name platform       # rename a stopped Wave
 lf wave relocate wave_... --repo ../moved-repo  # repair or move its repository
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
+
+`session open --json` prepares a review; execute its returned `open_argv` in the
+terminal to enter the conversation. That command carries the executable, Home
+and database together so changing the selected installation does not redirect
+the saved handoff. Early startup failures identify the attempted executable and
+owning data, and the opening command's Run journal retains the failure after a
+retry. Opening or retrying a review does not complete it. Session listing still
+reads the selected installation's store; save the handoff before switching.
 
 Wave chat connects automatically when opened in the app or through `lf chat`.
 The local connection respects the assigned Home and never moves Work. For a remote

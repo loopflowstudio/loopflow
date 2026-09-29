@@ -138,10 +138,11 @@ fn inventory_query(
 }
 
 impl SqliteStore {
-    /// Old rows are import evidence only; retain nullable columns as recorded.
+    /// Old rows are import evidence only. None means no established conversation;
+    /// the importer must report that retained row, not silently omit it.
     pub(crate) fn historical_session_inputs(
         &self,
-    ) -> StoreResult<Vec<(AgentSession, crate::session::SessionObservation)>> {
+    ) -> StoreResult<Vec<(Option<AgentSession>, crate::session::SessionObservation)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare("SELECT coalesce(i.session_id,r.session_id,r.id),r.id,r.created_at,r.task_id,r.wave_id,
             json_object('id',r.id,'session_id',r.session_id,'invocation_id',r.invocation_id,
@@ -165,17 +166,23 @@ impl SqliteStore {
         for row in rows {
             let (session, input, observed_at, task, wave, raw) = row?;
             let evidence: serde_json::Value = serde_json::from_str(&raw)?;
-            if !historical_agent_input(&conn, &evidence)? {
+            let agent = historical_agent_input(&conn, &evidence)?;
+            if !agent && historical_operation_retained(&conn, &evidence)? {
                 continue;
             }
-            let session = match session_in(&conn, &session)? {
-                Some(session) => session,
-                None => historical_conversation(&evidence)?,
+            let session = if agent {
+                Some(match session_in(&conn, &session)? {
+                    Some(session) => session,
+                    None => historical_conversation(&evidence)?,
+                })
+            } else {
+                None
             };
-            if evidence["session_id"]
-                .as_str()
-                .is_some_and(|id| id != session.id)
-            {
+            if session.as_ref().is_some_and(|session| {
+                evidence["session_id"]
+                    .as_str()
+                    .is_some_and(|id| id != session.id)
+            }) {
                 return Err(invalid(format!(
                     "historical input {input} names a different Session"
                 )));
@@ -772,6 +779,23 @@ fn historical_agent_input(conn: &Connection, row: &serde_json::Value) -> StoreRe
                     | crate::engine::flow_graph::FlowNodeKind::Xor
             )
         }))
+}
+
+fn historical_operation_retained(conn: &Connection, row: &serde_json::Value) -> StoreResult<bool> {
+    let saved: Option<String> = conn.query_row(
+        "SELECT json_extract(e.payload,'$.sql') FROM flow_events e
+         WHERE e.flow_id=?1 AND e.kind='operation_started' AND json_extract(e.payload,'$.legacy_run_id')=?2
+         AND e.node=?3 AND e.iterations=?4 AND (?5 IS NULL OR EXISTS(
+             SELECT 1 FROM flow_events c WHERE c.operation_start=e.seq AND c.kind='operation_completed'
+             AND c.flow_id=e.flow_id AND c.node=e.node AND c.iterations=e.iterations
+             AND c.outcome=?5 AND c.observed_at IS ?6))",
+        params![row["invocation_id"].as_str(), row["id"].as_str(), row["node"].as_i64(),
+            row["iterations"].as_str(), row["outcome"].as_str(), row["ended_at"].as_i64()],
+        |r| r.get(0),
+    ).optional()?.flatten();
+    saved
+        .map(|saved| Ok(serde_json::from_str::<serde_json::Value>(&saved)? == *row))
+        .unwrap_or(Ok(false))
 }
 
 /// Sessionless agent rows used the input ID as their conversation selector.

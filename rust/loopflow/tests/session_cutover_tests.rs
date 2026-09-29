@@ -1809,7 +1809,6 @@ fn imported_final_and_events_survive_artifact_removal() {
 fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     use loopflow::durable::RunId;
     use loopflow::session::{AgentSession, SessionKind, TitleSource};
-    use serde_json::json;
 
     let fixture = Fixture::new(false);
     let prior = RunId::new();
@@ -1911,13 +1910,19 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
             .unwrap();
     }
     let preview = fixture.json(&["session", "import", "--dry-run", "--json"]);
-    assert_eq!(preview["failed"], json!([]));
+    let unresolved = preview["failed"].as_array().unwrap();
+    assert_eq!(unresolved.len(), 2, "{preview}");
+    for input in [&mechanical, &ambiguous_kind] {
+        assert!(unresolved
+            .iter()
+            .any(|failure| failure["reason"].as_str().unwrap().contains(input.as_str())));
+    }
     assert_eq!(preview["run"], 4, "{preview}");
     assert_eq!(fixture.count("session_events"), 0);
     assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(fixture.count("agent_session_inputs"), 1);
     let imported = fixture.json(&["session", "import", "--json"]);
-    assert_eq!(imported["failed"], json!([]));
+    assert_eq!(imported["failed"], preview["failed"]);
     assert_eq!(imported["run"], preview["run"]);
     assert_eq!(
         fixture.json(&["session", "import", "--json"])["unchanged"],
@@ -2012,7 +2017,7 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
     let conflict = fixture.json(&["session", "import", "--json"]);
     assert_eq!(
         conflict["failed"].as_array().unwrap().len(),
-        1,
+        3,
         "{conflict}"
     );
     assert_eq!(

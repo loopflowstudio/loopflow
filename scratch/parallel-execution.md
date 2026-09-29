@@ -1157,3 +1157,49 @@ coverage, final typed DTOs and Chapter CLI proof remain required. The pending
 decision-interface choice is unchanged; neither valid Codex decision retry nor
 OpenCode decision integration is claimed passing. No code-complete or shipment
 claim follows from this checkpoint.
+
+### Explicit unresolved historical SQL (2026-09-29)
+
+Continuation checkpoint `dca1d617d` rebased to `3280c7524` on `567ac07df` and
+published. Integration changed only migrations.rs: the adoption loop reconciles
+upstream prefix hashing with the branch's transaction structure. It is not an
+exact byte transplant. `rebase-migration-contention.log` passes the one selected
+initialization/append/adoption regression (1.021s); no broader repeat followed.
+
+The next public preservation proof reproduced silent omission:
+`historical-unclassified-report-red.log` reports `failed=[]` despite two retained
+SQL inputs with no established conversation or operation destination. The
+existing reader now returns those observations without an invented AgentSession;
+import reports each original input in its existing failed list and retains its
+SQL row. Known operations are omitted from pending import only when their full
+source JSON, Flow/node/iterations and recorded completion match Flow history.
+No new registry, lifecycle object or migration archive was introduced.
+
+The first repair run passed public preview/applied/replay but exposed the
+populated fixture's old three-member count: its unknown caller now also appears
+explicitly. The expanded proof then exposed its positional `remove(0)` assumption;
+conflicting replay now selects the exact prior input. Both failed receipts remain.
+`historical-unclassified-canonical.log` passes the populated pre-admission upgrade
+in a freshly materialized disposable source snapshot (0.601s). It retains unknown
+caller/Started/native/Flow references and rejects missing, partial or conflicting
+operation payload, changed boundary, wrong completion time and absent completion;
+restoring the exact evidence resolves that operation. Snapshot hashes and root
+are in `canonical-unmapped-source.json`. No historical draft bytes changed.
+
+Hosted `3280c7524` also exposed an old publication fixture using an arbitrary
+temporary directory without Session admission. The test now creates a real
+isolated admitted input; it retains no-history/no-owned-client refusal and exact
+child cleanup. `historical-unclassified-and-admission-2.log` passes that test and
+the public SQL-only import (7.614s), while retaining the intervening populated
+fixture failure above. The earlier compile receipt records an IO/anyhow error
+conversion mistake, subsequently fixed; it was not a production behavior failure.
+
+All-target Clippy passes in `historical-unclassified-static.log`; formatting and
+whitespace pass. Production delta versus `3280c7524`: +42/-11 Rust lines, excluding
+test modules, integration tests and docs (`historical-unclassified-count.json`).
+Review tightened exact operation preservation instead of treating a matching old
+ID as sufficient. Reporting does not dispose of unknown rows: `runs` and its
+remaining triggers cannot be dropped until every row has a preserved destination.
+Complete import/table removal and every remaining-work requirement stay open.
+The separate Swift active-client fixture failure is under bounded research;
+its unpublished proposal is excluded until supervisor handback.

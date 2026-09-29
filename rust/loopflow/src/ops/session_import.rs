@@ -230,6 +230,13 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
     }
     let database = crate::store::database_path_from_env()?;
     for (session, observation) in store.historical_session_inputs().await? {
+        let Some(session) = session else {
+            import.count(&database, Err(anyhow!(
+                "SQL input {} has no established AgentSession or matching Flow operation history; its original row remains retained",
+                observation.input_id
+            )));
+            continue;
+        };
         let starts = import.first_assignment(session.task_id.as_ref()).await?;
         let result = store
             .import_session(session, None, vec![observation], dry_run)

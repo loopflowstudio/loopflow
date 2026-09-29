@@ -491,23 +491,16 @@ pub enum Commands {
         #[arg(
             long,
             requires = "run",
-            conflicts_with_all = ["final_answer", "json", "resume"]
+            conflicts_with_all = ["final_answer", "json"]
         )]
         events: bool,
         /// Print the Run's last durable provider conclusion
         #[arg(
             long = "final",
             requires = "run",
-            conflicts_with_all = ["events", "json", "resume"]
+            conflicts_with_all = ["events", "json"]
         )]
         final_answer: bool,
-        /// Resume the Run's provider-native interactive session
-        #[arg(
-            long,
-            requires = "run",
-            conflicts_with_all = ["events", "final_answer", "json"]
-        )]
-        resume: bool,
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
         #[arg(long)]
         task: Option<String>,
@@ -1796,26 +1789,6 @@ mod tests {
                 && project == "control-room"
                 && task == "W2-140"
         ));
-    }
-
-    #[test]
-    fn runs_resume_requires_one_run_and_excludes_record_output() {
-        let cli = Cli::try_parse_from(["lf", "runs", "abc123", "--resume"])
-            .expect("parse provider session resume");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Runs {
-                run: Some(run),
-                parent: None,
-                resume: true,
-                events: false,
-                final_answer: false,
-                json: false,
-                ..
-            }) if run == "abc123"
-        ));
-        assert!(Cli::try_parse_from(["lf", "runs", "--resume"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "runs", "abc123", "--resume", "--events"]).is_err());
     }
 
     #[test]

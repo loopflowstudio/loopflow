@@ -201,3 +201,23 @@ pub(crate) enum FlowSummaryState {
     Completed,
     Replaced,
 }
+
+/// Read-local admission context. Immutable observations override current-input
+/// fallback fields; attribution is selected from the input's original evidence.
+#[derive(Debug)]
+pub(crate) struct HistoryCapture {
+    pub captured: Option<i64>,
+    pub id: String,
+    pub current_capture: Option<i64>,
+    pub caller_artifact_key: Option<String>,
+    pub task_id: Option<TaskId>,
+    pub wave_id: Option<WaveId>,
+    pub observed_at: i64,
+    pub work_source: Option<WorkSource>,
+    pub cwd: std::path::PathBuf,
+    pub repo: Option<String>,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub interactive: bool,
+}

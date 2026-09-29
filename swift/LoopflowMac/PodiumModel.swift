@@ -132,7 +132,7 @@ final class PodiumModel {
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     /// Recent Runs, read only when the human discloses them.
-    private(set) var recentRuns = TaskReadings<[RunSnapshot]>()
+    private(set) var recentRuns = TaskReadings<[SessionHistory]>()
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
         project: nil,

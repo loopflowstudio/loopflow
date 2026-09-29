@@ -479,7 +479,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
 
         execute_flow_command(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
-        let runs: Vec<crate::run_record::RunSnapshot> = serde_json::from_str(
+        let runs: Vec<crate::run_record::SessionHistory> = serde_json::from_str(
             &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
         )
         .unwrap();
@@ -487,7 +487,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         assert_eq!(runs[0].usage.input_tokens, Some(12));
         assert_eq!(runs[0].usage.cost_usd, None);
         assert_eq!(runs[0].usage.final_streams, 0);
-        assert_eq!(runs[0].outcome.as_deref(), Some("completed"));
+        assert_eq!(runs[0].recorded_outcome.as_deref(), Some("completed"));
     }
 
     #[test]

@@ -43,7 +43,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--runs",
         type=Path,
         required=True,
-        help="RunSnapshot JSON supplied by the Rust Run reader",
+        help="SessionHistory JSON supplied by the shared history reader",
     )
     return parser.parse_args(argv)
 
@@ -368,9 +368,9 @@ def usage_rows(
     rows.append(
         measured_row(
             f"run_elapsed_seconds{suffix}",
-            "Elapsed / Run",
+            "Recorded input elapsed",
             provider,
-            [run["ended"] - run["started"] for run in samples if run["ended"] >= run["started"]],
+            [run["recorded_at"] - run["observed_at"] for run in samples if run["recorded_at"] >= run["observed_at"]],
             len(samples),
             metric_budget(policy, "run_elapsed_seconds"),
             policy["minimum_p95_samples"],
@@ -392,15 +392,16 @@ def build_report(
     window_runs = [
         run
         for run in runs
-        if run["ended"] is not None
-        and int(since_time.timestamp()) <= run["ended"] <= int(generated_at.timestamp())
+        if run["recorded_outcome"] is not None
+        and run["recorded_at"] is not None
+        and int(since_time.timestamp()) <= run["recorded_at"] <= int(generated_at.timestamp())
     ]
     rows = [
         unknown_row(
             policy,
             "task_first_progress_seconds",
             "Task launch → first progress",
-            "Run records do not record the first material progress boundary",
+            "Session history does not record the first material progress boundary",
         ),
         gate_row(
             policy, gates, "changed", "preland_changed_seconds", "Pre-land · changed", since_time

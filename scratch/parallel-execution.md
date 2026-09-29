@@ -31,9 +31,10 @@ bind remains prospective as an operating assumption pending Jack's decision.
 
 ## Current evidence
 
-Published checkpoint `d6dc8c43b`, PR #1296: hosted run `36629797823`
-passes Rust, Swift, UI and all substantive checks. Scratch-clear and its aggregate
-remain red by design. The repaired tail passed 72/72 locally without fail-fast.
+Published checkpoint `a3d767abc`: hosted Rust, Swift, UI and every substantive
+check pass; scratch-clear and its aggregate remain red by design. The complete
+local materialized Rust matrix passed 2,016 tests, 16 skipped, none unrun, with
+one nextest leaky-handle diagnostic. [Evidence](evidence.md) retains failed runs.
 
 The structured-result slice is published. Captured boundaries now
 supply native schemas to Codex, Claude and OpenCode. Exact successful native output
@@ -56,13 +57,16 @@ The public correction proof caught and repaired feedback being misread as cursor
 movement; the migration proof caught and repaired a dropped discovery index.
 Claude correlation has a native-message fixture, not a configured Claude proof.
 
-The captured-event cut is implemented locally: sequence-based reservation and
+The captured-event cut is published: sequence-based reservation and
 publication, immutable capture history, retained artifact/legacy selectors and
 migration-only `import_evidence` for unclassified SQL. RunId, the input catalog,
 and SessionRecord.run_id are removed. Rust/Swift wire consumers move together;
 replay resolves Session history before opening artifacts. Final proof/checkpoint
-is recorded in [evidence](evidence.md). The released history reader must now be
-rebased onto these event references; its old input projection is not the target.
+is recorded in [evidence](evidence.md). The released history reader is integrated on event identity in the working tree;
+its full materialized matrix passes 2,019 tests, 16 skipped, none unrun,
+with formatting and all-target Clippy. Orphan native receipts retain unknown Work/Exec,
+and the subtract-only pass removed redundant projection wrappers. Saved-Flow
+inventory and Desktop paging/reconciliation follow its checked checkpoint.
 
 Runtime loop children already use the shared driver/settlement transaction:
 retry retains the child, successful return occurs once, later passes are siblings,
@@ -90,8 +94,8 @@ Main owns this worktree's source, builds, integration and Git. Preserve supervis
 edits to questions, findings and the contributor index. Released proposals are
 hunks to review, not whole files to overwrite:
 
-- `.lf/tmp/final-history-proposal/`: uncompiled; retains RunId and omits orphan
-  native receipts from aggregate discovery. Integrate only after event identity.
+- `.lf/tmp/final-history-proposal/`: original proposal retained as evidence;
+  integrated and adapted to events in this slice, including orphan native receipts.
 - `.lf/tmp/flow-discovery-proposal/`: uncompiled; review insertion-time Git lookup
   and command/template collisions, now using real runtime parentage.
 - `.lf/tmp/released-import-proposal/`: authored, unexecuted public import bridge;

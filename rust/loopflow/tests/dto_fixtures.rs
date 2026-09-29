@@ -294,3 +294,24 @@ fn exec_page_retains_outcomes_unknowns_and_continuation() {
     );
     assert!(serde_json::from_str::<loopflow::exec::ExecPage>("{}").is_err());
 }
+
+#[test]
+fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
+    let value: loopflow::lf::commands::runs::SessionHistory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_history_summary.json"
+    ))
+    .unwrap();
+    assert_eq!(value.providers.len(), 2);
+    assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
+    assert!(value.providers[0].exec_id.is_none());
+    assert_eq!(value.providers[0].usage.input_tokens, None);
+    assert_eq!(value.providers[1].usage.input_tokens, Some(0));
+    assert_eq!(value.status(), "failed → completed");
+    let encoded = serde_json::to_value(&value).unwrap();
+    assert!(encoded.get("subjects").is_none());
+    assert!(encoded.get("outcome").is_none());
+    assert_eq!(
+        serde_json::from_value::<loopflow::lf::commands::runs::SessionHistory>(encoded).unwrap(),
+        value
+    );
+}

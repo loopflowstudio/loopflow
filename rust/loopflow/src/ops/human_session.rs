@@ -1587,7 +1587,7 @@ async fn open_flow_locked(
     if let Some(run_id) = &previous {
         let input = store
             .sqlite
-            .input_snapshot(run_id.as_str())
+            .input_history(run_id.as_str())
             .context("cannot replace a review input without its retained launch evidence")?;
         let dir = local_session_run_dir(run_id)
             .ok_or_else(|| anyhow!("invalid Session input {run_id}"))?;
@@ -1596,7 +1596,7 @@ async fn open_flow_locked(
         {
             bail!("review input still has native history or an active client");
         }
-        if input.outcome.is_none() {
+        if input.recorded_outcome.is_none() {
             bail!("review Run {run_id} has no terminal outcome; launch status is unresolved, so Open cannot authorize a replacement");
         }
     }
@@ -2032,7 +2032,7 @@ fn stop_native_run(run_id: &String) -> Result<()> {
     )
     .context("cannot resolve the provider for this Session input")?;
     let input = store
-        .input_snapshot(run_id.as_str())
+        .input_history(run_id.as_str())
         .context("cannot resolve the provider for this Session input")?;
     let dir =
         local_session_run_dir(run_id).ok_or_else(|| anyhow!("invalid Session input {run_id}"))?;

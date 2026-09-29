@@ -14,9 +14,10 @@
       },
       "subject": "W2-144",
       "fact": {
-        "kind": "run_finished",
-        "run_id": "run_00000000000000000000000000000001",
-        "status": "ok"
+        "kind": "input_completion_recorded",
+        "status": "ok",
+        "session_id": "run_00000000000000000000000000000001",
+        "captured": 12
       }
     },
     {

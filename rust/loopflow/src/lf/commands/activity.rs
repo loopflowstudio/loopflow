@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::durable::{Author, SteerComment, WorkRef};
-use crate::lf::commands::runs::RunSnapshot;
+use crate::lf::commands::runs::SessionHistory;
 use crate::lf::commands::util::parse_since;
 use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
@@ -39,12 +39,21 @@ pub struct WorkActivityEntry {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
     WorkCreated,
-    RunStarted {
-        run_id: String,
+    InputCaptured {
+        session_id: String,
+        captured: i64,
     },
-    RunFinished {
-        run_id: String,
+    InputCompletionRecorded {
+        session_id: String,
+        captured: i64,
         status: String,
+    },
+    ProviderHistoryRecorded {
+        session_id: String,
+        captured: Option<i64>,
+        reference: crate::run_record::ProviderHistoryReference,
+        exec_id: Option<crate::id::ExecId>,
+        status: Option<String>,
     },
     PrStarted {
         id: TaskPrId,
@@ -143,18 +152,55 @@ fn build_snapshot(
         }
     }
 
-    let runs = store.conversation_snapshots(
-        filter.wave,
-        filter.project,
-        filter.task,
-        None,
-        since,
-        true,
-    )?;
-    for (work, snapshot) in runs {
-        let Some(work) = work else { continue };
-        if let Some(work) = catalog.owners.get(&work) {
-            entries.extend(run_entries(&snapshot, work, since));
+    let runs =
+        store.conversation_history(filter.wave, filter.project, filter.task, None, since, true)?;
+    for snapshot in runs {
+        let work = snapshot
+            .task_id
+            .clone()
+            .map(WorkRef::Task)
+            .or_else(|| snapshot.wave_id.clone().map(WorkRef::Wave));
+        if let Some(work) = work.and_then(|work| catalog.owners.get(&work)) {
+            entries.extend(input_entries(&snapshot, work, since));
+        }
+        for provider in &snapshot.providers {
+            let work = provider
+                .task_id
+                .clone()
+                .map(WorkRef::Task)
+                .or_else(|| provider.wave_id.clone().map(WorkRef::Wave));
+            let Some(owner) = work.and_then(|work| catalog.owners.get(&work)) else {
+                continue;
+            };
+            for (phase, at) in [
+                ("started", provider.started_at),
+                ("completed", provider.completed_at),
+            ] {
+                let Some(at) = at.filter(|at| *at >= since) else {
+                    continue;
+                };
+                entries.push(activity_entry(
+                    format!(
+                        "session:{}:{}:{phase}",
+                        snapshot.session_id,
+                        serde_json::to_string(&provider.reference)?
+                    ),
+                    at,
+                    format!("{} provider {phase}", snapshot.label()),
+                    owner,
+                    WorkActivityFact::ProviderHistoryRecorded {
+                        session_id: snapshot.session_id.clone(),
+                        captured: snapshot.captured,
+                        reference: provider.reference.clone(),
+                        exec_id: provider.exec_id.clone(),
+                        status: if phase == "completed" {
+                            provider.outcome.clone()
+                        } else {
+                            None
+                        },
+                    },
+                ));
+            }
         }
     }
 
@@ -217,29 +263,36 @@ fn activity_entry(
     }
 }
 
-fn run_entries(run: &RunSnapshot, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
-    let label = run.label();
+fn input_entries(input: &SessionHistory, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
     let mut entries = Vec::new();
-    if run.started >= since {
+    let Some(captured) = input.captured else {
+        return entries;
+    };
+    if input.observed_at >= since {
         entries.push(activity_entry(
-            format!("run:{}:started", run.id),
-            run.started,
-            format!("{label} started"),
+            format!("session:{}:{captured}:captured", input.session_id),
+            input.observed_at,
+            format!("{} input captured", input.label()),
             work,
-            WorkActivityFact::RunStarted {
-                run_id: run.id.clone(),
+            WorkActivityFact::InputCaptured {
+                session_id: input.session_id.clone(),
+                captured,
             },
         ));
     }
-    if let Some(ended) = run.ended.filter(|ended| *ended >= since) {
+    if let (Some(outcome), Some(at)) = (
+        &input.recorded_outcome,
+        input.recorded_at.filter(|at| *at >= since),
+    ) {
         entries.push(activity_entry(
-            format!("run:{}:finished", run.id),
-            ended,
-            format!("{label} finished {}", run.status()),
+            format!("session:{}:{captured}:completion", input.session_id),
+            at,
+            format!("{} recorder reported {outcome}", input.label()),
             work,
-            WorkActivityFact::RunFinished {
-                run_id: run.id.clone(),
-                status: run.status().to_string(),
+            WorkActivityFact::InputCompletionRecorded {
+                session_id: input.session_id.clone(),
+                captured,
+                status: outcome.clone(),
             },
         ));
     }
@@ -426,7 +479,7 @@ mod tests {
         assert_eq!(snapshot.items.len(), 5);
         assert!(matches!(
             snapshot.items[0].fact,
-            WorkActivityFact::RunFinished { ref status, .. } if status == "ok"
+            WorkActivityFact::InputCompletionRecorded { ref status, .. } if status == "ok"
         ));
         assert!(matches!(
             snapshot.items[1].fact,
@@ -571,41 +624,23 @@ mod tests {
     }
 
     #[test]
-    fn run_start_and_finish_name_the_same_generic_run() {
-        let run = RunSnapshot {
-            id: "run_00000000000000000000000000000001".to_string(),
-            parent_run_id: None,
-            task_pr_id: None,
-            repo: Some("/repo".to_string()),
-            worktree: Some("/repo.task".to_string()),
-            subjects: vec![crate::run_record::SubjectAttribution::declared(
-                "task:W2-1".to_string(),
-            )],
-            skill: Some("implement".to_string()),
-            outcome: Some("completed".to_string()),
-            started: 10,
-            first_provider_attempt_at: None,
-            ended: Some(20),
-            usage: crate::run_record::RunUsage::empty(),
-            evidence_gaps: 0,
-            harness: "codex".to_string(),
-            model: None,
-            surface: "cli".to_string(),
-        };
-
-        let entries = run_entries(&run, &task_owner("W2-1", "control", "live"), 0);
+    fn input_capture_and_recorded_completion_are_not_provider_success() {
+        let input: SessionHistory = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/session_history_summary.json"
+        ))
+        .unwrap();
+        let entries = input_entries(&input, &task_owner("W2-1", "control", "live"), 0);
         assert!(matches!(
             entries[0].fact,
-            WorkActivityFact::RunStarted { .. }
+            WorkActivityFact::InputCaptured { .. }
         ));
         assert!(matches!(
-            &entries[1].fact,
-            WorkActivityFact::RunFinished {
-                run_id,
-                status,
-            } if run_id == "run_00000000000000000000000000000001"
-                && status == "completed"
+            entries[1].fact,
+            WorkActivityFact::InputCompletionRecorded { .. }
         ));
+        assert_eq!(input.providers.len(), 2);
+        assert_eq!(input.providers[0].outcome.as_deref(), Some("failed"));
+        assert_eq!(input.providers[1].outcome.as_deref(), Some("completed"));
     }
 
     #[test]

@@ -762,7 +762,7 @@ mod tests {
         ] {
             let rows = store
                 .sqlite
-                .conversation_snapshots(
+                .conversation_history(
                     Some(wave.name()),
                     Some(project.id.as_str()),
                     Some(selector),
@@ -772,22 +772,18 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(rows.len(), 2);
-            for (work, snapshot) in &rows {
-                assert_eq!(work.as_ref(), Some(&WorkRef::Task(task.id.clone())));
-                assert!(snapshot
-                    .subjects
-                    .iter()
-                    .any(|subject| subject.selector == "project:desktop-renamed"));
+            for snapshot in &rows {
+                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
             }
             assert!(store
                 .sqlite
-                .conversation_snapshots(None, Some("other"), Some(selector), None, 0, false)
+                .conversation_history(None, Some("other"), Some(selector), None, 0, false)
                 .unwrap()
                 .is_empty());
         }
         let children = store
             .sqlite
-            .conversation_snapshots(
+            .conversation_history(
                 None,
                 None,
                 None,
@@ -796,7 +792,10 @@ mod tests {
                 false,
             )
             .unwrap();
-        assert_eq!(children[0].1.id, helper.artifact_key.as_str());
+        assert_eq!(
+            children[0].artifact_key.as_deref(),
+            Some(helper.artifact_key.as_str())
+        );
         for _ in 0..55 {
             store
                 .create_session(
@@ -808,7 +807,7 @@ mod tests {
         }
         let children = store
             .sqlite
-            .conversation_snapshots(
+            .conversation_history(
                 None,
                 None,
                 None,
@@ -824,13 +823,9 @@ mod tests {
         );
         assert!(children
             .iter()
-            .all(|(work, snapshot)| snapshot.parent_run_id.as_deref()
+            .all(|snapshot| snapshot.caller_artifact_key.as_deref()
                 == Some(worker.artifact_key.as_str())
-                && work.as_ref() == Some(&WorkRef::Task(task.id.clone()))
-                && snapshot
-                    .subjects
-                    .iter()
-                    .any(|subject| subject.selector == "project:desktop-renamed")));
+                && snapshot.task_id.as_ref() == Some(&task.id)));
         store.sqlite.assert_no_historical_runs();
     }
 

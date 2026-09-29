@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::run_record::RunSnapshot;
+use crate::run_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;
@@ -48,19 +48,19 @@ fn since_days(days: u32) -> i64 {
     }
 }
 
-fn print_report(runs: &[RunSnapshot], days: u32) {
+fn print_report(runs: &[SessionHistory], days: u32) {
     let window = if days == 0 {
         "all time".to_string()
     } else {
         format!("last {days} days")
     };
     if runs.is_empty() {
-        println!("No direct Run usage recorded ({window}).");
+        println!("No provider usage recorded ({window}).");
         return;
     }
 
     let colors = Colors::default();
-    println!("{}DIRECT RUN USAGE ({window}){}", colors.bold, colors.reset);
+    println!("{}SESSION USAGE ({window}){}", colors.bold, colors.reset);
     println!(
         "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  RUN{reset}",
         bold = colors.bold,
@@ -79,7 +79,7 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
     for run in runs {
         println!(
             "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
-            time = format_time(run.started),
+            time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
             work = truncate(&display_work(run), WORK_WIDTH),
             run = truncate(run.label(), RUN_WIDTH),
@@ -93,18 +93,13 @@ fn print_report(runs: &[RunSnapshot], days: u32) {
                 .unwrap_or_else(|| "-".to_string()),
             finality = format!("{}/{}", run.usage.final_streams, run.usage.streams),
             gaps = run.evidence_gaps,
-            id = short_id(&run.id),
+            id = short_id(run.selector()),
         );
     }
 }
 
-fn display_work(run: &RunSnapshot) -> String {
-    for kind in ["task", "project", "wave"] {
-        if let Some(subject) = run.subject(kind) {
-            return format!("{kind}/{subject}");
-        }
-    }
-    "-".to_string()
+fn display_work(run: &SessionHistory) -> String {
+    run.work_label()
 }
 
 fn format_optional(value: Option<i64>) -> String {

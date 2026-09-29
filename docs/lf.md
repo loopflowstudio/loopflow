@@ -16,7 +16,8 @@ Every read surface takes `--json`; that JSON is the same wire the Mac app
 renders. This reference uses current command spellings. The accepted ownership
 contract and remaining implementation are centralized in
 [cutover status](architecture-reference.md#cutover-status), including transitional
-`lf runs`, `RunSnapshot` and Session `run_id` fields.
+`lf runs` and `lf replay` command spellings. Session history uses captured event
+sequences and exact provider references; `SessionRecord.run_id` is removed.
 
 ## Basic Usage
 
@@ -788,8 +789,9 @@ SQL agent inputs retain their recorded conversation even when an old input link
 is absent. A standalone agent input keeps its original input ID as its Session
 selector; recorded command outcome does not become a successful native turn.
 Named mechanical boundaries with a captured Flow retain their SQL evidence in
-Flow history. The forward migration retains original SQL in the immutable input
-catalog and removes the Run lifecycle table. Import reports each unresolved input
+Flow history. The forward migration retains unresolved original SQL in immutable
+`import_evidence`, preserving unknown conversation membership. Captured inputs
+belong to Session history; the input catalog and Run lifecycle table are removed. Import reports each unresolved input
 in `failed`, retaining its original evidence. An operation counts as preserved only when its complete SQL
 evidence, captured boundary and recorded completion match Flow history.
 `lf runs INPUT --json` reads retained input history even when its manifest is
@@ -854,7 +856,7 @@ lf session open sess_ab12 --json --replace # prepare a takeover command without 
 lf session complete sess_ab12     # finish it; provider history remains resumable
 lf replay run_ab12               # launch that request as a child Run
 lf usage --days 30              # direct provider-authored usage per Run
-lf usage --days 0 --json        # all RunSnapshot rows; zero means all time
+lf usage --days 0 --json        # all Session history; zero means all time
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
 lf ps                            # one OS-live process and call-tree snapshot
@@ -1046,28 +1048,34 @@ route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
 managed login exists, the provider CLI uses its ambient default credentials.
 
-`lf usage` selects the same Home-local conversation input history as `lf runs`,
-ordered newest first. `--days` filters by the recorded input start time and
-defaults to 30; zero selects all retained input history. A continuation in the
-window remains visible even when its conversation began earlier. `--wave`, `--project`, and `--task` apply the same Work attribution drill
-as `lf runs`; the table names the most specific Work on each row. JSON remains
-the filtered direct `RunSnapshot` array. Each row preserves provider-authored
-cumulative counters once per usage stream. Omitted counters stay unknown,
-provider final receipts are counted explicitly, and evidence gaps remain visible.
-Command settlement never invents provider finality. Native Codex usage is matched
-by recorded thread and turn to recorder checkpoints, so the same work is counted
-once. A retained prior turn supplies the thread baseline after reconnect; otherwise
-only the observed request suffix is reported with a gap. Native completion alone
-supplies neither final usage nor a command outcome. Missing original start/input
-membership stays in Session history without borrowing the current input.
+`lf usage` reads the same Home-local Session history as `lf runs`, newest first.
+`--days` defaults to 30; zero selects all retained history. Original manifest/SQL time selects imported history; new captures use their
+event observation time. Native turns without a captured input use
+their own first observed receipt, preserving missing capture/start membership.
+`--wave`, `--project`, and `--task` select recorded ownership, including native
+turns after a bind. Earlier usage keeps its original owner. Receipts without an
+original start remain unattributed and appear in unfiltered discovery.
 
-Provider retries retain separate native starts, outcomes and usage in the same
-AgentSession. An Exec records the actual command result; a FlowSession consumes
-one authorized successful completion. The input references have no mutable
-lifecycle; listing projects their recorded history. General captured observations
-cannot authorize Flow advancement. Full historical import and native-only usage
-recovery remain part of the cutover obligations. Neither historical identity nor a
-causal link grants process signal authority.
+JSON returns `SessionHistory` rows with `session_id`, optional `captured`, retained
+`artifact_key`/`caller_artifact_key` selectors, `providers`, and `usage`. A provider
+entry references its exact native thread/turn/start/completion, or older recorded
+attempt evidence beneath a captured event. `recorded_outcome`/`recorded_at` retain
+old recorder results separately from provider outcomes and actual Exec exits.
+These projections have no resumable lifecycle. Rust and Swift use the same shape;
+`RunSnapshot`, string `subjects`, and input-level `outcome`/`ended` are removed.
+
+Cumulative counters are reduced once per stream. Omitted counters stay unknown,
+final receipts and evidence gaps remain explicit. Native thread/turn correlation
+prevents counting recorder checkpoints twice. Without a retained baseline, usage
+reports the observed suffix as partial. A native completion supplies neither
+missing usage nor a command outcome.
+
+Recent `lf runs` summaries select their budget before reading history payloads,
+retaining every eligible unfinished entry. Exact Task and caller drills have no
+presentation cap. Original `run_` selectors remain valid; a Session selector
+reads its current captured event. Unknown historical SQL remains import evidence,
+not an invented conversation. Full populated-import and configured-provider
+acceptance remain cutover obligations.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on

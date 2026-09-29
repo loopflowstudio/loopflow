@@ -83,6 +83,10 @@ def _run(repo: Path, **overrides: object) -> dict:
         ),
     )
     run.update(overrides)
+    run["observed_at"] = run.pop("started")
+    ended = run.pop("ended")
+    run["recorded_at"] = ended
+    run["recorded_outcome"] = "completed" if ended is not None else None
     return run
 
 

@@ -135,17 +135,12 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn conversation_snapshots(
+    pub(crate) async fn conversation_history(
         &self,
         since: i64,
-    ) -> StoreResult<
-        Vec<(
-            Option<crate::durable::WorkRef>,
-            crate::run_record::RunSnapshot,
-        )>,
-    > {
+    ) -> StoreResult<Vec<crate::run_record::SessionHistory>> {
         run_sqlite(&self.sqlite, move |store| {
-            store.conversation_snapshots(None, None, None, None, since, true)
+            store.conversation_history(None, None, None, None, since, true)
         })
         .await
     }

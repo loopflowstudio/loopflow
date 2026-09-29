@@ -69,7 +69,10 @@ struct TaskCommentsProofTests {
         }
         func label(_ id: String) throws -> String { try find(id).accessibilityLabel().string() }
         func waitFor(_ condition: () async throws -> Bool) async throws {
-            for _ in 0..<30 where !(try await condition()) { try await settle(window) }
+            for _ in 0..<30 {
+                if try await condition() { return }
+                try await settle(window)
+            }
         }
 
         // Task A: the count is read on selection, the thread stays collapsed.

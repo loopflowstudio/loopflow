@@ -2986,7 +2986,8 @@ mod tests {
             "id": id,
             "name": name,
             "description": "",
-            "content": "## Definition\n\nA measured bet.\n\n## KRs\n",
+            "content": "flow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
+            "status": {"type":"started"},
             "initiatives": { "nodes": [{ "id": "initiative-123" }] },
             "teams": { "nodes": [{ "id": "team-123" }] }
         })
@@ -3007,6 +3008,7 @@ mod tests {
             "id": id,
             "name": name,
             "description": "A measured bet.",
+            "status": {"type":"started"},
             "content": "## Definition\n\nA measured bet.\n\n## Flows\n\n- first: (none)\n- loop: (none)\n- finally: (none)\n\n## KRs\n\n- [ ] Ownership holds",
             "initiatives": { "nodes": [{ "id": initiative }] },
             "teams": { "nodes": teams.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }

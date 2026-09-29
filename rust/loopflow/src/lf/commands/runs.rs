@@ -81,10 +81,9 @@ pub(crate) fn collect_runs_started_since(
     )
 }
 
-/// Runs are rows: one query selects them, and each Run's usage and launch
-/// evidence are read from its own record.
+/// Select conversations in SQL before reading their subordinate history.
 fn collect_runs_at(
-    lf_home: &Path,
+    _lf_home: &Path,
     database: &Path,
     filter: WorkFilter,
     parent: Option<&str>,
@@ -94,13 +93,18 @@ fn collect_runs_at(
         return Ok(Vec::new());
     }
     let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
-    let mut runs = store.runs(filter.wave, filter.project, filter.task, parent, since)?;
-    // Activity also selects work ending in the window. This started-only reader
-    // discards older rows before opening payloads, including their event streams.
-    runs.retain(|listed| listed.run.created_at >= since);
-    let runs = crate::run_record::run_snapshots(lf_home, runs)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    Ok(runs.into_iter().map(|(_, snapshot)| snapshot).collect())
+    Ok(store
+        .conversation_snapshots(
+            filter.wave,
+            filter.project,
+            filter.task,
+            parent,
+            since,
+            false,
+        )?
+        .into_iter()
+        .map(|(_, snapshot)| snapshot)
+        .collect())
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -121,10 +125,9 @@ pub fn list(
     // A Task's Runs and a Run's children list whole; other drills are recent.
     let runs = match (parent, task) {
         (Some(parent), _) => {
-            let (_, manifest) = crate::run_record::resolve_manifest(&home, parent)
-                .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
             let database = crate::store::observability_database_path()?;
-            let parent = manifest.run_id.to_string();
+            let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+            let parent = store.resolve_history_input(parent)?;
             collect_runs_at(&home, &database, filter, Some(&parent), 0)?
         }
         (None, Some(_)) => collect_runs_started_since(filter, 0)?,
@@ -362,22 +365,21 @@ mod tests {
     fn history_window_keeps_boundary_usage_and_gaps_before_payload_reads() {
         use crate::engine::stream::StreamEvent;
         use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
-        use std::io::Write;
-
-        let home = tempfile::tempdir().unwrap();
-        let database = home.path().join("loopflow.db");
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let home = ledger.home();
+        let database = home.join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let since = 1_790_000_000;
         let parent = crate::durable::RunId::new();
         let mut older = None;
         for started in [since - 1, since, since + 1] {
             let capture = CaptureHandle::begin_at(
-                home.path(),
+                home,
                 RunSpec {
                     harness: "proof".into(),
                     model: None,
                     surface: "headless".into(),
-                    cwd: home.path().to_owned(),
+                    cwd: home.to_owned(),
                     repo: None,
                     worktree: None,
                     skill: None,
@@ -394,34 +396,41 @@ mod tests {
             });
             capture.finish("completed").unwrap();
             let dir = capture.artifact_dir();
-            let mut manifest = crate::run_record::read_manifest(&dir).unwrap();
-            manifest.created_at = time::OffsetDateTime::from_unix_timestamp(started).unwrap();
-            std::fs::write(
-                dir.join("manifest.json"),
-                serde_json::to_vec(&manifest).unwrap(),
+            let input = capture.run_id();
+            // Simulate dated retained history on the final owners.
+            let conn = rusqlite::Connection::open(&database).unwrap();
+            conn.execute(
+                "UPDATE session_events SET observed_at=?2 WHERE receipt_key=?1||':manifest.json'",
+                rusqlite::params![input.as_str(), started],
             )
             .unwrap();
-            // Seed retained historical evidence: runtime admission creates no Run.
-            rusqlite::Connection::open(&database).unwrap().execute(
-                "INSERT INTO runs(id,created_at,cwd,published,provider,outcome,ended_at,caller_run_id) VALUES(?1,?2,?3,1,'proof','completed',?4,?5)",
-                rusqlite::params![manifest.run_id.as_str(), started, home.path().to_str().unwrap(), since+2,
-                    (started >= since).then_some(parent.as_str())],
-            ).unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET created_at=?2 WHERE input_id=?1",
+                rusqlite::params![input.as_str(), started],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_session_inputs SET caller_input_id=?2 WHERE input_id=?1",
+                rusqlite::params![
+                    input.as_str(),
+                    (started >= since).then_some(parent.as_str())
+                ],
+            )
+            .unwrap();
             if started == since {
-                std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(dir.join("events.jsonl"))
-                    .unwrap()
-                    .write_all(b"{")
-                    .unwrap();
+                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                    SELECT id,'observed',?1||':events.jsonl:partial',?2,?3 FROM agent_sessions WHERE input_id=?1",
+                    rusqlite::params![input.as_str(),since,serde_json::json!({"input_id": input,"source":"events.jsonl:partial","evidence":{"unparsed":"{"}}).to_string()]).unwrap();
             }
             if started < since {
-                older = Some(dir);
+                older = Some(input);
             }
+            // The SQL history remains useful after the input payload is unavailable.
+            std::fs::remove_dir_all(dir).unwrap();
         }
         let select = |since| {
             super::collect_runs_at(
-                home.path(),
+                home,
                 &database,
                 super::WorkFilter {
                     wave: None,
@@ -447,13 +456,27 @@ mod tests {
                 .filter(|run| run.started >= since)
                 .collect::<Vec<_>>()
         );
+        let store =
+            crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database).unwrap();
+        assert_eq!(
+            store
+                .conversation_snapshots(None, None, None, None, since, true)
+                .unwrap()
+                .len(),
+            3,
+            "activity retains the older work that ended inside the window"
+        );
+        assert!(store.runs(None, None, None, None, 0).unwrap().is_empty());
         // An excluded corrupt payload must not make the recent window fail.
-        std::fs::write(older.unwrap().join("manifest.json"), b"{").unwrap();
+        rusqlite::Connection::open(&database).unwrap().execute(
+            "UPDATE session_events SET payload='{' WHERE session_id=(SELECT id FROM agent_sessions WHERE input_id=?1)",
+            [older.unwrap().as_str()],
+        ).unwrap();
         assert_eq!(select(since), selected);
         // Exact parent selection also precedes payload hydration, without a date cap.
         assert_eq!(
             super::collect_runs_at(
-                home.path(),
+                home,
                 &database,
                 super::WorkFilter::default(),
                 Some(parent.as_str()),
@@ -461,13 +484,6 @@ mod tests {
             )
             .unwrap(),
             selected
-        );
-        let store =
-            crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database).unwrap();
-        assert_eq!(
-            store.runs(None, None, None, None, since).unwrap().len(),
-            3,
-            "activity retains the older work that ended inside the window"
         );
     }
 

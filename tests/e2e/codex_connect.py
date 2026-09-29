@@ -1054,6 +1054,18 @@ def _flow_automatic_retry_contract(
         results["run_rows"],
     )
     results["session_owners"] = "passed"
+    report = _command(
+        [str(binary), "usage", "--days", "0", "--json"], work=work, env=env, timeout=30
+    )
+    assert report.returncode == 0, report.stderr
+    rows = json.loads(report.stdout)
+    results["public_usage"] = rows
+    assert len(rows) == 1, rows
+    assert rows[0]["outcome"] == "completed", rows
+    assert rows[0]["usage"]["input_tokens"] == 40, rows
+    assert rows[0]["usage"]["output_tokens"] == 10, rows
+    assert rows[0]["usage"]["cost_usd"] is None, rows
+    results["usage_owners"] = "passed"
 
 
 def _flow_retry_contract(

@@ -1494,6 +1494,7 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
             .await
             .unwrap();
         bound.input_id = current.clone();
+        bound.provider = Some("claude".into());
         task.store
             .replace_session_input(&prior, bound)
             .await
@@ -1531,9 +1532,10 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
         } else {
             json!([])
         };
+        let at = chrono::Utc::now() - chrono::Duration::days(if attributed { 1 } else { 10 });
         let manifest = json!({
             "schema_version":1,"run_id":input,"parent_run_id":caller,
-            "created_at":"2026-09-20T20:00:00Z","harness":"opencode","model":null,
+            "created_at":at.to_rfc3339(),"harness":if attributed {"claude"} else {"opencode"},"model":null,
             "surface":"headless","cwd":fixture.repo.path(),"repo":fixture.repo.path(),
             "worktree":fixture.repo.path(),"skill":"implement","subjects":subjects,
             "flow":{"kind":"independent"},"launch":null,"context":null,
@@ -1545,9 +1547,18 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
         )
         .unwrap();
         std::fs::write(dir.join("terminal.json"), serde_json::to_vec(&json!({
-            "schema_version":1,"outcome":outcome,"ended_at":"2026-09-20T20:05:00Z","result_ref":null
+            "schema_version":1,"outcome":outcome,"ended_at":(at+chrono::Duration::minutes(5)).to_rfc3339(),"result_ref":null
         })).unwrap()).unwrap();
-        std::fs::write(dir.join("events.jsonl"), format!("{usage}\n")).unwrap();
+        let measurement = json!({"schema_version":1,"seq":1,"observed_at":at.to_rfc3339(),
+            "type":"usage","usage_stream_id":"repeated-local-stream","provider":manifest["harness"],
+            "model":null,"attempt_key":"attempt-1","turn_key":"turn-1","observation_seq":1,
+            "counter_kind":"cumulative","start_known":true,"final_receipt":attributed,
+            "usage":{"input_tokens":usage["input"],"output_tokens":usage["output"]}});
+        std::fs::write(
+            dir.join("events.jsonl"),
+            format!("{usage}\n{measurement}\n"),
+        )
+        .unwrap();
     }
     for dry in [true, false] {
         let args = if dry {
@@ -1559,7 +1570,7 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
         assert_eq!(report["failed"], json!([]), "{report}");
         assert_eq!(report["task_review"], 2, "{report}");
         assert_eq!(report["tasks_started"], json!([]));
-        assert_eq!(fixture.count("session_events"), if dry { 0 } else { 6 });
+        assert_eq!(fixture.count("session_events"), if dry { 0 } else { 8 });
         assert_eq!(started(), original_started);
         assert_eq!(
             runtime.block_on(task.store.session(&saved.id)).unwrap(),
@@ -1586,7 +1597,7 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
             .iter()
             .filter(|event| event["payload"]["input_id"] == json!(input))
             .collect();
-        assert_eq!(member.len(), 3);
+        assert_eq!(member.len(), 4);
         assert!(member.iter().all(|event| event["task_id"] == task_id
             && event["exec_id"].is_null()
             && event["provider_turn"].is_null()
@@ -1611,6 +1622,52 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
     assert_eq!(
         fixture.json(&["session", "history", &saved.id, "--json"]),
         history
+    );
+    for input in [&prior, &current] {
+        std::fs::remove_dir_all(fixture.run_dir(input.as_str())).unwrap();
+    }
+    let all = fixture.json(&["usage", "--days", "0", "--json"]);
+    let rows = all.as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{all}");
+    let first = rows.iter().find(|row| row["id"] == prior.as_str()).unwrap();
+    let second = rows
+        .iter()
+        .find(|row| row["id"] == current.as_str())
+        .unwrap();
+    assert_eq!(first["usage"]["input_tokens"], 21);
+    assert!(first["usage"]["output_tokens"].is_null());
+    assert!(first["subjects"].as_array().unwrap().is_empty());
+    assert_eq!(first["harness"], "opencode");
+    assert_eq!(first["outcome"], "failed");
+    assert_eq!(first["usage"]["final_streams"], 0);
+    assert_eq!(second["usage"]["input_tokens"], 0);
+    assert_eq!(second["usage"]["output_tokens"], 0);
+    assert_eq!(second["harness"], "claude");
+    assert_eq!(second["outcome"], "completed");
+    assert_eq!(second["usage"]["final_streams"], 1);
+    assert!(second["subjects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|subject| subject["selector"] == "task:INF-123" && subject["source"] == "inherited"));
+    assert_eq!(
+        fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
+        json!([second])
+    );
+    assert_eq!(
+        fixture.json(&["usage", "--days", "7", "--json"]),
+        json!([second]),
+        "recent continuation survives old Session creation"
+    );
+    assert_eq!(fixture.json(&["runs", "--json"]), json!([second]));
+    assert_eq!(
+        fixture.json(&["runs", "--parent", caller.as_str(), "--json"]),
+        all,
+        "exact parent reads both inputs without a date cap"
+    );
+    assert_eq!(
+        fixture.json(&["runs", "--parent", &caller.as_str()[..16], "--json"]),
+        all
     );
     assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(fixture.count("agent_session_inputs"), 2);

@@ -139,11 +139,120 @@ fn inventory_query(
 
 impl SqliteStore {
     /// Restore historical conversation facts without borrowing the importing Exec's Work.
+    pub(crate) fn resolve_history_input(&self, selector: &str) -> StoreResult<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
+            [selector],
+            |row| row.get::<_, bool>(0),
+        )? {
+            return Ok(selector.to_string());
+        }
+        let mut query = conn.prepare("SELECT id FROM (
+            SELECT input_id AS id FROM agent_session_inputs UNION SELECT caller_input_id FROM agent_session_inputs)
+            WHERE substr(id,1,length(?1))=?1 ORDER BY id LIMIT 2")?;
+        let ids = query
+            .query_map([selector], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        match ids.as_slice() {
+            [id] => Ok(id.clone()),
+            [] => Err(StoreError::NotFound),
+            _ => Err(invalid(format!("Input selector {selector:?} is ambiguous"))),
+        }
+    }
+
+    /// Project retained input history, with its own attribution and chronology.
+    /// A continuation never moves earlier usage to the conversation's new binding.
+    pub(crate) fn conversation_snapshots(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        caller: Option<&str>,
+        since: i64,
+        include_finished: bool,
+    ) -> StoreResult<
+        Vec<(
+            Option<crate::durable::WorkRef>,
+            crate::run_record::RunSnapshot,
+        )>,
+    > {
+        let inputs = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut query = conn.prepare("WITH inputs AS (
+                SELECT i.input_id,i.session_id,i.caller_input_id,
+                    COALESCE(m.observed_at,s.created_at) AS started,
+                    CASE WHEN m.seq IS NULL THEN s.task_id ELSE m.task_id END AS task_id,
+                    CASE WHEN m.seq IS NULL THEN s.wave_id ELSE m.wave_id END AS wave_id,
+                    terminal.observed_at AS ended
+                FROM agent_session_inputs i JOIN agent_sessions s ON s.id=i.session_id
+                LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                    AND m.receipt_key=i.input_id||':manifest.json'
+                LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
+                    AND terminal.receipt_key=i.input_id||':terminal.json'
+                WHERE m.seq IS NOT NULL OR (i.input_id=s.input_id AND s.input_published=1))
+                SELECT session_id,input_id,caller_input_id,started,task_id,wave_id,
+                    (SELECT name FROM waves WHERE id=inputs.wave_id),
+                    (SELECT p.project_slug FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=inputs.task_id),
+                    (SELECT issue_identifier FROM tasks WHERE id=inputs.task_id)
+                FROM inputs
+                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM waves WHERE id=?1 OR name=?1))
+                AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
+                    WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2))
+                AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3))
+                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT input_id FROM agent_session_inputs WHERE session_id=?4))
+                AND (started>=?5 OR (?6 AND ended>=?5))
+                ORDER BY started DESC,input_id DESC")?;
+            let rows = query.query_map(
+                params![wave, project, task, caller, since, include_finished],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        (
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                        ),
+                    ))
+                },
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        inputs
+            .into_iter()
+            .map(|(session_id, input, caller, started, task, wave, names)| {
+                let input = RunId::parse(&input).map_err(invalid)?;
+                let session = self.session(&session_id)?.ok_or(StoreError::NotFound)?;
+                let history = self.history_for_input(&session_id, &input)?;
+                let mut snapshot =
+                    crate::run_record::conversation_snapshot(&session, &input, &history, names)
+                        .map_err(invalid)?;
+                snapshot.started = started;
+                snapshot.parent_run_id = caller;
+                let work = match (task, wave) {
+                    (Some(task), _) => Some(crate::durable::WorkRef::Task(
+                        TaskId::parse(&task).map_err(invalid)?,
+                    )),
+                    (None, Some(wave)) => Some(crate::durable::WorkRef::Wave(
+                        crate::id::WaveId::parse(&wave).map_err(invalid)?,
+                    )),
+                    _ => None,
+                };
+                Ok((work, snapshot))
+            })
+            .collect()
+    }
+
     pub(crate) fn import_session(
         &self,
         mut session: AgentSession,
         review: Option<&FlowSession>,
-        history: &[crate::session::ImportedObservation],
+        history: &[crate::session::SessionObservation],
         dry_run: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -188,14 +297,14 @@ impl SqliteStore {
                     session.id
                 )));
             }
-            let changed = import_history_in(&tx, &session, history)?;
+            let changed = retain_history_in(&tx, &session, history)?;
             if !dry_run {
                 tx.commit()?;
             }
             return Ok(changed);
         }
         insert_session_in(&tx, &session)?;
-        import_history_in(&tx, &session, history)?;
+        retain_history_in(&tx, &session, history)?;
         if session.kind == SessionKind::FlowReview && review.is_some_and(|flow| !flow.finished) {
             tx.execute(
                 "UPDATE flow_sessions SET pending_session_id=?2,current_run_id=?3 WHERE id=?1",
@@ -548,10 +657,10 @@ impl SqliteStore {
     }
 }
 
-fn import_history_in(
+pub(super) fn retain_history_in(
     conn: &Connection,
     session: &AgentSession,
-    history: &[crate::session::ImportedObservation],
+    history: &[crate::session::SessionObservation],
 ) -> StoreResult<bool> {
     let mut changed = false;
     for observation in history {

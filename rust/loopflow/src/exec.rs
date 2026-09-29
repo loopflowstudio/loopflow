@@ -12,6 +12,8 @@ pub struct AgentCaller {
     pub session_id: String,
     pub provider_generation: i64,
     pub origin_exec_id: ExecId,
+    /// Native launch correlation retained by tool descendants across retries.
+    pub flow_turn: Option<String>,
 }
 
 /// Separate fences: reconnecting a driver does not replace its live provider.
@@ -29,6 +31,7 @@ impl SessionDriver {
             session_id,
             provider_generation: self.provider_generation,
             origin_exec_id: self.provider_exec_id.clone(),
+            flow_turn: None,
         }
     }
 }

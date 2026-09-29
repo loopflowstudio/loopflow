@@ -7,8 +7,9 @@ not evidence that each preceding implementation has passed.
 
 Jack requested this order on 2026-09-28: rewrite the docs and README for the
 accepted model before further executable owner conversion. The recovery
-checkpoint is rebased and published at `81b57c91f`; docs checkpoint
-`12462fe51` (formerly `4bb44b999`) completes the initial spec rewrite. It covers the active guides:
+checkpoint and mechanical conversion are rebased and published at `fb100f486`
+against main `1dce02734`. The initial spec rewrite, originally `4bb44b999`,
+survives that rebase. It covers the active guides:
 `README.md`, `docs/index.md`, `docs/lf.md`, `docs/agent-api.md`, `docs/waves.md`,
 architecture/reference/data/execution, and other active pages that define these
 objects. Derived docs were regenerated through the existing generator.
@@ -22,12 +23,13 @@ Architecture Reference now maps the spec to the remaining implementation;
 writing the spec does not complete the requirements below. The metric-planning
 repair is published; execution-owner conversion continues below.
 
-Docs review also found active command guidance that must follow the Chapter
-conversion: builtin split-wave, wave_start-chapter, start-chapter, wave_operate,
-loopflow and init, plus the restart hint in `ops/task.rs`, still name
-`lf wave new-chapter`. Update current instructions to the supported repository
-operation; preserve historical migration text. The checked ownership inventory
-must not list deleted Chapter storage as a current transition dependency.
+The bounded Chapter contributor updated eight active builtin skills, including
+both chapter reviews, to repository rotation and Linear Project ownership.
+Supervisor reviewed its uncommitted diff and static checks; main owns integration.
+The working restart hint in `ops/task.rs` now names missing synced Project data
+and Wave planning sync, removing the obsolete chapter command. Verify it with
+the Rust consistency pass. Preserve historical migration text. The checked
+ownership inventory must not list deleted Chapter storage as a current dependency.
 
 ## 1. Finish the execution owners
 
@@ -60,6 +62,12 @@ one managed FlowSession pointer while allowing other attributed Flows.
   retry starts, and the Flow wrongly completes. Preserve original native-turn
   authority through child commands; version/current Run alone cannot distinguish
   automatic retries. See evidence and Task comment `cae3e281-31e1-4ba0-a757-3dd2cb00c4ee`.
+  Jack's 2026-09-28 clarification supports bounded investment in this reproduced
+  failure while rejecting complexity driven by imagined races. Preserve original
+  turn attribution using the existing owners and one shared navigation check;
+  delete superseded Run authority. No additional attempt object or general race
+  framework. Substantial provider-specific machinery warrants revisiting the
+  retry boundary rather than silently widening the repair.
 - Mechanical boundaries retain correlated start/outcome directly on FlowSession.
   One lf process may perform several operations; no fake Exec or AgentSession.
   Missing completion keeps inspect-before-retry semantics.
@@ -68,15 +76,28 @@ one managed FlowSession pointer while allowing other attributed Flows.
   Delete `runs`, `current_run_id`, old reader/writer paths and replacement wrappers
   only after preservation and callers converge. Renaming tables is intermediate.
   Current dependency is concrete: `store/sqlite/flows.rs::FLOW_SELECT` still
-  reads Run publication/outcome, `select_flow_turn` joins the reserved Run,
-  `publish_attempt` writes it, and verdict/route writes use Run authority.
-  The working `lf/commands/flow.rs::run_op` now records mechanical results directly
-  on Flow history; its complete proof is still pending (see evidence).
+  reads Run publication/outcome, `publish_attempt` writes it, and creation of
+  the native-selection capability reads Run. The working conversion has removed
+  the Run join from `select_flow_turn`; it carries the reserved AgentSession ID.
+  Verdict/route/blocked now share original-turn caller Exec authority. Focused
+  source/canonical tests cover those store changes, while the real provider's
+  valid decision retry remains failing. The public automatic-retry ownership
+  fixture now asserts zero Runs and fails on one retained row after consuming
+  the successful native turn; launch/publication conversion owns that boundary.
+  Published `lf/commands/flow.rs::run_op` records mechanical results directly
+  on Flow history. Focused source/canonical, standalone crash/retry and hosted
+  disposable-OS managed proofs pass within their recorded scope (see evidence).
   Convert this complete boundary with TaskLauncher and saved-launch callers;
   preserve exact selected native history and uncertain mechanical effects.
 - Finish Ask/keyed answer, review completion, helpers (rebase conflicts/landing
   repair), replay, usage, activity and Task worker paths. Recording and resumability
   apply to headless agents as well as interactive ones.
+- Preserve the observed Task-settlement counterexample in evidence: a Python
+  inspection error was classified as a capability blocker because it printed an
+  old fixture log containing `operation not permitted`. Quoted command output
+  cannot become current control authority. Keep actual delivery/provider failures
+  on their outcome owners; remove this ambiguity during the Task/Exec conversion
+  without introducing command allowlists or a second failure-classification lifecycle.
 
 ## 2. Native continuity and authority
 
@@ -183,10 +204,28 @@ ancestry alone to signal. No duplicate deletion implementation or widened scope.
 Preserve main's upstream semantics and rebase/publish coherent verified checkpoints
 through lf. Run affected checks after final changes, canonical materialization in
 a disposable source copy, architecture/migration checks, fmt and all-target Clippy.
-The 2026-09-28 rebase integrated main d9632d833 and PR1317's saved Session
-executable/Home/database and launch-failure journal evidence. GitHub and the Task
-publication now name 26a0270af; the Task's recorded base is d9632d833. Preserve
-those upstream behaviors across Session/Run conversion. Main owns later rebases.
+The latest 2026-09-28 rebase integrates main `1dce02734`; published head is
+`fb100f486`. Integration of main `bc51da30` is queued for the next owned
+implementation boundary, not applied. It retains PR1317's saved Session executable/Home/database and
+launch-failure journal evidence, plus the subsequent landing and schema-cache
+changes. Two focused schema-cache reconciliation tests pass. Preserve those
+upstream behaviors across Session/Run conversion. Main owns later rebases.
+Hosted Rust at `594c7c319f` stopped at the comments fixture's missing Project
+status after 930 passes, with 1,013 tests unrun. `0131ed763f` repairs that fixture
+and related response builders without weakening required Project fields. Five
+focused tests, formatting and all-target Clippy pass on the isolated fixture
+tree. New CI36515601936 reaches two completion-fixture failures at duplicate
+`projects.external_project_id`, after 932 passes with 1,010 unrun. Their shared
+setup and retained-predecessor mock now pass the twelve-test planning module;
+`70e8db9c6` publishes that fixture-only repair. Its CI then failed the hierarchy
+fixture; `fb100f486` publishes that one-line correction. The latter CI is terminal
+at the obsolete Project-status prohibition: 1,304 passed, one failed, 643 unrun.
+After its narrow correction and rebase, run one no-fail-fast materialized Rust
+matrix to expose remaining failures together; retain exact source and all results.
+Full CI is owed. Resumed loop-decide iteration9 completed and chose Iterate;
+implement iteration10 is running after operational recovery of the quoted-output
+classifier failure. This does not finish
+the conversion or discharge any of the remaining requirements above.
 Do not cite assertion passes with a leaked process as clean settlement. Review
 complete public behavior and deletion paths; measure code by the same method/base.
 Update docs, skills and generated HTML with actual behavior. Compress and follow

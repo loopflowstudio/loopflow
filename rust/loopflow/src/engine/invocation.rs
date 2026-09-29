@@ -29,6 +29,17 @@ pub struct QueuedInvocation {
 }
 
 impl QueuedInvocation {
+    /// Exact occurrence in this captured graph, shared by agent and operation history.
+    pub(crate) fn location(
+        &self,
+        cursor: &crate::engine::ExecutionCursor,
+    ) -> Result<(u32, Vec<Vec<u32>>)> {
+        Ok((
+            self.node_id(cursor)?,
+            crate::engine::flow_graph::flow_iterations(&self.steps, cursor),
+        ))
+    }
+
     /// Local preorder index in the captured graph, including every XOR alternative.
     pub(crate) fn node_id(&self, cursor: &crate::engine::ExecutionCursor) -> Result<u32> {
         fn count(steps: &[ConcreteStep]) -> usize {

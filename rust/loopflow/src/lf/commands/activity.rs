@@ -143,15 +143,16 @@ fn build_snapshot(
         }
     }
 
-    let runs = store.runs(filter.wave, filter.project, filter.task, None, since)?;
-    let runs = crate::run_record::run_snapshots(&crate::store::observability_home_dir(), runs)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    for (run, snapshot) in runs {
-        let work = match (run.task_id, run.wave_id) {
-            (Some(task), _) => WorkRef::Task(task),
-            (None, Some(wave)) => WorkRef::Wave(wave),
-            (None, None) => continue,
-        };
+    let runs = store.conversation_snapshots(
+        filter.wave,
+        filter.project,
+        filter.task,
+        None,
+        since,
+        true,
+    )?;
+    for (work, snapshot) in runs {
+        let Some(work) = work else { continue };
         if let Some(work) = catalog.owners.get(&work) {
             entries.extend(run_entries(&snapshot, work, since));
         }

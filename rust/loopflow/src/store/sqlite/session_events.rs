@@ -2,6 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::durable::RunId;
 use crate::id::ExecId;
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::store::{StoreError, StoreResult};
@@ -9,6 +10,18 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn retain_session_observation(
+        &self,
+        session: &crate::session::AgentSession,
+        observation: &crate::session::SessionObservation,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::sessions::retain_history_in(&tx, session, std::slice::from_ref(observation))?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Retain a provider observation even when its conversational driver has
     /// changed. Observation grants neither native write nor Flow authority.
     pub(crate) fn record_session_event(
@@ -102,6 +115,24 @@ impl SqliteStore {
         after: i64,
         limit: usize,
     ) -> StoreResult<Vec<SessionEvent>> {
+        self.read_history(session, after, limit, None)
+    }
+
+    pub(super) fn history_for_input(
+        &self,
+        session: &str,
+        input: &RunId,
+    ) -> StoreResult<Vec<SessionEvent>> {
+        self.read_history(session, 0, 0, Some(input.as_str()))
+    }
+
+    fn read_history(
+        &self,
+        session: &str,
+        after: i64,
+        limit: usize,
+        input: Option<&str>,
+    ) -> StoreResult<Vec<SessionEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
@@ -111,10 +142,17 @@ impl SqliteStore {
              FROM session_events e LEFT JOIN session_events origin
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
-             WHERE e.session_id=?1 AND e.seq>?2 ORDER BY e.seq LIMIT ?3",
+             WHERE e.session_id=?1 AND e.seq>?2
+             AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':'))
+             ORDER BY e.seq LIMIT ?3",
         )?;
         let rows = query.query_map(
-            params![session, after, if limit == 0 { -1 } else { limit as i64 }],
+            params![
+                session,
+                after,
+                if limit == 0 { -1 } else { limit as i64 },
+                input
+            ],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,

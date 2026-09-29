@@ -988,24 +988,25 @@ async fn repair_conclusions(
 ) -> OpsResult<Vec<String>> {
     let error = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
     let runs = store
-        .runs(None, None, None, None, landing.created_at.unix_timestamp())
+        .conversation_snapshots(landing.created_at.unix_timestamp())
         .await
         .map_err(|source| error(&source))?;
     let mut conclusions = Vec::new();
     for run in runs
         .into_iter()
         .rev()
-        .map(|listed| listed.run)
-        .filter(|run| {
-            run.skill.as_deref() == Some("ci-fix")
-                && run.cwd == landing.worktree
-                && run.ended.is_some()
+        .map(|(_, snapshot)| snapshot)
+        .filter(|snapshot| {
+            snapshot.skill.as_deref() == Some("ci-fix")
+                && snapshot.worktree.as_deref() == landing.worktree.to_str()
+                && snapshot.ended.is_some()
         })
     {
         if shown.contains(run.id.as_str()) {
             continue;
         }
-        let dir = crate::run_record::record_dir(home, &run.id)
+        let input = crate::durable::RunId::parse(&run.id).map_err(|source| error(&source))?;
+        let dir = crate::run_record::record_dir(home, &input)
             .ok_or_else(|| error(&format!("Run {} has an invalid id", run.id)))?;
         let conclusion = crate::run_record::read_final_answer(&dir)
             .map_err(|source| error(&source))?
@@ -1363,7 +1364,7 @@ mod tests {
         use crate::chat::types::{ConversationEvent, ConversationItem};
         use crate::run_record::{CaptureHandle, RunSpec};
 
-        let _lock = crate::journal::test_env_lock();
+        let _ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {

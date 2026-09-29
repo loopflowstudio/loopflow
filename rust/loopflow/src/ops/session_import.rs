@@ -22,7 +22,7 @@ use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
 use crate::run_record::{AttributionSource, RunFlowMembership, RunManifest};
-use crate::session::{AgentSession, ImportedObservation, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, SessionKind, SessionObservation, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 #[derive(Debug, Serialize)]
@@ -350,7 +350,7 @@ impl Import<'_> {
         Ok(Some(if changed { kind } else { Stored::Unchanged }))
     }
 
-    async fn history(&self, input: &RunId) -> Result<Vec<ImportedObservation>> {
+    async fn history(&self, input: &RunId) -> Result<Vec<SessionObservation>> {
         let dir = self.run_dir(input)?;
         let mut history = Vec::new();
         let (task_id, wave_id, _) = match crate::run_record::read_manifest(&dir) {
@@ -367,7 +367,7 @@ impl Import<'_> {
                 .and_then(|at| {
                     OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
                 });
-            history.push(ImportedObservation {
+            history.push(SessionObservation {
                 input_id: input.clone(),
                 source: source.clone(),
                 observed_at: at.unwrap_or_else(OffsetDateTime::now_utc).unix_timestamp(),

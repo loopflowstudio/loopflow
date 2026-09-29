@@ -8,7 +8,7 @@ impl Store {
         &self,
         session: AgentSession,
         review: Option<FlowSession>,
-        history: Vec<crate::session::ImportedObservation>,
+        history: Vec<crate::session::SessionObservation>,
         dry_run: bool,
     ) -> StoreResult<bool> {
         run_sqlite(&self.sqlite, move |store| {
@@ -121,6 +121,21 @@ impl Store {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.bind_session(&id, &expected_run, &task)
+        })
+        .await
+    }
+
+    pub(crate) async fn conversation_snapshots(
+        &self,
+        since: i64,
+    ) -> StoreResult<
+        Vec<(
+            Option<crate::durable::WorkRef>,
+            crate::run_record::RunSnapshot,
+        )>,
+    > {
+        run_sqlite(&self.sqlite, move |store| {
+            store.conversation_snapshots(None, None, None, None, since, true)
         })
         .await
     }

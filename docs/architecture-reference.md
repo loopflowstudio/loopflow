@@ -42,7 +42,7 @@ consumers without their coordinated migration.
 | Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Valid native decision retry still fails original-turn transport; all-provider recovery and final retired-owner deletion remain required. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
 | Lossless import and final owner deletion | The offline importer exists but complete four-origin/headless/command import, repeated attempts, conflict/interruption preservation and final Run removal remain required. Ordinary reads must not import or reconstruct identity from old files. |
-| Indexed discovery and usage | Finish typed SQL summary/detail queries before payload IO, receipt-based usage and prospective bind attribution; measure dense cold/warm list/detail behavior. Current Run-backed lists and DTOs remain transitional. |
+| Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Finish native-only usage recovery, remaining detail readers, full historical import and dense cold/warm measurements. Legacy wire names remain transitional. |
 | Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Complete coordinated Rust/Swift history/usage and numeric graph IDs; structural graph keys remain on the current wire. |
 | Status-owned Chapters | Rotation/default-Flow implementation exists with focused fixtures. Complete historical adoption, partial/competing-plan preservation and second-Home proof. No Chapter table or packet belongs in the model. |
 | Integrated acceptance | Affected checks, configured provider/Desktop, backed-up real-Home import and final consistency remain required. Branch fixture passes are neither installed acceptance nor permission to promote. |
@@ -50,8 +50,9 @@ consumers without their coordinated migration.
 The admission checkpoint preserves saved executable/Home/database handoff and
 launch-failure diagnostics. Populated canonical migration, Ask/review recovery,
 refusal before provider launch and automatic-retry fixtures cover their stated
-boundaries. Historical Run rows remain migration evidence, and legacy discovery
-and usage still need their final indexed owners. The retained native decision
+boundaries. Historical Run rows remain migration evidence. History lists read
+Session observations; native-only usage, remaining detail readers and complete
+historical import still need their final proof. The retained native decision
 retry failure and other-provider gaps prevent code-complete acceptance. Detailed
 receipts and unresolved import obligations remain with the active Task; no
 full-green hosted, configured-provider or installed-migration result is asserted.

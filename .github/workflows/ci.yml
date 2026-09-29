@@ -13,7 +13,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  merge-proof:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      reuse: ${{ steps.proof.outputs.reuse }}
+      proof_url: ${{ steps.proof.outputs.proof_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Find the merge queue's proof for this exact commit
+        id: proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run python scripts/check_ci_proof.py
+
   architecture-check:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -22,6 +42,8 @@ jobs:
         run: uv run python scripts/check_architecture.py
 
   scratch-clear:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -43,6 +65,8 @@ jobs:
   # separate runners in parallel instead of back-to-back on one critical path.
   # Distinct cache keys keep the clippy-artifact and rustc-artifact caches apart.
   rust-lint:
+    needs: merge-proof
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,15 +78,20 @@ jobs:
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           key: lint-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run cargo fmt check
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo fmt --all -- --check
       - name: Run cargo clippy
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo clippy --all-targets -- -D warnings
 
   rust-test:
+    needs: merge-proof
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -76,19 +105,25 @@ jobs:
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           key: test-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
       - name: Run Rust tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo nextest run --all
       - name: Prove checkout refresh through the CLI
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           # Integration tests above already build this executable.
           test -x "$PWD/target/debug/lf"
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 
   task-installation:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -99,6 +134,8 @@ jobs:
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.
   migration-check:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -113,6 +150,8 @@ jobs:
         run: uv run python scripts/check_migrations.py
 
   python-test:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -121,6 +160,8 @@ jobs:
         run: uv run pytest python/tests/
 
   website-test:
+    needs: merge-proof
+    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -130,6 +171,8 @@ jobs:
         working-directory: website
 
   e2e-smoke:
+    needs: merge-proof
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -139,13 +182,17 @@ jobs:
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           key: ${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run E2E smoke test
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: tests/e2e/test_smoke.sh
 
   swift-test:
+    needs: merge-proof
+    if: ${{ !cancelled() }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -157,12 +204,12 @@ jobs:
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           key: swift-cli-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build CLI for Swift transport tests
-        run: cargo build -p loopflow --bin lf
       - name: Cache SwiftPM build
+        id: swift-cache
         uses: actions/cache@v6
         with:
           path: |
@@ -171,7 +218,11 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
           restore-keys: |
             swiftpm-${{ runner.os }}-
+      - name: Build CLI for Swift transport tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
+        run: cargo build -p loopflow --bin lf
       - name: Run Swift tests
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
         # Failure locations come from #file/#line, so debug info is unnecessary.
         # Native proofs share AppKit's main actor; concurrent suites starve
@@ -195,8 +246,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Check Swift multiplatform boundaries
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
       - name: Prove the control room renders its four states distinctly
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         # Unlike the hosted XCUITest (which needs Automation permission and so
         # lives behind the `--ui-host` gate), this launches the built app
         # directly and renders each state's window through SnapshotService
@@ -211,6 +264,8 @@ jobs:
         timeout-minutes: 15
 
   loopflow-ui-test:
+    needs: merge-proof
+    if: ${{ !cancelled() }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -220,16 +275,20 @@ jobs:
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
+        id: rust-cache
         with:
           key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: . -> target/dev-app-control
       - name: Install XcodeGen
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: brew install xcodegen
       - name: Generate Xcode project
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: xcodegen generate
         working-directory: swift
       - name: Build Loopflow for testing (compile check)
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         # The hosted test *run* is redundant: swift-test runs these same suites
         # un-hosted. This job's only unique signal is that the Loopflow app
         # target compiles. build-for-testing gives that without launching the
@@ -256,6 +315,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     needs:
+      - merge-proof
       - architecture-check
       - scratch-clear
       - rust-lint
@@ -270,6 +330,7 @@ jobs:
     steps:
       - name: Aggregate test results
         env:
+          REUSED_PROOF: ${{ needs.merge-proof.outputs.proof_url }}
           ARCHITECTURE_CHECK: ${{ needs.architecture-check.result }}
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
@@ -283,6 +344,9 @@ jobs:
           LOOPFLOW_UI_TEST: ${{ needs.loopflow-ui-test.result }}
         run: |
           failures=0
+          if [ -n "$REUSED_PROOF" ]; then
+            echo "Reused exact merge-group proof: $REUSED_PROOF"
+          fi
 
           check_result() {
             local name="$1"
@@ -292,7 +356,12 @@ jobs:
                 echo "PASS  $name"
                 ;;
               skipped)
-                echo "SKIP  $name"
+                if [ -n "$REUSED_PROOF" ]; then
+                  echo "PROVED  $name ($REUSED_PROOF)"
+                else
+                  echo "FAIL  $name (skipped without proof)"
+                  failures=1
+                fi
                 ;;
               *)
                 echo "FAIL  $name ($result)"

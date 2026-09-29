@@ -1,7 +1,7 @@
 # Testing
 
-CI runs the full proof matrix in parallel. Local work should run the smallest
-proof that can change the next decision.
+PR and merge-group CI run the full proof matrix in parallel. Local work should
+run the smallest proof that can change the next decision.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
@@ -10,7 +10,11 @@ CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;
 PRs and merge groups restore them without accumulating private copies. Cache
-restoration never skips compilation checks or tests.
+restoration alone never skips proof. After a merge, main can reuse a
+successful merge-group CI run for the identical SHA and workflow, linking that
+run in its summary. Missing or unreadable proof runs the full matrix. Main still
+restores the shared caches and runs each job whose cache misses; those jobs
+refresh their caches and must pass. PRs and merge groups always execute every check.
 
 The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run

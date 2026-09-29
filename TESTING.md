@@ -3,6 +3,9 @@
 CI runs the full proof matrix in parallel. Local work should run the smallest
 proof that can change the next decision.
 
+A new PR update cancels the previous CI run for that PR. Main and merge-group
+runs remain independent.
+
 The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
@@ -60,20 +63,34 @@ uv run python scripts/resource_envelope.py --recover
 
 The resource preflight names the owner and budget for every worktree build,
 gate-artifact root, the Home-local Run record store, uv cache, Cargo cache, and
-free disk. `performance/budgets.json` sets a 64 GiB free-space floor and four
+free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
+emergency disk reserve, and four
 low-priority verification workers. Total build size is measured, not capped.
 Individual root thresholds are cleanup signals, not gates: an oversized sibling names its
-worktree in a warning and does not block a healthy checkout. Before building,
-preflight automatically removes this checkout's allowlisted build roots when
-they exceed 24 GiB. This threshold accommodates combined Rust and Swift builds;
-it does not cap what a worktree may build.
+worktree in a warning and does not block a healthy checkout. The 24 GiB build threshold
+identifies cleanup candidates, not a limit on what a worktree may build.
 
-`--recover` also removes inactive worktrees' allowlisted build roots, old
-disposable gate output, and entries accepted by `uv cache prune`. Other active
+Verification preflight and explicit `--recover` reclaim inactive worktrees'
+allowlisted build roots only when unchanged for at least 24 hours and either
+oversized or needed to restore the cleanup target. They also prune old disposable
+gate output and entries accepted by `uv cache prune`. Cleanup runs before
+verification, not on an independent timer. A nonblocking host lock permits only
+one cleaner at a time across parallel workers. Verification prints each cleanup
+result and reclaimed size, including failed pruning attempts, and saves them in
+its resource receipt. All active
 worktrees, source, worktree metadata, gate receipts, Run bundles, and SQLite
-state are retained. Insufficient free disk stops product tests;
-low-disk output names the largest recoverable build roots. Measurement failures
+state are retained, including the current checkout's active builds. Only disk
+below the emergency reserve stops product tests;
+low-disk output names the largest inactive build roots. Measurement failures
 remain explicit because unmeasured capacity cannot establish a safe build.
+If eligible caches cannot restore 64 GiB free, verification warns and continues
+above 32 GiB. The reserve is a last-resort stop, not a forecast of a build's disk
+requirements or a host-wide reservation for concurrent builds.
+
+An empty plan or an identical passing result reused with `--reuse-passing`
+returns before resource scans and cleanup. Neither executes a build nor writes
+a new proof receipt. Changed content or commands require fresh verification and
+the normal resource checks.
 
 Every phase runs under a printed wall-clock limit. A phase that overruns is
 killed—process group and all—and reported as `VERIFICATION BUDGET`, so
@@ -182,6 +199,12 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 Pass `--no-parallel` explicitly for the full suite. Native proofs share AppKit's
 main actor; concurrent suites can starve async observations and distort timing
 budgets. Swift Testing otherwise runs suites concurrently.
+
+Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
+days with the toolchain, output log, and Swift Testing event stream. When console
+output stops after compilation, inspect `events.jsonl` for the last started test
+without a matching end event. SwiftPM buffers console output, so silence alone
+does not establish that test execution never began.
 
 The Swift transport suite launches `target/debug/lf` against a temporary Home.
 Build the current CLI before running it; an existing developer build can hide

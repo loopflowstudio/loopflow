@@ -7,9 +7,11 @@ simulated runner-bootstrap failure names the missing capability.
 
 import importlib.util
 import json
+import os
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +23,14 @@ assert _spec is not None and _spec.loader is not None
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["gate_test_runner"] = gate
 _spec.loader.exec_module(gate)
+
+_resource_spec = importlib.util.spec_from_file_location(
+    "gate_resource_envelope", ROOT / "scripts/resource_envelope.py"
+)
+assert _resource_spec is not None and _resource_spec.loader is not None
+resources = importlib.util.module_from_spec(_resource_spec)
+sys.modules[_resource_spec.name] = resources
+_resource_spec.loader.exec_module(resources)
 
 
 def _resource_report() -> dict[str, object]:
@@ -65,6 +75,28 @@ def test_healthy_resource_preflight_keeps_sibling_warning_visible() -> None:
     message = gate._resource_summary(report, "preflight")
     assert "Resource preflight: PASS" in message
     assert "warning: landing (/repo.landing)" in message
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_resource_summary_exposes_failed_cleanup_and_capacity_status(ok: bool) -> None:
+    report = _resource_report()
+    report["ok"] = ok
+    report["recovery"] = [
+        {
+            "source": "cache:uv",
+            "owner": "uv",
+            "removed_bytes": 0,
+            "removed_paths": [],
+            "status": "failed",
+            "detail": "cache is not writable",
+        }
+    ]
+
+    message = gate._resource_summary(report, "preflight")
+
+    assert f"Resource preflight: {'PASS' if ok else 'FAIL'}" in message
+    assert "cache:uv" in message
+    assert "failed: cache is not writable" in message
 
 
 @pytest.fixture(autouse=True)
@@ -305,7 +337,7 @@ def test_resource_preflight_blocks_before_product_commands(tmp_path, monkeypatch
         {
             "code": "disk:free",
             "owner": "fixture host",
-            "detail": "5 GiB free / 64 GiB floor",
+            "detail": "16 GiB free / 32 GiB reserve",
             "action": "recover fixture builds",
             "recoverable": True,
         }
@@ -336,6 +368,74 @@ def test_resource_preflight_blocks_before_product_commands(tmp_path, monkeypatch
     assert "NEXT ACTION" in output
 
 
+@pytest.mark.parametrize("stale", [False, True], ids=["recent-cache", "stale-cache"])
+def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch, capsys, stale):
+    repo, sibling = tmp_path / "current", tmp_path / "inactive"
+    for root in (repo, sibling):
+        (root / "target").mkdir(parents=True)
+        (root / "target/artifact").write_text("warm build")
+    if stale:
+        old = time.time() - 48 * 3600
+        for path in (sibling / "target/artifact", sibling / "target"):
+            os.utime(path, (old, old))
+    marker = tmp_path / "product-ran"
+    monkeypatch.delenv("LF_CONTROL_HOME", raising=False)
+    monkeypatch.setenv("LF_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv"))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setattr(
+        resources,
+        "_discover_worktrees",
+        lambda _: (
+            [resources.Worktree(repo, "current"), resources.Worktree(sibling, "idle")],
+            None,
+        ),
+    )
+    monkeypatch.setattr(resources, "_running_cwds", lambda: ({repo}, None))
+    measure = resources._allocated_bytes
+    monkeypatch.setattr(
+        resources,
+        "_allocated_bytes",
+        lambda path: 25 * 2**30 if path.name == "target" and path.exists() else measure(path),
+    )
+
+    def _free():
+        return int((62.5 if (sibling / "target").exists() else 87.5) * 2**30)
+
+    monkeypatch.setattr(
+        resources.shutil, "disk_usage", lambda _: SimpleNamespace(total=1024 * 2**30, free=_free())
+    )
+    policy = resources.load_policy()
+
+    def _check(recover: bool):
+        report = resources.inspect_resources(repo, policy, recover)
+        return report.as_record(), None if report.ok else "resource pressure"
+
+    monkeypatch.setattr(gate, "_run_resource_check", _check)
+    monkeypatch.setattr(gate, "_free_disk_bytes", _free)
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+
+    result = gate.run_plans([_plan(_cmd(["touch", str(marker)], "probe"))])
+
+    assert result == 0
+    assert marker.exists()
+    assert (repo / "target/artifact").read_text() == "warm build"
+    output = capsys.readouterr().out
+    record = json.loads(next((tmp_path / "evidence/changed").glob("*.json")).read_text())
+    if stale:
+        assert not (sibling / "target").exists()
+        assert "recover: build:idle" in output
+        assert "25.0 GiB" in output
+        assert "87.5 GiB free" in output
+        assert record["resources"]["recovery"][0]["status"] == "removed"
+    else:
+        assert (sibling / "target/artifact").read_text() == "warm build"
+        assert "64.0 GiB cleanup target" in output
+        assert not record["resources"]["recovery"]
+
+
 def test_identical_tree_and_plan_reuse_a_passing_run(tmp_path, monkeypatch, capsys):
     evidence_root = tmp_path / "evidence"
     marker = tmp_path / "ran"
@@ -345,10 +445,42 @@ def test_identical_tree_and_plan_reuse_a_passing_run(tmp_path, monkeypatch, caps
     plan = _plan(_cmd(["bash", "-c", f"test ! -e {marker} && touch {marker}"], "probe"))
 
     assert gate.run_plans([plan], reuse_passing=True) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(
+        gate, "_run_resource_check", lambda _: (None, "RESOURCE MEASUREMENT FAILED: unavailable")
+    )
     assert gate.run_plans([plan], reuse_passing=True) == 0
 
     assert marker.exists()
-    assert "Result: REUSED" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Result: REUSED" in output
+    assert "Resource preflight" not in output
+    assert len(list((evidence_root / "changed").glob("*.json"))) == 1
+
+    changed = _plan(_cmd(["touch", str(tmp_path / "changed-command-ran")], "probe"))
+    assert gate.run_plans([changed], reuse_passing=True) == 1
+    assert not (tmp_path / "changed-command-ran").exists()
+    assert "RESOURCE MEASUREMENT FAILED" in capsys.readouterr().out
+
+
+def test_empty_plan_needs_no_host_measurement_or_proof_receipt(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(
+        gate, "_run_resource_check", lambda _: (None, "RESOURCE MEASUREMENT FAILED: unavailable")
+    )
+
+    def _unreadable_tree():
+        raise OSError("cannot read checkout")
+
+    monkeypatch.setattr(gate, "_tree_fingerprint", _unreadable_tree)
+
+    assert gate.run_plans([]) == 0
+    output = capsys.readouterr()
+    assert "No suites ran" in output.out
+    assert "Resource" not in output.out
+    assert not output.err
+    assert not list(tmp_path.iterdir())
 
 
 def test_command_plan_change_invalidates_passing_evidence(tmp_path, monkeypatch):

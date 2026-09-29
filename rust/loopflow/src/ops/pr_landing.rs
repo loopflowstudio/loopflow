@@ -23,7 +23,10 @@ use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
-use super::pr::{merge_gate_state, observe_pr_by_number, PrInfo, PrObservation, PrReadFreshness};
+use super::pr::{
+    merge_gate_state, observe_merge_request, observe_pr_by_number, MergeRequest, PrInfo,
+    PrObservation, PrReadFreshness,
+};
 use super::progress::Progress;
 
 const LANDING_POLL_INTERVAL: Duration = Duration::from_secs(30);
@@ -122,24 +125,19 @@ impl LandingDriver for GithubLandingDriver {
             PrReadFreshness::Fresh,
         ) {
             PrObservation::Fresh(pr) => {
-                if matches!(pr.state.as_str(), "open" | "draft") {
-                    match super::pr::auto_merge_enabled(&landing.worktree, pr.number) {
-                        Ok(false) => {
-                            return Ok(LandingObservation::Unarmed {
-                                head_sha: pr
-                                    .head_sha
-                                    .unwrap_or_else(|| landing.observed_head_sha.clone()),
-                            });
-                        }
-                        Ok(true) => {}
+                let request = if matches!(pr.state.as_str(), "open" | "draft") {
+                    match observe_merge_request(&landing.worktree, pr.number) {
+                        Ok(request) => request,
                         Err(error) => {
                             return Ok(LandingObservation::Degraded {
                                 reason: error.to_string(),
                             });
                         }
                     }
-                }
-                classify_github_observation(landing, pr)
+                } else {
+                    None
+                };
+                classify_github_observation(landing, pr, request)
             }
             PrObservation::NotFound => Ok(LandingObservation::Degraded {
                 reason: format!(
@@ -161,7 +159,11 @@ impl LandingDriver for GithubLandingDriver {
     }
 }
 
-fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<LandingObservation> {
+fn classify_github_observation(
+    landing: &PrLanding,
+    pr: PrInfo,
+    request: Option<MergeRequest>,
+) -> OpsResult<LandingObservation> {
     let head_sha = pr
         .head_sha
         .unwrap_or_else(|| landing.observed_head_sha.clone());
@@ -179,6 +181,12 @@ fn classify_github_observation(landing: &PrLanding, pr: PrInfo) -> OpsResult<Lan
             })
         }
         "closed" => Ok(LandingObservation::Closed { head_sha }),
+        // The queue checks an integrated commit. Its membership takes precedence
+        // over the original PR head's mergeability and check results.
+        _ if matches!(request, Some(MergeRequest::Queued(_))) => {
+            Ok(LandingObservation::Pending { head_sha })
+        }
+        _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
         _ if matches!(pr.merge_state.as_deref(), Some("behind" | "dirty")) => {
             Ok(LandingObservation::Degraded {
                 reason: format!(
@@ -1054,7 +1062,8 @@ mod tests {
     use std::sync::Mutex;
 
     use super::{
-        ci_incident, repair_arm_command, supervise_pr_landing, LandingDriver, LandingObservation,
+        ci_incident, classify_github_observation, repair_arm_command, supervise_pr_landing,
+        LandingDriver, LandingObservation,
     };
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1062,6 +1071,7 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::ops::error::{OpsError, OpsResult};
+    use crate::ops::pr::{MergeRequest, PrInfo};
     use crate::pr_landing::{
         LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
         SUPERVISOR_STALE_AFTER,
@@ -1069,6 +1079,95 @@ mod tests {
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
     use crate::work::task::{AfterMerge, CiCheck, CiIncident};
+
+    fn github_landing_fixture() -> (PrLanding, PrInfo) {
+        let landing = PrLanding::new(
+            NewPrLanding {
+                repo: "loopflowstudio/loopflow".to_string(),
+                pr_number: 1323,
+                worktree: PathBuf::from("/unused"),
+                branch: "jack/landing".to_string(),
+                task_id: None,
+                requested_head_sha: "pr-head".to_string(),
+                after_merge: None,
+                next_slug: None,
+            },
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap();
+        let pr = PrInfo {
+            url: "https://github.com/loopflowstudio/loopflow/pull/1323".to_string(),
+            number: u64::from(landing.pr_number),
+            state: "open".to_string(),
+            branch: landing.branch.clone(),
+            merge_commit: None,
+            merged_at: None,
+            head_sha: Some("pr-head".to_string()),
+            merge_state: Some("behind".to_string()),
+        };
+        (landing, pr)
+    }
+
+    #[test]
+    fn queued_landing_waits_for_integration_instead_of_requiring_rebase() {
+        let (landing, mut pr) = github_landing_fixture();
+        for merge_state in ["behind", "dirty", "clean"] {
+            pr.merge_state = Some(merge_state.to_string());
+            let observed = classify_github_observation(
+                &landing,
+                pr.clone(),
+                Some(MergeRequest::Queued("queue-entry".to_string())),
+            )
+            .unwrap();
+            assert_eq!(
+                observed,
+                LandingObservation::Pending {
+                    head_sha: "pr-head".to_string()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn dequeued_landing_resumes_ordinary_integration_and_authorization_checks() {
+        let (landing, pr) = github_landing_fixture();
+        let observed =
+            classify_github_observation(&landing, pr.clone(), Some(MergeRequest::Auto)).unwrap();
+        assert!(matches!(observed, LandingObservation::Degraded { reason }
+            if reason.contains("needs integration (behind)")));
+        assert_eq!(
+            classify_github_observation(&landing, pr, None).unwrap(),
+            LandingObservation::Unarmed {
+                head_sha: "pr-head".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn queue_membership_never_overrides_a_confirmed_merge_or_closure() {
+        let (landing, mut pr) = github_landing_fixture();
+        pr.state = "merged".to_string();
+        pr.merge_commit = Some("integrated-head".to_string());
+        assert_eq!(
+            classify_github_observation(
+                &landing,
+                pr.clone(),
+                Some(MergeRequest::Queued("queue-entry".to_string()))
+            )
+            .unwrap(),
+            LandingObservation::Merged {
+                head_sha: "pr-head".to_string(),
+                merge_commit: "integrated-head".to_string()
+            }
+        );
+        pr.state = "closed".to_string();
+        assert_eq!(
+            classify_github_observation(&landing, pr, None).unwrap(),
+            LandingObservation::Closed {
+                head_sha: "pr-head".to_string()
+            }
+        );
+    }
 
     struct FakeDriver {
         observations: Mutex<VecDeque<LandingObservation>>,

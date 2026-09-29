@@ -595,12 +595,12 @@ pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
 }
 
 #[derive(Debug)]
-enum MergeRequest {
+pub(crate) enum MergeRequest {
     Auto,
     Queued(String),
 }
 
-fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
+pub(crate) fn observe_merge_request(repo: &Path, number: u64) -> OpsResult<Option<MergeRequest>> {
     let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([

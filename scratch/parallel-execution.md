@@ -16,8 +16,9 @@ Main owns executable edits, builds/tests, Git and this handoff. Supervisor owns
 2026-09-29 curation explicitly authorizes main to compact evidence.md too. Keep
 one executable writer. Supervisor released the active Session-view proposal
 `f928998ca6687fe814817bc2349fc3c8b8e67e8fe5729da740968e1f4fd98786` for this
-compression cut; its reviewed hunks are integrated. Flow-discovery and released-import
-contributions remain private pending terminal handback; see Supervisor's ownership index.
+compression cut; its reviewed hunks are integrated. Supervisor has released the
+Flow-discovery and released-import proposals for reviewed integration at the next
+implementation boundary. They remain unapplied and uncompiled; see the ownership index.
 
 Read these complete, unchanged acceptance owners before choosing another cut:
 [accepted model](data-model-one-table-per.md), [remaining work](remaining-work.md),
@@ -62,9 +63,10 @@ worktrees/processes. Use ordinary source inspection for code.
    behavior in the next implementation pass alongside history/discovery; inventory
    alone cannot close it.
 2. Active observation now uses Session/Exec ownership and removes run-bindings.
-   The hosted terminal attachment counterexample remains unresolved: local mounted
-   proofs pass, and per-terminal window/surface/focus/ancestor diagnostics preserve
-   the failing assertion for the next hosted run. Do not call the bounded wait a fix.
+   The review repairs terminal mounting and reproduces/fixes stale old-host focus
+   updates. Hosted detachment still needs confirmation on those bytes; exact
+   window/surface/focus/ancestor diagnostics and preservation assertions remain.
+   Do not call the bounded wait or prior local passes a hosted fix.
 3. Resolve Codex valid decision retry through Jack's existing decision conversation.
    The stale child is correctly rejected but the legitimate retry still receives
    old tool environment after a failed native turn. Keep independent work moving;
@@ -110,6 +112,51 @@ Clippy (`active-clippy-checked.log`), formatting, migration history and architec
 checks pass. Supervisor verified the production delta against `a3820bf7e` as
 +18,787/-31,209, net -12,422; this cut changes that net by -30. Counts support
 the ownership reduction but do not discharge the remaining acceptance matrix.
+
+## Slice review: active Session ownership (2026-09-29)
+
+Review scope is `07030b703` → `1fe26d25e` plus the bounded repairs below,
+not whole-design acceptance. The consumer replacement holds: `runs --active`
+and Desktop Monitor use stable AgentSession identity and existing Exec/native
+evidence. Source search finds no production `RunBinding`, run-bindings reader or
+writer, `ActiveRun` DTO, or subject-based live join. Retained native-client files
+are exact process evidence; historical Run-shaped readers remain the next cut.
+Passive observation neither claims a driver nor writes Started. SQL selects
+observed Exec/PID/input keys before decoding; cold filesystem discovery still
+scales with retained input directories.
+
+| Claim | Executed evidence and disposition |
+| --- | --- |
+| Public watch survives publication/removal and stops only its reader | `review-active-public.log`: watch passed in 8.288s with real CLI/FSEvents and a fixture client. No configured-provider acceptance. |
+| Exact PID/start, sequential Claude engines, shared-engine ambiguity, outside-Home SQL updates and bounded history | Reuse `active-rust-final.log` (13 passes), `active-public.log` (17 passes) and their scoped evidence above. No new broad suite or benchmark claim. |
+| Explicit work differs from Flow inheritance | Hosted `ci-94b-rust.log` and local `review-active-public.log` both reproduce declared-versus-inherited failure. Shared Flow reservation correctly marks the agent Session inherited; taskless review preparation still marked it declared. Corrected that constructor and the obsolete expectation. `review-flow-attribution.log`: full launch/reader case passes in 9.204s, retaining explicit Wave/Task declaration, inherited child/Flow members and one-row/history assertions. |
+| Terminal, surface, draft, companion and focus survive Monitor insertion | Hosted `ci-94b-swift.log` identifies terminal 0 detached (`window=nil`, no ancestors) while surface and layout survive. A local overlapping-mount experiment passed before repair (`review-terminal-remount-red.log`, despite its filename); it is not a reproduced failure. Source returned the same pooled NSView as two representables' root during split replacement. Candidate repair gives each representable its own mount containing the retained terminal. `review-terminal-mount.log`: 21 focused Swift tests pass, including the unchanged Monitor preservation assertions. Hosted repair remains unproved. |
+| Departing mount cannot change current terminal focus | Reviewed released handback `.lf/tmp/terminal-mount-proposal/handback.md`, patch SHA256 `2cd3c5fc6558dd689907e55b89563a1c66691a89a819ed4d240dfe14313ec111`. Test-only `review-terminal-stale-update-red.log` reproduces old-host disabling clearing the current terminal's focus after verified reparenting. One parent-identity guard fixes it. `review-terminal-stale-update-green.log`: five tests pass in 8.856s, including original Monitor, Chapter transfer, rename/navigation and hidden-terminal draft proofs. This proves the stale-update boundary, not the original hosted detach mechanism. |
+
+Measured production slice plus these repairs: **+582/−608, net −26** against
+`07030b703`, with `1fe26d25e` and review working bytes. SQL contributes +8;
+tests, docs/generated assets and scratch are excluded, with no rename credit.
+`review-active-source.json` records exact hashes/counts and the production-prefix
+method, excluding `top.rs`'s test helper and retaining production below inline
+tests in `events.rs`. This refines the earlier count's scope; line reduction is
+supporting evidence, not an acceptance criterion.
+
+Original red logs and the earlier leaked-handle report remain evidence. The new
+mount changes lifetime ownership, not timeout/retry policy. Full local Swift's
+earlier 287-pass result did not resolve hosted detachment. Rust formatting and
+all-target Clippy pass (`review-active-clippy.log`); resource preflight observed
+51.0 GiB free above the 32 GiB floor. Source proofs used disposable Homes with
+inherited execution authority cleared; no installed store or configured provider
+was used.
+
+Whole-design blockers remain: runtime loop child FlowSession production and its
+transactional parent/child recovery; final history/discovery/Desktop paging;
+released-populated import and attribution; legitimate Codex decision retry;
+configured provider/Desktop acceptance and final integrated checks. Review the
+released Flow-discovery and preservation proposals at the next implementation
+boundary, preserving their cautions and missing cases. Inventory alone cannot
+close runtime nesting. Concept review with Jack still precedes delivery; this
+review chooses no Flow edge and completes no Task.
 
 ## Current implementation and its limits
 

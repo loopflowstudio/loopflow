@@ -67,7 +67,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
                     task_id: flow.task_id.clone(),
                     wave_id: flow.wave_id.clone(),
                     flow_session_id: Some(flow.id().to_owned()),
-                    work_source: work.map(|_| WorkSource::Declared),
+                    work_source: work.map(|_| WorkSource::Inherited),
                     bound_at: None,
                     kind: SessionKind::FlowReview,
                     interactive: true,

@@ -657,13 +657,13 @@ pub(crate) trait StepLauncher: Send + Sync {
     async fn review(&self, flow: &FlowSession, skill: &ConcreteSkill) -> Result<Option<String>>;
 
     /// Run the step's provider to completion. `flow.current_attempt` is the
-    /// reserved Run the launch publishes. Returns the step's progress summary.
+    /// reserved Run the launch publishes; `flow.claim` is the validated worker
+    /// claim. Returns the step's progress summary.
     async fn launch(
         &self,
         flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
-        claim: Option<&TaskWorkerClaim>,
     ) -> Result<Option<String>>;
 }
 
@@ -756,10 +756,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                     .direction
                     .clone()
                     .or(context.direction);
-                let progress = self
-                    .launcher
-                    .launch(&flow, skill, &context, self.claim().as_ref())
-                    .await?;
+                let progress = self.launcher.launch(&flow, skill, &context).await?;
                 *self.progress.lock().expect("Flow progress mutex poisoned") = progress;
             }
             match self.store.sqlite.flow_output(&self.id)? {
@@ -803,7 +800,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             return Ok(());
         }
         eprintln!("op: {}", ops.item.display_name());
-        execute_child(&flow, self.claim().as_ref()).await
+        execute_child(&flow).await
     }
 }
 
@@ -854,14 +851,14 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
     })
 }
 
-async fn execute_child(flow: &FlowSession, claim: Option<&TaskWorkerClaim>) -> Result<()> {
+async fn execute_child(flow: &FlowSession) -> Result<()> {
     let executable = std::env::current_exe().context("locate the executing Flow driver")?;
     let mut command = tokio::process::Command::new(executable);
     command
         .args(["__flow-step", flow.id(), &flow.version.to_string()])
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
-    if let Some(claim) = claim {
+    if let Some(claim) = &flow.claim {
         command.env(
             crate::durable::TASK_WORKER_CLAIM_ENV,
             serde_json::to_string(claim)?,
@@ -900,7 +897,6 @@ impl StepLauncher for SavedLauncher {
         flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
-        _claim: Option<&TaskWorkerClaim>,
     ) -> Result<Option<String>> {
         let _token = EnvVarGuard::set(
             flow_run::FLOW_STEP_ENV,
@@ -1054,9 +1050,8 @@ mod tests {
             flow: &crate::durable::FlowSession,
             skill: &crate::engine::ConcreteSkill,
             _: &crate::engine::ExecutionContext,
-            claim: Option<&crate::durable::TaskWorkerClaim>,
         ) -> anyhow::Result<Option<String>> {
-            assert!(claim.is_none());
+            assert!(flow.claim.is_none());
             let run = &flow.current_attempt.as_ref().unwrap().run_id;
             self.store.sqlite.publish_attempt(
                 flow.id(),

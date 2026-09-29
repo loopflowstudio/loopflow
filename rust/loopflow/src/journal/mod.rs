@@ -158,6 +158,18 @@ pub(crate) struct ExecProcessReceipt {
     pub started_at: i64,
 }
 
+impl ExecProcessReceipt {
+    fn process_evidence(&self) -> ProcessIdentityEvidence {
+        match process_started_at(self.pid) {
+            Ok(Some(started_at)) if (started_at - self.started_at).abs() <= 3 => {
+                ProcessIdentityEvidence::Live
+            }
+            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+            Err(_) => ProcessIdentityEvidence::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProcessIdentityEvidence {
     Live,
@@ -943,14 +955,8 @@ pub(crate) fn task_worker_owner_evidence(
             && receipt.pid == owner.pid
             && receipt.started_at == owner.started_at
     });
-    if receipt.is_some() {
-        return match process_started_at(owner.pid) {
-            Ok(Some(started_at)) if (started_at - owner.started_at).abs() <= 3 => {
-                ProcessIdentityEvidence::Live
-            }
-            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
-            Err(_) => ProcessIdentityEvidence::Unknown,
-        };
+    if let Some(receipt) = receipt {
+        return receipt.process_evidence();
     }
 
     let Ok(path) = crate::store::observability_database_path() else {
@@ -985,13 +991,7 @@ pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> Proce
         .iter()
         .find(|receipt| receipt.exec_id == exec.as_str())
     {
-        return match process_started_at(receipt.pid) {
-            Ok(Some(started)) if (started - receipt.started_at).abs() <= 3 => {
-                ProcessIdentityEvidence::Live
-            }
-            Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
-            Err(_) => ProcessIdentityEvidence::Unknown,
-        };
+        return receipt.process_evidence();
     }
     match store.exec(exec) {
         Ok(Some(record)) if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,

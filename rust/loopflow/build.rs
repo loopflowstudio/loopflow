@@ -199,7 +199,11 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
                     } else {
                         root.join(path)
                     };
-                    println!("cargo:rerun-if-changed={}", path.display());
+                    // An absent packed-refs makes every build dirty. Packing
+                    // loose refs is covered by the refs directories above.
+                    if git_path != "packed-refs" || path.exists() {
+                        println!("cargo:rerun-if-changed={}", path.display());
+                    }
                 }
             }
         }

@@ -886,78 +886,225 @@ impl GhRestPr {
     }
 }
 
-/// Read the required-check state for `branch`'s open PR from GitHub.
-///
-/// Read the merge-gate state for `branch`'s head. `gh pr checks` exits non-zero
-/// while checks are pending or failing, so valid JSON outranks the exit status.
-/// A missing required-check set is distinct from an unreadable one: callers may
-/// wait on the former, while watched landing must surface or back off the latter.
-///
-/// Branch protection frequently requires only an aggregate roll-up check (e.g.
-/// `tests-result`) whose own job link points at the aggregation step, not the
-/// leaf job that actually failed. So the gate state (failing/pending/passing) is
-/// read from `--required` — the authoritative merge gate — while the failing
-/// checks handed to a ci-fix turn are the actionable *leaves* read from the full
-/// check set. Seeding a ci-fix turn with the aggregate gives the skill nothing
-/// to act on; seeding the leaves points it at the broken job.
-pub(crate) fn merge_gate_state(repo: &Path, branch: &str) -> OpsResult<Option<MergeGateReading>> {
-    if !gh_available() {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
+/// Read one complete check set for the observed head. Required checks decide
+/// the gate; the same snapshot's leaf failures supply repair details.
+pub(crate) fn merge_gate_state(
+    repo: &Path,
+    number: u64,
+    head_sha: &str,
+) -> OpsResult<Option<MergeGateReading>> {
+    let mut cursor = None;
+    let mut cursors = std::collections::HashSet::new();
+    let mut checks = Vec::new();
+    loop {
+        let page = read_check_page(repo, number, cursor.as_deref())?;
+        if page.head != head_sha || page.commit.as_deref() != Some(head_sha) {
+            return Ok(None);
+        }
+        let Some(contexts) = page.contexts else {
+            return Ok(None);
+        };
+        checks.extend(contexts.nodes);
+        if !contexts.page_info.has_next_page {
+            return Ok(project_checks(checks));
+        }
+        let next = contexts.page_info.end_cursor.ok_or_else(|| {
+            OpsError::Message(format!(
+                "GitHub check page for PR #{number} has no next cursor"
+            ))
+        })?;
+        if !cursors.insert(next.clone()) {
+            return Err(OpsError::Message(format!(
+                "GitHub check pagination repeated a cursor for PR #{number}"
+            )));
+        }
+        cursor = Some(next);
     }
-    let required = read_check_set(repo, branch, true)?;
-    if required.is_empty() {
-        return Ok(None);
-    }
-    let full = read_check_set(repo, branch, false)?;
-    Ok(Some(MergeGateReading::from_checks(required, full)))
 }
 
-fn read_check_set(repo: &Path, branch: &str, required: bool) -> OpsResult<Vec<GhCheck>> {
+const CHECKS_QUERY: &str = r#"query LoopflowPrChecks($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+  repository(owner:$owner,name:$name) {
+    pullRequest(number:$number) {
+      headRefOid
+      commits(last:1) { nodes { commit {
+        oid
+        statusCheckRollup { contexts(first:100,after:$endCursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            __typename
+            ... on CheckRun {
+              name status conclusion detailsUrl startedAt
+              isRequired(pullRequestNumber:$number)
+              checkSuite { workflowRun { event workflow { name } } }
+            }
+            ... on StatusContext {
+              context state targetUrl
+              isRequired(pullRequestNumber:$number)
+            }
+          }
+        } }
+      } } }
+    }
+  }
+}"#;
+
+fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<GhCheckPage> {
     let mut command = Command::new("gh");
-    command.arg("pr").arg("checks").arg(branch);
-    if required {
-        command.arg("--required");
+    command.args([
+        "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+        "-F", &format!("number={number}"), "-f", &format!("query={CHECKS_QUERY}"),
+        "--jq", ".data.repository.pullRequest | {head: .headRefOid, commit: .commits.nodes[0].commit.oid, contexts: .commits.nodes[0].commit.statusCheckRollup.contexts}",
+    ]);
+    if let Some(cursor) = cursor {
+        command.args(["-f", &format!("endCursor={cursor}")]);
     }
-    let output = command
-        .arg("--json")
-        .arg("name,bucket,link")
-        .current_dir(repo)
-        .output()?;
-    parse_check_set_output(
-        branch,
-        required,
-        output.status.success(),
-        &output.stdout,
-        &stderr_from_output(&output),
-    )
-}
-
-fn parse_check_set_output(
-    branch: &str,
-    required: bool,
-    succeeded: bool,
-    stdout: &[u8],
-    stderr: &str,
-) -> OpsResult<Vec<GhCheck>> {
-    if let Ok(checks) = serde_json::from_slice(stdout) {
-        return Ok(checks);
-    }
-    let message = stderr.to_ascii_lowercase();
-    if message.contains("no checks reported")
-        || (required && message.contains("no required checks"))
-    {
-        return Ok(Vec::new());
-    }
-    if !succeeded {
-        let required_flag = if required { " --required" } else { "" };
+    let output = command.current_dir(repo).output()?;
+    // gh api fails on GraphQL errors even when the response has partial data.
+    if !output.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!("gh pr checks {branch}{required_flag}"),
-            stderr: stderr.to_string(),
+            command: format!("gh api graphql [PR #{number} checks]"),
+            stderr: stderr_from_output(&output),
         });
     }
-    Err(OpsError::Message(format!(
-        "could not parse GitHub check state for branch {branch}"
-    )))
+    serde_json::from_slice(&output.stdout).map_err(|error| {
+        OpsError::Parse(format!(
+            "could not parse GitHub checks for PR #{number}: {error}"
+        ))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckPage {
+    head: String,
+    commit: Option<String>,
+    contexts: Option<GhCheckContexts>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckContexts {
+    nodes: Vec<GhCheckContext>,
+    page_info: GhCheckPageInfo,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckPageInfo {
+    has_next_page: bool,
+    end_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "__typename", rename_all_fields = "camelCase")]
+enum GhCheckContext {
+    CheckRun {
+        name: String,
+        status: String,
+        conclusion: Option<String>,
+        details_url: Option<String>,
+        is_required: bool,
+        #[serde(with = "time::serde::rfc3339::option")]
+        started_at: Option<time::OffsetDateTime>,
+        check_suite: GhCheckSuite,
+    },
+    StatusContext {
+        context: String,
+        state: String,
+        target_url: Option<String>,
+        is_required: bool,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckSuite {
+    workflow_run: Option<GhCheckWorkflowRun>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckWorkflowRun {
+    event: String,
+    workflow: Option<GhCheckWorkflow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhCheckWorkflow {
+    name: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum GhCheckIdentity {
+    Run(String, Option<String>, Option<String>),
+    Status(String),
+}
+
+fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading> {
+    contexts.sort_by_key(|context| {
+        std::cmp::Reverse(match context {
+            GhCheckContext::CheckRun { started_at, .. } => *started_at,
+            GhCheckContext::StatusContext { .. } => None,
+        })
+    });
+    let mut seen = std::collections::HashSet::new();
+    let mut required = Vec::new();
+    let mut full = Vec::new();
+    for context in contexts {
+        let (identity, name, state, link, is_required) = match context {
+            GhCheckContext::CheckRun {
+                name,
+                status,
+                conclusion,
+                details_url,
+                is_required,
+                check_suite,
+                ..
+            } => {
+                let (workflow, event) = match check_suite.workflow_run {
+                    Some(run) => (run.workflow.map(|workflow| workflow.name), Some(run.event)),
+                    None => (None, None),
+                };
+                let identity = GhCheckIdentity::Run(name.clone(), workflow, event);
+                let state = if status == "COMPLETED" {
+                    conclusion.unwrap_or_default()
+                } else {
+                    status
+                };
+                (identity, name, state, details_url, is_required)
+            }
+            GhCheckContext::StatusContext {
+                context,
+                state,
+                target_url,
+                is_required,
+            } => (
+                GhCheckIdentity::Status(context.clone()),
+                context,
+                state,
+                target_url,
+                is_required,
+            ),
+        };
+        if !seen.insert(identity) {
+            continue;
+        }
+        let bucket = match state.as_str() {
+            "SUCCESS" => "pass",
+            "SKIPPED" | "NEUTRAL" => "skipping",
+            "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => "fail",
+            "CANCELLED" => "cancel",
+            _ => "pending",
+        };
+        let check = GhCheck {
+            name,
+            bucket: bucket.to_string(),
+            link,
+        };
+        if is_required {
+            required.push(check.clone());
+        }
+        full.push(check);
+    }
+    (!required.is_empty()).then(|| MergeGateReading::from_checks(required, full))
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -1054,13 +1201,10 @@ impl RequiredChecks {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 struct GhCheck {
-    #[serde(default)]
     name: String,
-    #[serde(default)]
     bucket: String,
-    #[serde(default)]
     link: Option<String>,
 }
 
@@ -1556,12 +1700,223 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::os::unix::fs::PermissionsExt;
+
     use super::{
-        classify_pr_read_failure, is_missing_pr, normalize_task_pr_copy, parse_check_set_output,
-        parse_generated_pr_copy, pr_number_from_url, GhCheck, GhRestHead, GhRestPr,
+        classify_pr_read_failure, is_missing_pr, merge_gate_state, normalize_task_pr_copy,
+        parse_generated_pr_copy, pr_number_from_url, project_checks, GhCheck, GhRestHead, GhRestPr,
         MergeGateReading, PrCopy, RequiredChecks, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
+    use serde_json::{json, Value};
+
+    struct CheckFixture {
+        directory: tempfile::TempDir,
+        path: Option<OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CheckFixture {
+        fn new(first: Value, second: Value) -> Self {
+            let lock = crate::journal::test_env_lock();
+            let directory = tempfile::tempdir().unwrap();
+            std::fs::write(directory.path().join("first.json"), first.to_string()).unwrap();
+            std::fs::write(directory.path().join("second.json"), second.to_string()).unwrap();
+            let script = directory.path().join("gh");
+            std::fs::write(
+                &script,
+                r#"#!/bin/sh
+fixture="$(dirname "$0")"
+case "$*" in
+  *endCursor=*)
+    cat "$fixture/second.json"
+    if [ -f "$fixture/fail" ]; then echo 'GitHub unavailable' >&2; exit 1; fi ;;
+  *) cat "$fixture/first.json" ;;
+esac
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let path = std::env::var_os("PATH");
+            let paths = std::iter::once(directory.path().to_path_buf())
+                .chain(std::env::split_paths(path.as_deref().unwrap_or_default()));
+            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+            Self {
+                directory,
+                path,
+                _lock: lock,
+            }
+        }
+
+        fn read(&self) -> crate::ops::error::OpsResult<Option<MergeGateReading>> {
+            merge_gate_state(self.directory.path(), 1325, "head-1")
+        }
+    }
+
+    impl Drop for CheckFixture {
+        fn drop(&mut self) {
+            match &self.path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    fn page(head: &str, nodes: Vec<Value>, next: Option<&str>) -> Value {
+        json!({"head":head,"commit":head,"contexts":{
+            "nodes":nodes,"pageInfo":{"hasNextPage":next.is_some(),"endCursor":next}
+        }})
+    }
+
+    fn run(name: &str, conclusion: &str, required: bool, started: &str) -> Value {
+        json!({"__typename":"CheckRun", "name":name,"status":"COMPLETED",
+            "conclusion":conclusion,"isRequired":required,"startedAt":started,
+            "detailsUrl":format!("https://ci/{name}"),
+            "checkSuite":{"workflowRun":{"event":"pull_request","workflow":{"name":"CI"}}}
+        })
+    }
+
+    #[test]
+    fn check_read_includes_required_failures_on_later_pages() {
+        let server = CheckFixture::new(
+            page(
+                "head-1",
+                vec![run("lint", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+                Some("next"),
+            ),
+            page(
+                "head-1",
+                vec![run("test", "FAILURE", true, "2026-09-29T00:00:00Z")],
+                None,
+            ),
+        );
+        let reading = server.read().unwrap().unwrap();
+        assert!(reading.failing);
+        assert_eq!(reading.failing_leaves[0].name, "test");
+    }
+
+    #[test]
+    fn changed_head_and_failed_pages_cannot_reuse_partial_green_checks() {
+        let green = page(
+            "head-1",
+            vec![run("test", "SUCCESS", true, "2026-09-29T00:00:00Z")],
+            Some("next"),
+        );
+        let mut changed_commit = page("head-1", vec![], None);
+        changed_commit["commit"] = json!("head-2");
+        for second in [page("head-2", vec![], None), changed_commit] {
+            let server = CheckFixture::new(green.clone(), second);
+            assert!(server.read().unwrap().is_none());
+        }
+        let server = CheckFixture::new(green, page("head-1", vec![], None));
+        std::fs::write(server.directory.path().join("fail"), "").unwrap();
+        assert!(server
+            .read()
+            .unwrap_err()
+            .to_string()
+            .contains("GitHub unavailable"));
+    }
+
+    #[test]
+    fn missing_checks_and_unreadable_or_incomplete_pages_remain_distinct() {
+        for first in [
+            page("head-1", vec![], None),
+            json!({"head":"head-1","commit":"head-1","contexts":null}),
+        ] {
+            let server = CheckFixture::new(first, Value::Null);
+            assert!(server.read().unwrap().is_none());
+        }
+        for first in [
+            json!("invalid response"),
+            json!({"head":"head-1","commit":"head-1","contexts":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}),
+        ] {
+            let server = CheckFixture::new(first, Value::Null);
+            assert!(server.read().is_err());
+        }
+        let repeated = page("head-1", vec![], Some("same-cursor"));
+        let server = CheckFixture::new(repeated.clone(), repeated);
+        assert!(server
+            .read()
+            .unwrap_err()
+            .to_string()
+            .contains("repeated a cursor"));
+    }
+
+    #[test]
+    fn check_reruns_keep_the_latest_result_without_merging_workflows_or_events() {
+        let old = run("test", "FAILURE", true, "2026-09-28T00:00:00Z");
+        let new = run("test", "SUCCESS", true, "2026-09-29T00:00:00Z");
+        let mut other_workflow = old.clone();
+        other_workflow["isRequired"] = json!(false);
+        other_workflow["checkSuite"]["workflowRun"]["workflow"]["name"] = json!("Other");
+        other_workflow["detailsUrl"] = json!("https://ci/other");
+        let mut other_event = other_workflow.clone();
+        other_event["checkSuite"]["workflowRun"]["workflow"]["name"] = json!("CI");
+        other_event["checkSuite"]["workflowRun"]["event"] = json!("push");
+        other_event["detailsUrl"] = json!("https://ci/push");
+        let contexts =
+            serde_json::from_value(json!([old, new, other_workflow, other_event])).unwrap();
+        let reading = project_checks(contexts).unwrap();
+        assert!(!reading.failing);
+        let urls: Vec<_> = reading
+            .failing_leaves
+            .iter()
+            .map(|c| c.url.as_deref())
+            .collect();
+        assert_eq!(
+            urls,
+            vec![Some("https://ci/other"), Some("https://ci/push")]
+        );
+    }
+
+    #[test]
+    fn context_states_preserve_gate_and_optional_failure_meanings() {
+        for (state, failing, pending) in [
+            ("SUCCESS", false, false),
+            ("SKIPPED", false, false),
+            ("NEUTRAL", false, false),
+            ("CANCELLED", true, false),
+            ("ACTION_REQUIRED", true, false),
+            ("TIMED_OUT", true, false),
+            ("FAILURE", true, false),
+            ("FUTURE_STATE", false, true),
+        ] {
+            let required = run("required", state, true, "2026-09-29T00:00:00Z");
+            let optional = run("optional", "FAILURE", false, "2026-09-29T00:00:00Z");
+            let reading =
+                project_checks(serde_json::from_value(json!([required, optional])).unwrap())
+                    .unwrap();
+            assert_eq!(
+                (reading.failing, reading.pending),
+                (failing, pending),
+                "{state}"
+            );
+            assert_eq!(reading.failing_leaves[0].name, "optional");
+        }
+        let mut pending = run("required", "FAILURE", true, "2026-09-29T00:00:00Z");
+        pending["status"] = json!("IN_PROGRESS");
+        let reading = project_checks(serde_json::from_value(json!([pending])).unwrap()).unwrap();
+        assert!(!reading.failing);
+        assert!(reading.pending);
+    }
+
+    #[test]
+    fn legacy_status_contexts_are_distinct_from_same_named_check_runs() {
+        let contexts = json!([
+            run("test", "SUCCESS", false, "2026-09-29T00:00:00Z"),
+            {"__typename":"StatusContext","context":"test","state":"ERROR",
+             "targetUrl":"https://legacy/test","isRequired":true},
+            {"__typename":"StatusContext","context":"test","state":"SUCCESS",
+             "targetUrl":"https://legacy/older","isRequired":true}
+        ]);
+        let reading = project_checks(serde_json::from_value(contexts).unwrap()).unwrap();
+        assert!(reading.failing);
+        assert_eq!(
+            reading.failing_leaves[0].url.as_deref(),
+            Some("https://legacy/test")
+        );
+    }
 
     fn check(name: &str, bucket: &str) -> GhCheck {
         GhCheck {
@@ -1671,44 +2026,6 @@ mod tests {
             RequiredChecks::from_checks(vec![check("build", "pass"), check("lint", "skipping")]);
         assert!(!checks.failing);
         assert!(!checks.pending);
-    }
-
-    #[test]
-    fn unreadable_required_checks_remain_an_error() {
-        let error = parse_check_set_output(
-            "jack/task",
-            true,
-            false,
-            b"",
-            "HTTP 403: authentication required",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("authentication required"));
-
-        assert!(parse_check_set_output(
-            "jack/task",
-            true,
-            false,
-            b"",
-            "no required checks reported on branch",
-        )
-        .unwrap()
-        .is_empty());
-    }
-
-    #[test]
-    fn new_head_without_checks_is_missing_evidence_not_a_failed_read() {
-        for required in [true, false] {
-            assert!(parse_check_set_output(
-                "jack/release",
-                required,
-                false,
-                b"",
-                "no checks reported on the 'jack/release' branch",
-            )
-            .unwrap()
-            .is_empty());
-        }
     }
 
     #[test]

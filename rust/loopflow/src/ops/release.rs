@@ -1667,13 +1667,7 @@ fn finish_release_pr(
     progress: &impl Progress,
 ) -> OpsResult<String> {
     loop {
-        match wait_for_pr_merge(
-            main_repo,
-            prepared.pr_number,
-            release_branch,
-            &prepared.head_sha,
-            progress,
-        )? {
+        match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
             ReleasePrWait::Merged(commit) => return Ok(commit),
             ReleasePrWait::NeedsIntegration(state) => {
                 progress.status(&format!(
@@ -2565,7 +2559,6 @@ fn read_release_pr(repo: &Path, pr_number: u64) -> OpsResult<GhPrView> {
 fn wait_for_pr_merge(
     repo: &Path,
     pr_number: u64,
-    branch: &str,
     head_sha: &str,
     progress: &impl Progress,
 ) -> OpsResult<ReleasePrWait> {
@@ -2614,7 +2607,7 @@ fn wait_for_pr_merge(
             crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha)?;
         }
 
-        if merge_gate_state(repo, branch)?.is_some_and(|reading| reading.failing) {
+        if merge_gate_state(repo, pr_number, head_sha)?.is_some_and(|reading| reading.failing) {
             return Ok(ReleasePrWait::NeedsRepair);
         }
 

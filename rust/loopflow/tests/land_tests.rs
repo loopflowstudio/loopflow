@@ -120,6 +120,7 @@ exit 0
 }
 
 fn gh_watched_land_script(log_path: &str) -> String {
+    let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -136,6 +137,14 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
   if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
   exit 0
 fi
@@ -146,10 +155,6 @@ fi
 if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
-fi
-if [ "$1 $2" = "pr checks" ]; then
-  echo '[{{"name":"fixture-check","bucket":"fail","link":"https://example.com/check/1"}}]'
-  exit 1
 fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"

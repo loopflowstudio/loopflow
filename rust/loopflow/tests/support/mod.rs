@@ -14,6 +14,25 @@ use time::OffsetDateTime;
 
 mod ambient;
 
+#[allow(dead_code)] // Shared GitHub fixture compiled into multiple test crates.
+pub fn github_checks_page(head: &str, checks: &[(&str, &str, bool)]) -> String {
+    let nodes: Vec<_> = checks
+        .iter()
+        .map(|(name, conclusion, required)| {
+            serde_json::json!({
+                "__typename":"CheckRun", "name":name, "status":"COMPLETED",
+                "conclusion":conclusion, "isRequired":required,
+                "startedAt":"2026-09-29T00:00:00Z", "detailsUrl":format!("https://ci/{name}"),
+                "checkSuite":{"workflowRun":null}
+            })
+        })
+        .collect();
+    serde_json::json!({"head":head,"commit":head,"contexts":{
+        "nodes":nodes,"pageInfo":{"hasNextPage":false,"endCursor":null}
+    }})
+    .to_string()
+}
+
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))

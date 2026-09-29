@@ -180,6 +180,12 @@ integration recovery; only an authoritative GitHub merge finishes the landing.
 process, placement, and heartbeat used both to claim and to retain that
 ownership. Incidents retain response provenance and timing across generations.
 
+Required gates and repair details come from one paginated GitHub check set for
+the observed PR head. Every page must still name that head. A moved head leaves
+checks unknown until the caller reobserves; an unreadable page cannot supply a
+partial success. Repeated jobs retain their newest result within each workflow
+and event, while legacy status contexts keep their own identities.
+
 Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
 under a fresh supervisor generation, including when the SHA has not changed.
 The waiting CLI displays completed `ci-fix` conclusions from existing Run

@@ -594,6 +594,11 @@ fn collapse_authored_history(
     let recovery_ref = format!("refs/loopflow/recovery/{safe_branch}-{}", owner.id());
     git(repo, &["update-ref", &recovery_ref, &owner.head])?;
 
+    if git(repo, &["show", "-s", "--format=%P", "HEAD"])? == fork {
+        progress.status("Preserving the existing authored commit");
+        return Ok(fork);
+    }
+
     progress.status("Collapsing authored history for final integration...");
     git(repo, &["reset", "--soft", &fork])?;
     git(

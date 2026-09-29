@@ -1185,7 +1185,8 @@ another one. This is a delivery-state decision and needs no Flow-position claim.
 
 Submit, arm, and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned
-target, verify it, and push once. Ordinary `lf rebase` keeps commit history.
+target, verify it, and push once. A range with one linear commit keeps that commit
+unless the target changes. Ordinary `lf rebase` keeps commit history.
 
 ### lf pr abandon
 

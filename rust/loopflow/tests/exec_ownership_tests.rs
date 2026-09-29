@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use loopflow::durable::RunId;
@@ -196,15 +196,22 @@ struct Driver {
     child: Child,
     id: ExecId,
     stop: std::path::PathBuf,
+    output: std::path::PathBuf,
 }
 
 impl Driver {
-    fn start(home: &Path, repo: &Path, name: &str) -> Self {
-        let mut child = command(home, repo, &["__telemetry-scorecard"])
+    fn start(home: &Path, repo: &Path, name: &str, preload: Option<&Path>) -> Self {
+        let output = home.join(format!("{name}.output"));
+        let log = std::fs::File::create(&output).unwrap();
+        let mut command = command(home, repo, &["__telemetry-scorecard"]);
+        if let Some(preload) = preload {
+            command.env("LD_PRELOAD", preload);
+        }
+        let mut child = command
             .env("LF_TEST_DRIVER", name)
             .env("LF_TEST_BINARY", env!("CARGO_BIN_EXE_lf"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
             .spawn()
             .unwrap();
         let ready = home.join(format!("{name}.ready"));
@@ -213,6 +220,7 @@ impl Driver {
             child,
             id: ExecId::parse(std::fs::read_to_string(ready).unwrap().trim()).unwrap(),
             stop: home.join(format!("{name}.stop")),
+            output,
         }
     }
 }
@@ -260,13 +268,33 @@ async fn interruption_records_the_exec_without_a_fabricated_signal_name() {
         .await
         .unwrap();
     write_scorecard(repo.path());
-    let mut driver = Driver::start(home.path(), repo.path(), "interrupt");
+    // Hold the existing cleanup hook after killing its owned group. Without
+    // exit coordination the awakened command returns 1 while Exec already says
+    // interrupted/130. A passing ordinary timing alone does not cover this race.
+    #[cfg(target_os = "linux")]
+    let preload = {
+        let source = home.path().join("hold_group_kill.c");
+        let library = home.path().join("hold_group_kill.so");
+        std::fs::write(&source, include_str!("support/hold_group_kill.c")).unwrap();
+        let output = Command::new("cc")
+            .args(["-shared", "-fPIC", "-o"])
+            .arg(&library)
+            .arg(&source)
+            .arg("-ldl")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        Some(library)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let preload: Option<std::path::PathBuf> = None;
+    let mut driver = Driver::start(home.path(), repo.path(), "interrupt", preload.as_deref());
     // SAFETY: this PID is our still-owned child, retained until wait completes.
     assert_eq!(
         unsafe { libc::kill(driver.child.id() as i32, libc::SIGINT) },
         0
     );
-    assert_eq!(driver.child.wait().unwrap().code(), Some(130));
+    let exit = driver.child.wait().unwrap();
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32, Option<String>) = conn
         .query_row(
@@ -275,7 +303,17 @@ async fn interruption_records_the_exec_without_a_fabricated_signal_name() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(row, ("interrupted".into(), 130, None));
+    assert_eq!(
+        (exit.code(), row),
+        (Some(130), ("interrupted".into(), 130, None)),
+        "{}",
+        std::fs::read_to_string(&driver.output).unwrap()
+    );
+    if preload.is_some() {
+        assert!(std::fs::read_to_string(&driver.output)
+            .unwrap()
+            .contains("test ordering: owned group killed before interrupt hook returns"));
+    }
     let scorecard_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
     let script = repo
         .path()
@@ -326,10 +364,10 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original");
+    let original = Driver::start(home.path(), repo.path(), "original", None);
     let original_id = original.id.clone();
-    let replacement = Driver::start(home.path(), repo.path(), "replacement");
-    let restart = Driver::start(home.path(), repo.path(), "restart");
+    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
+    let restart = Driver::start(home.path(), repo.path(), "restart", None);
     let session_id = "engine-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
@@ -463,8 +501,8 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Driver::start(home.path(), repo.path(), "original");
-    let replacement = Driver::start(home.path(), repo.path(), "replacement");
+    let original = Driver::start(home.path(), repo.path(), "original", None);
+    let replacement = Driver::start(home.path(), repo.path(), "replacement", None);
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store

@@ -76,14 +76,25 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
         .push(Box::new(f));
 }
 
-/// Run all registered interrupt cleanups. Called from the signal handler.
-pub fn run_interrupt_cleanups() {
-    if let Some(hooks) = INTERRUPT_HOOKS.get() {
-        if let Ok(hooks) = hooks.lock() {
-            for hook in hooks.iter() {
-                hook();
-            }
+/// Finish interruption while excluding the command's ordinary return path.
+/// Killing a child can wake that path before the remaining hooks finish.
+pub fn exit_on_interrupt() -> ! {
+    let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
+    if let Some(hooks) = &hooks {
+        for hook in hooks.iter() {
+            hook();
         }
+    }
+    kill_child_if_running();
+    // Keep the hook lock until process exit: a child failure must not replace
+    // the interrupted exit while cleanup is still running on this thread.
+    std::process::exit(130);
+}
+
+/// Do not let ordinary command return overtake an interruption already cleaning up.
+pub fn wait_for_interrupt_cleanup() {
+    if let Some(hooks) = INTERRUPT_HOOKS.get() {
+        drop(hooks.lock());
     }
 }
 

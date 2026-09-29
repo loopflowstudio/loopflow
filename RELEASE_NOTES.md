@@ -1,44 +1,56 @@
-# v0.12.24
+# v0.12.25
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.25 keeps Task review close to the work and removes repeated preparation from delivery. The Mac app adds file editing beside Task conversations, while consolidated workflows reconcile plans, code, and memory before validation. Landing preserves unchanged commits, published descriptions, and merge-queue progress; verification reuses matching builds and evidence with clearer delivery measurements.
 
-v0.12.24 makes account access, Task execution, and unattended releases easier to inspect and recover. Authentication moves into one command family with retained usage observations, while branch builds keep private data and managed Tasks use their owning installation. Scheduled releases can hand failed checks to the landing repair supervisor and report failures back to cron.
+## Review and edit without leaving the Task
 
-## Inspect accounts and usage in one place
+The Mac app now places scratch notes, changed files, and an editable file view beside the Task’s retained terminals. Files and terminals follow the selected Task’s checkout.
 
-Login and account inspection now share `lf auth`. Browser choices are remembered independently for managed accounts and local services, and successful usage responses remain available for offline inspection.
+- **Show Files** provides recursive scratch navigation, changed files, and a PR link. Compare against the recorded PR base (**Parent**) or **HEAD**; **Diff** includes unsaved edits without writing them to disk.
+- Drafts, selection, and Undo survive switching files or Tasks within a window. Autosave runs after two quiet seconds; disable **Autosave Task Files** to save explicitly with ⌘S.
+- External changes arrive live. Disjoint local edits survive; disk changes win overlaps. Revision-checked saves retain submitted drafts, displaced files, and recovery receipts.
+- `lf task changes`, `diff`, and `file` gain comparison and file support; `lf task save` adds saving through recorded local placement without planning sync or starting a Run.
 
-- Use `lf auth status` or `lf auth status --details` to inspect account IDs, cached usage windows, their age and reset time, and remembered browser bindings. `lf auth status codex --verify` refreshes observations for the selected account set.
-- Native browser callback completion and explicit hidden manual input replace Chrome page and clipboard scraping. New managed accounts are staged and checked for identity before registration.
-- Status distinguishes managed credentials, local tokens, and uninspected forwarding, keeping missing credentials visible. Verification saves returned usage windows atomically while preserving routing and cooldown state.
-- Account and route listings show IDs beside logins. Headless Runs record the account selected for each attempt before a provider Session ID exists.
+## Reconcile work before delivery
 
-## Keep development data separate from installed work
+`realign` becomes the builtin owner for updating plans, code, and Wave memory. Consolidated repair and operating skills reduce overlapping entry points and make delivery stopping points explicit.
 
-A branch build now seeds a private, source-specific data directory once, preserving subsequent private writes and clearing inherited execution authority. Managed Task operations route to the selected installation before preparation, checkpoints, or worker claims, keeping its executable and database together.
+- `realign` replaces `review-slice`, `refresh-plan`, `update-wave`, and `record-learnings`, preserving accepted requirements, unresolved evidence, and remaining work in existing artifacts.
+- `refresh` runs rebase → realign. Queue preparation runs compress → refresh → gate, so reconciliation happens before validation. Pursue passes refresh before convergence and publication; build and slice also make publication explicit.
+- `lf pr open` creates a draft and preserves existing readiness. `lf pr publish` promotes drafts; a failed promotion retains draft copy for retry.
+- Use `unbreak` to restore broken workflows and `debug` to investigate and fix code failures. `incident` composes unbreak → 5whys → launch-plan.
+- `lf vsm-operate` adds a manual repository pass through delivery, coordination, capacity, adaptation, and identity using independently callable S1–S5 skills. `wave/operate` applies the same questions within one Wave while preserving independent Task progress.
 
-- `lf task run` starts or continues saved work; `lf task restart` replaces its invocation. Preparation is now `lf task checkout`, which can restore missing checkouts from retained history and work from dirty checkouts.
-- Managed operations return installed Task state and consume installed review readiness without transferring branch-only identities or feedback.
-- Opening a Wave chat connects it automatically. Separate Wave lifecycle and Task/Wave enablement controls are removed from the CLI, app, and wire models.
-- Task execution cannot change installations. Incompatible-database errors retain migration evidence and recommend recovery pairs only after checking their artifacts and exact database compatibility.
+## Keep useful CI work through landing
 
-## Recover release checks and report failures
+Final preparation and landing now preserve work that still applies to the current head. Merge-queue waiting, GitHub observations, and CI reuse are coordinated without treating stale or missing evidence as a pass.
 
-Scheduled releases now use the existing landing repair supervisor when required checks fail. The release path retains version-metadata rebuilding when main advances and preserves blocked repair checkouts for recovery.
+- Resuming a clean, armed or queued standalone PR retains its head and CI. Final preparation also preserves a single authored commit when its source and base are unchanged; necessary rebases and multi-commit normalization remain.
+- When local and remote heads match, final preparation retains GitHub’s title and body. Explicit copy and valid gate output take precedence; changed local heads generate fresh copy.
+- PRs waiting to enter the merge queue can remain behind main without an unnecessary rebase. Real conflicts and failed checks still receive recovery before entry; queued work waits for GitHub’s integrated result.
+- Landing and release read merge state and queue membership together, avoiding a false missing-request failure when a PR merges between reads. Required gates and repair details come from one check set for the observed head, with pagination and moving-head handling.
+- Main can reuse a successful merge-group CI run for the exact pushed SHA. Missing, failed, mismatched, or unreadable proof runs the full matrix. PRs and merge groups retain full checks; main still fills missing shared build caches.
+- Rust, SwiftPM, and Xcode caches account for their relevant profiles, source inputs, and toolchains. CI reuses already-built CLI and app binaries; native captures run two at a time while retaining all eight images and comparisons.
 
-- Cron receives the release operation's actual exit status. The scheduled release target resolves to the deterministic operation Flow before the same-named skill.
-- GitHub's temporary no-checks response after a push remains pending instead of being treated as a completed check result.
-- The blocking Swift fixture join reproduced locally is replaced with bounded asynchronous exit observation, addressing the cleanup defect investigated after the previous release's test hang. The original hosted job retained no stack, so that diagnosis remains limited to the local reproduction.
+## Measure delivery from current Run evidence
+
+Scheduled telemetry now reads the current Run ledger instead of the removed `agent_turns` table. Reports distinguish measured intervals from missing evidence and avoid assigning performance passes to unbudgeted samples.
+
+- The scorecard reports ended-Run duration, direct usage, and recorded Task PR creation, publication, and landing intervals.
+- **Recorded agent attempt → merge** joins provider attempts to exact managed Task PRs and reports measured/eligible coverage, including earlier and unfinished Runs. It is an observed lower bound: missing history or standalone work can hide an earlier start. Unstarted prepared Sessions remain unknown; Task PR creation → merge remains the durable baseline.
+- Date- and ownership-scoped Run queries filter manifests before parsing unrelated event histories, retaining usage, ordering, and evidence-gap behavior.
+- Expensive CI commands log CPU time, memory accounting, faults, and context switches alongside elapsed time. These peaks do not measure simultaneous host memory.
 
 ## Operational notes
 
-- **Command migration:** six `lf auth` subcommands replace the old account/profile/access commands and top-level routing commands. Readers move to `lf catalog`, `lf wave list`, `lf wave status`, `lf wave probe`, and `lf pr checks`; removed commands have no compatibility aliases. Update scripts for these changes and the Task commands above.
-- The auth migration preserves populated account, profile, and route history. Published Rust API replacements are documented in `docs/subscriptions.md` under Rust API migration.
-- Branch and installed databases do not synchronize, so branch status can differ from state returned by a managed operation. Private databases do not isolate provider mutations or shared checkout edits. Remote placement remains supported; remote chat transport is not added to the app.
-- Recorded checks include 338 Swift tests, simulated failed-check repair before tagging, and all four disposable Linux installation proofs. Live installed-worker acceptance and live release publication remain unproven in the supplied evidence.
-- Browser login without pasted codes, first-time managed connection, remembered Linear profile targeting, and real Claude/Codex usage windows also remain unproven. The configured Claude probe returned `invalid_grant`; its decoder fixture is synthetic. A copied-Home demo retained a pre-migration detailed-status failure and a stored-route/absent-credential disagreement. Cross-account Session continuation, native credential refresh coordination, and remaining-headroom ranking are outside this release's auth scope.
+- **Custom workflows and installed skills:** retired names have no compatibility aliases. Update custom Flow references and sync installed skill exports separately. Captured Flows retain pinned instructions. Manual S1–S5 operation adds no scheduling or channel delivery; its full evidence handoff and the incident handoff remain unproven end to end in the supplied record.
+- **Task file limits:** editing supports complete UTF-8 files up to 1 MB. Unsaved drafts do not survive window closure. Recovery storage has no automatic cleanup and disappears with the worktree; it does not guarantee exclusion of concurrent writers or power-loss durability. Extremely long lines can remain slow.
+- **Saved Sessions:** returned `open_argv` carries the original executable, Home, and database across installation changes. Retained launches require valid receipts and unchanged artifacts; listing still uses the selected installation. `lf session open <id> --json` prepares the handoff; execute its returned argv to open the conversation. Returned launch failures remain journaled after retry. The complete installation-switch journey and real Ghostty open/resume remain unverified.
+- **Disk headroom:** fresh verification reclaims eligible inactive build caches unchanged for 24 hours toward 64 GiB free and stops below 32 GiB. Active and recent builds remain protected. Busy uv caches fail pruning immediately so other cleanup can proceed; recent gate output no longer consumes cleanup capacity without an eligible removal.
+- **Performance evidence:** build caches need an initial cold fill, and hosted warm reuse remains unverified for the Swift/Xcode changes. Local native capture comparisons fell from about 28 seconds to 14 seconds with identical images. These measurements and the recorded reader/build improvements do not establish an overall time-to-merge reduction. Added Swift failure logs improve diagnosis; the reported hosted hang is not claimed fixed.
 
 ## Small changes
 
-- Cold installation-proof image downloads have a network deadline separate from container creation.
-- CI adds a required disposable Linux installation job covering continuation, review completion, store protection, and recovery.
+- Store validation embeds the canonical schema reference at build time, reuses constructed references for other migration paths, and reduces checksum bookkeeping while still checking each actual database. Shipped migration SQL and receipt bytes are unchanged.
+- Development and test builds optimize bundled SQLite. Cargo avoids rebuilds caused by absent packed refs or unrelated loose-branch commits while retaining provenance updates for the current checkout and tags.
+- Native Task proof waits stop when their condition succeeds. Wave selection tests no longer depend on creation order, candidate-release tests avoid unrelated merge polling, and doctor tests fetch isolated local remotes instead of mutating a shared checkout.

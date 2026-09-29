@@ -58,10 +58,25 @@ boundary without restart. Hashed scratch originals remain in
   PATH-only provider sentinels given the recent vendor-PATH escape. Preserve
   separate released/development frontiers and explicit SQL/terminal, recovery,
   keyed-retry proof limits. No production change or publication hold.
-- **Terminal mounting live:** tool26677, Run `run_822ff2c551f84ce89b9f1f99ec3776d3`.
-  Codex acknowledgment verified. Writes only `.lf/tmp/terminal-mount-proposal/`.
-  Trace hosted detached-but-retained terminal through actual mounting/dismantling
-  owners; private repair proposal and regression plan, no builds/tests/source edits.
+- **Terminal mounting released:** tool26677 exited0, Run
+  `run_822ff2c551f84ce89b9f1f99ec3776d3` completed. Private handback at
+  `.lf/tmp/terminal-mount-proposal/handback.md`; original patch superseded by main's
+  fresh host. Follow-up SHA256
+  `2cd3c5fc6558dd689907e55b89563a1c66691a89a819ed4d240dfe14313ec111`
+  verified; release comment2eb83523-5a9a-4e76-b3af-38a49a872f24 read back.
+  Main reproduced stale old-host update clearing new terminal focus, then passed
+  five focused retention cases with the single parent check. This is distinct
+  from the original hosted detach mechanism; hosted confirmation remains owed.
+  Exact red/green/attribution logs hashed in terminal-mount-supervisor-proof.json.
+- **Final history contribution failed at launch:** tool33025 exited1, Run
+  `run_bc4799d4121d4ae2a1768199423136e0` now authoritatively failed. No output or
+  implementation. Assignment remains `.lf/tmp/final-history-proposal/assignment.txt`.
+  Responses returned401 missing authentication header; pinned auth status codex
+  says expired. Account listing shows cached connection, then fails on absent
+  account_access_profiles; neither proves valid current login. Supervisor changed
+  no credentials/account/store and asked Jack here about future launches. Existing
+  managed review worker remains live. Do not infer its death from this failure or
+  launch repeated account retries. Final history/wire removal remains main's scope.
 - **Flow discovery released:** tool53793 exited0, Run
   `run_69b5879a1af84990877c7d331a849e20` completed. Read
   `.lf/tmp/flow-discovery-proposal/{handback.md,proof-plan.md,flow-discovery.patch}`.

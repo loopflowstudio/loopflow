@@ -240,7 +240,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     );
     let report = String::from_utf8_lossy(&telemetry.stdout);
     assert!(report.contains("Lifecycle scorecard"), "{report}");
-    assert!(report.contains("Elapsed / Run"), "{report}");
+    assert!(report.contains("Recorded input elapsed"), "{report}");
     assert!(report.contains("Land request → merge"), "{report}");
     let events_after_telemetry = store.list_run_events_since(0).unwrap();
     for original in original_events {

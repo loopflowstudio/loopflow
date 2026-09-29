@@ -354,7 +354,7 @@ mod tests {
                 record_receipts(&store, "session", "thread", &request, &receipt).unwrap();
             }
         }
-        let recovered = store.input_snapshot(input.as_str()).unwrap();
+        let recovered = store.input_history(input.as_str()).unwrap();
         assert_eq!(recovered.usage.input_tokens, Some(50));
         assert_eq!(recovered.usage.output_tokens, Some(10));
         assert!(
@@ -362,12 +362,12 @@ mod tests {
             "native decrease retains the existing reducer gap"
         );
         assert_eq!(
-            recovered.outcome, None,
+            recovered.recorded_outcome, None,
             "provider completion does not complete its Exec"
         );
         assert_eq!(
             store
-                .input_snapshot(replacement.artifact_key.as_str())
+                .input_history(replacement.artifact_key.as_str())
                 .unwrap()
                 .usage
                 .input_tokens,

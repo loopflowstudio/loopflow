@@ -115,11 +115,11 @@ struct DTOFixtureTests {
         #expect(snapshot.items.map(\.subject) == [
             "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
         ])
-        if case .runFinished(let identity, let status) = snapshot.items[0].fact {
-            #expect(identity.primaryId == "run_00000000000000000000000000000001")
+        if case .inputCompletionRecorded(_, let captured, let status) = snapshot.items[0].fact {
+            #expect(captured == 12)
             #expect(status == "ok")
         } else {
-            Issue.record("expected a typed Run finish")
+            Issue.record("expected a recorded Session outcome")
         }
         #expect(snapshot.items[1].fact.github?.number == 1144)
         #expect(snapshot.items[1].fact.github?.url.host == "github.com")
@@ -168,12 +168,12 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[1].runtime == nil)
         #expect(detail.tasks.items[1].reference.issueUrl == nil)
         #expect(detail.tasks.items[1].reference.workspace == nil)
-        #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001")
+        #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001:12")
         #expect(detail.runs.items[0].skill == "task/pursue")
         #expect(detail.runs.items[0].taskPrId == "pr_33333333333333333333333333333333")
         #expect(detail.runs.items[0].firstProviderAttemptAt == 1784052010)
         #expect(detail.runs.items[0].usage.inputTokens == 12000)
-        #expect(detail.runs.items[0].outcome == "completed")
+        #expect(detail.runs.items[0].recordedOutcome == "completed")
         #expect(detail.tasks.items[0].condition.state == .waiting)
         #expect(detail.tasks.items[0].condition.reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.tasks.items[0].actions.recommended == .openPr)
@@ -424,4 +424,19 @@ struct DTOFixtureTests {
             .appendingPathComponent(name)
         return try Data(contentsOf: fixtures)
     }
+}
+
+@Test("Session input history retains distinct native results and unknown Exec")
+func sessionInputHistoryFixture() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/session_history_summary.json")
+    let value = try JSONDecoder().decode(SessionHistory.self, from: Data(contentsOf: url))
+    #expect(value.providers.count == 2)
+    #expect(value.providers[0].outcome == "failed")
+    #expect(value.providers[0].execId == nil)
+    #expect(value.providers[0].usage.inputTokens == nil)
+    #expect(value.providers[1].outcome == "completed")
+    #expect(value.providers[1].usage.inputTokens == 0)
+    #expect(value.status == "failed → completed")
 }

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
 use crate::durable::{Home, WorkRef, WorkStatus};
-use crate::lf::commands::runs::{format_tokens, RunSnapshot};
+use crate::lf::commands::runs::{format_tokens, SessionHistory};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
@@ -73,7 +73,7 @@ pub struct WaveDetailSnapshot {
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Home-local Run records, newest first.
-    pub runs: Evidence<RunSnapshot>,
+    pub runs: Evidence<SessionHistory>,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -1854,7 +1854,7 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     }
 }
 
-fn print_runs(runs: &Evidence<RunSnapshot>) {
+fn print_runs(runs: &Evidence<SessionHistory>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
@@ -1871,7 +1871,7 @@ fn print_runs(runs: &Evidence<RunSnapshot>) {
                         .total_tokens()
                         .map(format_tokens)
                         .unwrap_or_else(|| "-".to_string()),
-                    age = format_age(now().unix_timestamp() - run.started),
+                    age = format_age(now().unix_timestamp() - run.observed_at),
                 );
             }
             if *truncated {

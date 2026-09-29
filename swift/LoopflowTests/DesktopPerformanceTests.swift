@@ -161,7 +161,7 @@ struct DesktopPerformanceTests {
                 }
                 scrolledOffset = scroll.contentView.bounds.minY
                 labelsBeforeRefresh = window.outlineText
-                initialVerificationMS = milliseconds(window.capturedAt)
+                initialVerificationMS = milliseconds(window.observedAt)
                 try #require(scrolledOffset > 0 && model.isRefreshing)
                 planning.release()
             }, ready: {
@@ -280,7 +280,7 @@ struct DesktopPerformanceTests {
         do {
             try await action()
             try await wait(window, render: true, ready: ready)
-            let captured = Double(window.capturedAt - start) / 1_000_000
+            let captured = Double(window.observedAt - start) / 1_000_000
             let verified = milliseconds(start)
             try await input()
             record["outcome"] = "passed"
@@ -450,7 +450,7 @@ private final class PerformancePlanning {
 private final class PerformanceWindow: NSWindow {
     var outlineText: [String] = []
     var contentText: [String] = []
-    var capturedAt: UInt64 = 0
+    var observedAt: UInt64 = 0
 
     func capture() throws {
         guard let host = contentView,
@@ -461,7 +461,7 @@ private final class PerformanceWindow: NSWindow {
         guard let image = bitmap.cgImage else {
             throw PerformanceFailure("unavailable", "Native bitmap has no image")
         }
-        capturedAt = DispatchTime.now().uptimeNanoseconds
+        observedAt = DispatchTime.now().uptimeNanoseconds
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .fast
         request.recognitionLanguages = ["en-US"]

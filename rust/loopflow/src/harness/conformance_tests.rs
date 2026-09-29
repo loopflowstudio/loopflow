@@ -423,7 +423,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
             matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
         );
         assert!(history.observe(&session, &[message]).unwrap().is_empty());
-        let usage = store.input_snapshot(input.as_str()).unwrap().usage;
+        let usage = store.input_history(input.as_str()).unwrap().usage;
         assert_eq!(usage.input_tokens, measured);
         assert_eq!(usage.output_tokens, measured.map(|_| 5));
         assert_eq!(usage.cost_usd, measured.map(|_| 0.5));

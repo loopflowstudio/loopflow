@@ -1091,7 +1091,9 @@ def _flow_automatic_retry_contract(
     rows = json.loads(report.stdout)
     results["public_usage"] = rows
     assert len(rows) == 1, rows
-    assert rows[0]["outcome"] == "completed", rows
+    assert rows[0]["recorded_outcome"] == "completed", rows
+    native = [record for record in rows[0]["providers"] if record["reference"]["kind"] == "native_turn"]
+    assert [record["outcome"] for record in native] == ["failed", "completed"], native
     assert rows[0]["usage"]["input_tokens"] == 40, rows
     assert rows[0]["usage"]["output_tokens"] == 10, rows
     assert rows[0]["usage"]["cost_usd"] is None, rows

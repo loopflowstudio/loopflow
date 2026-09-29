@@ -1537,3 +1537,16 @@ exec-owner-reader-static.log passes all-target Clippy(16.05s); fmt/whitespace
 pass. The new reader adds no migration/index, no process authority and no
 provider launch. Exact live identity is now an Exec projection, while the
 remaining historical inventory and final wire obligations stay open.
+
+Publishedde5fcea9c toPR1296 after lf rebase --plan; recorded origin/main and merge
+base both remain6e7189926. Publication warns that optional Linear link enrichment
+failed JSON decoding; GitHub publication succeeded and the next publish retries
+that link. No auth repair or Task/Flow disposition follows. Numeric proposal is
+still excluded pending explicit handback.
+
+A remaining-scope audit found the quoted-output incident note stale: scanner
+deletion and regression passes already belong to f48606e8c/implement-focused-repairs.log.
+Current source retains review_commands with the quoted inspection failure and
+actual failed delivery/retry, and neither retired scanner function remains.
+The incident note now points to that later proof without rewriting its historical
+observations or claiming a fresh behavioral run.

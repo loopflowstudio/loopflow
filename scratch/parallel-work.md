@@ -115,8 +115,13 @@ environment setup replaced the fake Claude PATH, reaching the installed executab
 inside the disposable test environment. Main corrected fixture isolation; the later
 three-case repair passes, and17public Session/watch/DTO checks pass. Earlier red/leak
 receipts remain. BundledSQLite five-read totals:0.389ms for0 candidates,0.426ms for4
-among20,000retainedSessions; query-only timings. Swift integration initially fails
-at a remaining old `.runs` consumer; mounted hosted failure remains unresolved.
+among20,000retainedSessions; query-only timings. Swift integration initially failed
+at a remaining old `.runs` consumer, then compiled. The39-test local run passed
+mounted cases but failed one old diagnostic-string assertion; its corrected
+five-case transport test passes. Latest Clippy passes17.78s. Hosted Monitor
+attachment remains unresolved; bounded per-terminal diagnostics are added without
+a longer timeout. `.lf/tmp/cut-i/active-swift-supervisor-progress.json` hashes
+these logs; local passes are not a hosted repair.
 Log hashes/results `.lf/tmp/cut-i/active-integration-supervisor-progress.json`.
 Do not cite stale `active-swift-fixture.log` (earlier02:14 proof) as this cut's result.
 

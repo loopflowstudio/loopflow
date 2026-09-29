@@ -23,7 +23,7 @@ pub fn run(
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
     let items = expand_flow(flow, repo)?;
-    print_pipeline_header(&flow.name, &items, repo)?;
+    print_pipeline_header(&flow.name, &items);
     let bound_message =
         binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
     execute(
@@ -39,7 +39,7 @@ pub fn run(
 pub fn show(name: &str, repo: &Path) -> Result<()> {
     let flow = crate::engine::load_flow(name, repo)?;
     let items = expand_flow(&flow, repo)?;
-    for line in render_pipeline_lines(&items, repo)? {
+    for line in render_pipeline_lines(&items) {
         println!("{line}");
     }
     Ok(())
@@ -552,9 +552,9 @@ fn record<T>(written: crate::store::StoreResult<T>) {
     }
 }
 
-fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -> Result<()> {
+fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep]) {
     let colors = Colors::new();
-    let lines = render_pipeline_lines(items, repo)?;
+    let lines = render_pipeline_lines(items);
     let pipeline = lines
         .into_iter()
         .map(|line| {
@@ -575,20 +575,15 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -
         name = flow_name,
         pipeline = pipeline,
     );
-    Ok(())
 }
 
-fn render_pipeline_lines(items: &[ConcreteStep], repo: &Path) -> Result<Vec<String>> {
-    let mut lines = Vec::new();
-    for item in items {
-        lines.extend(render_pipeline_item(item, repo)?);
-    }
-    Ok(lines)
+fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
+    items.iter().flat_map(render_pipeline_item).collect()
 }
 
-fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>> {
+fn render_pipeline_item(item: &ConcreteStep) -> Vec<String> {
     match item {
-        ConcreteStep::Skill(skill) if skill.policy.human => Ok(vec![format!(
+        ConcreteStep::Skill(skill) if skill.policy.human => vec![format!(
             "{} [review:{}]",
             skill.skill.name,
             skill
@@ -596,32 +591,20 @@ fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>>
                 .id
                 .as_deref()
                 .expect("validated review node has an id"),
-        )]),
-        ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
-        ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
-        ConcreteStep::Xor(branch) => render_branch_item("xor", branch, repo),
+        )],
+        ConcreteStep::Skill(skill) => vec![skill.skill.name.clone()],
+        ConcreteStep::Op(ops) => vec![format!("op: {}", ops.item.display_name())],
+        ConcreteStep::Xor(branch) => render_branch_pipeline(branch),
     }
 }
 
-fn render_branch_item(kind: &str, branch: &ConcreteXor, repo: &Path) -> Result<Vec<String>> {
-    render_branch_pipeline(kind, &branch.router.name, &branch.paths, repo)
-}
+fn render_branch_pipeline(branch: &ConcreteXor) -> Vec<String> {
+    let mut lines = vec![format!("[xor via {}]", branch.router.name)];
+    let mut paths: Vec<_> = branch.paths.iter().collect();
+    paths.sort_by_key(|(name, _)| *name);
 
-fn render_branch_pipeline(
-    kind: &str,
-    router: &str,
-    paths: &std::collections::HashMap<String, crate::engine::ConcretePath>,
-    repo: &Path,
-) -> Result<Vec<String>> {
-    let mut lines = vec![format!("[{kind} via {router}]")];
-    let mut keys: Vec<&String> = paths.keys().collect();
-    keys.sort();
-
-    for (index, key) in keys.into_iter().enumerate() {
-        let path = paths
-            .get(key)
-            .expect("branch path key collected from map should exist");
-        let nested = render_pipeline_lines(&path.steps, repo)?;
+    for (index, (key, path)) in paths.iter().enumerate() {
+        let nested = render_pipeline_lines(&path.steps);
         let branch_prefix = tree_prefix(index, paths.len());
         if nested.is_empty() {
             lines.push(format!("{branch_prefix} {key}"));
@@ -632,7 +615,7 @@ fn render_branch_pipeline(
         lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
     }
 
-    Ok(lines)
+    lines
 }
 
 fn tree_prefix(index: usize, total: usize) -> &'static str {
@@ -676,13 +659,13 @@ pub(crate) trait StepLauncher: Send + Sync {
     async fn review(&self, flow: &FlowSession, skill: &ConcreteSkill) -> Result<Option<String>>;
 
     /// Run the step's provider to completion. `flow.current_attempt` is the
-    /// reserved Run the launch publishes. Returns the step's progress summary.
+    /// reserved Run the launch publishes; `flow.claim` is the validated worker
+    /// claim. Returns the step's progress summary.
     async fn launch(
         &self,
         flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
-        claim: Option<&TaskWorkerClaim>,
     ) -> Result<Option<String>>;
 }
 
@@ -775,10 +758,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                     .direction
                     .clone()
                     .or(context.direction);
-                let progress = self
-                    .launcher
-                    .launch(&flow, skill, &context, self.claim().as_ref())
-                    .await?;
+                let progress = self.launcher.launch(&flow, skill, &context).await?;
                 *self.progress.lock().expect("Flow progress mutex poisoned") = progress;
             }
             match self.store.sqlite.flow_output(&self.id)? {
@@ -822,7 +802,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             return Ok(());
         }
         eprintln!("op: {}", ops.item.display_name());
-        execute_child(&flow, self.claim().as_ref()).await
+        execute_child(&flow).await
     }
 }
 
@@ -873,14 +853,14 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
     })
 }
 
-async fn execute_child(flow: &FlowSession, claim: Option<&TaskWorkerClaim>) -> Result<()> {
+async fn execute_child(flow: &FlowSession) -> Result<()> {
     let executable = std::env::current_exe().context("locate the executing Flow driver")?;
     let mut command = tokio::process::Command::new(executable);
     command
         .args(["__flow-step", flow.id(), &flow.version.to_string()])
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
-    if let Some(claim) = claim {
+    if let Some(claim) = &flow.claim {
         command.env(
             crate::durable::TASK_WORKER_CLAIM_ENV,
             serde_json::to_string(claim)?,
@@ -919,7 +899,6 @@ impl StepLauncher for SavedLauncher {
         flow: &FlowSession,
         skill: &ConcreteSkill,
         ctx: &ExecutionContext,
-        _claim: Option<&TaskWorkerClaim>,
     ) -> Result<Option<String>> {
         let _token = EnvVarGuard::set(
             flow_run::FLOW_STEP_ENV,
@@ -1073,9 +1052,8 @@ mod tests {
             flow: &crate::durable::FlowSession,
             skill: &crate::engine::ConcreteSkill,
             _: &crate::engine::ExecutionContext,
-            claim: Option<&crate::durable::TaskWorkerClaim>,
         ) -> anyhow::Result<Option<String>> {
-            assert!(claim.is_none());
+            assert!(flow.claim.is_none());
             let run = &flow.current_attempt.as_ref().unwrap().run_id;
             self.store.sqlite.publish_attempt(
                 flow.id(),
@@ -1272,7 +1250,7 @@ mod tests {
         };
 
         let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
-        let lines = render_pipeline_lines(&items, temp.path()).unwrap();
+        let lines = render_pipeline_lines(&items);
 
         assert_eq!(
             lines,
@@ -1293,7 +1271,7 @@ mod tests {
         let flow = crate::engine::load_flow("task-design", &repo).unwrap();
         let items = crate::engine::expand_flow(&flow, &repo).unwrap();
 
-        let lines = render_pipeline_lines(&items, &repo).unwrap();
+        let lines = render_pipeline_lines(&items);
         assert_eq!(
             lines,
             vec![
@@ -1317,8 +1295,7 @@ mod tests {
         let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
         assert_eq!(human, vec!["review_choice"]);
         let items = crate::engine::expand_flow(&flow, repo.path()).unwrap();
-        assert!(render_pipeline_lines(&items, repo.path())
-            .unwrap()
+        assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
     }

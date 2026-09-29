@@ -152,3 +152,62 @@ actual contract. Landing's repair command also consumes its thread tool caller
 before invoking rebase. [Evidence](evidence.md#mechanical-flow-step-checkpoint)
 retains intermediate failures and exact logs. No agent-step or configured-provider
 acceptance follows from this mechanical checkpoint.
+
+Compression keeps claim selection and process observation separate: both Exec
+and Task-owner readers now share the receipt's PID/start-time comparison, while
+retaining their distinct receipt matching and terminal-evidence fallbacks. Step
+launchers take the claim from the already-validated Flow snapshot rather than a
+second argument. Flow rendering uses only the captured steps; unused repository
+arguments, infallible Result wrappers and a redundant XOR adapter are removed.
+The 52 selected source tests pass in `.lf/tmp/cut-i/exec-compress-focused.log`,
+covering worker handoff/stop, surviving mechanical children, Task/taskless
+continuation and rendered review/XOR paths. This reuses the existing fixtures;
+it does not repeat or replace the full materialized matrix above. All-target
+Clippy (`exec-compress-clippy.log`), formatting and architecture checks pass.
+
+## Slice review · 2026-09-29
+
+Scope: mechanical child execution at `3c5bb5ab3`, worker startup handoff at
+`5bd311697`, and the retained compression edits. Jack Heart's full agent-step
+conversion remains the next implementation boundary. This review does not accept
+the complete Exec-per-step design or LOO-298.
+
+| Claim | Planned behavior | Implemented behavior | Proof | Result |
+| --- | --- | --- | --- | --- |
+| Each mechanical boundary has a real Exec | Driver delegates the saved operation to a child | One hidden child entry reads the captured boundary; start/result reference its Exec | Public CLI two-step success and success-then-failure fixtures inspect distinct child Execs and retained outcomes | Covered locally |
+| Driver death preserves live work | Resume waits without repeating the effect | Exact selected operation Exec is observed before claim replacement or recovery | Public CLI kills the driver during a scripted operation; resume waits, advances once, retains original parent and unknown driver outcome | Covered locally |
+| Child admission cannot move the cursor | Validate boundary/version/claim before effects | Start transaction selects once and sets Started; completion compares the selected start and Exec as well as claim/version | Task child fixture rejects stale version, runs after source deletion, preserves driver claim/cursor and records one effect on replay | Covered locally |
+| Stop follows actual ownership | Adopt worker at startup; retain live selected steps | Exact startup claim transfers to worker; stop observes driver and selected operation separately | Worker handoff, surviving-step stop and unknown-identity fixtures; real sleep processes, simulated Task startup | Covered at fixture boundary; configured Task startup remains unproven |
+| Compression preserves authority and rendering | Remove duplicated arguments/comparison code only | Claim comes from the validated Flow row; receipt readers retain different matching and fallback rules; rendering uses captured steps | Source review and 52 retained focused passes, including review/XOR rendering | Covered locally |
+| All agent steps use the child entry | Common provider executor; capture belongs to child | TaskLauncher and SavedLauncher still execute agent work in the driver | Reachable-path inspection | Outstanding next slice |
+
+Ownership review found one production start/result writer for Flow operations:
+`execute_step` calls the existing transactional methods. The separate direct
+operation CLI remains a normal command, not a second Flow progression writer.
+No new table, result protocol, Session for mechanical work, or ancestry-based
+signal authority is introduced. A successful child exit cannot substitute for
+the saved operation result: cursor settlement validates that result again.
+The compression does not merge Exec and Task-owner receipt lookup semantics.
+
+The public CLI proofs use real lf processes and isolated SQLite stores with
+scripted effects. They do not establish configured providers, rendered Desktop,
+exactly-once external effects after missing completion, or agent-step ancestry
+after driver handoff. The existing full-tree/import obligations remain intact.
+
+Fresh validation: `.lf/tmp/cut-i/exec-review-full.log` passes the isolated,
+materialized Rust matrix with fail-fast disabled: **2,032 passed, 16 skipped,
+none unrun, no leak diagnostic**. This includes the public mechanical-step and
+driver-death demonstrations above. `.lf/tmp/cut-i/exec-review-source.json`
+records the source snapshot and command; all 466 Rust, Cargo and fixture inputs
+still match. Only this review note changed after snapshot creation. Fresh
+formatting, diff validation and architecture checks pass
+(`exec-review-architecture.log`). The unchanged compression source retains its
+all-target Clippy pass in `exec-compress-clippy.log`; Swift retains the prior
+291-test result, with no Swift changes in this slice.
+
+Disposition: the mechanical slice and compression are coherent for checkpoint
+publication. No new bounded implementation defect was found in this review.
+Next action: move agent capture reservation and execution into the shared child entry, then
+delete TaskLauncher/SavedLauncher while preserving Task input/account/steer and
+native recovery behavior. Attribution reduction and the separate naming commit
+follow that conversion; this slice supplies no Flow navigation or Task settlement.

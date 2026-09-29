@@ -267,8 +267,8 @@ impl StepLauncher for TaskLauncher {
         flow: &FlowSession,
         skill: &ConcreteSkill,
         _ctx: &ExecutionContext,
-        claim: Option<&TaskWorkerClaim>,
     ) -> Result<Option<String>> {
+        let claim = flow.claim.as_ref();
         let store = &self.store;
         let task = load_task(store, &self.task_id).await?;
         let wave = owning_wave(store, &task).await?;

@@ -42,8 +42,10 @@ fn remote_branch_exists(repo: &TestRepo, name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn gh_no_pr_script() -> &'static str {
-    r#"#!/bin/sh
+fn gh_no_pr_script() -> String {
+    let unarmed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", None);
+    format!(
+        r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -59,7 +61,7 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'false'
+  echo '{unarmed}'
   exit 0
 fi
 
@@ -74,6 +76,7 @@ fi
 
 exit 0
 "#
+    )
 }
 
 fn noop_open_script() -> &'static str {
@@ -81,6 +84,8 @@ fn noop_open_script() -> &'static str {
 }
 
 fn gh_land_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(1, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -100,7 +105,7 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 
@@ -119,14 +124,23 @@ exit 0
     )
 }
 
-fn gh_watched_land_script(log_path: &str, awaiting_queue: bool) -> String {
-    let request = if awaiting_queue {
-        "awaiting_queue"
-    } else {
-        "true"
-    };
+fn gh_watched_land_script(log_path: &str, awaiting_queue: bool, merge_race: bool) -> String {
     let merge_state = if awaiting_queue { "behind" } else { "blocked" };
     let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
+    let unarmed = support::github_merge_response(1, "$head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(
+        1,
+        "$head",
+        "OPEN",
+        merge_state,
+        Some(if awaiting_queue {
+            "awaiting_queue"
+        } else {
+            "auto"
+        }),
+    );
+    let merged = support::github_merge_response(1, "$head", "MERGED", "UNKNOWN", None)
+        .replace("\"oid\":\"$head\"", "\"oid\":\"merge-head\"");
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -151,7 +165,22 @@ if [ "$1 $2" = "api graphql" ]; then
 JSON
       exit 0 ;;
   esac
-  if [ -f "$auto_state" ]; then echo '{request}'; else echo 'false'; fi
+  # A request-only projection discards the server's merged state at this boundary.
+  case "$*" in *--jq*) echo false; exit 0 ;; esac
+  head="$(git rev-parse HEAD)"
+  if [ ! -f "$auto_state" ]; then
+    cat <<JSON
+{unarmed}
+JSON
+  elif [ "{merge_race}" = true ] || [ -z "$LF_TEST_REPAIR_PROOF" ] || [ -f "$LF_TEST_REPAIR_PROOF" ]; then
+    cat <<JSON
+{merged}
+JSON
+  else
+    cat <<JSON
+{armed}
+JSON
+  fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -164,7 +193,7 @@ if [ "$1 $2" = "pr merge" ]; then
 fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
-  if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
+  if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
     echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
     exit 0
   fi
@@ -188,6 +217,15 @@ fn initialize_landing_store(path: &std::path::Path) {
 }
 
 fn gh_existing_pr_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
+    let queued = support::github_merge_response(
+        912,
+        "fixture-head",
+        "OPEN",
+        "CLEAN",
+        Some("queued:PR_fixture"),
+    );
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -205,8 +243,8 @@ if [ "$1 $2" = "api graphql" ]; then
   case "$*" in
     *dequeuePullRequest*) rm -f "$queue_state"; exit 0 ;;
   esac
-  if [ -f "$queue_state" ]; then echo 'queued:PR_fixture';
-  elif [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$queue_state" ]; then echo '{queued}';
+  elif [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -227,6 +265,7 @@ exit 0
 }
 
 fn gh_auto_failure_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", None);
     format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -239,7 +278,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'false'
+  echo '{unarmed}'
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -658,7 +697,7 @@ fn land_missing_pr_error_includes_branch_name() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
         &[
-            ("gh", gh_no_pr_script()),
+            ("gh", &gh_no_pr_script()),
             ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
@@ -1433,7 +1472,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
         &[
-            ("gh", gh_no_pr_script()),
+            ("gh", &gh_no_pr_script()),
             ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
@@ -1558,11 +1597,12 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_waits_for_authoritative_merged_observation() {
-    for (repair, blocked, awaiting_queue) in [
-        (false, false, false),
-        (true, false, false),
-        (true, true, false),
-        (true, false, true),
+    for (repair, blocked, awaiting_queue, merge_race) in [
+        (false, false, false, true),
+        (false, false, false, false),
+        (true, false, false, false),
+        (true, true, false, false),
+        (true, false, true, false),
     ] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
@@ -1584,7 +1624,11 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
             .unwrap();
         assert!(status.success());
         let log_path = repo.bare_path().join("watched-gh.log");
-        let script = gh_watched_land_script(log_path.to_string_lossy().as_ref(), awaiting_queue);
+        let script = gh_watched_land_script(
+            log_path.to_string_lossy().as_ref(),
+            awaiting_queue,
+            merge_race,
+        );
         let codex = codex_app_server_script(
             if blocked {
                 r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
@@ -1697,12 +1741,5 @@ fi"#,
             );
             assert!(String::from_utf8_lossy(&output.stderr).contains("Rebased the linked worktree"));
         }
-        let gh_log = fs::read_to_string(log_path).unwrap();
-        assert!(
-            gh_log
-                .lines()
-                .any(|line| line.starts_with("api -H Accept:")),
-            "land never read the authoritative PR state: {gh_log}"
-        );
     }
 }

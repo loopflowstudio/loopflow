@@ -163,17 +163,6 @@ struct GhPrMergeCommit {
 }
 
 #[derive(Debug, Deserialize)]
-struct GhPrView {
-    state: String,
-    #[serde(rename = "mergeStateStatus")]
-    merge_state_status: String,
-    #[serde(default, rename = "mergeCommit")]
-    merge_commit: Option<GhPrMergeCommit>,
-    #[serde(default)]
-    url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct GhReleasePr {
     number: u64,
     state: String,
@@ -1710,8 +1699,9 @@ fn finish_release_pr(
                     Err(error) => {
                         // Main can advance during repair. Release preparation owns
                         // rebuilding version metadata; the shared watcher owns CI.
-                        let view = read_release_pr(main_repo, prepared.pr_number)?;
-                        if matches!(view.merge_state_status.as_str(), "BEHIND" | "DIRTY") {
+                        let view =
+                            crate::ops::pr::observe_pr_merge(main_repo, prepared.pr_number)?.pr;
+                        if matches!(view.merge_state.as_deref(), Some("behind" | "dirty")) {
                             if let Some(pr) = current_pr(&wt.path)? {
                                 if let Some(head) = pr.head_sha {
                                     prepared.head_sha = head;
@@ -2540,22 +2530,6 @@ enum ReleasePrWait {
     NeedsRepair,
 }
 
-fn read_release_pr(repo: &Path, pr_number: u64) -> OpsResult<GhPrView> {
-    let output = run_stdout(
-        repo,
-        "gh",
-        &[
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "state,mergeStateStatus,mergeCommit,url",
-        ],
-    )?;
-    serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse PR state: {err}")))
-}
-
 fn wait_for_pr_merge(
     repo: &Path,
     pr_number: u64,
@@ -2568,19 +2542,21 @@ fn wait_for_pr_merge(
     let mut attempt: u64 = 0;
 
     loop {
-        let view = read_release_pr(repo, pr_number)?;
+        let observation = crate::ops::pr::observe_pr_merge(repo, pr_number)?;
+        let view = observation.pr;
+        let request = observation.request;
 
         match view.state.as_str() {
-            "MERGED" => {
+            "merged" => {
                 let commit = view.merge_commit.ok_or_else(|| {
                     OpsError::Message(format!(
                         "PR #{pr_number} is merged but merge commit is unavailable"
                     ))
                 })?;
-                return Ok(ReleasePrWait::Merged(commit.oid));
+                return Ok(ReleasePrWait::Merged(commit));
             }
-            "CLOSED" => {
-                let url = view.url.unwrap_or_else(|| format!("PR #{pr_number}"));
+            "closed" => {
+                let url = view.url;
                 return Err(OpsError::Message(format!(
                     "{url} was closed without merging"
                 )));
@@ -2588,11 +2564,9 @@ fn wait_for_pr_merge(
             _ => {}
         }
 
-        let request = crate::ops::pr::observe_merge_request(repo, pr_number)?;
-        if crate::ops::pr::merge_needs_integration(Some(&view.merge_state_status), request.as_ref())
-        {
+        if crate::ops::pr::merge_needs_integration(view.merge_state.as_deref(), request.as_ref()) {
             return Ok(ReleasePrWait::NeedsIntegration(
-                view.merge_state_status.to_ascii_lowercase(),
+                view.merge_state.expect("integration state matched"),
             ));
         }
 
@@ -2618,7 +2592,7 @@ fn wait_for_pr_merge(
         if attempt.is_multiple_of(6) {
             progress.status(&format!(
                 "PR #{pr_number} is open ({}) and awaiting GitHub auto-merge...",
-                view.merge_state_status.to_ascii_lowercase()
+                view.merge_state.as_deref().unwrap_or("unknown")
             ));
         }
         attempt += 1;

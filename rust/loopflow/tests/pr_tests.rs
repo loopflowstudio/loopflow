@@ -297,6 +297,7 @@ exit 0
 }
 
 fn gh_changed_head_script(log_path: &str) -> String {
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 echo "$@" >> "{log_path}"
@@ -304,7 +305,7 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'true'
+  echo '{armed}'
   exit 0
 fi
 if [ "$1" = "api" ]; then
@@ -320,6 +321,7 @@ exit 0
 }
 
 fn gh_open_auto_script(log_path: &str) -> String {
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 echo "$@" >> "{log_path}"
@@ -327,7 +329,7 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'true'
+  echo '{armed}'
   exit 0
 fi
 if [ "$1" = "api" ]; then

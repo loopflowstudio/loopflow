@@ -131,6 +131,10 @@ exit 1
 fn write_gh_merge_wait_script(log_path: &str, queued: bool) -> String {
     let queued = if queued { "1" } else { "0" };
     let checks = support::github_checks_page("$head", &[]);
+    let unarmed = support::github_merge_response(1176, "$head", "OPEN", "CLEAN", None);
+    let pending =
+        support::github_merge_response(1176, "$head", "OPEN", "DIRTY", Some("queued:PR_release"));
+    let merged = support::github_merge_response(1176, "$head", "MERGED", "UNKNOWN", None);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
@@ -162,20 +166,22 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
+  'api graphql')
     head="$(git rev-parse HEAD)"
     if [ "$queued" = 1 ] && [ ! -f "$seen" ]; then
       touch "$seen"
-      echo '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null}}'
+      cat <<JSON
+{pending}
+JSON
     elif [ -f "$armed" ] || [ "$queued" = 1 ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
+      cat <<JSON
+{merged}
+JSON
     else
-      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+      cat <<JSON
+{unarmed}
+JSON
     fi
-    exit 0;;
-  'api graphql')
-    if [ "$queued" = 1 ]; then echo queued:PR_release;
-    elif [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
     exit 0;;
   'pr merge')
     if [ "$queued" = 1 ]; then echo 'queued work is already armed' >&2; exit 56; fi
@@ -195,6 +201,9 @@ fn write_gh_dirty_release_script(
     main_branch: &str,
 ) -> String {
     let checks = support::github_checks_page("$head", &[]);
+    let dirty = support::github_merge_response(1176, "$release_head", "OPEN", "DIRTY", None);
+    let open = support::github_merge_response(1176, "$release_head", "OPEN", "$merge_state", None);
+    let merged = support::github_merge_response(1176, "$release_head", "MERGED", "UNKNOWN", None);
     format!(
         r#"#!/bin/sh
 log="{log_path}"
@@ -226,13 +235,17 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac
     exit 0;;
-  'pr view')
+  'api graphql')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     if [ -f "$integrated" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$release_head"
+      cat <<JSON
+{merged}
+JSON
     elif [ ! -f "$seen" ]; then
       touch "$seen"
-      printf '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+      cat <<JSON
+{dirty}
+JSON
     else
       main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
       if git merge-base --is-ancestor "$main_head" "$release_head"; then
@@ -240,10 +253,11 @@ case "$1 $2" in
       else
         merge_state=BEHIND
       fi
-      printf '{{"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n' "$merge_state"
+      cat <<JSON
+{open}
+JSON
     fi
     exit 0;;
-  'api graphql') echo 'false'; exit 0;;
   'pr merge')
     release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
     main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
@@ -972,7 +986,12 @@ case "$1 $2" in
       *) branch=$(git branch --show-current) ;;
     esac ;;
   'pr create'|'pr edit'|'pr ready') exit 0 ;;
-  'api graphql') echo false; exit 0 ;;
+  'api graphql')
+    case " $* " in
+      *' number=92 '*) branch=jack/release-default-v0-9-2 ;;
+      *' number=100 '*) branch=jack/release-default-v0-10-0 ;;
+      *) exit 1 ;;
+    esac ;;
   'release view') echo '{{"isDraft":false}}'; exit 0 ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 1 ;;
 esac
@@ -1004,8 +1023,10 @@ if [ -f "$state/merged-$number" ]; then
   status=MERGED
   merge="{{\"oid\":\"$(cat "$state/merged-$number")\"}}"
 fi
-result=$(printf '{{"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
-if [ "$2" = list ]; then printf '[%s]\n' "$result"; else printf '%s\n' "$result"; fi
+result=$(printf '{{"id":"PR_release","isMergeQueueEnabled":false,"autoMergeRequest":null,"mergeQueueEntry":null,"mergedAt":null,"number":%s,"state":"%s","isDraft":false,"mergeStateStatus":"CLEAN","mergeCommit":%s,"headRefOid":"%s","headRefName":"%s","baseRefName":"main","url":"https://example.com/pr/%s","title":"Release","body":"Release notes","statusCheckRollup":[]}}' "$number" "$status" "$merge" "$head" "$branch" "$number")
+if [ "$2" = list ]; then printf '[%s]\n' "$result";
+elif [ "$1 $2" = "api graphql" ]; then printf '{{"data":{{"repository":{{"pullRequest":%s}}}}}}\n' "$result";
+else printf '%s\n' "$result"; fi
 "#,
         state = state.display()
     );
@@ -1584,13 +1605,7 @@ fn release_run_repairs_failed_checks_before_tagging() {
 }
 
 fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
-    let request = if awaiting_queue {
-        "awaiting_queue"
-    } else {
-        "true"
-    };
     let merge_state = if awaiting_queue { "BEHIND" } else { "BLOCKED" };
-    let rest_merge_state = merge_state.to_ascii_lowercase();
     let state = tempfile::tempdir().unwrap();
     let repaired = state.path().join("repaired");
     let checks = support::github_checks_page(
@@ -1600,6 +1615,18 @@ fn prove_release_repairs_failed_checks(awaiting_queue: bool) {
             ("swift-test", "FAILURE", false),
         ],
     );
+    let open = support::github_merge_response(
+        1309,
+        "$head",
+        "OPEN",
+        merge_state,
+        Some(if awaiting_queue {
+            "awaiting_queue"
+        } else {
+            "auto"
+        }),
+    );
+    let merged = support::github_merge_response(1309, "$head", "MERGED", "UNKNOWN", None);
     let gh = format!(
         r#"#!/bin/sh
 repaired='{}'
@@ -1613,12 +1640,6 @@ case "$1 $2" in
       *' --head '*) printf '[{{"number":1309,"state":"OPEN","mergeCommit":null,"url":"https://github.com/loopflowstudio/release-fixture/pull/1309","headRefOid":"%s"}}]\n' "$head";;
       *) echo '[]';;
     esac;;
-  'pr view')
-    if [ -f "$repaired" ]; then
-      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}}}}\n' "$head"
-    else
-      echo '{{"state":"OPEN","mergeStateStatus":"{merge_state}","mergeCommit":null}}'
-    fi;;
   'api graphql')
     case "$*" in
       *LoopflowPrChecks*)
@@ -1626,11 +1647,18 @@ case "$1 $2" in
 {checks}
 JSON
         ;;
-      *) echo {request} ;;
+      *)
+        if [ -f "$repaired" ]; then
+          cat <<JSON
+{merged}
+JSON
+        else
+          cat <<JSON
+{open}
+JSON
+        fi ;;
+
     esac;;
-  'api -H')
-    if [ -f "$repaired" ]; then merged=true; else merged=false; fi
-    printf '{{"number":1309,"state":"open","merged":%s,"html_url":"https://github.com/loopflowstudio/release-fixture/pull/1309","merge_commit_sha":"%s","head":{{"sha":"%s"}},"mergeable_state":"{rest_merge_state}"}}\n' "$merged" "$head" "$head";;
   *) echo "unexpected gh: $*" >&2; exit 1;;
 esac
 "#,

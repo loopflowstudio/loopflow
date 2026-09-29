@@ -24,8 +24,7 @@ use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    merge_gate_state, merge_needs_integration, observe_merge_request, observe_pr_by_number,
-    MergeRequest, PrInfo, PrObservation, PrReadFreshness,
+    merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
 };
 use super::progress::Progress;
 
@@ -118,34 +117,13 @@ struct GithubLandingDriver;
 
 impl LandingDriver for GithubLandingDriver {
     fn observe(&self, landing: &PrLanding) -> OpsResult<LandingObservation> {
-        match observe_pr_by_number(
-            &landing.worktree,
-            landing.pr_number,
-            &landing.branch,
-            PrReadFreshness::Fresh,
-        ) {
-            PrObservation::Fresh(pr) => {
-                let request = if matches!(pr.state.as_str(), "open" | "draft") {
-                    match observe_merge_request(&landing.worktree, pr.number) {
-                        Ok(request) => request,
-                        Err(error) => {
-                            return Ok(LandingObservation::Degraded {
-                                reason: error.to_string(),
-                            });
-                        }
-                    }
-                } else {
-                    None
-                };
-                classify_github_observation(landing, pr, request)
+        match observe_pr_merge(&landing.worktree, u64::from(landing.pr_number)) {
+            Ok(observation) => {
+                classify_github_observation(landing, observation.pr, observation.request)
             }
-            PrObservation::NotFound => Ok(LandingObservation::Degraded {
-                reason: format!(
-                    "GitHub no longer exposes pull request #{}; merge state is unknown",
-                    landing.pr_number
-                ),
+            Err(error) => Ok(LandingObservation::Degraded {
+                reason: error.to_string(),
             }),
-            PrObservation::Degraded { reason } => Ok(LandingObservation::Degraded { reason }),
         }
     }
 

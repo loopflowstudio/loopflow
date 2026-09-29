@@ -181,7 +181,8 @@ def main() -> None:
         "id": fixture["project"],
         "name": "Task PR Tests",
         "description": "",
-        "content": "",
+        "content": "flow: feature",
+        "status": {"type": "started"},
         "initiatives": {"nodes": [{"id": "initiative-task-pr-tests"}]},
         "teams": {"nodes": [{"id": "team-task-pr-tests"}]},
     }

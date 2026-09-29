@@ -9,11 +9,12 @@
 //! Delete this module, its command and its test once every Home that ran a
 //! release older than the Session tables has been imported.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::durable::{FlowSession, RunId, TaskId, WorkRef};
@@ -21,7 +22,7 @@ use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
 use crate::run_record::{AttributionSource, RunFlowMembership, RunManifest};
-use crate::session::{AgentSession, Run, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, ImportedObservation, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 #[derive(Debug, Serialize)]
@@ -30,12 +31,14 @@ pub struct ImportReport {
     pub interactive: usize,
     pub ask: usize,
     pub flow_review: usize,
+    /// Captured Flows without a pending human review, including completed history.
+    pub flow: usize,
     /// Task reviews the schema migration stored, given their name and provider.
     pub task_review: usize,
     /// Runs outside any Session.
     pub run: usize,
     pub unchanged: usize,
-    /// Tasks whose first stored Run is an imported one: `started_at` is the
+    /// Tasks first assigned during import: `started_at` is the
     /// time of this import, not of the conversation.
     pub tasks_started: Vec<TaskId>,
     pub failed: Vec<ImportFailure>,
@@ -101,6 +104,7 @@ struct FlowFile {
     task: Option<String>,
     as_work: Option<String>,
     active: Option<FlowFileBoundary>,
+    failure: Option<crate::durable::TaskFlowBlocker>,
     finished: bool,
 }
 
@@ -119,20 +123,30 @@ impl FlowFile {
     }
 
     /// The Work the Flow was launched with, resolved once from its selectors.
-    async fn declared_work(&self, store: &SharedStore) -> Option<(Option<TaskId>, WaveId)> {
-        let selector = self
+    async fn declared_work(&self, store: &SharedStore) -> Result<Option<(Option<TaskId>, WaveId)>> {
+        let mut work: Option<(Option<TaskId>, WaveId)> = None;
+        for selector in self
             .as_work
-            .clone()
-            .or(self.task.as_ref().map(|id| format!("task:{id}")))
-            .or(self.wave.as_ref().map(|id| format!("wave:{id}")))?;
-        let binding = crate::ops::resolve_work_binding(store, &self.cwd, &selector)
-            .await
-            .ok()?;
-        let task = match binding.work {
-            WorkRef::Task(id) => Some(id),
-            _ => None,
-        };
-        Some((task, binding.wave_id))
+            .iter()
+            .cloned()
+            .chain(self.task.iter().map(|id| format!("task:{id}")))
+            .chain(self.wave.iter().map(|id| format!("wave:{id}")))
+        {
+            let (task, wave) = recorded_work(store, &selector).await?;
+            if let Some((known_task, known_wave)) = &work {
+                if known_wave != &wave
+                    || known_task
+                        .as_ref()
+                        .zip(task.as_ref())
+                        .is_some_and(|(a, b)| a != b)
+                {
+                    bail!("Flow {} records conflicting Work ancestry", self.id);
+                }
+            }
+            let task = task.or_else(|| work.as_ref().and_then(|(task, _)| task.clone()));
+            work = Some((task, wave));
+        }
+        Ok(work)
     }
 
     fn invocation(&self, work: Option<(Option<TaskId>, WaveId)>) -> FlowSession {
@@ -147,7 +161,7 @@ impl FlowFile {
                 steps: self.steps.clone(),
             },
             cursor: self.cursor.clone(),
-            version: 0,
+            version: 1,
             task_id,
             wave_id,
             cwd: self.cwd.clone(),
@@ -158,7 +172,7 @@ impl FlowFile {
             ready_summary: None,
             worker_generation: 0,
             claim: None,
-            failure: None,
+            failure: self.failure.clone(),
             finished: self.finished,
             updated_at: time::OffsetDateTime::now_utc(),
         }
@@ -173,6 +187,7 @@ struct Import<'a> {
     report: ImportReport,
     /// Runs the Ask and Flow files name; the Run scan leaves them alone.
     claimed: HashSet<RunId>,
+    captures: HashMap<String, FlowSession>,
 }
 
 pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportReport> {
@@ -184,6 +199,7 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
             interactive: 0,
             ask: 0,
             flow_review: 0,
+            flow: 0,
             task_review: 0,
             run: 0,
             unchanged: 0,
@@ -191,6 +207,7 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
             failed: Vec::new(),
         },
         claimed: HashSet::new(),
+        captures: HashMap::new(),
     };
     for path in files(&import.home.join("human-sessions"), |path| {
         path.extension()
@@ -202,6 +219,13 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
     for dir in files(&import.home.join("flows"), |path| path.is_dir())? {
         let path = dir.join("position.json");
         let stored = import.flow_review(&path).await;
+        if stored.is_ok() {
+            let file: FlowFile = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let work = file.declared_work(store).await?;
+            let mut flow = file.invocation(work);
+            flow.updated_at = OffsetDateTime::from_unix_timestamp(modified(&path)?)?;
+            import.captures.insert(file.id, flow);
+        }
         import.count(&path, stored);
     }
     for dir in crate::run_record::record_dirs(&import.home)? {
@@ -215,6 +239,7 @@ enum Stored {
     Interactive,
     Ask,
     FlowReview,
+    Flow,
     TaskReview,
     Run,
     Unchanged,
@@ -245,6 +270,31 @@ fn modified(path: &Path) -> Result<i64> {
     Ok(OffsetDateTime::from(modified).unix_timestamp())
 }
 
+/// Recorded attribution is independent of whether the Task may launch now.
+async fn recorded_work(store: &SharedStore, selector: &str) -> Result<(Option<TaskId>, WaveId)> {
+    if let Some(selector) = selector.strip_prefix("task:") {
+        let task = match TaskId::parse(selector) {
+            Ok(id) => store.get_task(&id).await?,
+            Err(_) => store.get_task_by_issue(selector).await?,
+        }
+        .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
+        return Ok((Some(task.id), task.wave_id));
+    }
+    if let Some(selector) = selector.strip_prefix("wave:") {
+        if let Ok(id) = WaveId::parse(selector) {
+            if let Some(wave) = store.get_wave(&id).await? {
+                return Ok((None, wave.id().clone()));
+            }
+        }
+        let waves = store.find_waves_by_slug(selector).await?;
+        let [wave] = waves.as_slice() else {
+            bail!("Wave {selector} names {} registered Waves", waves.len());
+        };
+        return Ok((None, wave.id().clone()));
+    }
+    bail!("historical attribution must name a Task or Wave: {selector}")
+}
+
 /// The name a conversation was given, or its seed.
 fn name(dir: &Path, seed: String) -> Result<(String, TitleSource)> {
     match std::fs::read(dir.join("session-name.json")) {
@@ -267,6 +317,7 @@ impl Import<'_> {
             Ok(Some(Stored::Interactive)) => report.interactive += 1,
             Ok(Some(Stored::Ask)) => report.ask += 1,
             Ok(Some(Stored::FlowReview)) => report.flow_review += 1,
+            Ok(Some(Stored::Flow)) => report.flow += 1,
             Ok(Some(Stored::TaskReview)) => report.task_review += 1,
             Ok(Some(Stored::Run)) => report.run += 1,
             Ok(Some(Stored::Unchanged)) => report.unchanged += 1,
@@ -278,73 +329,172 @@ impl Import<'_> {
         }
     }
 
-    /// Store a Session with its Run unless it is stored already.
+    /// Import compares captured facts; Session identity alone is not equality.
     async fn store(
         &mut self,
         kind: Stored,
         session: AgentSession,
-        run: Run,
         review: Option<FlowSession>,
     ) -> Result<Option<Stored>> {
-        if self.store.session(&session.id).await?.is_some() {
-            return Ok(Some(Stored::Unchanged));
+        let input = session.input_id.clone();
+        let starts = self.first_assignment(session.task_id.as_ref()).await?;
+        let history = self.history(&session).await?;
+        let changed = self
+            .store
+            .import_session(session, review, history, self.report.dry_run)
+            .await?;
+        self.claimed.insert(input);
+        if changed {
+            self.report.tasks_started.extend(starts);
         }
-        if self.store.run(&run.id).await?.is_some() {
-            bail!("Run {} is already stored outside this Session", run.id);
+        Ok(Some(if changed { kind } else { Stored::Unchanged }))
+    }
+
+    async fn history(&self, session: &AgentSession) -> Result<Vec<ImportedObservation>> {
+        let dir = self.run_dir(&session.input_id)?;
+        let mut history = Vec::new();
+        let (task_id, wave_id, _) = match crate::run_record::read_manifest(&dir) {
+            Ok(manifest) => self.work(&manifest).await?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, None, None),
+            Err(error) => return Err(error.into()),
+        };
+        let mut record = |source: String, evidence: serde_json::Value| {
+            let at = evidence
+                .get("observed_at")
+                .or_else(|| evidence.get("ended_at"))
+                .or_else(|| evidence.get("created_at"))
+                .and_then(serde_json::Value::as_str)
+                .and_then(|at| {
+                    OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).ok()
+                });
+            history.push(ImportedObservation {
+                source: source.clone(),
+                observed_at: at.unwrap_or_else(OffsetDateTime::now_utc).unix_timestamp(),
+                task_id: task_id.clone(),
+                wave_id: wave_id.clone(),
+                payload: serde_json::json!({"input_id": session.input_id, "source": source, "evidence": evidence}),
+            });
+        };
+        for name in ["manifest.json", "terminal.json", "provider-session.json"] {
+            match std::fs::read(dir.join(name)) {
+                Ok(bytes) => record(
+                    name.into(),
+                    serde_json::from_slice(&bytes).with_context(|| name.to_string())?,
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
-        self.start(&run).await?;
-        if !self.report.dry_run {
-            self.store.create_session(session, review).await?;
+        match std::fs::read_to_string(dir.join("events.jsonl")) {
+            Ok(events) => {
+                for (line, bytes) in events.lines().enumerate() {
+                    // Partial JSONL remains explicit evidence, never silently discarded.
+                    let evidence = serde_json::from_str(bytes)
+                        .unwrap_or_else(|_| serde_json::json!({"unparsed": bytes}));
+                    record(format!("events.jsonl:{line}"), evidence);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
-        Ok(Some(kind))
+        Ok(history)
     }
 
     /// Report first assignment, including existing conversation bindings.
-    async fn start(&mut self, run: &Run) -> Result<()> {
-        let Some(task) = &run.task_id else {
-            return Ok(());
+    async fn first_assignment(&self, task: Option<&TaskId>) -> Result<Option<TaskId>> {
+        let Some(task) = task else {
+            return Ok(None);
         };
         if self.store.get_task(task).await?.is_none() {
             bail!("Task {task} is not registered");
         }
         if !self.store.task_started(task).await? && !self.report.tasks_started.contains(task) {
-            self.report.tasks_started.push(task.clone());
+            return Ok(Some(task.clone()));
         }
-        Ok(())
+        Ok(None)
     }
 
-    /// A Run outside any Session. A Flow step's Run keeps its Task and Wave;
-    /// the invocation's cursor has moved on, so the row names no invocation.
+    /// Historical agent inputs retain their exact recorded Flow occurrence.
     async fn headless(&mut self, dir: &Path, manifest: RunManifest) -> Result<Option<Stored>> {
         let (task_id, wave_id, work_source) = self.work(&manifest).await?;
-        let evidence = crate::run_record::read_run_snapshot(dir)?;
-        let run = Run {
-            id: manifest.run_id,
-            session_id: None,
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            task_id,
-            wave_id,
-            work_source,
-            created_at: manifest.created_at.unix_timestamp(),
-            published: true,
+        let mut capture = None;
+        let (flow_session_id, node, iterations) = match &manifest.flow {
+            Some(RunFlowMembership::Step(step)) => {
+                let flow = self
+                    .captures
+                    .get(&step.invocation_id)
+                    .cloned()
+                    .or(self.store.flow(&step.invocation_id).await?)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "input {} names unavailable capture {}",
+                            manifest.run_id,
+                            step.invocation_id
+                        )
+                    })?;
+                let graph = crate::engine::flow_graph::FlowGraph::new(
+                    &flow.invocation.flow,
+                    &flow.invocation.steps,
+                );
+                let node = step
+                    .node
+                    .as_ref()
+                    .map(|key| {
+                        let mut index = 0;
+                        while let Some(node) = graph.node_at(index) {
+                            if &node.key == key {
+                                return Ok(index);
+                            }
+                            index += 1;
+                        }
+                        bail!("input {} names an uncaptured node {key}", manifest.run_id)
+                    })
+                    .transpose()?;
+                capture = Some(flow);
+                (
+                    Some(step.invocation_id.clone()),
+                    node,
+                    step.iterations.clone(),
+                )
+            }
+            _ => (None, None, None),
+        };
+        let (title, title_source) = name(
+            dir,
+            manifest
+                .skill
+                .clone()
+                .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
+        )?;
+        let session = AgentSession {
+            id: manifest.run_id.to_string(),
+            input_id: manifest.run_id,
+            caller_input_id: manifest.parent_run_id,
+            input_published: true,
             cwd: manifest.cwd,
             skill: manifest.skill,
             provider: Some(manifest.harness),
             model: manifest.model,
-            caller_run_id: manifest.parent_run_id,
-            ended: evidence
-                .outcome
-                .zip(evidence.ended)
-                .map(|(outcome, at)| crate::session::RunEnd { outcome, at }),
+            node,
+            iterations,
+            task_id,
+            wave_id,
+            flow_session_id,
+            work_source,
+            bound_at: None,
+            kind: SessionKind::Conversation,
+            interactive: false,
+            repo: manifest
+                .repo
+                .map(|path| path.to_string_lossy().into_owned()),
+            title,
+            title_source,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: manifest.created_at.unix_timestamp(),
         };
-        self.start(&run).await?;
-        if !self.report.dry_run {
-            self.store.create_run(run).await?;
-        }
-        Ok(Some(Stored::Run))
+        self.store(Stored::Run, session, capture).await
     }
 
     fn run_dir(&self, run: &RunId) -> Result<PathBuf> {
@@ -354,13 +504,16 @@ impl Import<'_> {
 
     async fn ask(&mut self, path: &Path) -> Result<Option<Stored>> {
         let file: AskFile = serde_json::from_slice(&std::fs::read(path)?)?;
-        self.claimed.extend(file.session_run_id.clone());
         let (run_id, published, dir) = match file.session_run_id {
             Some(id) => {
                 let dir = self.run_dir(&id)?;
                 (id, dir.join("manifest.json").exists(), Some(dir))
             }
-            None => (RunId::new(), false, None),
+            None => {
+                let digest = Sha256::digest(file.id.as_bytes());
+                let id = RunId::parse(&format!("run_{}", hex::encode(&digest[..16])))?;
+                (id, false, None)
+            }
         };
         let created_at = match &dir {
             Some(dir) if published => crate::run_record::read_manifest(dir)?
@@ -385,41 +538,23 @@ impl Import<'_> {
             AskStatus::Completed { summary } => (Some(summary), Some(modified(path)?)),
         };
         let (provider, model) = crate::engine::config::parse_agent(&file.model);
-        let run = Run {
-            id: run_id,
-            session_id: Some(file.id.clone()),
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
-            work_source: (task_id.is_some() || wave_id.is_some()).then_some(WorkSource::Inherited),
+        let work_source = (task_id.is_some() || wave_id.is_some()).then_some(WorkSource::Inherited);
+        let session = AgentSession {
+            caller_input_id: Some(file.parent_run_id),
             task_id,
             wave_id,
-            created_at,
-            published,
+            flow_session_id: None,
+            work_source,
+            bound_at: None,
+            id: file.id,
+            input_id: run_id,
+            input_published: published,
             cwd: file.cwd,
             skill: file.skill,
             provider: Some(provider),
             model,
-            caller_run_id: Some(file.parent_run_id),
-            ended: None,
-        };
-        let session = AgentSession {
-            caller_input_id: run.caller_run_id.clone(),
-            task_id: run.task_id.clone(),
-            wave_id: run.wave_id.clone(),
-            flow_session_id: run.invocation_id.clone(),
-            work_source: run.work_source,
-            bound_at: None,
-            id: file.id,
-            input_id: run.id.clone(),
-            input_published: run.published,
-            cwd: run.cwd.clone(),
-            skill: run.skill.clone(),
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-            node: run.node,
-            iterations: run.iterations.clone(),
+            node: None,
+            iterations: None,
             kind: SessionKind::Ask,
             interactive: true,
             repo: None,
@@ -430,11 +565,25 @@ impl Import<'_> {
             completed_at,
             created_at,
         };
-        self.store(Stored::Ask, session, run, None).await
+        self.store(Stored::Ask, session, None).await
     }
 
     async fn flow_review(&mut self, path: &Path) -> Result<Option<Stored>> {
         let file: FlowFile = serde_json::from_slice(&std::fs::read(path)?)?;
+        let work = file.declared_work(self.store).await?;
+        let mut flow = file.invocation(work.clone());
+        flow.updated_at = OffsetDateTime::from_unix_timestamp(modified(path)?)?;
+        let human =
+            matches!(file.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human);
+        if file.active.is_none() || !human || file.finished {
+            return Ok(Some(
+                if self.store.import_flow(flow, self.report.dry_run).await? {
+                    Stored::Flow
+                } else {
+                    Stored::Unchanged
+                },
+            ));
+        }
         let Some(active) = &file.active else {
             return Ok(None);
         };
@@ -444,10 +593,7 @@ impl Import<'_> {
             }
             _ => return Ok(None),
         };
-        self.claimed.extend(active.run_id.clone());
         let id = format!("flow:{}:{}", file.id, active.id);
-        let work = file.declared_work(self.store).await;
-        let flow = file.invocation(work.clone());
         let Some(run_id) = active.run_id.clone() else {
             // Never opened: nothing to preserve but the wait itself.
             let stored = self.store.flow(&file.id).await?;
@@ -464,44 +610,27 @@ impl Import<'_> {
         let manifest = crate::run_record::read_manifest(&dir).context("the review's Run record")?;
         let (title, title_source) = name(&dir, skill.clone())?;
         let created_at = manifest.created_at.unix_timestamp();
-        let run = Run {
-            id: run_id,
-            session_id: Some(id.clone()),
-            invocation_id: Some(file.id.clone()),
-            node: None,
-            iterations: None,
-            attempt: None,
+        let session = AgentSession {
+            caller_input_id: manifest.parent_run_id,
             task_id: flow.task_id.clone(),
-            work_source: work.as_ref().map(|_| WorkSource::Declared),
             wave_id: flow.wave_id.clone(),
-            created_at,
-            published: true,
+            flow_session_id: Some(file.id.clone()),
+            work_source: work.as_ref().map(|_| WorkSource::Declared),
+            bound_at: None,
+            id,
+            input_id: run_id,
+            input_published: true,
             cwd: manifest.cwd,
             skill: Some(skill),
             provider: Some(manifest.harness),
             model: manifest.model,
-            caller_run_id: None,
-            ended: None,
-        };
-        let session = AgentSession {
-            caller_input_id: run.caller_run_id.clone(),
-            task_id: run.task_id.clone(),
-            wave_id: run.wave_id.clone(),
-            flow_session_id: run.invocation_id.clone(),
-            work_source: run.work_source,
-            bound_at: None,
-            id,
-            input_id: run.id.clone(),
-            input_published: run.published,
-            cwd: run.cwd.clone(),
-            skill: run.skill.clone(),
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-            node: run.node,
-            iterations: run.iterations.clone(),
+            node: None,
+            iterations: None,
             kind: SessionKind::FlowReview,
             interactive: true,
-            repo: None,
+            repo: manifest
+                .repo
+                .map(|path| path.to_string_lossy().into_owned()),
             title,
             title_source,
             request: None,
@@ -512,8 +641,7 @@ impl Import<'_> {
             },
             created_at,
         };
-        self.store(Stored::FlowReview, session, run, Some(flow))
-            .await
+        self.store(Stored::FlowReview, session, Some(flow)).await
     }
 
     async fn run(&mut self, dir: &Path) -> Result<Option<Stored>> {
@@ -521,8 +649,8 @@ impl Import<'_> {
         if self.claimed.contains(&manifest.run_id) {
             return Ok(None);
         }
-        if let Some(run) = self.store.run(&manifest.run_id).await? {
-            return self.review_evidence(dir, &manifest, run).await;
+        if let Some(session) = self.store.session_for_run(&manifest.run_id).await? {
+            return self.review_evidence(dir, &manifest, session).await;
         }
         let conversation =
             manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
@@ -553,44 +681,27 @@ impl Import<'_> {
         let created_at = manifest.created_at.unix_timestamp();
         // An old Home named an interactive Session by its Run.
         let id = manifest.run_id.to_string();
-        let run = Run {
-            id: manifest.run_id,
-            session_id: Some(id.clone()),
-            invocation_id: None,
-            node: None,
-            iterations: None,
-            attempt: None,
+        let session = AgentSession {
+            caller_input_id: manifest.parent_run_id,
             task_id,
             wave_id,
+            flow_session_id: None,
             work_source,
-            created_at,
-            published: true,
+            bound_at: None,
+            id,
+            input_id: manifest.run_id,
+            input_published: true,
             cwd: manifest.cwd,
             skill: manifest.skill,
             provider: Some(manifest.harness),
             model: manifest.model,
-            caller_run_id: None,
-            ended: None,
-        };
-        let session = AgentSession {
-            caller_input_id: run.caller_run_id.clone(),
-            task_id: run.task_id.clone(),
-            wave_id: run.wave_id.clone(),
-            flow_session_id: run.invocation_id.clone(),
-            work_source: run.work_source,
-            bound_at: None,
-            id,
-            input_id: run.id.clone(),
-            input_published: run.published,
-            cwd: run.cwd.clone(),
-            skill: run.skill.clone(),
-            provider: run.provider.clone(),
-            model: run.model.clone(),
-            node: run.node,
-            iterations: run.iterations.clone(),
+            node: None,
+            iterations: None,
             kind: SessionKind::Conversation,
             interactive: true,
-            repo: None,
+            repo: manifest
+                .repo
+                .map(|path| path.to_string_lossy().into_owned()),
             title,
             title_source,
             request: None,
@@ -598,7 +709,7 @@ impl Import<'_> {
             completed_at,
             created_at,
         };
-        self.store(Stored::Interactive, session, run, None).await
+        self.store(Stored::Interactive, session, None).await
     }
 
     /// The Task and Wave a Run's manifest names, by the selectors it recorded.
@@ -606,34 +717,38 @@ impl Import<'_> {
         &self,
         manifest: &RunManifest,
     ) -> Result<(Option<TaskId>, Option<WaveId>, Option<WorkSource>)> {
-        let subject = |kind: &str| {
-            manifest.subjects.iter().find_map(|subject| {
-                let selector = subject.selector.strip_prefix(kind)?.strip_prefix(':')?;
-                Some((
-                    selector,
-                    match subject.source {
-                        AttributionSource::Declared => WorkSource::Declared,
-                        AttributionSource::Inherited => WorkSource::Inherited,
-                    },
-                ))
-            })
-        };
-        if let Some((selector, source)) = subject("task") {
-            let task = match TaskId::parse(selector) {
-                Ok(id) => self.store.get_task(&id).await?,
-                Err(_) => self.store.get_task_by_issue(selector).await?,
+        let mut selected: Option<(Option<TaskId>, WaveId, WorkSource)> = None;
+        for subject in &manifest.subjects {
+            if !subject.selector.starts_with("task:") && !subject.selector.starts_with("wave:") {
+                continue;
             }
-            .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
-            return Ok((Some(task.id), Some(task.wave_id), Some(source)));
-        }
-        if let Some((selector, source)) = subject("wave") {
-            let waves = self.store.find_waves_by_slug(selector).await?;
-            let [wave] = waves.as_slice() else {
-                bail!("Wave {selector} names {} registered Waves", waves.len());
+            let (task, wave) = recorded_work(self.store, &subject.selector).await?;
+            let source = match subject.source {
+                AttributionSource::Declared => WorkSource::Declared,
+                AttributionSource::Inherited => WorkSource::Inherited,
             };
-            return Ok((None, Some(wave.id().clone()), Some(source)));
+            if let Some((known_task, known_wave, _)) = &selected {
+                if known_wave != &wave
+                    || known_task
+                        .as_ref()
+                        .zip(task.as_ref())
+                        .is_some_and(|(a, b)| a != b)
+                {
+                    bail!(
+                        "input {} records conflicting Work ancestry",
+                        manifest.run_id
+                    );
+                }
+                if known_task.is_some() {
+                    continue;
+                }
+            }
+            selected = Some((task, wave, source));
         }
-        Ok((None, None, None))
+        Ok(match selected {
+            Some((task, wave, source)) => (task, Some(wave), Some(source)),
+            None => (None, None, None),
+        })
     }
 
     /// A review the schema migration stored takes its name and provider from
@@ -642,28 +757,41 @@ impl Import<'_> {
         &mut self,
         dir: &Path,
         manifest: &RunManifest,
-        run: Run,
+        session: AgentSession,
     ) -> Result<Option<Stored>> {
-        let Some(session) = self.store.session_for_run(&run.id).await? else {
-            return Ok(None);
-        };
-        if session.input_id != run.id {
-            return Ok(None);
+        if session.input_id != manifest.run_id {
+            bail!(
+                "historical input {} needs prior-input comparison before import",
+                manifest.run_id
+            );
         }
         let (title, source) = name(dir, session.title.clone())?;
         let renamed = title != session.title && session.title_source == TitleSource::Generated;
-        let unnamed = run.provider.is_none();
+        let unnamed = session.provider.is_none();
+        let history = self.history(&session).await?;
+        let imported = self
+            .store
+            .import_session(session.clone(), None, history, self.report.dry_run)
+            .await?;
         if !renamed && !unnamed {
-            return Ok(Some(Stored::Unchanged));
+            return Ok(Some(if imported {
+                Stored::TaskReview
+            } else {
+                Stored::Unchanged
+            }));
         }
         if !self.report.dry_run {
             if renamed {
                 self.store
-                    .rename_session(&session.id, Some(&run.id), &title, source)
+                    .rename_session(&session.id, Some(&session.input_id), &title, source)
                     .await?;
             }
             self.store
-                .fill_run_provider(&run.id, &manifest.harness, manifest.model.as_deref())
+                .fill_run_provider(
+                    &session.input_id,
+                    &manifest.harness,
+                    manifest.model.as_deref(),
+                )
                 .await?;
         }
         Ok(Some(Stored::TaskReview))

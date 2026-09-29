@@ -10,6 +10,10 @@ use crate::engine::ExecutionCursor;
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
+    /// Restore an old captured Flow without selecting or executing it.
+    pub(crate) async fn import_flow(&self, flow: FlowSession, dry_run: bool) -> StoreResult<bool> {
+        run_sqlite(&self.sqlite, move |store| store.import_flow(&flow, dry_run)).await
+    }
     pub async fn create_flow(&self, flow: FlowSession) -> StoreResult<FlowSession> {
         run_sqlite(&self.sqlite, move |store| store.create_flow(&flow)).await
     }

@@ -4,8 +4,8 @@ import Foundation
 public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let seq: Int64
     public let sessionID: String
-    public let providerThread: String
-    public let providerTurn: String
+    public let providerThread: String?
+    public let providerTurn: String?
     public let kind: Kind
     public let providerGeneration: Int64?
     public let execID: String?
@@ -17,7 +17,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public var id: Int64 { seq }
 
     public enum Kind: String, Codable, Sendable {
-        case started, usage, completed
+        case started, usage, completed, observed
     }
 
     enum CodingKeys: String, CodingKey {

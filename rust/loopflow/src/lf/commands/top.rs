@@ -18,7 +18,7 @@ use crate::journal::{
     read_exec_process_receipts_at, remove_exec_process_receipt_at, ExecProcessReceipt,
 };
 use crate::lf::output::truncate;
-use crate::store::{sqlite::SqliteStore, RunEventRow};
+use crate::store::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -108,7 +108,7 @@ pub struct ProcessPruneReport {
 
 #[derive(Debug, Clone)]
 struct ActivityData {
-    events: Vec<RunEventRow>,
+    execs: Vec<ExecRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -472,17 +472,29 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
 
 fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<ActivityData> {
     if !path.exists() {
-        return Ok(ActivityData { events: Vec::new() });
+        return Ok(ActivityData { execs: Vec::new() });
     }
     let store = SqliteStore::open_run_ledger_read_only(path)
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
     Ok(store.read_run_ledger_snapshot(|store| {
-        let mut events = Vec::new();
+        let mut execs = Vec::new();
         for receipt in live_execs {
-            let exec_events = store.run_events_matching_exec(&receipt.exec_id)?;
-            events.extend(exec_events);
+            let id = crate::id::ExecId::parse(&receipt.exec_id)
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+            if let Some(exec) = store.exec(&id)? {
+                execs.push(ExecRecord {
+                    trace_id: exec.trace_id.to_string(),
+                    id: exec.id.to_string(),
+                    parent_id: exec.parent_exec_id.map(|id| id.to_string()),
+                    label: command_label(exec.command.as_deref()),
+                    repo: exec.repo,
+                    worktree: exec.cwd,
+                    wave: exec.wave,
+                    started_at: exec.started_at,
+                });
+            }
         }
-        Ok(ActivityData { events })
+        Ok(ActivityData { execs })
     })?)
 }
 
@@ -592,8 +604,7 @@ fn collect_activity(
     processes: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
-    let ActivityData { events } = data;
-    let execs = collect_execs(&events).into_values().collect::<Vec<_>>();
+    let ActivityData { execs } = data;
 
     let process_by_pid = processes
         .processes
@@ -709,38 +720,6 @@ fn collect_activity(
         nodes,
         provider_processes,
     })
-}
-
-fn collect_execs(events: &[RunEventRow]) -> HashMap<String, ExecRecord> {
-    let mut execs = HashMap::new();
-    for event in events.iter().filter(|event| event.node == "run") {
-        let entry = execs
-            .entry(event.process_id.clone())
-            .or_insert_with(|| ExecRecord {
-                trace_id: event.run_id.clone(),
-                id: event.process_id.clone(),
-                parent_id: event.parent_process_id.clone(),
-                label: command_label(event.command.as_deref()),
-                repo: event.repo.clone(),
-                worktree: event.worktree.clone(),
-                wave: event.wave.clone(),
-                started_at: event.ts,
-            });
-        entry.started_at = entry.started_at.min(event.ts);
-        if entry.repo.is_none() {
-            entry.repo.clone_from(&event.repo);
-        }
-        if entry.worktree.is_none() {
-            entry.worktree.clone_from(&event.worktree);
-        }
-        if entry.wave.is_none() {
-            entry.wave.clone_from(&event.wave);
-        }
-        if entry.label == "lf" && event.command.is_some() {
-            entry.label = command_label(event.command.as_deref());
-        }
-    }
-    execs
 }
 
 fn command_label(command: Option<&str>) -> String {
@@ -1169,30 +1148,22 @@ fn kernel_state_label(state: &str) -> &'static str {
 mod tests {
     use super::*;
 
-    fn run_event(
+    fn exec_record(
         trace: &str,
         exec: &str,
         parent: Option<&str>,
         at: i64,
-        event: &str,
         command: &str,
-    ) -> RunEventRow {
-        RunEventRow {
-            run_id: trace.to_string(),
-            process_id: exec.to_string(),
-            parent_process_id: parent.map(str::to_string),
-            seq: 0,
-            ts: at,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: Some("/src/loopflow".to_string()),
-            wave: Some("product".to_string()),
-            node: "run".to_string(),
-            event: event.to_string(),
-            command: Some(serde_json::to_string(&["lf", command]).unwrap()),
-            flow: None,
-            skill: None,
-            step_index: None,
-            error: None,
+    ) -> ExecRecord {
+        ExecRecord {
+            trace_id: trace.into(),
+            id: exec.into(),
+            parent_id: parent.map(str::to_owned),
+            label: format!("lf {command}"),
+            repo: Some("/src/loopflow".into()),
+            worktree: Some("/src/loopflow".into()),
+            wave: Some("product".into()),
+            started_at: at,
         }
     }
 
@@ -1216,6 +1187,74 @@ mod tests {
             pid,
             started_at,
         }
+    }
+
+    #[test]
+    fn activity_reads_exact_exec_rows_without_replaying_command_events() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let exec = crate::id::ExecId::new();
+        let missing = crate::id::ExecId::new();
+        let trace = crate::id::TraceId::new();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
+            rusqlite::params![exec, trace, r#"["lf","implement"]"#],
+        ).unwrap();
+        // A stray journal event cannot manufacture an actual process record.
+        conn.execute(
+            "INSERT INTO run_events(run_id,process_id,seq,ts,node,event,command)
+            VALUES(?1,?2,0,9000,'run','started','unowned')",
+            rusqlite::params![trace, missing],
+        )
+        .unwrap();
+        let recorded = store.exec(&exec).unwrap().unwrap();
+        assert_eq!(recorded.via_agent, None);
+        assert_eq!(recorded.completed_at, None);
+        assert_eq!(recorded.exit_code, None);
+        assert!(store.exec(&missing).unwrap().is_none());
+        conn.execute(
+            "INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
+            VALUES(?1,?2,0,9000,'skill','started','other-work')",
+            rusqlite::params![trace, exec],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE execs SET completed_at=9000,outcome='failed',exit_code=42 WHERE id=?1",
+            [&exec],
+        )
+        .unwrap();
+        let recorded = store.exec(&exec).unwrap().unwrap();
+        assert_eq!(recorded.completed_at, Some(9000));
+        assert_eq!(recorded.outcome.as_deref(), Some("failed"));
+        assert_eq!(recorded.exit_code, Some(42));
+        assert_eq!(recorded.signal, None);
+        // An observed command outcome cannot override an exact OS-live receipt.
+        let mut owned = receipt(exec.as_str(), 10, 1000);
+        owned.trace_id = trace.to_string();
+        let mut unowned = receipt(missing.as_str(), 20, 1000);
+        unowned.trace_id = trace.to_string();
+        let receipts = vec![owned, unowned];
+        let data = read_activity_data(&path, &receipts).unwrap();
+        let snapshot = collect_activity(
+            data,
+            ProcessSnapshot {
+                processes: vec![
+                    process(10, 1, 1000, "lf implement"),
+                    process(20, 1, 1000, "lf unowned"),
+                ],
+                receipts,
+                opencode_servers: Vec::new(),
+            },
+            10_000,
+        )
+        .unwrap();
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].label, "lf implement");
+        assert_eq!(snapshot.nodes[0].started_at, 1000);
+        assert_eq!(snapshot.nodes[0].worktree.as_deref(), Some("/checkout"));
+        assert_eq!(snapshot.nodes[0].wave, None);
     }
 
     #[test]
@@ -1243,7 +1282,7 @@ mod tests {
             "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf implement",
         ] {
             let snapshot = collect_activity(
-                ActivityData { events: vec![run_event("trace", "worker", None, 1_000, "started", "implement")] },
+                ActivityData { execs: vec![exec_record("trace", "worker", None, 1_000, "implement")] },
                 ProcessSnapshot {
                     processes: vec![process(10, 1, 1_000, command), process(11, 10, 1_001, "codex app-server")],
                     receipts: vec![receipt("worker", 10, 1_000)],
@@ -1259,14 +1298,13 @@ mod tests {
     fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
         let data = ActivityData {
-            events: vec![
-                run_event("trace", "exec-5whys", None, 1_000, "started", "5whys"),
-                run_event(
+            execs: vec![
+                exec_record("trace", "exec-5whys", None, 1_000, "5whys"),
+                exec_record(
                     "trace",
                     "exec-implement",
                     Some("exec-5whys"),
                     2_000,
-                    "started",
                     "implement",
                 ),
             ],
@@ -1331,9 +1369,9 @@ mod tests {
     fn dead_and_unknown_calls_are_absent_while_registered_orphans_remain_visible() {
         let now = 10_000;
         let data = ActivityData {
-            events: vec![
-                run_event("trace", "dead", None, 1_000, "started", "old"),
-                run_event("trace", "unknown", None, 2_000, "started", "legacy"),
+            execs: vec![
+                exec_record("trace", "dead", None, 1_000, "old"),
+                exec_record("trace", "unknown", None, 2_000, "legacy"),
             ],
         };
         let processes = ProcessSnapshot {

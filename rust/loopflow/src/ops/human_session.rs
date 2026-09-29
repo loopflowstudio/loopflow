@@ -1659,16 +1659,7 @@ pub(crate) async fn rename(
 /// Assign a Task to future Session work. The id is the Session's
 /// or any of its Runs'; a closed Session binds like an open one.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
-    let owned = match RunId::parse(id) {
-        Ok(run_id) => store.session_for_run(&run_id).await?,
-        Err(_) => store.session(id).await?,
-    };
-    let session = owned.ok_or_else(|| session_not_found(id))?;
-    let task = match crate::durable::TaskId::parse(task) {
-        Ok(id) => store.get_task(&id).await?,
-        Err(_) => store.get_task_by_issue(task).await?,
-    }
-    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
+    let (session, task) = binding_target(store, id, task).await?;
     let session = store
         .bind_session(&session.id, &session.input_id, &task.id)
         .await
@@ -1681,6 +1672,43 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
         session.id, task.plan.identifier, task.plan.title
     );
     surface(store, &session).await
+}
+
+/// Resolved identity for confirmation, not a reservation or permission to bind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionBindingPreview {
+    pub session_id: String,
+    pub task_id: String,
+    pub identifier: String,
+    pub title: String,
+}
+
+pub(crate) async fn preview_binding(
+    store: &SharedStore,
+    id: &str,
+    task: &str,
+) -> Result<SessionBindingPreview> {
+    let (session, task) = binding_target(store, id, task).await?;
+    Ok(SessionBindingPreview {
+        session_id: session.id,
+        task_id: task.id.to_string(),
+        identifier: task.plan.identifier,
+        title: task.plan.title,
+    })
+}
+
+async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(AgentSession, Task)> {
+    let owned = match RunId::parse(id) {
+        Ok(run_id) => store.session_for_run(&run_id).await?,
+        Err(_) => store.session(id).await?,
+    };
+    let session = owned.ok_or_else(|| session_not_found(id))?;
+    let task = match crate::durable::TaskId::parse(task) {
+        Ok(id) => store.get_task(&id).await?,
+        Err(_) => store.get_task_by_issue(task).await?,
+    }
+    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?;
+    Ok((session, task))
 }
 
 fn session_not_found(id: &str) -> anyhow::Error {
@@ -3370,6 +3398,26 @@ mod tests {
             {
                 assert_eq!(graphs[&invocation_id].node_at(node).unwrap().label, step);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod binding_preview_tests {
+    use super::SessionBindingPreview;
+
+    #[test]
+    fn binding_preview_requires_exact_identity_and_label() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_binding_preview.json"
+        ))
+        .unwrap();
+        let preview: SessionBindingPreview = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(preview).unwrap(), value);
+        for key in ["session_id", "task_id", "identifier", "title"] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<SessionBindingPreview>(missing).is_err());
         }
     }
 }

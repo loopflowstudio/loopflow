@@ -1772,3 +1772,66 @@ not settle Codex's valid native decision retry, final connect/wire/discovery/imp
 or Desktop obligations. Released Desktop/partial inventory proposals remain
 unapplied; the private metadata-summary contribution does not block publication.
 Fresh main matches the retained base, so no speculative rebase was applied.
+
+
+## Desktop headless discovery and permanent binding (working, 2026-09-29)
+
+Published checkpoint `6c0981dbd` carries Exec discovery and the OpenCode native
+repair on PR1296. Main then reviewed and applied the released Desktop proposal's
+hunks on those bytes. No private full-file replacement was used. Supervisor's
+confirmation-text finding is incorporated: normal UI shows the Session name and
+public Task identifier/title, while stable internal IDs remain in transport.
+
+Desktop now reads both interactive modes in one complete inventory and filters
+only navigation. Selection, pane reconciliation and drafts retain hidden Sessions.
+Binding preview resolves a historical Task through the existing bind resolver;
+it records no Started or assignment and confirmation submits the resolved ID to
+the existing binding transaction. A bound conversation uses its retained terminal
+workspace when its Task's checkout differs. No paging/lifecycle owner is added.
+
+`desktop-controls-rust.log` passes five checks in 11.871s: strict shared preview
+wire, default/both-mode/repository inventory, mixed-origin import, inert preview,
+done-Task binding, Started once and prior usage attribution. `desktop-controls-swift.log`
+passes 67 tests across six suites in 9.353s, including off-roadmap binding, retained
+confirmation on refusal, stale-poll exclusion and hidden selection/drafts. Mounted
+terminal proof passes (5.531s): surfaces, focus, draft and companion survive
+headless hiding and binding to a differently placed Task. All-target Clippy
+passes (16.21s), as do formatting and bounded architecture checks. The Xcode
+fallback build-for-testing passes in `desktop-controls-xcode-focused.log`.
+The initial scripts/test.py --loopflow invocation unexpectedly selected the
+whole branch affected matrix; main interrupted it through its cleanup handler
+and ran the exact Xcode build directly. The interrupted result is retained at
+`desktop-controls-xcode.log` and establishes no full gate. Docs sync first used
+the wrong cwd, then passed from website. No hosted visual acceptance is claimed. The full discovery,
+connect, import and native retry requirements remain in remaining-work.md.
+
+
+Measured Desktop production delta versus6c0981dbd: +256/-35, net+221. Rust/Swift
+production prefixes exclude test modules, fixtures, docs and scratch; no rename
+credit. Source hashes and method are in `desktop-controls-source.json`. Review
+keeps complete inventory separate from display and exact commit identity separate
+from preview labels. The released proposal is integrated; its original artifact
+still records its unexecuted handback state, not these later proof results.
+
+## Hosted OpenCode conformance reconciliation (working, 2026-09-29)
+
+Supervisor retrieved the completed Rust job109511330688 from CI36599037523 on
+published6c0981dbd: 503passed, onefailed,15skipped,1480unrun. The remaining trace
+helper fed only map_event yet expected the deleted busy/idle lifecycle/usage
+reducer. All four traces used older display/status fields; no native request or
+assistant-parent identity was present. Their original bytes remain in6c0981dbd.
+Main removed that unused replay/fixture representation and replaced its claims
+with two native-history conformance checks, using synthetic current native shapes.
+
+The replacement covers absent versus zero versus measured usage, exact native
+request correlation across command output/text/completion, deduplicated outcomes,
+status/error without invented completion, and a native request's actual failed
+completion. The existing public automatic-retry, disconnect-after-effect and
+actual OpenCode final-answer proofs remain independent stronger consumer evidence.
+No synthetic idle completion was restored and no production code changed for this
+CI repair. `opencode-conformance-native.log` passes all 11 selected conformance/native
+history/mapper tests without fail-fast (0.424s), including unchanged Claude/Codex
+traces. All-target Clippy passes in `desktop-conformance-clippy-final.log` (16.03s)
+after removing a needless test clone flagged in the retained first log. Formatting
+and architecture pass. No native production bytes changed after their preceding
+public/actual-provider proofs; only the stale trace representation was replaced.

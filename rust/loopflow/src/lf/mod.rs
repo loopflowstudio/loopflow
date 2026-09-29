@@ -675,6 +675,25 @@ pub struct AskArgs {
     pub question: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SessionMode {
+    #[value(name = "true")]
+    Interactive,
+    #[value(name = "false")]
+    Headless,
+    All,
+}
+
+impl SessionMode {
+    pub fn interactive(self) -> Option<bool> {
+        match self {
+            Self::Interactive => Some(true),
+            Self::Headless => Some(false),
+            Self::All => None,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
     /// Read this conversation's native start, usage and completion receipts
@@ -695,9 +714,9 @@ pub enum SessionCommand {
         /// Include waiting steps from every repository on this machine
         #[arg(long)]
         all: bool,
-        /// Select interactive or headless conversations
-        #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
-        interactive: bool,
+        /// Select interactive (true), headless (false), or both (all)
+        #[arg(long, value_enum, default_value = "true")]
+        interactive: SessionMode,
         /// Include completed conversations and historical reviews
         #[arg(long)]
         history: bool,
@@ -740,9 +759,12 @@ pub enum SessionCommand {
     /// Assign a Task to a Session that has none; the Task never changes after
     Bind {
         id: String,
-        /// The Task, by its issue identifier (e.g. INF-123)
+        /// The Task, by its issue identifier (e.g. INF-123) or stable Task ID
         #[arg(long)]
         task: String,
+        /// Resolve the exact target without assigning the Session
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long)]
         json: bool,
     },

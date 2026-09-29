@@ -51,7 +51,7 @@ private actor SessionFixtureStore {
     }
 
     func run(_ args: [String]) throws -> String {
-        if args == ["session", "list", "--json", "--limit", "0"] {
+        if args == ["session", "list", "--json", "--interactive", "all", "--limit", "0"] {
             return unresolved ? "[\(kind.record)]" : "[]"
         }
         if args.starts(with: ["session", "open", kind.id]), args.contains("--json") {

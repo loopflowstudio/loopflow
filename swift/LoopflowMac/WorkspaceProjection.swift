@@ -313,6 +313,17 @@ extension WorkspaceProjection {
     }
 }
 
+/// One exact Session's assignment confirmation, retained through a failed commit.
+struct SessionBindingDraft: Equatable {
+    let id = UUID()
+    let sessionId: String
+    let title: String
+    var selector = ""
+    var preview: SessionBindingPreview?
+    var submitting = false
+    var error: String?
+}
+
 /// An in-place Session name edit. It belongs to exactly one Session; a
 /// completion for another Session can never touch it.
 struct SessionRenameDraft: Equatable {
@@ -359,9 +370,14 @@ final class WorkspaceNavigation {
             if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
                 self.renaming = nil
             }
+            if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
+                self.binding = nil
+            }
         }
     }
     var renaming: SessionRenameDraft?
+    var binding: SessionBindingDraft?
+    var showsHeadlessSessions = false
     /// Flow drafts by planning Task id; they survive Task and Session navigation.
     var flowDrafts: [String: TaskFlowDraft] = [:]
     var startingTaskSessions: Set<String> = []

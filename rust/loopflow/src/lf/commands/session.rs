@@ -76,7 +76,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     },
                     task: task.clone(),
                     search: search.clone(),
-                    interactive: Some(*interactive),
+                    interactive: interactive.interactive(),
                     history: *history,
                     limit: *limit,
                     offset: *offset,
@@ -106,8 +106,25 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
-        SessionCommand::Bind { id, task, json } => {
+        SessionCommand::Bind {
+            id,
+            task,
+            dry_run,
+            json,
+        } => {
             let store = open_shared_store().await?;
+            if *dry_run {
+                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!(
+                        "{} → {} ({}) [{}]. Not assigned.",
+                        preview.session_id, preview.identifier, preview.title, preview.task_id
+                    );
+                }
+                return Ok(());
+            }
             let session = crate::ops::human_session::bind(&store, id, task).await?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&session)?);

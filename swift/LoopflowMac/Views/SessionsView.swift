@@ -336,7 +336,10 @@ struct SessionsView: View {
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
-        workspaces.workspace(for: taskPath ?? worktreeLayout.focusedPath ?? store.repoPath).multiplexer
+        let path = navigation.selectedSessionId == nil
+            ? taskPath ?? worktreeLayout.focusedPath ?? store.repoPath
+            : worktreeLayout.focusedPath ?? store.repoPath
+        return workspaces.workspace(for: path).multiplexer
     }
     private var taskPath: String? {
         guard let task = fileTask else { return nil }
@@ -401,29 +404,31 @@ struct SessionsView: View {
                                     .buttonStyle(.plain).fixedSize()
                             }
                             if terminalsVisible {
-                                if let taskPath {
+                                if navigation.selectedSessionId != nil { worktreeChip }
+                                else if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
                                         .foregroundStyle(palette.textSecondary).help(taskPath)
                                         .accessibilityLabel("Task worktree")
                                         .accessibilityIdentifier("task-worktree-location")
                                 } else if fileTask == nil { worktreeChip }
-                                if fileTask == nil || taskPath != nil { completionControls }
+                                if navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil { completionControls }
                             }
                         }
                         ZStack {
                             Group {
-                                if let taskPath {
-                                    WorktreeTerminalsView(workspace: workspaces.workspace(for: taskPath),
-                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                        .id(taskPath)
-                                } else if fileTask != nil {
-                                    ContentUnavailableView("Task workspace unavailable", systemImage: "folder")
-                                } else {
+                                if navigation.selectedSessionId != nil || fileTask == nil {
+                                    // Binding changes ancestry, never the conversation's panes.
                                     WorktreeNodeView(
                                         node: worktreeLayout.layout, layout: worktreeLayout,
                                         workspaces: workspaces, isActive: terminalsVisible,
                                         showsStrips: worktreeLayout.layout.isSplit, sessions: store)
+                                } else if let taskPath {
+                                    WorktreeTerminalsView(workspace: workspaces.workspace(for: taskPath),
+                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
+                                        .id(taskPath)
+                                } else {
+                                    ContentUnavailableView("Task workspace unavailable", systemImage: "folder")
                                 }
                             }
                             .opacity(terminalsVisible ? 1 : 0)
@@ -472,7 +477,7 @@ struct SessionsView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, fileTask == nil || taskPath != nil {
+            if terminalsVisible, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -535,7 +540,7 @@ struct SessionsView: View {
     /// A Task with exactly one open Session drills into that Session; zero or
     /// several open the Task overview, which names each conversation.
     private func openTask(_ work: WorkReference) {
-        let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+        let sessions = model.visibleWorkspace.waves.lazy.flatMap(\.tasks)
             .first { $0.id.work == work }?.sessions ?? []
         if sessions.count == 1, let session = sessions.first {
             openSession(session)

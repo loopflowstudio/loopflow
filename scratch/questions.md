@@ -113,9 +113,10 @@ No Run launched or owner reply established the latest execution schema. Retry
 coordination before shared migrations; do not edit that branch, copy stores,
 repair auth or treat prior Wave memory as current agreement.
 
-Next implementation action: build and prove the shared normalized planning
-lookup, including cache miss, missing Project, unknown selector and provider
-failure. Resolve the outage policy before claiming offline managed execution.
+The shared normalized lookup now has focused proofs for cache miss, missing
+Project, unknown selector and provider failure. Next, finish provider ordering,
+webhook convergence and public freshness/error representation. Resolve the outage
+policy before dependent managed-admission work or any offline execution claim.
 This review records no Advance/Iterate verdict; the saved Flow owns navigation.
 
 ## Implementation observations — 2026-09-29
@@ -135,3 +136,11 @@ so retain existing relative order when the Project is unchanged.
 These choices do not settle offline managed admission, Wave migration controls,
 or provider revision ordering. The complete design remains unfinished; the working
 design contains the remaining implementation list and proof limits.
+
+Realign source inspection at `dfd7563d4` found two consumer limits: automatic
+refresh failure returns retained planning with its original timestamp but no
+status `planning_error`; the new status envelope has no Swift/DTO fixture parity.
+Invalidated records are retained but hidden by both planning readers. Keep these
+gaps separate from managed execution policy. No new behavioral checks or
+coordination request ran during reconciliation; the prior grouped OAuth tracing
+failure and LOO-298 coordination blocker remain unresolved.

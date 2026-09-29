@@ -4,6 +4,48 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dep
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
+## Synced planning and runtime selection (LOO-334, 2026-09-29)
+
+Jack Heart approved one local planning interface, with repository-level Linear
+authority when connected and private local plans otherwise. Git shares Wave
+goals, memory, Flows, Skills and provider bindings; Linear adds shared planning.
+Shared execution between participants belongs to the paid layer. Cross-store
+discovery here serves one operator and grants no teammate execution authority.
+
+Accepted contracts below exceed the implemented planning slice:
+
+- Repository files establish Waves; never adopt every Linear Initiative during
+  a read. Jack selected one Initiative per Wave/subwave, portable `A/B` names,
+  and native parent links only when supported. Use the owning worktree's full
+  definition set, including dirty additions/deletions; context-free reads use
+  last-fetched configured remote main. Reads neither union views nor reset files.
+  No-remote/main-checkout policy and outward definition sync remain unresolved.
+- Separate presence, freshness and execution eligibility. Project-less issues
+  exist; list omission and failed refresh cannot prove deletion. Acquisition
+  timestamps are not provider revisions. Shared entities can be newer than a
+  Wave's membership observation, so its sync timestamp cannot date every field.
+- Invalid or mismatched planning must stop managed progression while ordinary
+  worktree Flows remain available without settling that Task's invocation.
+  Jack excluded automatic reconciliation. Cached-Task outage admission remains
+  undecided; retaining cached inspection does not select an execution policy.
+- Status observes PRs without completing Tasks. Chapter rollover must complete the
+  predecessor after unfinished Task transfer and preserves archival/history;
+  closure does not establish successful KRs or complete transferred Tasks.
+- Jack selected the official runtime at each new worker boundary, independently
+  of the execution store, with deliberate visible pins. This supersedes the
+  coupled runtime/store target in the LOO-321 branch notes below, while retaining
+  source isolation and verified historical pairs. It is not implemented yet.
+
+Branch `dfd7563d4` implements normalized connected planning and planning-only
+status. Recorded lookup, migration and cached public-CLI proofs passed; these
+are simulated/local evidence, not live Linear or the full command story. Status
+freshness/error presentation and Swift parity remain incomplete. The grouped
+OAuth tracing test failed then passed alone; that grouped failure is unresolved.
+LOO-298 coordination failed as unregistered before any Run launched. Its older
+model notes are not a current integration contract; shared execution migrations
+must wait for that contract. This curation reruns no behavioral checks and grants
+no Task completion, publication or Flow navigation.
+
 ## Session launch continuity (branch evidence, 2026-09-28)
 
 Jack assigned `jack-heart/session-launch-hardening` an independent main-based
@@ -1080,9 +1122,10 @@ local configuration, optional provider connection and later PM setup. Today's
   Wave never terminates successful siblings. The Mac app uses the shared
   connection path. Reconciliation polling remains recovery,
   never startup acknowledgement.
-- **Controller evidence is not an agent Run** (learned 2026-07-20). When a
-  merged PR or another controller fact completes a Task, persist the Task
-  domain transition and completion event in one transaction. Never mint a
+- **Controller evidence is not an agent Run** (learned 2026-07-20; clarified
+  by LOO-334). An authorized completion operation persists the Task domain
+  transition and completion event in one transaction. A status read observing
+  a merged PR must not perform that transition. Never mint a
   synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
   with a zero-agent-boundary fixture and repeated reads that count Runs and
   completion events.

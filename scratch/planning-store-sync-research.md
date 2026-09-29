@@ -71,7 +71,7 @@ delivery IDs. Those APIs do not by themselves establish equivalent transaction
 checkpoints or a complete ordered replication log.
 [Linear webhooks](https://linear.app/developers/webhooks).
 
-## Repository evidence
+## Repository evidence at the review baseline (`a3820bf7e`)
 
 - `store/mod.rs::PmSnapshotRow` and `store/sqlite.rs::put_pm_snapshot` persist a
   serialized payload per Wave, atomically replaced on refresh.
@@ -82,12 +82,16 @@ checkpoints or a complete ordered replication log.
 - Repository configuration already owns provider/Team; Wave Initiative IDs
   identify relationships inside that connection.
 
-The current cache already has useful refresh policy. The missing architectural
-piece is a shared entity reader that does not require prior list membership or
-allocated execution. Normalization must replace competing snapshot readers,
-not become an additional planning copy.
+That cache supplied the refresh policy reused by the implementation. At
+`dfd7563d4`, normalized entity/membership storage replaces the payload table;
+`PmSnapshotRow` is a typed assembled view. Exact lookup acquires planning before
+resolving ownership, and status needs no execution allocation. The current
+[checkpoint](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
+records proof and remaining webhook, provider-ordering and public freshness gaps.
+The baseline observations above explain the change; they are no longer a
+description of the current reader.
 
-## Proposed application
+## Adopted architecture; completion tracked in the working design
 
 1. Normalize Tasks by stable entity identity in existing SQLite. Detail lookup,
    Wave listing, mutation response and webhook update the same planning record.

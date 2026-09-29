@@ -57,6 +57,13 @@ A null detail response invalidates cached admission until a complete detail
 read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
+The status envelope currently exposes observation time, not a complete refresh
+outcome: automatic refresh failure can return dated planning with no
+`planning_error`. An invalidated record remains stored but is excluded from
+detail and Wave readers. Wave `synced_at` dates membership refresh; joined
+entities may contain newer detail observations. Neither timestamp establishes
+provider revision ordering or permission to continue managed work offline.
+
 ## Capture a Flow once
 
 ```yaml

@@ -84,6 +84,31 @@ Remaining implementation, preserving the approved single-PR delivery boundary:
   the complete two-store public-CLI acceptance sequence. The new CLI status shape
   is planning/execution; existing execution snapshots remain unchanged.
 
+Source reconciliation at `dfd7563d4`: the locally fetched `origin/main` still
+points to the reviewed base `a3820bf7e`; no newer integrated execution contract
+was available from that ref. Infrastructure's Session-launch and branch-isolation
+memory reinforces retained executable/store pairs and preservation of failed
+launch evidence. Reuse those mechanisms for discovery; they do not establish
+LOO-298 agreement or the new independent runtime/store selection contract.
+
+Freshness still needs a complete public representation. A failed automatic
+refresh can return the retained record with its original `observed_at`; status
+then has no `planning_error`, while the failure is logged. `needs_refresh` hides
+an invalidated record from both readers but retains its bytes; it is not a public
+invalid/unavailable state. Wave `synced_at` dates membership acquisition, whereas
+joined entities can have newer detail observations. Preserve these distinctions
+in the remaining DTO/action work. The new `TaskStatus` envelope has CLI coverage,
+but no matching Swift consumer or cross-language fixture yet. PM fixture passes
+do not prove that new envelope. These are implementation gaps, not selected
+offline-admission policy.
+
+This reconciliation changes documentation and relevant Infrastructure memory
+only. Prior behavioral receipts above are reused; no new behavioral run, provider
+request, coordination retry or installation promotion occurred. The grouped OAuth
+tracing failure remains unresolved. The next implementation boundary is provider
+ordering/webhook convergence and explicit planning freshness; shared execution
+migrations still require LOO-298's contract.
+
 Review findings fixed in code: typed snapshot consumers replace serialized ones;
 Project-less existence is separate from ownership; incomplete detail cannot clear
 known relationships; list omission does not erase known Tasks; detail does not
@@ -192,7 +217,7 @@ Task claiming, fleet scheduling or execution handoff. Linear Task status is shar
 planning evidence, not cross-user execution authority. The paid execution layer
 is neither implemented nor designed by this change.
 
-## Why the current system fails
+## Original failure and surviving constraints
 
 The reported LOO-298 incident had a Linear issue, PR #1296 and a checkout, but the
 official CLI said no Task existed. Its record was in another installation's store.
@@ -200,15 +225,15 @@ The incident also reported a wrapper retaining older executable and data-directo
 settings, divergent account/usage data, and a worker arriving after its caller had
 withdrawn the claim at a ten-second deadline.
 
-Source inspection establishes:
+Baseline inspection at `a3820bf7e` established the following. The first three
+defects are repaired by the planning slice; the runtime and startup defects remain:
 
-- `ops/task.rs::task_status` demands a local execution Task before consulting
-  provider planning. It can also complete a Task after observing a merged PR.
-- `ops/task_pm.rs::resolve_task_async` requires cached Wave membership before
-  refresh. Sync cannot help a selector that is rejected before it runs.
-- `pm/linear.rs::OwnedIssueNode::into_ownership` rejects an existing issue without
-  a Project. Direct provider lookup exists, but its decoder conflates existence
-  with complete ownership.
+- `ops/task.rs::task_status` required execution and could complete work from a
+  merged PR. It now reads planning independently and observes PRs without completion.
+- `ops/task_pm.rs::resolve_task_async` rejected uncached Wave membership before
+  refresh. It now acquires the exact issue into the shared reader first.
+- `pm/linear.rs::OwnedIssueNode::into_ownership` rejected Project-less issues.
+  It now preserves existence and represents the missing relationship explicitly.
 - Repository `engine/config.rs::PmConfig` already has provider and Linear Team
   fields. `ops/pm.rs::read_repository_team` reads them. Wave Initiative mapping
   can remain distinct from repository connection ownership.
@@ -220,8 +245,8 @@ Source inspection establishes:
   `ops/child.rs::CHILD_STARTUP_GRACE` is ten seconds. A late child can become stale
   without another worker competing with it.
 
-The first two findings require better synchronization and separate planning from
-execution requirements. They do not justify accepting arbitrary explicit Tasks.
+These repairs separate planning lookup from execution allocation. They do not
+establish all managed-admission boundaries or justify arbitrary explicit Tasks.
 
 ## Accepted decisions
 
@@ -269,9 +294,10 @@ surviving Task owner rather than introducing a temporary second schema.
 Normalize planning into entity records within the
 existing SQLite store. Issue lookup, Wave listing, confirmed mutations and webhook
 ingestion update the same Task by stable identity. Lists hold membership and order;
-they do not own additional title/status copies. Today's serialized per-Wave
-snapshots cannot remain an independent planning source beside normalized records.
-Migrate their consumers together. This follows Apollo's shared-entity pattern;
+they do not own additional title/status copies. The draft migration now removes
+serialized per-Wave snapshots and their payload consumers. `PmSnapshotRow`
+remains a typed view assembled from normalized records, not another persisted
+planning copy. This follows Apollo's shared-entity pattern;
 it does not select Apollo as a dependency or require a general GraphQL cache.
 
 Separate acquisition policy, stored freshness and managed Task validity. Missing
@@ -283,7 +309,8 @@ remains an open product choice.
 ### Research translated into implementation
 
 The [source comparison](planning-store-sync-research.md) supplies the rationale
-and evidence limits. The implementation adopts these concrete contracts:
+and evidence limits. These are the adopted target contracts; the checkpoint
+distinguishes completed integration from remaining work:
 
 | Research lesson | Loopflow contract | Verification |
 |---|---|---|
@@ -573,13 +600,12 @@ cannot adopt arbitrary unbound implementation checkouts. Implement or explicitly
 resolve these gaps before demonstrating the opening sequence; do not manufacture
 a second design or Task to make the story appear continuous.
 
-1. Consolidate planning readers behind normalized entities in the synced local
-   store. Migrate `pm_snapshots` payload consumers to entity/membership reads and
-   remove the old payload writer/read path when migrated; do not dual-write two
-   planning representations. Preserve migration history. Rework direct provider
-   decoding to retain issue existence with incomplete ownership. Delete cached
-   Wave-membership rejection before refresh and direct command read alternatives.
-   Detail, bulk sync, confirmed mutations and webhook ingestion share updates.
+1. Finish convergence on the normalized reader already implemented for detail,
+   Wave lists and PM operations. Payload storage and its consumers are removed;
+   incomplete ownership is representable and lookup refreshes before resolving
+   membership. Integrate webhook updates/invalidation and provider ordering;
+   acquisition timestamps cannot settle conflicting provider revisions. Preserve
+   migration history and the existing deletion receipts. No second planning copy.
 2. Adapt Task/Project identities and planning writes for local operation. Preserve
    IDs and execution through forward migration; coordinate with LOO-298 first.
 3. Update Task operations, direct `--as task:` resolution, Session selection,
@@ -666,14 +692,14 @@ host installation or credentials. Provider simulation is not configured live pro
     two worktrees share one local store yet return their own definitions. Dirty
     add/delete/edit and revert affect the owning view immediately; read order,
     branch switches and Linear refresh cannot overwrite another view or resurrect
-    locally removed Waves. Context-free reads use main. No provider mutation or
-    execution allocation follows from definition import.
+    locally removed Waves. Context-free reads use the remote-main baseline.
+    No provider mutation or execution allocation follows from definition import.
 
 Primary end-to-end command after extension:
 `uv run python scripts/test_task_installation.py`. Use one focused behavioral proof
 per changed boundary; affected suites once at gate. Rust changes require
-`cargo fmt` and `cargo clippy --all-targets -- -D warnings`. No behavioral checks
-have run for this design review.
+`cargo fmt` and `cargo clippy --all-targets -- -D warnings`. The checkpoint above
+records the partial implementation's proofs; this full matrix remains unproven.
 
 ## Scope and implementation handoff
 
@@ -714,5 +740,6 @@ behavior. They do not prevent the first slice. No Flow navigation is selected he
 - Kickoff review caught Home-ID aliasing, Project-required existence, runtime/store
   coupling and Linear-only Project identity under local creation. Those constraints
   remain; the direct-read architecture and mismatch-continuation proposal do not.
-- No implementation, live provider request, migration, publication, promotion or
-  acceptance demonstration was performed in this review.
+- The interactive design review performed no implementation, live provider
+  request, migration, publication, promotion or acceptance demonstration.
+  Subsequent implementation and local proof are recorded in the checkpoint above.

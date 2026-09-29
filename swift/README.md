@@ -34,6 +34,44 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
+Choose **Show Files** in a Task or Session toolbar to read `scratch/` and changed files
+beside the retained terminal. **Parent** compares the worktree with the Task PR's
+recorded base; **HEAD** compares with its current commit. The displayed SHA pins
+the file list and selected diff. A recorded PR links above the file navigator.
+Use ↑/↓ in the navigator to select files; hover a row for its full path.
+**Show Files** / **Hide Files** remembers the browser visibility across relaunches.
+
+**File** retains editable UTF-8 drafts and selection in this window; **Diff**
+shows the draft comparison read-only. Task headers show the recorded checkout;
+terminal and files follow that Task without a separate worktree selector.
+Switching files, hiding Files and returning to the Task keeps the draft.
+
+Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
+app menu for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+including atomic replacements. Disjoint local edits survive; disk wins overlaps
+without a conflict dialog. Incoming updates reset Undo to the surviving local
+edits, so Undo cannot restore text the LLM replaced. IME composition completes
+before incoming changes apply. Missing or invalid files retain dirty drafts and
+cannot be saved. Unsaved drafts do not survive closing the window.
+
+**Open saved versions** opens recovery folders in the checkout's Git metadata,
+including files later renamed or deleted. Every completed Save retains its draft,
+receipt and displaced inode; no version is created for each keystroke. Ordinary
+reads and saves do not scan old recovery history. Inspect late writes explicitly
+with `lf task file ISSUE PATH --recoveries --json`. Retention has no automatic
+cleanup or size cap; each settled save can retain up to two file-sized versions.
+Removing the worktree removes its recovery. Each window holds separate drafts
+and receives the other's writes through the same disk-wins policy.
+
+Save preserves file mode and exact UTF-8 bytes, including BOM and line endings.
+Revision checks refuse already-observed changes before the editor reconciles
+and retries. Arbitrary writers can still race publication; this is not exclusion
+of concurrent writes, extended-attribute preservation or power-loss durability.
+Symlink paths cannot be saved. A symlink introduced during exchange is retained
+without changing its destination.
+Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
+long lines retain the native editor's known responsiveness limitation.
+
 Select a repository in the outline, then choose a Task or Session. Use the
 outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
 shows repo → Wave → Task → Session and promotes descendants of singleton Waves
@@ -79,8 +117,7 @@ rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Home and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
-the focused worktree (a mono chip whose menu chooses, splits and hides
-worktrees and opens a terminal there), **Complete** for the focused pane's
+the Task's read-only worktree location, **Complete** for the focused pane's
 conversation when its shared actions allow it, and the Activity and Monitor
 glyphs.
 
@@ -148,9 +185,9 @@ an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
 Selecting a Session in another checkout restores that worktree's conversation,
-companion terminals, split layout, and focus. The toolbar's worktree menu splits
-entire workspaces; pane strips and keybinds split within one workspace. Hiding a
-worktree retains its processes. Closing a shell ends that shell. Changing a shell's
+companion terminals, split layout, and focus. Outside Task context, the toolbar's
+worktree menu splits entire workspaces; pane strips and keybinds split within one
+workspace. Hiding a worktree retains its processes. Closing a shell ends that shell. Changing a shell's
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.

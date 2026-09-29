@@ -7,7 +7,11 @@ import Foundation
 import Loopflow
 
 enum RegistryQueryLocal {
-    static let shared = RegistryQuery(watchActiveRuns: {
+    static let shared = RegistryQuery(runWithInput: { args, cwd, input in
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
+        }.value
+    }, watchActiveRuns: {
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ActiveRunsLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(

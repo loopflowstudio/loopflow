@@ -983,6 +983,8 @@ pub enum TaskCommand {
     /// List files changed from this Task's recorded base commit
     Changes {
         issue: String,
+        #[arg(long, default_value = "parent")]
+        base: String,
         #[arg(long)]
         json: bool,
     },
@@ -990,6 +992,11 @@ pub enum TaskCommand {
     Diff {
         issue: String,
         path: Option<String>,
+        #[arg(long, default_value = "parent")]
+        base: String,
+        /// Compare a UTF-8 draft read from stdin without writing the worktree
+        #[arg(long, requires = "path")]
+        draft: bool,
         #[arg(long)]
         json: bool,
     },
@@ -997,6 +1004,18 @@ pub enum TaskCommand {
     File {
         issue: String,
         path: String,
+        /// Inspect retained versions, including late writes; omitted for fast content reads
+        #[arg(long)]
+        recoveries: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save UTF-8 stdin with an expected revision and retained recovery files
+    Save {
+        issue: String,
+        path: String,
+        #[arg(long)]
+        revision: String,
         #[arg(long)]
         json: bool,
     },
@@ -2435,7 +2454,7 @@ mod tests {
         assert!(matches!(
             changes.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Changes { issue, json: true }
+                cmd: TaskCommand::Changes { issue, json: true, .. }
             }) if issue == "INF-123"
         ));
 
@@ -2449,6 +2468,7 @@ mod tests {
                     issue,
                     path: Some(path),
                     json: true,
+                    ..
                 }
             }) if issue == "INF-123" && path == "src/parser.rs"
         ));
@@ -2459,7 +2479,7 @@ mod tests {
         assert!(matches!(
             file.command,
             Some(Commands::Task {
-                cmd: TaskCommand::File { issue, path, json: true }
+                cmd: TaskCommand::File { issue, path, json: true, recoveries: false }
             }) if issue == "INF-123" && path == "src/parser.rs"
         ));
     }

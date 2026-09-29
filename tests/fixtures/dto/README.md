@@ -50,3 +50,8 @@ the provider's Wave-qualified title is normalized before this reader returns.
 It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
 
 `task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.
+
+`task_files.json` pins `lf task changes/diff/file/save --json`: exact comparison bases,
+rename paths, scratch listing, and lossless content with a byte revision and
+explicit file state, Save outcome, recovery access and late-change disclosure.
+Rust round-trips the same fixture Swift decodes.

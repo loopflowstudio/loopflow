@@ -22,6 +22,14 @@ final class PaneHover {
 final class SessionsWorkspace {
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
+    private var taskFiles: [String: TaskFilesStore] = [:]
+
+    func files(taskId: String, issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
+        if let files = taskFiles[taskId] { return files }
+        let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
+        taskFiles[taskId] = files
+        return files
+    }
     let surfaces: GhosttySurfacePool
     private var surfaceClosed: AnyCancellable?
 
@@ -57,9 +65,11 @@ final class SessionsWorkspace {
 /// while never sharing an NSView or multiplexer across windows — a Session
 /// viewed in another window is just another "active elsewhere" client.
 @MainActor
+@Observable
 final class SessionsWorkspaceRegistry {
-    private var workspaces: [String: SessionsWorkspace] = [:]
-    private var layouts: [String: WorktreeLayoutStore] = [:]
+    // Observable only for environment delivery; lazy creation must not invalidate views.
+    @ObservationIgnored private var workspaces: [String: SessionsWorkspace] = [:]
+    @ObservationIgnored private var layouts: [String: WorktreeLayoutStore] = [:]
     let surfaces = GhosttySurfacePool()
 
     func layout(for repoPath: String) -> WorktreeLayoutStore {
@@ -75,8 +85,14 @@ final class SessionsWorkspaceRegistry {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }
 
-    func reconcileSessions(_ ids: Set<String>, in paths: Set<String>) {
-        for path in paths { workspaces[path]?.multiplexer.reconcileSessions(ids) }
+    func removeSessions(_ ids: Set<String>) {
+        for workspace in workspaces.values {
+            let sessions = Set(workspace.multiplexer.layout.allPanes.compactMap { pane -> String? in
+                if case .session(let id) = pane.content { return id }
+                return nil
+            })
+            workspace.multiplexer.reconcileSessions(sessions.subtracting(ids))
+        }
     }
 
     func workspace(for repoPath: String) -> SessionsWorkspace {
@@ -308,8 +324,10 @@ private final class SessionsLatencyMetrics {
 
 /// Unified Work navigation around the existing retained native workspace.
 struct SessionsView: View {
+    @AppStorage("taskFilesVisible") private var showsFiles = false
     @Bindable var model: PodiumModel
     private let workspaces: SessionsWorkspaceRegistry
+    private let query: RegistryQuery
     private let worktreeLayout: WorktreeLayoutStore
     @ObservedObject private var store: SessionsStore
     @State private var layoutRevision = 0
@@ -318,7 +336,15 @@ struct SessionsView: View {
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
-        workspaces.workspace(for: worktreeLayout.focusedPath ?? store.repoPath).multiplexer
+        workspaces.workspace(for: taskPath ?? worktreeLayout.focusedPath ?? store.repoPath).multiplexer
+    }
+    private var taskPath: String? {
+        guard let task = fileTask else { return nil }
+        let workspace = task.task.reference.workspace
+        if workspace?.localExists != true, let prepared = navigation.preparedTaskWorktrees[task.task.id] {
+            return prepared
+        }
+        return workspace?.worktree
     }
     private var availablePaths: [String] {
         worktreeLayout.knownPaths.union(store.sessions.map(\.record.cwd)).sorted()
@@ -328,6 +354,7 @@ struct SessionsView: View {
          query: RegistryQuery = RegistryQueryLocal.shared) {
         self.model = model
         self.workspaces = workspaces
+        self.query = query
         worktreeLayout = workspaces.layout(for: repoPath)
         let store = workspaces.workspace(for: repoPath).sessionStore(repoPath: repoPath, query: query)
         store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: repoPath) }
@@ -336,6 +363,12 @@ struct SessionsView: View {
 
     private var navigation: WorkspaceNavigation { model.navigation }
     private var terminalsVisible: Bool { navigation.content == .terminals }
+    private var fileTask: WorkspaceTask? {
+        // A departing repository view must not mount the next repository's
+        // retained terminals while SwiftUI replaces its hierarchy.
+        guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
+        return model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId)?.task
+    }
 
     var body: some View {
         let _ = layoutRevision
@@ -356,52 +389,82 @@ struct SessionsView: View {
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
                     .frame(width: 264)
                 Rectangle().fill(palette.border).frame(width: 1)
-                VStack(spacing: 0) {
-                    WorkspaceBreadcrumbBar(
-                        model: model,
-                        crumb: model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId),
-                        onOpenSession: openSession, onMonitor: showMonitor
-                    ) {
-                        if terminalsVisible {
-                            worktreeChip
-                            completionControls
-                        }
-                    }
-                    ZStack {
-                        WorktreeNodeView(
-                            node: worktreeLayout.layout, layout: worktreeLayout,
-                            workspaces: workspaces, isActive: terminalsVisible,
-                            showsStrips: worktreeLayout.layout.isSplit, sessions: store
-                        )
-                        .opacity(terminalsVisible ? 1 : 0)
-                        .disabled(!terminalsVisible)
-                        .allowsHitTesting(terminalsVisible)
-                        .accessibilityHidden(!terminalsVisible)
-                        VStack(spacing: 0) {
-                            HSplitView {
-                                ScrollViewReader { reader in
-                                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
-                                                    onNewSession: newTaskSession)
-                                        .onChange(of: navigation.content == .details
-                                            ? navigation.flowDrafts[model.selection?.id ?? ""]?.selectedNode : nil,
-                                                  initial: true) { _, selected in
-                                            if selected != nil { reader.scrollTo("task-flow-anchor", anchor: .top) }
-                                        }
-                                }
-                                .frame(minWidth: 300, maxWidth: .infinity)
-                                if navigation.showsActivity {
-                                    WorkActivityView(model: model)
-                                        .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
-                                }
+                HSplitView {
+                    VStack(spacing: 0) {
+                        WorkspaceBreadcrumbBar(
+                            model: model,
+                            crumb: model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId),
+                            onOpenSession: openSession, onMonitor: showMonitor
+                        ) {
+                            if taskPath != nil {
+                                Button(showsFiles ? "Hide Files" : "Show Files") { showsFiles.toggle() }
+                                    .buttonStyle(.plain).fixedSize()
+                            }
+                            if terminalsVisible {
+                                if let taskPath {
+                                    Text(URL(fileURLWithPath: taskPath).lastPathComponent)
+                                        .font(Typography.code(11)).lineLimit(1)
+                                        .foregroundStyle(palette.textSecondary).help(taskPath)
+                                        .accessibilityLabel("Task worktree")
+                                        .accessibilityIdentifier("task-worktree-location")
+                                } else if fileTask == nil { worktreeChip }
+                                if fileTask == nil || taskPath != nil { completionControls }
                             }
                         }
-                        .background(palette.background)
-                        .opacity(terminalsVisible ? 0 : 1)
-                        .allowsHitTesting(!terminalsVisible)
-                        .accessibilityHidden(terminalsVisible)
+                        ZStack {
+                            Group {
+                                if let taskPath {
+                                    WorktreeTerminalsView(workspace: workspaces.workspace(for: taskPath),
+                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
+                                        .id(taskPath)
+                                } else if fileTask != nil {
+                                    ContentUnavailableView("Task workspace unavailable", systemImage: "folder")
+                                } else {
+                                    WorktreeNodeView(
+                                        node: worktreeLayout.layout, layout: worktreeLayout,
+                                        workspaces: workspaces, isActive: terminalsVisible,
+                                        showsStrips: worktreeLayout.layout.isSplit, sessions: store)
+                                }
+                            }
+                            .opacity(terminalsVisible ? 1 : 0)
+                            .disabled(!terminalsVisible)
+                            .allowsHitTesting(terminalsVisible)
+                            .accessibilityHidden(!terminalsVisible)
+                            VStack(spacing: 0) {
+                                HSplitView {
+                                    ScrollViewReader { reader in
+                                        WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
+                                                        onNewSession: newTaskSession)
+                                            .onChange(of: navigation.content == .details
+                                                ? navigation.flowDrafts[model.selection?.id ?? ""]?.selectedNode : nil,
+                                                      initial: true) { _, selected in
+                                                if selected != nil { reader.scrollTo("task-flow-anchor", anchor: .top) }
+                                            }
+                                    }
+                                    .frame(minWidth: 300, maxWidth: .infinity)
+                                    if navigation.showsActivity {
+                                        WorkActivityView(model: model)
+                                            .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
+                                    }
+                                }
+                            }
+                            .background(palette.background)
+                            .opacity(terminalsVisible ? 0 : 1)
+                            .allowsHitTesting(!terminalsVisible)
+                            .accessibilityHidden(terminalsVisible)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .clipped()
                     }
-                    .frame(maxWidth: .infinity)
-                    .clipped()
+                    if showsFiles, let task = fileTask, let taskPath {
+                        TaskFilesView(
+                            store: workspaces.workspace(for: taskPath).files(
+                                taskId: task.task.id, issue: task.task.task.identifier, cwd: taskPath, query: query),
+                            prURL: task.task.activePr?.publication?.github?.url
+                        )
+                        .id(task.task.id)
+                        .frame(minWidth: 480, idealWidth: 700)
+                    }
                 }
             }
         }
@@ -409,7 +472,7 @@ struct SessionsView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible {
+            if terminalsVisible, fileTask == nil || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
             }
@@ -419,16 +482,17 @@ struct SessionsView: View {
             layoutRevision += 1
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
-            guard let records else { return }
+            guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
+                  let records else { return }
             let previous = Set(store.sessions.map(\.id))
             store.reconcile(records)
             let ids = Set(store.sessions.map(\.id))
             for id in previous.subtracting(ids) { store.releaseSurface(id) }
-            workspaces.reconcileSessions(ids, in: worktreeLayout.knownPaths)
+            workspaces.removeSessions(previous.subtracting(ids))
         }
         .onChange(of: store.sessions.map(\.id)) { previous, ids in
             for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
-            workspaces.reconcileSessions(Set(ids), in: worktreeLayout.knownPaths)
+            workspaces.removeSessions(Set(previous).subtracting(ids))
         }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttySurfaceClosed)) { notification in
             guard let terminal = notification.object as? TerminalIdentity else { return }
@@ -508,7 +572,8 @@ struct SessionsView: View {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
         worktreeLayout.select(scope.repoPath)
         navigation.content = .terminals
-        multiplexer.newShell(command: ConversationLaunch(scope: scope).arguments(lf: lf))
+        workspaces.workspace(for: scope.repoPath).multiplexer.newShell(
+            command: ConversationLaunch(scope: scope).arguments(lf: lf))
     }
 
     /// An independent conversation with Task context in the Task's checkout.
@@ -526,6 +591,7 @@ struct SessionsView: View {
             worktree = try await Task.detached(priority: .userInitiated) {
                 try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
             }.value
+            origin.preparedTaskWorktrees[taskId] = worktree
         }
         try launch(.task(repo: worktree, id: issue), in: origin)
     }
@@ -1383,6 +1449,9 @@ private struct SessionsShortcutMonitor: NSViewRepresentable {
                       event.window === window,
                       let shortcut = Self._shortcut(for: event)
                 else { return event }
+                // A focused text view owns ⌘Z. Every other shortcut stays here, so ⌘W
+                // closes a pane instead of falling through to close the window.
+                if case .undoClose = shortcut, window.firstResponder is NSTextView { return event }
                 self.handler(shortcut)
                 return nil
             }

@@ -28,14 +28,19 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
+    private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let observe: @Sendable () async throws -> ActiveRunsObservation
 
     public init(
+        runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
+            throw RegistryQueryError("Draft comparison is unavailable on this transport")
+        },
         watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
             throw RegistryQueryError("Active Run observation is unavailable on this transport")
         },
         run: @escaping RegistryRunner
     ) {
+        self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveRuns
     }
@@ -167,8 +172,8 @@ public struct RegistryQuery: Sendable {
 
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
-    public func taskChanges(issue: String, cwd: String?) async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "changes", issue, "--json"], cwd)
+    public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "changes", issue, "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
@@ -216,12 +221,20 @@ public struct RegistryQuery: Sendable {
     public func taskDiff(
         issue: String,
         path: String?,
+        base: String = "parent",
+        draft: String? = nil,
         cwd: String?
     ) async throws -> TaskDiffSnapshot {
         var args = ["task", "diff", issue]
         if let path { args.append(path) }
-        args.append("--json")
-        let stdout = try await run(args, cwd)
+        args.append(contentsOf: ["--base", base, "--json"])
+        let stdout: String
+        if let draft {
+            args.append("--draft")
+            stdout = try await runWithInput(args, cwd, draft)
+        } else {
+            stdout = try await run(args, cwd)
+        }
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
@@ -233,6 +246,12 @@ public struct RegistryQuery: Sendable {
     ) async throws -> TaskFileSnapshot {
         let stdout = try await run(["task", "file", issue, path, "--json"], cwd)
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
+    }
+
+    public func saveTaskFile(issue: String, path: String, revision: String, content: String,
+                             cwd: String?) async throws -> TaskFileSave {
+        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], cwd, content)
+        return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
     /// Sessions in this repository.

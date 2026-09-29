@@ -195,13 +195,34 @@ after it:
 ```bash
 lf task run DES-123 --json                           # durable Task Work
 lf task status DES-123 --json                        # same identity and worktree
-lf task changes DES-123 --json                       # committed + working changes
-lf task diff DES-123 src/parser.rs --json            # one file's Task patch
+lf task changes DES-123 --base head --json           # net changes + recursive scratch listing
+lf task diff DES-123 src/parser.rs --base parent --json # patch against recorded PR base
 lf task file DES-123 src/parser.rs --json            # current worktree contents
 lf wave --wave designer sync                           # normalized onto `sync`
 lf task --wave designer create --title "Fix it" --notes "Repair startup"  # normalized onto `create`
 lf commit -m "explain the change"                   # -m remains commit-local
 ```
+
+Task file access reads recorded placement directly from the local registry; it
+does not sync planning, reconcile PRs, or start a Run. Comparisons default to `parent`. Use `head` for the current commit,
+or pass the `base_commit` SHA returned by `task changes` to pin subsequent reads.
+`task diff ISSUE PATH --draft` reads a UTF-8 draft from stdin without changing the
+worktree or index. `task file` returns complete UTF-8 content and a byte revision,
+or an explicit binary, unsupported-encoding, missing, or over-1-MB state.
+
+```bash
+lf task save DES-123 scratch/notes.md --revision <revision-from-task-file> --json < draft.md
+```
+
+Save refuses an observed revision conflict. Each exchange retains a receipt,
+submitted draft and displaced file under the checkout's Git metadata. Add
+`--recoveries` to `task file` to inspect retained versions and late writes.
+Ordinary content reads skip history inspection; Save inspects only its new
+exchange. `task changes` returns the recovery root directory. Recovery remains after restart, deletion or rename.
+Nothing automatically restores or deletes these versions. Open-descriptor writers
+can still change a displaced file later. This preserves recovery without claiming
+a compare-and-swap or power-loss guarantee. Files must be complete UTF-8 within
+1 MB; Save rejects symlink paths and Git metadata.
 
 Flags may cross nested subcommands to reach a selected command that owns the
 spelling. If more than one level owns it, a flag already valid at its current

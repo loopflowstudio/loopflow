@@ -218,18 +218,8 @@ struct TaskMonitorTests {
     }
 
     private func query(feed: ActiveRunsTestFeed, sessions: String = "[]") throws -> RegistryQuery {
-        var roadmap = try #require(JSONSerialization.jsonObject(with: fixture("roadmap_snapshot")) as? [String: Any])
-        var waves = try #require(roadmap["waves"] as? [[String: Any]])
-        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
-        var tasks = try #require(evidence["items"] as? [[String: Any]])
-        for index in tasks.indices {
-            // Tasks without local checkouts use the repository's existing workspace.
-            tasks[index]["reference"] = ["issue_url": NSNull(), "workspace": NSNull()]
-        }
-        evidence["items"] = tasks
-        waves[0]["tasks"] = evidence
-        roadmap["waves"] = waves
-        let text = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
+        let text = String(decoding: try placingTaskWorktrees(
+            in: fixture("roadmap_snapshot"), at: "/src/loopflow"), as: UTF8.self)
         let initial = try activeRuns()
         return RegistryQuery(watchActiveRuns: { try await feed.open(initial: initial) }) { args, _ in
             switch args.first {

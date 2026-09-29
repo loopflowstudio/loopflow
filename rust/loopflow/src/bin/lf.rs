@@ -973,6 +973,16 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn read_task_draft() -> anyhow::Result<String> {
+    let limit = loopflow::ops::task::MAX_FILE_BYTES;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
+    Ok(String::from_utf8(bytes)?)
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> anyhow::Result<()> {
     match command {
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
@@ -1063,8 +1073,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             let task = loopflow::ops::task::task_status(issue.as_deref())?;
             print_task(&task, *json)
         }
-        TaskCommand::Changes { issue, json } => {
-            let snapshot = loopflow::ops::task::task_changes(issue)?;
+        TaskCommand::Changes { issue, base, json } => {
+            let snapshot = loopflow::ops::task::task_changes(issue, base)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else if snapshot.files.is_empty() {
@@ -1089,8 +1099,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             }
             Ok(())
         }
-        TaskCommand::Diff { issue, path, json } => {
-            let snapshot = loopflow::ops::task::task_diff(issue, path.as_deref())?;
+        TaskCommand::Diff {
+            issue,
+            path,
+            base,
+            draft,
+            json,
+        } => {
+            let content = draft.then(read_task_draft).transpose()?;
+            let snapshot =
+                loopflow::ops::task::task_diff(issue, path.as_deref(), base, content.as_deref())?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
             } else {
@@ -1101,17 +1119,34 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             }
             Ok(())
         }
-        TaskCommand::File { issue, path, json } => {
-            let snapshot = loopflow::ops::task::task_file(issue, path)?;
+        TaskCommand::File {
+            issue,
+            path,
+            recoveries,
+            json,
+        } => {
+            let snapshot = loopflow::ops::task::task_file(issue, path, *recoveries)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
-            } else if snapshot.binary {
-                anyhow::bail!("{} is binary", snapshot.path);
+            } else if snapshot.state != loopflow::ops::task::TaskFileState::Text {
+                anyhow::bail!("{}: {:?}", snapshot.path, snapshot.state);
             } else {
                 print!("{}", snapshot.content.as_deref().unwrap_or_default());
-                if snapshot.truncated {
-                    eprintln!("\n[file truncated at 1 MB]");
-                }
+            }
+            Ok(())
+        }
+        TaskCommand::Save {
+            issue,
+            path,
+            revision,
+            json,
+        } => {
+            let content = read_task_draft()?;
+            let saved = loopflow::ops::task::task_save(issue, path, revision, &content)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&saved)?);
+            } else {
+                println!("{}", saved.message);
             }
             Ok(())
         }
@@ -1640,6 +1675,15 @@ fn main() -> anyhow::Result<()> {
                 tokio::runtime::Runtime::new()?
                     .block_on(loopflow::controller::task::run_worker(task_id.clone()))
             }),
+            // Local document access owns no Run lifecycle. Placement and the recorded
+            // Git base come from the Task registry inside these operations.
+            Some(Commands::Task {
+                cmd:
+                    cmd @ (TaskCommand::Changes { .. }
+                    | TaskCommand::Diff { .. }
+                    | TaskCommand::File { .. }
+                    | TaskCommand::Save { .. }),
+            }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
             Some(Commands::Task { cmd }) => in_repo_runtime(&args, |repo| {
                 run_task_command(repo, cmd, cli.model.as_deref())
             }),

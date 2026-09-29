@@ -16,6 +16,7 @@ struct LoopflowApp: App {
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @State private var didOpenCaptureView = false
+    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
@@ -55,6 +56,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appSettings) {
+                Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
                 Picker("Appearance", selection: Binding(
                     get: { appearanceMode },
                     set: { appearanceMode = $0 }

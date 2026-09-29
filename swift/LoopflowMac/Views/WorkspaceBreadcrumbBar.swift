@@ -38,7 +38,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
         .font(Typography.text)
         .tint(palette.textSecondary)
         .padding(.horizontal, 14)
-        .frame(minHeight: 40)
+        .frame(height: TaskFileChrome.headerHeight)
         .background(palette.surfaceMuted)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("workspace-toolbar")

@@ -1,10 +1,11 @@
 //! Release-scoped schema migrations. See `MIGRATIONS.md` next to this file for
 //! the convention; the one rule is that a shipped migration is never edited.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
@@ -1067,20 +1068,13 @@ fn _validate_development_schema(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
-    let expected = rusqlite::Connection::open_in_memory()?;
-    expected.execute_batch(
-        "CREATE TABLE schema_migrations (
-             version TEXT PRIMARY KEY,
-             applied_at INTEGER NOT NULL
-         );",
+    let expected = expected_schema(
+        MIGRATIONS
+            .iter()
+            .map(|migration| migration.sql)
+            .chain(drafts.iter().map(|draft| draft.sql)),
     )?;
-    for migration in MIGRATIONS {
-        expected.execute_batch(migration.sql)?;
-    }
-    for draft in drafts {
-        expected.execute_batch(draft.sql)?;
-    }
-    if product_schema(conn)? != product_schema(&expected)? {
+    if product_schema(conn)?.as_slice() != expected.as_ref() {
         return Err(StoreError::IncompatibleDevelopment(
             "schema does not match the applied draft prefix".to_string(),
         ));
@@ -1890,6 +1884,28 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
 /// migration chain builds. Names alone miss type, constraint, index, trigger,
 /// and foreign-key drift.
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
+    if product_schema(conn)?.as_slice() != expected.as_ref() {
+        return Err(incompatible());
+    }
+    Ok(())
+}
+
+/// Cache only the immutable reference derived from this build's ordered SQL.
+/// Every caller still reads and compares the actual database schema afresh.
+fn expected_schema(
+    sql: impl IntoIterator<Item = &'static str>,
+) -> StoreResult<Arc<[ProductSchemaObject]>> {
+    type References = HashMap<Vec<&'static str>, Arc<[ProductSchemaObject]>>;
+    static REFERENCES: OnceLock<Mutex<References>> = OnceLock::new();
+    let sql: Vec<_> = sql.into_iter().collect();
+    let mut references = REFERENCES
+        .get_or_init(Mutex::default)
+        .lock()
+        .expect("schema reference cache poisoned");
+    if let Some(schema) = references.get(&sql) {
+        return Ok(Arc::clone(schema));
+    }
     let expected = rusqlite::Connection::open_in_memory()?;
     expected.execute_batch(
         "CREATE TABLE schema_migrations (
@@ -1897,14 +1913,12 @@ fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResul
             applied_at INTEGER NOT NULL
         );",
     )?;
-    for migration in set {
-        expected.execute_batch(migration.sql)?;
+    for statement in &sql {
+        expected.execute_batch(statement)?;
     }
-
-    if product_schema(conn)? != product_schema(&expected)? {
-        return Err(incompatible());
-    }
-    Ok(())
+    let schema: Arc<[ProductSchemaObject]> = product_schema(&expected)?.into();
+    references.insert(sql, Arc::clone(&schema));
+    Ok(schema)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2076,7 +2090,8 @@ mod tests {
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
         validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
-        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_schema, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
@@ -3770,6 +3785,46 @@ mod tests {
                 "0.11.012_context_input_normalization",
             ]
         );
+    }
+
+    #[test]
+    fn warmed_schema_reference_still_detects_live_index_drift() {
+        let migration = Migration {
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT NOT NULL);
+                  CREATE INDEX idx_example_value ON example(value);",
+            ..MIGRATIONS[0]
+        };
+        let conn = open();
+        conn.execute_batch(migration.sql).unwrap();
+        validate_schema(&conn, &[migration]).unwrap();
+
+        conn.execute_batch("DROP INDEX idx_example_value;").unwrap();
+        assert!(validate_schema(&conn, &[migration]).is_err());
+
+        let intact = open();
+        intact.execute_batch(migration.sql).unwrap();
+        validate_schema(&intact, &[migration]).unwrap();
+    }
+
+    #[test]
+    fn schema_reference_distinguishes_sql_under_the_same_migration_identity() {
+        let required = Migration {
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            ..MIGRATIONS[0]
+        };
+        let nullable = Migration {
+            sql: "CREATE TABLE example (id TEXT PRIMARY KEY, value TEXT);",
+            ..required
+        };
+        let conn = open();
+        conn.execute_batch(required.sql).unwrap();
+        validate_schema(&conn, &[required]).unwrap();
+        assert!(validate_schema(&conn, &[nullable]).is_err());
+
+        let other = open();
+        other.execute_batch(nullable.sql).unwrap();
+        validate_schema(&other, &[nullable]).unwrap();
+        assert!(validate_schema(&other, &[required]).is_err());
     }
 
     #[test]

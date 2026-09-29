@@ -4,6 +4,24 @@ LOO-298 · 2026-09-28 · Operational resolution for failed decision Run
 `run_232d082cf8da4b26b1753affd8190c8f` and existing Ask
 `ask_once_3b65e08317dfd16e8a83b89cb9a2fd0b0b49f4a48ca7e37fa05b0b56edc8619e`.
 
+## Current disposition — 2026-09-29
+
+The operational history below predates implementation checkpoint `f48606e8c`.
+That checkpoint deleted the completed-command output scanner; the retained
+`implement-focused-repairs.log` passes
+`task_agent_driver_runs_fresh_slice_turns_until_the_flow_finishes` with quoted
+permission text followed by the actual inspection exception, plus a genuine
+failed delivery command recovered by retry. Provider-failure/credential and
+public command-outcome assertions remain separate. The batch reports12 passes
+and1 cached-auth failure, so it is not an all-green result. See [evidence](evidence.md).
+
+Source inspection at `de5fcea9c` finds neither `completed_boundary_failure` nor
+`execution_blocker_at_handoff`; `review_commands` retains both cases. No behavior
+was rerun for this note correction. The former unresolved-production and local-
+checkpoint-only statements below describe the earlier unblock, not current scope.
+Jack's subsequent regular publication authorization governs delivery. The native
+decision and complete owner/wire requirements remain open.
+
 ## Observations
 
 The decision's inspection command printed `controller/task/mod.rs`, including

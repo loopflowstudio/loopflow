@@ -16,6 +16,13 @@ run in its summary. Missing or unreadable proof runs the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. PRs and merge groups always execute every check.
 
+Swift cache keys include the tracked Swift tree, compiler, and SDK. Successful
+main jobs save the build and source hashes/timestamps. After checkout, CI restores
+an input's cached timestamp only when its contents still match; changed inputs
+keep their new timestamps and rebuild. Missing timestamp metadata leaves normal
+Swift build detection in control. Source or toolchain changes may require a new
+main cache fill; PRs and merge groups only restore shared caches.
+
 CI wraps the expensive Rust, Swift, and Xcode commands with native
 `/usr/bin/time`: `-v` on Linux and `-l` on macOS. Their existing job logs retain
 elapsed time, user/system CPU seconds, maximum RSS, faults, and context switches

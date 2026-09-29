@@ -208,16 +208,20 @@ jobs:
         with:
           key: swift-cli-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Cache SwiftPM build
+      - name: Fingerprint Swift build inputs
+        id: swift-inputs
+        run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM build
         id: swift-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             swift/.build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
-          restore-keys: |
-            swiftpm-${{ runner.os }}-
+          key: ${{ steps.swift-inputs.outputs.key }}
+          restore-keys: ${{ steps.swift-inputs.outputs.restore-prefix }}
+      - name: Restore unchanged Swift source timestamps
+        run: uv run python scripts/swift_cache.py restore
       - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         run: /usr/bin/time -l cargo build -p loopflow --bin lf
@@ -262,6 +266,17 @@ jobs:
           test -x swift/.build/debug/LoopflowMac
           /usr/bin/time -l scripts/prove_wave_surface_states.sh
         timeout-minutes: 15
+      - name: Record Swift source timestamps
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save
+      - name: Save SwiftPM build
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            swift/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ steps.swift-inputs.outputs.key }}
 
   loopflow-ui-test:
     needs: merge-proof

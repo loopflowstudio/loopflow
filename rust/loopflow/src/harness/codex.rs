@@ -346,6 +346,18 @@ pub(super) fn process_notification(
                     final_receipt: true,
                 });
             }
+            if status == crate::chat::types::Lifecycle::Failed {
+                if let Some(message) = params
+                    .pointer("/turn/error/message")
+                    .and_then(Value::as_str)
+                {
+                    let _ = events.send(ConversationEvent::Error {
+                        code: "codex_error".into(),
+                        message: message.to_owned(),
+                        evidence: None,
+                    });
+                }
+            }
             let _ = events.send(ConversationEvent::TurnCompleted {
                 turn_id: tid,
                 status,

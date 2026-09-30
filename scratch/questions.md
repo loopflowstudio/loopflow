@@ -184,3 +184,62 @@ LOO-298's step entry must stop using the driver's own executable and resolve
 - **The four Task-input assumptions: held.** "hold this to discuss again." Not
   decided; do not treat the operator's assumptions as accepted.
 - **LOO-335: deleted** at Jack's direction.
+
+2026-09-30 · **Task context follows the checkout: decided.** On the first of the
+four held Task-step behaviors, Jack Heart: "Yeah the task context should be
+automatically passed in when you do any skill (or flow) inside a task worktree.
+shouldnt need to explicitly use task commands." Any `lf` skill or Flow run in a
+Task's worktree receives the same Task context a Task step gets, including live
+steers and workspace details. No `--as task:X` or Task command is required.
+The other three held behaviors remain open.
+
+2026-09-30 · **One user name for every lf run: decided.** Jack Heart, on the
+second held behavior: "what my name is should be common to all lf runs
+ideally." Every agent start, whatever launched it, renders the same user name
+from the one resolver. No launch path omits it or supplies its own.
+
+2026-09-30 · **Worktree confinement: unchanged.** Jack Heart, on the third held
+behavior: "sounds like this doesnt actually change?" Correct: a Task Flow step
+keeps worktree confinement, the execution boundary and skipped prompts.
+Open follow-on for Jack: Task context now follows the worktree, but confinement
+is still attached only to Task Flow steps. A run a person starts in a Task
+worktree gets the context and their configured permissions. Either keep that
+split (confine unattended runs) or confine anything run in a Task worktree.
+
+2026-09-30 · **Credential failures belong to accounts, not Tasks: decided.**
+Jack Heart, on the fourth held behavior: "Yeah dont think tasks should be
+involved in this. good example of where responsibility is not distributed to
+the right places." The Task-only "capability blocked" detector stays deleted.
+The shared launch path fails over, and the account layer records the revoked
+credential on the account (`record_credential_invalidated_blocking`, which sets
+`credential_state` to missing), where `lf auth status` and the route show it.
+All four held Task-step behaviors are now settled; one follow-on on
+confinement remains open.
+
+2026-09-30 · **Task commands are shortcuts: decided.** Jack Heart: "the key thing
+is that the lf task run commands are just shortcuts but dont imply any different
+behavior than just running the equivalent lf flow directly." `lf task run X` is
+`lf flow <the Task's Flow>` run in X's worktree, and nothing else. Any behavior
+a Task step has must come from something the equivalent `lf flow` invocation
+also has: the checkout, the Flow, headless or interactive mode, or explicit
+flags. Consequence for confinement: it can no longer key on "launched as a
+Task". It keys on the worktree or on unattended execution; either satisfies
+the rule. Operator's reading; Jack has not picked between them.
+
+2026-09-30 · **What identifies the Task: decided.** Jack Heart: "and --as and the
+worktree are what identify the task, not having a parent exec that is lf task
+..." A run's Task comes from `--as task:X` or from the checkout it runs in.
+Never from process ancestry, a parent `lf task` Exec, or inherited environment.
+Candidates this removes: the calling Session's Task inherited by agent-issued
+commands (`agent_work_in`, WorkSource `inherited`), `LF_TASK_ORIGIN` carried to
+descendants, and Task identity read from `LF_WORK_ADVANCE_CLAIM`. The claim may
+still fence the driver; it does not name the Task for a step.
+
+## Confinement implementation boundary · 2026-09-30
+
+Following Jack Heart's request for one predicate, the current slice keeps the
+intersection of unattended execution and a Task checkout, now shared by direct
+skills and ordinary/managed Flows. This is an interim preservation choice, not
+approval of either wider policy. The two options remain checkout-only (including
+interactive commands) or unattended-only (including unbound work). See
+[the branch audit](task-command-equivalence.md).

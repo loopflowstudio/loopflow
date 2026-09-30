@@ -389,6 +389,15 @@ impl SqliteStore {
         Self::open(path, super::FrontierAdvance::Forbidden)
     }
 
+    /// Revalidate a connection after a child executable may have upgraded it.
+    pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        super::migrations::validate_installed_development_sqlite(
+            &conn,
+            crate::build_info::migration_draft_manifest(),
+        )
+    }
+
     /// Open the shared store as `lf install promote` — the single authorized
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.

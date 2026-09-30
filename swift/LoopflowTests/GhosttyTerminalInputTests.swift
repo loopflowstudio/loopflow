@@ -8,7 +8,7 @@ import GhosttyKit
 @testable import LoopflowMac
 @testable import Loopflow
 
-@Suite("Embedded terminal input")
+@Suite("Embedded terminal input", .requiresDisplay)
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)

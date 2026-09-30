@@ -10,7 +10,7 @@ import GhosttyKit
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Task Monitor integration proof", .serialized)
+@Suite("Task Monitor integration proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskMonitorProofTests {
     @Test("Focusing another Task's pane cannot redirect returning to the selected Task")

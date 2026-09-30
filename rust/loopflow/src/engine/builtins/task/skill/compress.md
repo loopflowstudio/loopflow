@@ -1,6 +1,6 @@
 ---
-requires: branch diff, current design, and runnable focused proof
-produces: simpler code related to the diff and executed proof
+requires: branch diff and current design
+produces: simpler code related to the diff
 action_style: procedural
 ---
 Simplify anything related to the branch diff. Make the code easier to understand
@@ -16,7 +16,7 @@ and change while preserving required behavior. The output is a diff.
    maintain** list of concrete files/symbols and their exclusive tests/fixtures.
    Remove obsolete concepts, authorities, and paths before polishing surviving
    code. Never repair, refactor, or extend code the plan removes, including its
-   exclusive tests/fixtures. Preserve required behavior, data, and proof on the
+   exclusive tests/fixtures. Preserve required behavior, data, and tests on the
    surviving path; include any minimum consumer cutover or migration in the same
    cut. Temporary breakage within that cut calls for finishing it, not repairing
    the predecessor. Keep remaining deletion targets current for the next pass.
@@ -34,13 +34,12 @@ and change while preserving required behavior. The output is a diff.
    indirection, state, and speculative flexibility; retain abstractions that
    help readers. Clarity matters more than brevity or line count.
 
-5. Make coherent edits and verify the affected behavior with focused proof.
-   If proof fails, repair the reduction; if required proof cannot run, stop with
-   its exact blocker. Reuse applicable passing evidence; gate and CI own broader
-   suites.
+5. Sanity-check the reduction: build changed code and run its focused test
+   when behavior changed. Reuse applicable results; no edits means no rerun.
+   Fix actual failures. If a check cannot run headless, use a headless equivalent
+   or leave it to gate/CI; do not stop or block the Flow for it. Human judgment
+   belongs to demo/review. Gate owns affected suites and acceptance checks once.
 
-Leave consequential rationale beside the changed code or in the existing plan.
-Summarize the simplification, applicable proof, and unresolved gaps briefly so
-the next reader can use them. No separate pass record is required. If nothing
-needs reducing, say so without manufacturing edits. Realign reconciles the plan
-with the work.
+Keep rationale beside the code or in the plan, and one command/result line
+with any deferred owner. No pass ledger. If nothing needs reducing, say so.
+Realign reconciles the plan.

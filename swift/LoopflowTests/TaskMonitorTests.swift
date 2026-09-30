@@ -88,7 +88,7 @@ struct TaskMonitorTests {
     }
 
 #if canImport(GhosttyKit)
-    @Test("Task selection and Monitor preserve native Session input and its companion")
+    @Test("Task selection and Monitor preserve native Session input and its companion", .requiresDisplay)
     func mixedMonitorRetainsInput() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()

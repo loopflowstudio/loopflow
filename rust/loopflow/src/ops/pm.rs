@@ -2317,7 +2317,7 @@ async fn pm_sync_async(
         for project in projects {
             if team_id
                 .as_deref()
-                .is_some_and(|team| crate::pm::project_is_foreign(&project, team))
+                .is_some_and(|team| project_is_foreign(&project, team))
             {
                 diagnostics.push(format!(
                     "skipped foreign-Team Project `{}` ({}) in wave/{wave}: Teams [{}]",
@@ -2447,7 +2447,7 @@ async fn pm_sync_async(
             super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
             let title_path = canonical_wave_title_path_async(repo, wave).await?;
             for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
-                if crate::pm::project_is_foreign(&project, &team_id) {
+                if project_is_foreign(&project, &team_id) {
                     continue;
                 }
                 validate_project_ownership(&project, wave, &initiative, &team_id)?;
@@ -2785,7 +2785,7 @@ async fn checked_projects_with_store(
             projects.push(adopted);
         }
     }
-    projects.retain(|project| !crate::pm::project_is_foreign(project, &ctx.team_id));
+    projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
         project.name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2793,6 +2793,10 @@ async fn checked_projects_with_store(
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
+}
+
+fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+    !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
@@ -2967,7 +2971,7 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            if crate::pm::project_is_foreign(&project, &ctx.team_id) {
+            if project_is_foreign(&project, &ctx.team_id) {
                 if skipped_ids.insert(project.id.clone()) {
                     skipped_projects.push((name.clone(), project));
                 }

@@ -260,10 +260,6 @@ fn validate_snapshot_ownership(
     Ok(())
 }
 
-pub(crate) fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
-    !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
-}
-
 pub(crate) fn validate_project_ownership(
     wave: &str,
     initiative_id: &str,

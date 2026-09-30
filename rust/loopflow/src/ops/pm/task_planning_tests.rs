@@ -83,9 +83,8 @@ async fn planning_graphql(
     let vars = &request["variables"];
     let page =
         |nodes| json!({"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}});
+    let mut state = state.lock().await;
     let project_id = state
-        .lock()
-        .await
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
@@ -95,8 +94,6 @@ async fn planning_graphql(
         "Next chapter"
     };
     let project_name = state
-        .lock()
-        .await
         .project_name
         .clone()
         .unwrap_or_else(|| project_name.into());
@@ -108,7 +105,6 @@ async fn planning_graphql(
     } else if query.contains("query ListInitiatives") {
         json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
     } else if query.contains("mutation RenameProject") {
-        let mut state = state.lock().await;
         if let Some(project) = state
             .extra_projects
             .iter_mut()
@@ -120,7 +116,6 @@ async fn planning_graphql(
         }
         json!({"projectUpdate":{"success":true}})
     } else if query.contains("query ListInitiativeProjects") {
-        let mut state = state.lock().await;
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
@@ -138,7 +133,6 @@ async fn planning_graphql(
         projects.extend(state.extra_projects.clone());
         json!({"initiative":{"projects":page(projects)}})
     } else if query.contains("query ListProjectIssues") {
-        let mut state = state.lock().await;
         if state
             .extra_projects
             .iter()
@@ -172,7 +166,6 @@ async fn planning_graphql(
         owned["archivedAt"] = serde_json::Value::Null;
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
-        let state = state.lock().await;
         if state.trashed {
             return axum::Json(
                 json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
@@ -187,14 +180,12 @@ async fn planning_graphql(
         issue["project"] = project;
         json!({"issue":issue})
     } else if query.contains("query IssueDeletion") {
-        let state = state.lock().await;
         if state.trashed && state.unreadable_trash {
             json!({"issue":null})
         } else {
             json!({"issue":{"trashed":state.trashed}})
         }
     } else if query.contains("mutation DeleteIssue") {
-        let mut state = state.lock().await;
         if state.refuse_deletion || state.trashed {
             return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
         }
@@ -213,7 +204,6 @@ async fn planning_graphql(
     } else if query.contains("query CompletedWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
     } else if query.contains("mutation SetIssueState") {
-        let mut state = state.lock().await;
         if state.fail_completion {
             state.fail_completion = false;
             return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
@@ -230,7 +220,6 @@ async fn planning_graphql(
         }
         json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
     } else if query.contains("query IssueAttachments") {
-        let mut state = state.lock().await;
         if state.move_on_attachment_read {
             state.move_on_attachment_read = false;
             state.current_project_id = Some("project-1".into());
@@ -238,9 +227,8 @@ async fn planning_graphql(
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueComments") {
-        json!({"issue":{"comments":page(state.lock().await.comments.clone())}})
+        json!({"issue":{"comments":page(state.comments.clone())}})
     } else if query.contains("mutation CreateComment") {
-        let mut state = state.lock().await;
         let id = format!("comment-{}", state.comments.len() + 1);
         state
             .comments
@@ -251,7 +239,6 @@ async fn planning_graphql(
         }
         json!({"commentCreate":{"comment":{"id":id}}})
     } else if query.contains("mutation UpdateIssue") {
-        let mut state = state.lock().await;
         let issue = state
             .issues
             .iter_mut()
@@ -267,8 +254,6 @@ async fn planning_graphql(
         json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
     } else if query.contains("mutation CreateIssue") {
         state
-            .lock()
-            .await
             .issues
             .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
             "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,

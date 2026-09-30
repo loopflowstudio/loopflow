@@ -15,9 +15,10 @@ preview, exclusion, fresh-membership check, and cancellation path.
 
 ## Delete — do not maintain
 
-Remove the unconditional foreign-Team rejection from Project enumeration in
+The unconditional foreign-Team rejection is removed from Project enumeration in
 sweep, planning refresh, and wave sync. Keep the ownership validator for mutations
-and repository-owned snapshot integrity. No schema migration or parallel owner.
+and repository-owned snapshot integrity. No schema migration or parallel owner;
+no remaining deletion targets.
 
 ## Remaining acceptance
 
@@ -36,4 +37,10 @@ their strict validator. Snapshot refresh only upserts observed Projects/Tasks;
 omitting a foreign Project does not delete retained history. Sweep's existing
 fresh membership and worker/PR exclusions remain unchanged.
 
-Check: `cargo test -p loopflow --lib foreign_projects_do_not_block_sweep_refresh_or_sync -- --nocapture` passed (1); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; materialized affected suite and configured acceptance belong to gate/demo.
+Compression keeps the foreign-Team predicate private to the operations module,
+where all four callers live. The provider model retains its strict validator.
+The stateful GraphQL fixture now locks once per request, removing repeated locks
+and reading Project identity and title from the same state. No asynchronous work
+runs while the request holds that lock.
+
+Check after compression: `cargo test -p loopflow --lib foreign_projects_do_not_block_sweep_refresh_or_sync -- --nocapture` passed (1); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; materialized affected suite and configured acceptance belong to gate/demo.

@@ -292,6 +292,7 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
     else:
         environment = os.environ.copy()
         environment.update(
+            LOOPFLOW_NATIVE_TESTS="1",
             LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
             LF_DESKTOP_PERF_SAMPLES=str(samples),
         )

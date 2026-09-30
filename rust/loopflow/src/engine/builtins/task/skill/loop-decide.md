@@ -14,8 +14,13 @@ Read the previous direction, what changed or was learned, current feedback,
 and unresolved findings. Follow supplied artifact paths and inspect their
 current contents when they may have changed. Reconcile earlier evidence and
 accepted changes; a newer proposal does not override an accepted requirement.
-Reuse applicable proof. An unexecuted check or successful process exit alone
-does not establish that the objective was met.
+Reuse applicable results without treating a process exit as task completion.
+
+An unavailable or human-dependent check alone never means Blocked. Use a
+headless equivalent or name its later gate/CI owner and continue. Before gate,
+build/focused-test sanity is enough. Actual failures and missing behavior still
+need work. Leave judgment to demo/review; neither claim deferred checks passed
+nor bypass an authored review.
 
 - **Advance** when the work required at this boundary is satisfied, including
   applicable acceptance conditions and findings from earlier attempts. Leave
@@ -27,13 +32,12 @@ does not establish that the objective was met.
 - **Blocked** when the previous iteration made no meaningful progress, repeated
   the same failure without new evidence, or exposed an input or judgment the
   agent cannot supply. Honor unresolved blockers in the supplied criteria and
-  evidence, including required checks that cannot run. Explain what needs
-  resolving. Do not spend another iteration repeating unchanged direction.
-  If evidence is missing, name that gap rather than pretending it proves no progress.
+  evidence. Explain what needs resolving. Do not spend another iteration repeating unchanged direction.
+  If evidence is missing, name that gap rather than pretending it establishes no progress.
 
 Separate the questions before deciding: which obligations are satisfied, what
 changed or was learned, and what useful action or missing human input remains.
-Inspect the relevant evidence; do not substitute a confidence score for proof.
+Inspect the relevant evidence; do not substitute a confidence score for observed results.
 The runner owns edge targets and execution identity. There is no pass limit;
 judge whether to continue from the work and evidence, not the iteration count.
 
@@ -44,7 +48,7 @@ Let the supplied protocol own how help is requested; do not open a second
 Session alongside its request.
 
 After the human completes the Ask, read its summary and the changed artifacts.
-Reassess using the new evidence or direction. Completion of an Ask is not proof
+Reassess using the new evidence or direction. Completion of an Ask does not establish
 that the work is done and does not choose a navigation decision. If the
 same blocker remains unresolved, report that fact instead of cycling through
 identical Asks automatically.

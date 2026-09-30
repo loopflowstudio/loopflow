@@ -3,14 +3,18 @@
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
 matrix until scratch is clear. `lf pr submit`, `lf pr arm`, and `lf pr land`
 clear scratch before pushing a landing candidate. Scratch-free PRs, including
-small changes and Dependabot updates, run the full proof matrix in parallel.
-Local work should run the smallest proof that can change the next decision.
+small changes and Dependabot updates, run the full test matrix in parallel.
+Implement/compress only build changed code and run its focused test. Gate owns
+affected suites and automated acceptance once; see the verification cadence in
+[STYLE.md](STYLE.md#verification-cadence). Scratch keeps one check-result line.
+Required checks run unattended; defer unavailable checks to capable CI and
+leave people's judgment to demo/review. Neither blocks earlier Flow steps.
 
-For checkpoint PRs, `scratch-clear` reports deferred proof and `tests-result`
+For checkpoint PRs, `scratch-clear` reports deferred tests and `tests-result`
 and the matrix jobs skip. That is not a passing test result. The required merge
-queue always rejects scratch artifacts and runs full proof before merging.
+queue always rejects scratch artifacts and runs full tests before merging.
 Missing scratch, classifier failures, and unexpected skipped candidate jobs
-still fail the aggregate. Restoring scratch on a later PR head defers its proof.
+still fail the aggregate. Restoring scratch on a later PR head defers its tests.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
@@ -19,9 +23,9 @@ CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency
 caches; version-only releases retain them. Main publishes the shared caches;
 PRs and merge groups restore them without accumulating private copies. Cache
-restoration alone never skips proof. After a merge, main can reuse a
+restoration alone never skips tests. After a merge, main can reuse a
 successful merge-group CI run for the identical SHA and workflow, linking that
-run in its summary. Missing or unreadable proof runs the full matrix. Main still
+run in its summary. Missing or unreadable results trigger the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
@@ -87,7 +91,7 @@ uv run python scripts/test.py --all    # reproduce the serial full matrix
 `scripts/test.py` diffs your branch against `origin/main`, maps changed paths
 to the CI jobs below, and runs just those—fast suites first. `--reuse-passing`
 uses a prior pass only when tracked and untracked file content, the worktree,
-and the selected command plan are identical. Full and required-host runs never
+and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
@@ -141,7 +145,7 @@ same per-pass root limit.
 
 An empty plan or an identical passing result reused with `--reuse-passing`
 returns before resource scans and cleanup. Neither executes a build nor writes
-a new proof receipt. Changed content or commands require fresh verification and
+a new check receipt. Changed content or commands require fresh verification and
 the normal resource checks.
 
 Busy uv cache pruning times out after 15 seconds while other eligible recovery
@@ -186,17 +190,22 @@ small samples stay `COLLECTING` until 20 observations support p95.
 “Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
 to the exact PR. See [metric definitions and coverage limits](performance/README.md).
 
-The summary states **what each suite proves**. The `loopflow` suite compiles
-the app and UI-test runners; it does **not** run hosted UI behavior. That real
-run is a separately named **required host gate**—it never runs under `--all`
-because it needs a permissioned macOS host:
+Desktop's `swift` suite builds the app through the test-target dependency and
+runs model and production-view tests through `scripts/test_desktop.sh`, which
+denies WindowServer connections even on a logged-in host. No Automation
+permission is needed. Only macOS's setuid `/bin/ps` leaves the sandbox so CLI
+process observation still works. `DesktopHeadlessTests` checks the four Work states and
+selection through the real button action. Gate and CI use this same suite.
+
+Window/Metal/PTY integration tests are optional display-session diagnostics:
 
 ```bash
-uv run python scripts/test.py --ui-host   # real hosted LoopflowUITests run
+LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel
+uv run python scripts/test.py --ui-host  # optional XCUITest diagnostic
 ```
 
-See `release/UI_HOST_GATE.md` for the maintained host, the capability it needs,
-and how a missing permission is reported (never silently skipped).
+They are never acceptance prerequisites for a headless Flow. See
+`release/UI_HOST_GATE.md` for optional hosted execution and cleanup.
 
 Path → suite mapping:
 
@@ -206,7 +215,7 @@ Path → suite mapping:
 | `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
-| `swift/` | swift | `swift test --package-path swift --no-parallel -Xswiftc -gnone`, then the multiplatform boundary check |
+| `swift/` | swift | `scripts/test_desktop.sh -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |
 | local store/worktree code, `tests/e2e/` | e2e *(slow)* | CLI smoke |
 
@@ -254,23 +263,21 @@ source. A Markdown-only edit can fail that check.
 
 ## Swift Tests
 
-Tests for the Swift package (models, protocols, shared logic).
+App build and headless tests for models, protocols, and production views.
 
 ```bash
 cargo build -p loopflow --bin lf # Required by the real CLI transport proof
-swift test --package-path swift --no-parallel # All Swift tests
+scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
-Pass `--no-parallel` explicitly for the full suite. Native proofs share AppKit's
-main actor; concurrent suites can starve async observations and distort timing
-budgets. Swift Testing otherwise runs suites concurrently.
+Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
+they are reported as skipped in headless runs, not counted as passing.
 
-`scripts/prove_wave_surface_states.sh` separately renders four fixture states at
-two widths using the built app. It runs the two widths in separate processes,
-waits for both, then advances to the next state. All eight images must be nonempty
-and pairwise distinct. Interrupting the script stops and reaps its capture children.
+`scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
+windows and therefore needs a display session. It is not in gate or CI.
 
 Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
 days with the toolchain, output log, and Swift Testing event stream. When console
@@ -289,7 +296,7 @@ test can resume on a different thread and hang in Foundation's run-loop wait
 even after the child exits. When a Swift run stops reporting progress, sample
 the test helper process before changing timeouts; cleanup can be the blocker.
 
-In asynchronous terminal proofs, observe the surface after each wake-up before
+In asynchronous terminal tests, observe the surface after each wake-up before
 checking the deadline. A busy main actor can resume after the deadline even
 when the PTY produced its output in time; do not fail on a pre-sleep snapshot.
 
@@ -308,7 +315,7 @@ SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
 whole-file platform gate. When changing terminal code or its tests, gate both
-configurations: run the focused SwiftPM tests and
+build configurations: run the headless Swift suite and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.
 
@@ -332,25 +339,19 @@ checkouts; changed inputs start fresh, including signed entitlement state.
 Only main saves caches. PRs and merge groups still run the compile command and
 build the current Rust control tools.
 
-**Hosted run** (`ui-host` required gate, permissioned host only). Actually runs
-`LoopflowUITests`; needs macOS UI-automation permission. Never runs under
-`--all`—absence of the permission is a named failure, not a silent skip.
-
-```bash
-uv run python scripts/test.py --ui-host
-```
-
-See `release/UI_HOST_GATE.md`.
+**Optional hosted diagnostic** (`--ui-host`). Runs `LoopflowUITests` on a
+permissioned display host. It is excluded from `--all` and is never required
+for Task acceptance. See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. These proof jobs run in parallel and feed the
+See `.github/workflows/ci.yml`. These check jobs run in parallel and feed the
 aggregate `tests-result` check:
 
 | Job | Runner | Command |
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
-| `scratch-clear` | ubuntu-latest | defer checkpoint PR proof; reject scratch artifacts on queue/main |
+| `scratch-clear` | ubuntu-latest | defer checkpoint PR tests; reject scratch artifacts on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
 | `rust-test` | ubuntu-latest | `cargo nextest run --all --no-fail-fast` |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
@@ -358,7 +359,7 @@ aggregate `tests-result` check:
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
+| `swift-test` | macos-15 | app build, headless model/view tests, boundary check |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
 Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
@@ -398,7 +399,7 @@ cleanup after the effect exits to exercise settlement ordering. It uses no
 configured provider or installed Home.
 
 For shared repository discovery or CLI dispatch changes, include the PM and
-Wave consumers in the focused proof:
+Wave consumers in the focused check:
 
 ```bash
 cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
@@ -409,14 +410,14 @@ Git would hide the cached-PM context regression; global-command tests alone do
 not cover it.
 
 Work-command dispatch also needs the registration lifecycle and repository
-ownership proofs. Empty registrations can be forgotten from their registered
+ownership tests. Empty registrations can be forgotten from their registered
 directory without Git metadata; Work operations still enforce repository ownership.
 
 ```bash
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-Task decision feedback has a focused store-and-driver proof:
+Task decision feedback has a focused store-and-driver check:
 
 ```bash
 cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
@@ -428,11 +429,11 @@ Provider effects are simulated. The name's `live` refers to the active local
 decision, not configured-provider acceptance. Structured decision output owns
 Advance, Iterate, or Blocked with a required reason; feedback alone is no verdict.
 
-Task stall proof uses `session_record::activity::tests`, `task_live_unblock`, and
+Task stall check uses `session_record::activity::tests`, `task_live_unblock`, and
 Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
 CPU for the body and descendants in Session events. Five quiet minutes
 requires samples no more than 45 seconds apart; the worker samples every 15
-seconds. Unit proofs advance a simulated clock; the CLI/desktop proof samples a
+seconds. Unit tests advance a simulated clock; the CLI/desktop check samples a
 real sleeping process with a seeded five-minute history. Neither establishes a
 five-minute configured provider stall. Preserve CPU-active silence, fresh-event,
 missing-sample and PID-reuse counterexamples when changing the projection.
@@ -531,7 +532,7 @@ cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sourc
 
 Catalog retirement also affects historical migration tests. Keep their persisted
 names and data-preservation assertions at the migration boundary; current catalog
-resolution belongs in engine tests. Include the legacy Flow repair proof:
+resolution belongs in engine tests. Include the legacy Flow repair check:
 
 ```bash
 cargo test -p loopflow --lib legacy_task_flow_repair
@@ -565,7 +566,7 @@ changes; an ordinary draft build may omit the trigger. Installed development
 builds record draft checksums too: add a forward draft after the owning migration
 instead of rewriting an applied draft. Preserve populated historical fixtures.
 
-For manual migration proof in a shared checkout, materialize only in a disposable
+For manual migration check in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization
 can change package versions, the lockfile, registry and migration files; another
 execution can commit those temporary changes before cleanup. Keep the assigned checkout
@@ -573,7 +574,7 @@ on its authoring schema and leave the live Home untouched. A copy without Git
 metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
 source behavior; otherwise the build defaults to release provenance. It also
 cannot prove fixtures that require `git rev-parse HEAD`: run those in
-the assigned checkout when its schema suffices, and report that separate proof.
+the assigned checkout when its schema suffices, and report that separate check.
 Do not count a fixture setup failure as a passing materialized test.
 
 After removing a public concept, run `uv run python scripts/check_architecture.py`;
@@ -587,7 +588,7 @@ builtin discovery, prompt goldens and storage settlement.
 For landing changes, prove same-head recovery and authoritative merge separately
 from commit creation. Exercise takeover while the old repair is still running;
 generation fencing alone does not stop its effects. Label simulated
-provider/GitHub proofs. Known live-proof limits belong in Infrastructure memory.
+provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
 binary mid-test mixes migration frontiers in a single temporary Home.
@@ -654,16 +655,16 @@ selected-installation fallback, then puts another `lf` first on PATH. It checks
 the child Exec executable and its Flow store. The declaration proof starts Task Y
 from Task X's agent and checks Y attribution while retaining X as the causal parent.
 
-The recovery proof adds a draft unknown to the branch, preserves both
+The recovery check adds a draft unknown to the branch, preserves both
 databases and independent private writes, recommends the
 installed executable/database pair only after its real exact-store preflight,
 and refuses
 that recommendation after the installed schema changes or executable disappears.
 The focused `incompatible_seed_preserves_source_receipts_and_private_writes`
-unit proof covers a newer source snapshot, its WAL, and reseeding without replacing
+unit check covers a newer source snapshot, its WAL, and reseeding without replacing
 private work. GitHub is
 simulated and review Sessions are prepared without launching a provider. These are
-real current-CLI operation proofs, not older-version compatibility, promotion
+real current-CLI operation tests, not older-version compatibility, promotion
 or configured worker acceptance.
 The harness keeps Docker build/registry caches, serializes use of its build
 cache, and destroys the account and installation after each attempt.
@@ -671,7 +672,7 @@ cache, and destroys the account and installation after each attempt.
 The `store::branch_data::tests` private-data subprocess fixture checks ordinary
 storage, observation, captured artifacts, and child context with stale control pins,
 including a relative custom database and malformed inherited control path.
-`global_commands` has focused real-CLI proofs for explicit data-directory
+`global_commands` has focused real-CLI tests for explicit data-directory
 reads/writes and
 Task-bound promotion refusal with read-only candidate preflight. These use
 disposable stores; they do not prove installed worker routing or a live demo.
@@ -766,7 +767,7 @@ CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
 after `canonicalize_migrations.py --materialize-for-tests`, using release
 provenance and published migration authority only in that isolated build.
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
-runuser, and uv; run the proof as root without host Home mounts. Optionally copy
+runuser, and uv; run the check as root without host Home mounts. Optionally copy
 a checksum-verified older released pair into `/fixture/prior` to exercise the
 external-installer transition.
 

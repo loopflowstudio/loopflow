@@ -41,6 +41,12 @@ skill; they are not appended supplements or automatically exported to customers.
 Improve the shared skill for general lessons; keep local rules with their local
 consumer. Do not create miscellaneous `.lf/` learning notes.
 
+Generate only headless, machine-runnable checks. Implement/compress build and
+run focused sanity tests; gate owns acceptance and affected suites once. An
+unavailable check goes to capable gate/CI and does not block earlier work.
+People's judgment belongs to demo/review, never automated acceptance. Scratch
+keeps one command/result line, not an evidence ledger.
+
 ## Workflow
 
 1. **Resolve the target.** Infer the artifact kind from the named path or
@@ -62,7 +68,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    publication, and navigation around the operation.
 
    Match proof to maturity: an early Task needs a concrete problem and
-   recognizable success; design chooses the implementation and operational proof.
+   recognizable success; design chooses the implementation and headless acceptance checks at gate.
    Name the output's reader and their next decision. State how separate input
    artifacts reach the consumer's execution context and which copy stays current;
    a path alone does not deliver contents. Name a missing transfer mechanism
@@ -75,7 +81,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    counterexample. Use that understanding to update the artifact that owns the
    truth while the context is available. Delete stale instructions; retain
    accepted constraints and unresolved contrary evidence. Save consequential
-   rationale and links to proof. Leave a minimal review when it helps the next
+   rationale and a one-line check result. Leave a minimal review when it helps the next
    reader: progress against the plan, what worked, what was learned, and what
    remains unresolved. Supply evidence for the next decision without making
    that decision for its owner. Avoid duplicating the plan or accumulating
@@ -116,7 +122,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
 ## Persisted plans
 
 Plan-writing skills must produce step-neutral artifacts: named, dated decisions,
-explicit acceptance or draft status, remaining work, and proof. Keep session/step
+explicit acceptance or draft status, remaining work, and a one-line check result. Keep session/step
 instructions and ambient Home facts out of plans. Historical skill invocations
 use plain names without dollar prefixes; verbatim transcripts remain separate
 reference evidence. Audit a plan as input to a different skill in a fresh Run:

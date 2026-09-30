@@ -25,46 +25,117 @@ inherited LF_/LOOPFLOW_ authority removed.
   Project owns its Flow default. Rotation preserves started unfinished Tasks
   and retires only proven untouched backlog. Missing evidence stays unknown.
 
-The implementation is in place. Current contracts belong in
+The core model is implemented; remaining behavior and proof are listed below.
+Current contracts belong in
 [architecture-reference](../docs/architecture-reference.md) and
 [CLI reference](../docs/lf-reference.md); do not reconstruct another design
 from the old scratch history.
 
-## Next work
+## Delivery decision
 
-1. Reconcile docs, builtin skills and generated pages with final behavior.
-   Keep the short CLI guide/reference split. Resolve the naming proposals in
-   [naming.md](naming.md) only if Jack selects them.
-2. Measure cold/warm CLI list and detail on a representative dense store,
-   separating startup, SQL and payload costs.
-3. Prove cancellation while an exactly owned child is live. Retain unresolved
-   completion rather than inferring authority from the Exec tree.
-4. Run final affected suites, migration and architecture checks, build, fmt
-   and all-target Clippy. Then follow the saved Flow through publication,
-   Jack's demo, queue preparation and landing. This compression pass is
-   authorized only to commit, push without force and stop.
+Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
+autonomously, no need to review with me.” Land #1296 as one PR after the checks
+below. No demo, concept review or further landing approval is required. This
+supersedes the older Task snapshot and demo boundary, not the technical proofs.
 
-## Acceptance and conversion boundaries
+#1358, #1359 and #1360 already landed the independent resource, publication and
+resident-Wave cuts. The proposed Exec/Chapter splits in `.lf/tmp/landing-groups.md`
+would remove only about 10% and require manual extraction; Jack rejected them.
+Sync this branch by merging main, never rebasing. `e3a2c7e2c` merged main through
+#1360. This realign pass ends after a local commit and non-force push; the
+supervising session owns subsequent landing.
+
+## Before merge
+
+1. **Code and unresolved behavior.** Keep the implemented three-owner model and
+   three direct migrations; do not rebuild historical import or split the PR.
+   Close the retained Task-cancellation case with an exactly owned live child:
+   prove child exit, claim release and truthful Flow/Exec settlement, including
+   unresolved completion. The passing direct-command SIGINT test alone is not
+   that proof. Reconcile the architecture reference's remaining public
+   conversation/engine restart obligation with `session connect --replace`,
+   which currently selects client replacement; implement any missing accepted
+   behavior and its focused proof rather than treating the flag as engine restart.
+   Explicitly disposition the earlier Task-row/publication, stacking and
+   refused-start cleanup reports against #1359 and current code. #1359's landing
+   alone does not establish all three repaired. Leave `agent_events` and
+   `exec_events` proposals open; neither is a merge prerequisite.
+2. **Docs.** Reconcile `docs/architecture-reference.md`, the short `docs/lf.md`
+   and detailed `docs/lf-reference.md`, affected architecture pages, builtin
+   skills and `TESTING.md` with the final CLI/schema and #1360's removal. Remove
+   stale archive/import, old Run-owner and resident-service instructions; retain
+   the distinction between implemented behavior and configured acceptance.
+   Regenerate affected website pages and the architecture HTML from their source.
+3. **Measurements and behavioral checks.** Measure cold/warm CLI list and detail
+   on a representative disposable dense store, separating startup, SQL and
+   payload costs; record dataset size and production-code delta against main.
+   Preserve one proof per final behavior: Session bind/rename/headless discovery,
+   retry/review and exact completion, typed decisions, driver/provider fencing,
+   Exec ancestry across handoff, cancellation and Chapter convergence. Keep the
+   populated current-review and Project-default migration checks, Rust/Swift DTO
+   agreement and retained-terminal tests. Synthetic two-Home Chapter tests remain
+   useful race coverage even though only this machine is a deployed client.
+4. **Integrated gate.** After remaining repairs and any merge from main, build
+   `lf`, run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+   `uv run python scripts/check_migrations.py` and
+   `uv run python scripts/check_architecture.py`. Use the affected-suite plan in
+   `TESTING.md` (`uv run python scripts/test.py --list`, then its selected checks):
+   full local Rust without fail-fast, release-materialized migrations in a
+   disposable source copy, affected Python/website/Swift, app build and CLI smoke.
+   Reuse results only for identical content and commands. Required hosted CI and
+   merge checks must pass on the final candidate. A missing rendering environment
+   leaves configured Desktop proof open; it does not create another review wait.
+
+Recorded compression evidence under `.lf/tmp/test-compress/`: `affected.log`
+has 44 passes and two failures; `repairs.log` has both failed cases passing after
+repair. `chapters.log` records 17 passes; `native-ownership.log` records two.
+Build and final Clippy logs passed. These are earlier focused results, not a
+full final-tree gate. Realign inspects this evidence without rerunning the suite.
+This documentation reconciliation passed architecture coverage, migration-history
+validation (three drafts, 56 shipped migrations unchanged) and `git diff --check`.
+
+## Before a release migrates ~/.lf
+
+Jack reports this machine is the only client. The pinned development Home is
+gone; its active Tasks were moved into the one main Home, `~/.lf`, by hand.
+Do not recreate that Home or plan a fleet compatibility rollout. This report is
+not verification of the moved Tasks or authority for this pass to access the
+installed store with branch binaries.
+
+1. **Prepare the exact candidate.** Retain current Waves, Projects, Tasks,
+   PR/Linear/worktree links, account routes and resumable conversations. Discard
+   finished history, old formats and intermediate drafts. The three remaining
+   groups are `record_execs`, `project_status_chapters` and `session_ownership`;
+   released migration history stays immutable. Materialize them through the
+   release workflow and prove the candidate's actual migration frontier.
+2. **Rehearse current-state conversion.** Inspect and adapt the private converter
+   `.lf/tmp/deep-compress/convert_current.py` to the final schema and a frozen
+   source copy. It currently reads sidecars directly from live `~/.lf` while
+   writing a disposable database, so its earlier run is not an atomic snapshot
+   or a deployable migration procedure. The SQL migrations alone do not recover
+   every resumable native identity from those sidecars. Prove selected captures,
+   pending reviews, native IDs, Task links/default Flows, account routes and
+   foreign keys on copies, including the manually moved Tasks. Do not copy old
+   turns, process receipts or driver authority.
+3. **Quiesce and back up.** Coordinate the cutover with the supervising session
+   and release operation; autonomous merge authorization is not permission for
+   this documentation pass to migrate or promote. Stop new scheduled launches
+   and all old writers (Desktop, Task/Flow workers and Session drivers); verify
+   owned child exit without inferring authority from ancestry. Back up SQLite
+   and required filesystem/native conversation state from the same quiescent
+   interval. Retain the matching old executable and a restorable backup.
+4. **Apply and verify before reopening writers.** Repeat the proven procedure
+   through the authorized release/install path, verify integrity, preserved
+   current state and the selected executable/database pair, then resume writers
+   on the new version. On failure keep writers stopped and recover the matching
+   bytes/store together; never run the old binary against a partly converted DB.
 
 Configured Codex/Claude/OpenCode accounts, interactive reconnect and rendered
-Desktop continuity remain unproven. Synthetic provider tests establish only
-local behavior. Chapter tests cover interrupted rotation and second-Home sync;
-no live Linear rotation or distributed transaction is claimed.
-
-Jack removed historical compatibility and intermediate-draft obligations.
-Retain current Waves, Projects, Tasks, PR/Linear/worktree links, accounts/routes
-and resumable conversations. Three direct migrations create the final schema;
-released migration history stays immutable. Keep the populated current-review
-and Project-default upgrade tests: those represent existing machine state.
-
-Before actual conversion, obtain separate authority, quiesce old writers, take
-an SQLite backup and repeat the private-copy rehearsal. The existing private
-converter is `.lf/tmp/deep-compress/convert_current.py`; inspect it against the
-final schema before reuse. Verify selected captures, native identities, pending
-reviews, Task links, account routes and foreign keys. Do not copy old turns,
-process receipts or driver authority. A consistent database backup plus live
-filesystem reads is not an atomic snapshot. Promotion and installed acceptance
-remain outside this pass.
+Desktop continuity remain release/installed-acceptance obligations. Exercise them
+with the candidate and again after conversion where installed state matters;
+record failures without claiming fixtures as configured proof. Jack's waiver of
+demo/review removes his attendance requirement, not these checks. No live Linear
+rotation or distributed transaction is established by local Chapter fixtures.
 
 ## Test compression boundary
 

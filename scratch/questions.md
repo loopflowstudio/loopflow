@@ -29,6 +29,16 @@ pass histories stay in Git.
   Migration rehearsals use copies only; no installed-Home write or promotion.
 - One item per implement iteration, focused checks between items, full local
   Rust coverage before final gate. LOO-334 continues independently.
+- Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
+  autonomously, no need to review with me.” No demo or review wait remains.
+  Land #1296 as one PR; #1358, #1359 and #1360 already landed the independent
+  pieces. Exec/Chapter extraction would save only about 10% and requires manual
+  cutting, so the old landing-groups proposal is superseded.
+- Merge main into this branch; do not rebase. `e3a2c7e2c` merged #1360.
+- Only this machine is a client. Jack reports the pinned dev Home is gone and
+  its active Tasks were moved by hand to the one main Home, `~/.lf`. Do not
+  recreate it or preserve history/compatibility for nonexistent clients. Three
+  migrations remain; current operating state and resumable Sessions still matter.
 
 ## Still open
 
@@ -37,11 +47,14 @@ pass histories stay in Git.
   checkout-only or unattended-only policy; preserve the current intersection.
 - A Wave with no In Progress Project has no selected automatic creation policy.
   Report the missing plan. Whole-Flow binding is outside Session bind scope.
-- `session_events` → `agent_events` remains a tentative naming proposal.
-  [Naming](naming.md) records the current table names.
+- `session_events` → `agent_events` and the earlier `exec_events` rename remain
+  open, unapplied proposals. The latter has no surviving `run_events` table to
+  rename. [Naming](naming.md) records that observation without closing the choice.
 - Configured provider/Desktop acceptance and actual quiescent conversion need
   their own proof and authority. Fixture success does not close either.
 
-Current compression authorization: delete redundant tests and scratch, run build,
-fmt, all-target Clippy with warnings denied and remaining affected tests, commit,
-then `git push` without force and stop. No new product decision is needed here.
+Current realign authorization: reconcile the plan and Infrastructure memory,
+commit, push without force and stop. Subsequent autonomous landing belongs to
+the supervising session. [Remaining work](remaining-work.md) separates merge
+requirements from release conversion of `~/.lf`; neither installed migration
+nor promotion is part of this pass.

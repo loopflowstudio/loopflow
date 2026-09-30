@@ -45,6 +45,12 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
     }
+    let program = command
+        .as_std()
+        .get_program()
+        .to_string_lossy()
+        .into_owned();
+    crate::provider_auth::apply_provider_env_to_command(&program, command.as_std_mut());
 }
 
 pub(crate) fn conversation_environment(
@@ -316,30 +322,6 @@ pub fn is_terminal_harness_error(code: &str) -> bool {
     matches!(code, "codex_disconnected" | "opencode_disconnected")
 }
 
-/// Drain events trailing a `TurnCompleted { Failed }` to extract an actionable
-/// error code. The opencode mapping emits usage before completion, then an
-/// `Error { code }` for hollow-body, decode-gap, and disconnect failures. The
-/// harness sends them synchronously, so the error is already in the buffer when
-/// the runner processes the completion.
-/// Returns the best failure reason: the error code/message if found, else the
-/// generic fallback.
-pub(crate) fn drain_turn_failure_reason(
-    event_rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    fallback: &str,
-) -> String {
-    match event_rx.try_recv() {
-        Ok(ConversationEvent::Error { code, message, .. }) => format!("{code}: {message}"),
-        Ok(other) => {
-            tracing::debug!(
-                event = ?other,
-                "unexpected event trailing a Failed turn; keeping fallback reason"
-            );
-            fallback.to_string()
-        }
-        Err(_) => fallback.to_string(),
-    }
-}
-
 /// What happened when the controller tried to deliver input to the exact
 /// provider Turn active at the time of the call.
 ///
@@ -472,19 +454,6 @@ impl HarnessKind {
 pub fn canonical_harness(name: &str) -> Option<&'static str> {
     HarnessKind::parse(name).map(HarnessKind::as_str)
 }
-
-/// How a body builds its provider. `default_create_harness` is the only
-/// production implementation; holding it as a value rather than calling it
-/// directly is what lets a body's construction be substituted.
-pub type CreateHarness = Box<
-    dyn Fn(
-            &str,
-            ApprovalPolicy,
-            mpsc::UnboundedSender<ConversationEvent>,
-        ) -> Result<Box<dyn Harness>>
-        + Send
-        + Sync,
->;
 
 pub fn default_create_harness(
     name: &str,

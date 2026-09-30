@@ -47,7 +47,7 @@ pub(crate) async fn task_execution_and_flow(
         .map(|claim| task_worker_owner_evidence(&claim.owner));
     let mut snapshot = project_execution(position.as_ref(), evidence);
     if let Some(position) = position.as_ref().filter(|flow| flow.failure.is_none()) {
-        if let Some(exec) = store.sqlite.pending_flow_operation_exec(position.id())? {
+        if let Some(exec) = store.sqlite.pending_flow_step_exec(position.id())? {
             match crate::journal::exec_process_evidence(&store.sqlite, &exec) {
                 ProcessIdentityEvidence::Live => {
                     snapshot.state = TaskExecutionState::Running;

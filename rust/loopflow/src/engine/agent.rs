@@ -140,6 +140,8 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
+    /// Chrome integration for a native stream session.
+    pub chrome: bool,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
@@ -289,6 +291,8 @@ pub fn system_prompt_with_structured_replies(config: &AgentConfig) -> String {
 /// Process/runtime options for launching an agent subprocess.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessConfig {
+    /// Task policy input; the provider loop remains the ordinary command loop.
+    pub task_input: Option<crate::ops::task_input::TaskInput>,
     /// Run in auto/batch mode (non-interactive).
     pub auto: bool,
     /// Stream output in real-time.
@@ -736,6 +740,14 @@ pub fn build_claude_session_turn_args(
 ) -> Vec<String> {
     let mut args = vec!["-p".to_string(), content.to_string()];
     args.extend(claude_args_for(config, resume_id).to_args());
+    args.push(
+        if config.chrome {
+            "--chrome"
+        } else {
+            "--no-chrome"
+        }
+        .to_string(),
+    );
     args
 }
 
@@ -1138,6 +1150,7 @@ pub fn launch_agent(
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
     let mut launch = launch.clone();
+    launch.chrome = capabilities.chrome;
     pin_provider_account_id_blocking(&mut launch)?;
     let (harness, model) = parse_agent(launch.agent());
     let implicit_capture = if process.capture.is_none() {
@@ -1555,10 +1568,10 @@ fn _launch_harness_once(
 
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     let (provider, _) = parse_agent(launch.agent());
-    let account_route = match if provider == "codex" {
-        resolve_account_route_blocking(Provider::Codex, launch)
-    } else {
-        Ok(None)
+    let account_route = match match provider.as_str() {
+        "codex" => resolve_account_route_blocking(Provider::Codex, launch),
+        "claude" => resolve_account_route_blocking(Provider::Claude, launch),
+        _ => Ok(None),
     } {
         Ok(route) => route,
         Err(error) => {
@@ -1623,6 +1636,7 @@ fn _launch_harness_once(
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
 
+        let _comments = process.task_input.as_ref().map(crate::ops::task_input::TaskInput::refresh);
         let drive = async {
             harness
                 .send_input(&prompt)
@@ -1631,8 +1645,20 @@ fn _launch_harness_once(
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
+            let mut input_tick = tokio::time::interval(Duration::from_millis(250));
+            input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut activity_tick = tokio::time::interval(crate::run_record::activity::SAMPLE_INTERVAL);
+            activity_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             while exit_code.is_none() {
                 tokio::select! {
+                    _ = input_tick.tick(), if process.task_input.is_some() => {
+                        process.task_input.as_ref().expect("Task input is enabled")
+                            .poll(harness.as_mut(), capture).await
+                            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+                    }
+                    _ = activity_tick.tick(), if capture.is_some() => {
+                        if let Some(capture) = capture { capture.observe_activity(harness.process_id()).await; }
+                    }
                     raw = raw_rx.recv(), if capture.is_some() => {
                         if let Some(raw) = raw {
                             if let Some(capture) = capture {
@@ -1673,6 +1699,12 @@ fn _launch_harness_once(
                             _ => {}
                         }
                     }
+                }
+            }
+            while let Ok(event) = event_rx.try_recv() {
+                if let Some(capture) = capture { capture.record_conversation(event.clone()); }
+                if let ConversationEvent::Error { code, message, .. } = event {
+                    stderr.push_str(&format!("{code}: {message}\n"));
                 }
             }
             while let Ok(raw) = raw_rx.try_recv() {
@@ -2981,6 +3013,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_minimal() {
         let config = AgentConfig {
+            chrome: false,
             session_driver: None,
             flow_selection: None,
             system_prompt: String::new(),
@@ -3013,6 +3046,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_full() {
         let config = AgentConfig {
+            chrome: false,
             session_driver: None,
             flow_selection: None,
             system_prompt: "Be concise".to_string(),
@@ -3045,6 +3079,7 @@ trust_level = "trusted"
     #[test]
     fn build_claude_session_turn_args_appends_loopflow_guidance() {
         let config = AgentConfig {
+            chrome: false,
             session_driver: None,
             flow_selection: None,
             system_prompt: "Base prompt".to_string(),

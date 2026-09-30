@@ -3601,7 +3601,10 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     no_position_file();
     assert!(stderr.contains("blocked"), "{stderr}");
     let failure = failure.unwrap();
-    assert!(failure.contains("work-proof Run failed"), "{failure}");
+    assert!(
+        failure.contains("work-proof: opencode_error: fixture failure"),
+        "{failure}"
+    );
     assert_eq!(pointer, None, "a Flow about the Task is not its Flow");
     let failed = invocation_inputs(&fixture, &invocation);
     assert_eq!(failed.len(), 1, "{failed:?}");

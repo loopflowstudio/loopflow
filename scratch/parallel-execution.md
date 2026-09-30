@@ -22,12 +22,13 @@ Desktop, Chapter, incident or migration obligations. Final concept review with
 Jack and resolved findings precede final gates and saved delivery. Usage after
 bind remains prospective as an operating assumption pending Jack's decision.
 
-Mechanical steps now use a real child Exec, preserving a surviving step across
-driver death. This is a coherent internal slice of item 1. The common agent
-executor and child-owned capture reservation are next; TaskLauncher/SavedLauncher
-remain until their Task seed, account, steer and attachment behavior moves into
-the direct provider path. [Exec-per-step](exec-per-step.md) and
-[evidence](evidence.md#mechanical-flow-step-checkpoint) retain proof and limits.
+Skills now join ops as child lf commands. TaskLauncher/SavedLauncher and their
+alternate provider loops are deleted locally; Task seed and live controls enter
+the direct command as input. The ordinary surviving-child and managed native
+recovery proofs pass, including attached input and Chapter preservation. See
+[the exact inventory, failures and remaining proofs](exec-per-step.md#direct-skill-command-cut--2026-09-29).
+Task managed-account/preflight policy remains an explicit exception for Jack's
+review; item 1 and the complete design are not yet accepted.
 
 ## Current evidence
 

@@ -13,8 +13,6 @@ use crate::work::wave::Wave;
 
 use super::{OpsError, OpsResult};
 
-pub(crate) const TASK_ACCOUNT_ID_ENV: &str = "LF_TASK_ACCOUNT_ID";
-
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
     pub work: WorkRef,
@@ -306,16 +304,7 @@ pub(crate) struct TaskWorkerLaunch {
     pub environment: Vec<(String, String)>,
 }
 
-#[cfg(test)]
-tokio::task_local! {
-    pub(crate) static TEST_TASK_LAUNCH: tokio::sync::mpsc::UnboundedSender<TaskWorkerLaunch>;
-}
-
 pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
-    #[cfg(test)]
-    if let Ok(sender) = TEST_TASK_LAUNCH.try_with(Clone::clone) {
-        return sender.send(request).map_err(run_error);
-    }
     let environment = request.environment.clone();
     start_work_session(&request, environment).await
 }
@@ -357,6 +346,15 @@ async fn start_work_session(
             crate::machine_install::INSTALL_SWITCH_ENV.to_string(),
             switch_id.to_string_lossy().into_owned(),
         ));
+    }
+    environment.push((
+        crate::engine::config::USER_NAME_ENV.to_string(),
+        crate::engine::config::launch_user_name()
+            .map_err(run_error)?
+            .unwrap_or_default(),
+    ));
+    if let Ok(options) = std::env::var(crate::lf::TASK_SKILL_OPTIONS_ENV) {
+        environment.push((crate::lf::TASK_SKILL_OPTIONS_ENV.to_string(), options));
     }
     let environment = environment
         .iter()

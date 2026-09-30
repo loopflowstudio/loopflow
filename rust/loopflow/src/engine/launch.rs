@@ -125,21 +125,7 @@ pub fn prepare_launch_prompt(
 
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
-    let agent = agent
-        .or_else(|| {
-            components
-                .skill
-                .as_ref()
-                .and_then(|skill| skill.agent.clone())
-        })
-        .or_else(|| config.agent.clone())
-        .or_else(|| {
-            components
-                .skill
-                .as_ref()
-                .and_then(|skill| skill.default_agent.clone())
-        })
-        .unwrap_or_else(|| default_agent().to_string());
+    let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
 
     // Keep only system-safe sections (operate/surface) in
@@ -152,6 +138,7 @@ pub fn prepare_launch_prompt(
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
     let launch = AgentConfig {
+        chrome: false,
         session_driver: None,
         flow_selection: None,
         system_prompt,
@@ -221,6 +208,20 @@ fn is_supported_opencode_model_variant(variant: &str) -> bool {
         "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
         _ => false,
     }
+}
+
+/// The same precedence applies to direct commands, captured skills and reviews.
+pub(crate) fn resolve_agent(
+    override_agent: Option<&str>,
+    skill: Option<&Skill>,
+    config: &Config,
+) -> String {
+    override_agent
+        .map(str::to_owned)
+        .or_else(|| skill.and_then(|skill| skill.agent.clone()))
+        .or_else(|| config.agent.clone())
+        .or_else(|| skill.and_then(|skill| skill.default_agent.clone()))
+        .unwrap_or_else(|| default_agent().to_owned())
 }
 
 #[cfg(test)]

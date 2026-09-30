@@ -529,7 +529,7 @@ async fn local_started_task(
     assert!(!context.store.task_started(&task.id).await.unwrap());
     let flow = context
         .store
-        .reserve_attempt(flow.id(), flow.version, None)
+        .reserve_attempt(flow.id(), flow.version, None, None)
         .await
         .unwrap();
     assert!(context.store.task_started(&task.id).await.unwrap());

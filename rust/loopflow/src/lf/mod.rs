@@ -1,3 +1,7 @@
+/// Prompt flags forwarded to a managed Task's ordinary skill commands.
+#[doc(hidden)]
+pub const TASK_SKILL_OPTIONS_ENV: &str = "LF_TASK_SKILL_OPTIONS";
+
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
@@ -124,9 +128,51 @@ pub struct Cli {
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
+
+    /// Execute a skill from this saved Flow boundary, without resolving its definition again.
+    #[arg(long = "__flow-step", hide = true)]
+    pub flow_step: Option<String>,
 }
 
 impl Cli {
+    /// Forward prompt and provider options to a captured step. Work and the
+    /// definition come from its Flow row, not another launch-time lookup.
+    #[doc(hidden)]
+    pub fn step_args(&self) -> Vec<String> {
+        let mut args = vec!["--batch".to_string()];
+        for (flag, enabled) in [
+            ("--clipboard", self.clipboard),
+            ("--yolo", self.yolo),
+            ("--chrome", self.chrome),
+            ("--no-chrome", self.no_chrome),
+            ("--diff-files", self.diff_files),
+            ("--no-diff-files", self.no_diff_files),
+            ("--diff", self.diff),
+            ("--no-diff", self.no_diff),
+            ("--no-loopflow", self.no_loopflow),
+        ] {
+            if enabled {
+                args.push(flag.to_string());
+            }
+        }
+        for (flag, values) in [
+            ("--docs", &self.docs),
+            ("--account", &self.account),
+            ("--only-account", &self.only_account),
+        ] {
+            for value in values {
+                args.extend([flag.to_string(), value.clone()]);
+            }
+        }
+        if let Some(model) = &self.model {
+            args.extend(["--model".to_string(), model.clone()]);
+        }
+        if let Some(turns) = self.max_turns {
+            args.extend(["--max-turns".to_string(), turns.to_string()]);
+        }
+        args
+    }
+
     pub(crate) fn launch_options(&self) -> Self {
         Self {
             command: None,
@@ -153,6 +199,7 @@ impl Cli {
             as_work: self.as_work.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,
+            flow_step: self.flow_step.clone(),
         }
     }
 

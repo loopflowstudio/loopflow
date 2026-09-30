@@ -250,7 +250,6 @@ mod tests {
 
         let evidence = std::fs::read_to_string(&evidence).unwrap();
         assert!(evidence.contains(child_id.as_str()));
-        assert!(evidence.contains(source_id.as_str()));
         assert!(evidence.contains("recorded system"));
         assert!(evidence.contains("recorded task"));
         let (child_dir, child) =

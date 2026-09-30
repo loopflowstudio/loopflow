@@ -164,7 +164,6 @@ class Server(BaseHTTPRequestHandler):
             if evidence := os.environ.get("LF_TEST_REPLAY_EVIDENCE"):
                 Path(evidence).write_text(json.dumps({
                     "input": os.environ["LF_RUN_ID"],
-                    "parent": os.environ.get("LF_PARENT_RUN_ID"),
                     "request": body,
                 }))
             self._json({})

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 /// The SSH destination by which the current foreground `lf` was reached.
@@ -101,6 +101,31 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     }
 
     PathBuf::from("lf")
+}
+
+/// A recursive executable lock puts its `lf` first on PATH. Ordinary step
+/// discovery uses that same shell order, then the selected installation, then
+/// this driver. Historical control pins never override a newly selected lf.
+pub(crate) fn resolve_step_lf_binary(cwd: &Path) -> Result<PathBuf> {
+    let search_path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(path) = std::env::split_paths(&search_path)
+        .map(|directory| cwd.join(directory).join("lf"))
+        .find(|candidate| candidate.is_file())
+    {
+        return Ok(path);
+    }
+    if let Some(selection) =
+        crate::machine_install::current_selection(&crate::machine_install::root()?)?
+    {
+        if let Some(cli) = selection
+            .artifact_set
+            .artifact(&crate::machine_install::ArtifactRole::Cli)
+            .filter(|cli| cli.path.is_file())
+        {
+            return Ok(cli.path.clone());
+        }
+    }
+    std::env::current_exe().context("resolve Flow driver executable as final fallback")
 }
 
 fn select_binary_override(

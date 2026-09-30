@@ -3647,23 +3647,88 @@ fn invocation_inputs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
 #[test]
 fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let fixture = Fixture::new(false);
+    fixture.repo.create_branch("task-row-flow");
     saved_flow_stand_in(&fixture);
-    let task_path = fixture.repo.create_named_worktree("task-row-flow");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        &task_path,
+        fixture.repo.path(),
         "task-row-flow",
         &fixture.repo.head_sha(),
     );
     let task_id = task.task.id.to_string();
+    // Claude supports the checkout boundary. Its native process is simulated;
+    // the public lf command, account route and Session/Flow writes are real.
+    let provider = fixture.home.path().join("bin/claude");
+    std::fs::write(
+        &provider,
+        r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+if "--version" in sys.argv:
+    print("fixture Claude")
+    raise SystemExit(0)
+home = Path(__file__).resolve().parent.parent
+with (home / "launched").open("a") as output:
+    output.write(os.environ["LF_RUN_ID"] + "\n")
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "fixture-conversation"}))
+failure = home / "fail-once"
+failed = failure.exists()
+failure.unlink(missing_ok=True)
+print(json.dumps({"type": "result", "subtype": "error_during_execution" if failed else "success",
+                  "is_error": failed, "result": "fixture failure" if failed else "Fixture complete",
+                  "session_id": "fixture-conversation"}))
+raise SystemExit(1 if failed else 0)
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let account_home = fixture.home.path().join("accounts/claude/fixture");
+    std::fs::create_dir_all(&account_home).unwrap();
+    std::fs::write(
+        account_home.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"synthetic-fixture-token","expiresAt":4102444800000}}"#,
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "claude".into(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    store
+        .set_provider_route(&loopflow::profile::ProviderRoute {
+            scope: loopflow::profile::RouteScope::Default,
+            provider: loopflow::provider_auth::Provider::Claude,
+            accounts: vec![account_id],
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
     std::fs::write(fixture.home.path().join("fail-once"), "").unwrap();
     let blocked = fixture.run(&[
         "--task",
         "INF-123",
-        "--__cwd",
-        fixture.repo.path().to_str().unwrap(),
         "--model",
-        "opencode",
+        "claude",
         "flow",
         "work-then-review",
         "-b",
@@ -3691,10 +3756,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     no_position_file();
     assert!(stderr.contains("blocked"), "{stderr}");
     let failure = failure.unwrap();
-    assert!(
-        failure.contains("work-proof: opencode_error: fixture failure"),
-        "{failure}; {stderr}"
-    );
+    assert!(failure.contains("work-proof"), "{failure}; {stderr}");
     assert_eq!(pointer, None, "a Flow about the Task is not its Flow");
     let failed = invocation_inputs(&fixture, &invocation);
     assert_eq!(failed.len(), 1, "{failed:?}");

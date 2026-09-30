@@ -15,7 +15,7 @@ behavior or permissions compared with the same Flow in X's checkout.
 | `claim.is_some()` sets worktree scope, execution boundary and skipped permissions | One `confine_checkout_agent(task_checkout, interactive)` predicate | Implemented for the intersection: unattended execution in a Task checkout. Both direct and managed commands use it |
 | Task-specific account preflight error classification | `provider_account::preflight_agent_account` and shared agent selection | Moved; inherited account leases and shared failover retain their owners |
 | Task-specific writable roots and probe | Agent execution boundary | Moved; Task preflight delegates before allocating work |
-| Current binary starts Flow children | PATH resolves `lf` at each step | Implemented; recursive executable lock remains LOO-334's responsibility |
+| Current binary starts Flow children | Explicit recursive lock through PATH → ordinary PATH → selected installation → driver executable | PATH honors the lock's leading directory; missing PATH lf falls back without using historical control pins. The child's Exec command records its executable path. Lock creation remains LOO-334's responsibility |
 | Child migration followed by old-driver settlement | Read-only schema compatibility check before any Flow settlement | Implemented; incompatible driver exits with selected result retained |
 | In-turn `lf flow blocked` command | Selected successful structured result with a required reason | Removed; keyed Ask completion starts another turn in the same conversation |
 | Task worker claim and managed Flow selection | Driver admission/settlement | Retained mechanics; no longer select step permissions |

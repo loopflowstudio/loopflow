@@ -290,6 +290,27 @@ fn codex_trace_error_turn() {
     ));
 }
 
+#[test]
+fn codex_inline_error_survives_without_a_separate_notification() {
+    let lines: Vec<_> = read_trace_lines("codex_error.jsonl")
+        .into_iter()
+        .filter(|line| serde_json::from_str::<Value>(line).unwrap()["method"] != "error")
+        .collect();
+    let events = replay_codex_lines(lines.clone().into_iter().chain(lines).collect());
+    let kinds: Vec<_> = events.iter().map(ConversationEvent::event_type).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "turn_started",
+            "error",
+            "turn_completed",
+            "turn_started",
+            "error",
+            "turn_completed"
+        ]
+    );
+}
+
 /// A `willRetry: true` error mid-turn must NOT produce a terminal Error
 /// event: the vendor keeps the turn alive and retries, so the turn survives
 /// to its real completion. The error surfaces non-terminally as a Thought

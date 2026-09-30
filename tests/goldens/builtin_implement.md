@@ -122,6 +122,10 @@ If no user authorization is required, record a material assumption in
 No rendering environment. Output is logged, not displayed.
 
 
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
+
 The skill.
 
 <lf:skill:implement>

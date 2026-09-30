@@ -2,6 +2,7 @@ mod support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
@@ -1872,6 +1873,17 @@ fi"#;
             ]);
         }
         let output = command
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    Path::new(env!("CARGO_BIN_EXE_lf"))
+                        .parent()
+                        .unwrap()
+                        .display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
             .current_dir(&worktree)
             .env_remove("LF_GIT_OPERATION_ID")
             .env_remove("LF_TRACE_ID")

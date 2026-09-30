@@ -30,6 +30,7 @@ Projects do not own memory, cadence, or child projects.
 - `telemetry-daily` -> check architecture drift, local development friction,
   CI, release cadence, spend, and host health; turn the first red or flaky
   signal into focused work.
+
 Release owns the `release-run` schedule in [its goal](release/GOAL.md).
 
 ## Process

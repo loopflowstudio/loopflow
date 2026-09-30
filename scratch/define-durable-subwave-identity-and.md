@@ -10,11 +10,13 @@ This branch starts at current LOO-298 commit `ab901f1f16e19e663791e635bbc85366b8
 Only LOO-329's read-slice changes were ported; none of its inherited migration
 copies or older LOO-298 commits were brought over. Keep synchronization by merge,
 never rebase. Jack requested no design review; interactive acceptance is at demo.
-LOO-298's other scratch files describe the parent work, not this Task's scope.
+Inherited LOO-298 scratch notes were removed under the supervising session's
+2026-09-30 steer; their original contents remain in the base commit's history.
 
 ## Remaining work
 
-1. The supervising Flow owns integration, broader gate, publication
+1. Local implementation and the disposable-Home proof are complete. The
+   supervising Flow owns integration, broader gate, publication
    and Jack's interactive demo. Stay on the code Flow until LOO-298 lands;
    synchronize by merge, never rebase. No push or landing ran in this pass.
 2. After landing, use installed `lf` to create Release's Linear Initiative and
@@ -24,6 +26,32 @@ LOO-298's other scratch files describe the parent work, not this Task's scope.
    store proofs below establish local Rust behavior, not installed acceptance.
 
 ## Implementation and proof · 2026-09-30
+
+The Release follow-through uses the authored Infrastructure and Release Markdown
+in a disposable checkout/Home through the compiled `lf-prompt` executable. Both
+selected-Wave prompts passed: each selected file appears once, ancestors precede
+Release, the parent excludes Release, ordinary context excludes auth/Product and
+child directories, and nested scratch remains included. Authored configuration
+checks confirm Infrastructure's 09:00 telemetry schedule, Release's 10:00
+release-run schedule and its mechanical `release run patch` Flow. No scheduled
+release was invoked. The existing disposable-store Task-binding, rename,
+reparenting and fresh-Home regression remains the Task/identity proof; this new
+check exercises real repository content without replacing that regression.
+
+Release's GOAL now states its planning responsibility; its memory introduction
+records the accepted nested-Wave scope and pending live cutover. Review removed
+stale exploratory wording, deleted the two inherited parent notes, scoped
+`scratch/questions.md` to LOO-354 and replaced the dangling parent-memory pointer
+with its preserved Git location. No Rust implementation changed in this pass.
+
+Proof command: `uv run python .lf/tmp/subwaves/release-proof.py`.
+Outputs: `.lf/tmp/subwaves/release-proof.log`, `release-proof-build.log`,
+`release-proof-inputs.json` and the two `*-authored-prompt.md` files beside them.
+The script removes its temporary checkout/Home and strips inherited LF_/LOOPFLOW_
+authority. Resource preflight passed at 37.7 GiB free above the 32 GiB reserve;
+the busy uv cache was retained. This is local authored-content proof, not Linear,
+launchd, configured provider or Desktop acceptance. Formatting, architecture
+coverage and diff checks passed. No broader gate ran.
 
 The final reader commands passed (103 tests across seven commands), resolving the
 previous resource stop. [Read-slice evidence](subwave-read-slice.md) retains the

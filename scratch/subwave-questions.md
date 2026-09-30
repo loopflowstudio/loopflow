@@ -17,11 +17,9 @@ The original LOO-329 notes remain at
   use this branch's current parent model and its ordinary migration workflow.
 - The release Initiative, plan/Task moves and live schedule transfer happen
   through installed `lf` after code lands. A file fixture cannot prove that split.
-- Parent rename and arbitrary directory reparenting need stable identity evidence.
-  Current discovery has neither parent assignment nor a directory-move identity
-  contract. Do not infer a moved Wave from a coincidentally matching leaf name.
-  Resolve that implementation question within the accepted id/name/parent model
-  when building step 2; no new identity sidecar or metadata ledger is selected.
+- Parent rename and arbitrary directory reparenting use the authored Wave UUID
+  described below. Do not infer a moved Wave from a matching leaf name; no
+  identity sidecar or metadata ledger is selected.
 
 The 2026-09-30 implementation resumed above the emergency reserve (44.1 GiB).
 All seven final reader commands passed; [read-slice evidence](subwave-read-slice.md)

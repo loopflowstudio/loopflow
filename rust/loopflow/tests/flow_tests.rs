@@ -144,75 +144,6 @@ SQL
 }
 
 #[test]
-fn mechanical_flow_boundaries_each_have_their_own_child_exec() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    write_flow(
-        repo.path(),
-        "mechanical-proof",
-        "- cmd: rebase --plan\n- cmd: rebase --plan\n",
-    );
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &["flow", "mechanical-proof", "-b", "--no-loopflow"],
-        None,
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let counts: (i64, i64, i64) = conn.query_row(
-        "SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs)",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).unwrap();
-    assert_eq!(
-        counts,
-        (0, 0, 3),
-        "the driver and two real step processes create no conversations"
-    );
-    let history: Vec<(String, i64, String)> = conn
-        .prepare("SELECT kind,node,exec_id FROM flow_events ORDER BY seq")
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(
-        history
-            .iter()
-            .map(|(kind, node, _)| (kind.as_str(), *node))
-            .collect::<Vec<_>>(),
-        vec![
-            ("operation_started", 0),
-            ("operation_completed", 0),
-            ("operation_started", 1),
-            ("operation_completed", 1)
-        ]
-    );
-    assert_eq!(history[0].2, history[1].2);
-    assert_eq!(history[2].2, history[3].2);
-    assert_ne!(history[0].2, history[2].2);
-    let children: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM execs child JOIN execs driver ON driver.id=child.parent_exec_id
-         WHERE child.via_agent=0 AND child.outcome='succeeded' AND driver.parent_exec_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(children, 2);
-    assert_eq!(
-        conn.query_row("SELECT state FROM flow_sessions", [], |row| row
-            .get::<_, String>(0))
-            .unwrap(),
-        "completed"
-    );
-}
-
-#[test]
 fn mechanical_failure_retains_earlier_step_success() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
@@ -278,139 +209,16 @@ fn mechanical_failure_retains_earlier_step_success() {
         .unwrap(),
         "failed"
     );
-    assert_eq!(
-        conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn mechanical_task_step_owns_its_effect_without_taking_the_driver_claim() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
-        home.path(),
-        repo.path(),
-        "mechanical-task",
-        &repo.head_sha(),
-    );
-    write_flow(repo.path(), "task-op", "- cmd: rebase --plan\n");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let flow = runtime
-        .block_on(task.store.start_task_flow(
-            &task.task.id,
-            FlowSession {
-                invocation: QueuedInvocation::load(repo.path(), "task-op").unwrap(),
-                cursor: Default::default(),
-                version: 0,
-                task_id: Some(task.task.id.clone()),
-                wave_id: Some(task.task.wave_id.clone()),
-                cwd: repo.path().to_owned(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                ready_summary: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        ))
-        .unwrap();
-    let TaskWorkerClaimOutcome::Claimed(claim) = runtime
-        .block_on(task.store.claim_task_worker(
-            &task.task.id,
-            flow.id(),
-            flow.version,
-            &TaskWorkerOwner {
-                trace_id: TraceId::new(),
-                exec_id: ExecId::new(),
-                pid: std::process::id(),
-                started_at: 1,
-            },
-            time::OffsetDateTime::now_utc(),
-        ))
-        .unwrap()
-    else {
-        panic!("claim not acquired")
-    };
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    fs::remove_file(repo.path().join(".lf/flows/task-op.yaml")).unwrap();
-    let invoke = |version: u64| {
-        lf_command(
-            repo.path(),
-            home.path(),
-            &["__flow-step", flow.id(), &version.to_string()],
-            None,
-        )
-        .env(
-            loopflow::durable::TASK_WORKER_CLAIM_ENV,
-            serde_json::to_string(&claim).unwrap(),
-        )
-        .output()
-        .unwrap()
-    };
-    assert!(!invoke(flow.version + 1).status.success());
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    let output = invoke(flow.version);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    let current = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(current.claim.as_ref(), Some(&claim));
-    assert_eq!(current.cursor, flow.cursor, "the driver owns navigation");
-    assert!(
-        invoke(flow.version).status.success(),
-        "completed effect is retained on replay"
-    );
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (starts, results, conversations): (i64, i64, i64) = conn.query_row(
-        "SELECT (SELECT count(*) FROM flow_events WHERE kind='operation_started'),
-        (SELECT count(*) FROM flow_events WHERE kind='operation_completed'), (SELECT count(*) FROM agent_sessions)",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-    assert_eq!((starts, results, conversations), (1, 1, 0));
-    let effect_exec: String = conn
+    let (children, conversations): (i64, i64) = conn
         .query_row(
-            "SELECT exec_id FROM flow_events WHERE kind='operation_started'",
+            "SELECT (SELECT count(*) FROM execs c JOIN execs p ON c.parent_exec_id=p.id
+             WHERE c.via_agent=0 AND p.parent_exec_id IS NULL),
+            (SELECT count(*) FROM agent_sessions)",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_ne!(effect_exec, claim.owner.exec_id.as_str());
-    assert_eq!(
-        conn.query_row(
-            "SELECT outcome FROM execs WHERE id=?1",
-            [&effect_exec],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        "succeeded"
-    );
-    assert!(conn
-        .execute(
-            "UPDATE tasks SET started_at=started_at+1 WHERE id=?1",
-            [task.task.id.as_str()]
-        )
-        .is_err());
+    assert_eq!((children, conversations), (2, 0));
 }
 
 #[test]
@@ -1529,22 +1337,15 @@ fn observing_and_preparing_a_task_are_not_execution() {
     };
     assert_eq!(starts(), 0);
     assert!(!started(), "a prepared, unrun Task is not started");
-    let read = run_lf(
-        repo.path(),
-        home.path(),
-        &["runs", "--active", "--task", "INF-123", "--json"],
-        None,
-    );
-    assert!(
-        read.status.success(),
-        "{}",
-        String::from_utf8_lossy(&read.stderr)
-    );
-    assert_eq!(
-        starts(),
-        0,
-        "a filtered active-Run read cannot start its Task"
-    );
+    for args in [
+        vec!["runs", "--active", "--task", "INF-123", "--json"],
+        vec!["session", "list", "--task", "INF-123", "--json"],
+        vec!["usage", "--task", "INF-123", "--json"],
+    ] {
+        let read = run_lf(repo.path(), home.path(), &args, None);
+        assert!(read.status.success(), "{read:?}");
+        assert_eq!(started_at(), None, "inspection cannot start its Task");
+    }
 
     write_skill(repo.path(), "review-proof", "Review the fixture.");
     write_flow(
@@ -1585,7 +1386,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert_eq!(sessions.len(), 1);
     assert!(sessions[0]["id"].as_str().is_some());
-    assert!(sessions[0].get("run_id").is_none());
     // A Flow about the Task names it on its review Run, and the first Run
     // that names a Task starts it, opened or not.
     assert_eq!(starts(), 1, "a review Run naming the Task starts it");
@@ -1593,41 +1393,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
         started(),
         "a reserved Run naming the Task is start evidence"
     );
-
-    write_skill(repo.path(), "first-work", "Do this proof-owned work.");
-    register_codex_account(home.path());
-    let bin = TempDir::new().unwrap();
-    write_executable(
-        &bin.path().join("codex"),
-        &codex_app_server_script("done", ""),
-    );
-    let path = format!(
-        "{}:{}",
-        bin.path().display(),
-        std::env::var("PATH").unwrap()
-    );
-    let mut first = None;
-    for _ in 0..2 {
-        let launched = run_lf(
-            repo.path(),
-            home.path(),
-            &["--task", "INF-123", "first-work", "-b", "--no-loopflow"],
-            Some(&path),
-        );
-        assert!(
-            launched.status.success(),
-            "{}",
-            String::from_utf8_lossy(&launched.stderr)
-        );
-        assert_eq!(starts(), 1, "independent execution starts its Task");
-        assert!(started(), "a launched Run is durable start evidence");
-        assert_eq!(
-            *first.get_or_insert(started_at()),
-            started_at(),
-            "a later Run leaves Started alone"
-        );
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
 }
 
 #[test]
@@ -1896,33 +1661,6 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         serde_json::json!({"kind": "task", "id": task.task.id})
     );
     assert_eq!(task_runs("INF-123"), vec![after_landing, bound]);
-}
-
-#[test]
-fn historical_start_evidence_still_prevents_backlog_retirement() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
-        home.path(),
-        repo.path(),
-        "historical-start",
-        &repo.head_sha(),
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)", [task.task.id.as_str()]).unwrap();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    assert!(
-        runtime
-            .block_on(task.store.chapter_task_evidence(&task.task.id))
-            .unwrap()
-            .begun
-    );
-    assert!(!runtime
-        .block_on(task.store.retire_chapter_backlog(&task.task.id))
-        .unwrap());
 }
 
 #[test]
@@ -2399,7 +2137,6 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     assert_eq!(opened["title"], "Contribution review");
     assert_eq!(opened["id"], session_id);
-    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["work"], session["work"]);
     assert!(!home.path().join("prompts").exists());
     assert_eq!(

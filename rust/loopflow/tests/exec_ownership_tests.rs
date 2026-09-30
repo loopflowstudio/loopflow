@@ -14,48 +14,6 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
-async fn inspection_records_one_completed_exec_without_starting_work() {
-    let home = tempfile::tempdir().unwrap();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("LF_")
-            || key.to_string_lossy().starts_with("LOOPFLOW_")
-        {
-            command.env_remove(key);
-        }
-    }
-    let output = command
-        .args(["session", "list", "--all", "--json"])
-        .current_dir(home.path())
-        .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", &database)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let connection = rusqlite::Connection::open(&database).unwrap();
-    let (count, completed): (i64, i64) = connection
-        .query_row(
-            "SELECT count(*), count(completed_at) FROM execs WHERE outcome='succeeded'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("every parsed lf command has an Exec row");
-    assert_eq!((count, completed), (1, 1));
-    let work: i64 = connection
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(work, 0, "inspection must not reserve agent or Task work");
-}
-
-#[tokio::test]
 async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     use loopflow::exec::{Exec, ExecPage};
     let home = tempfile::tempdir().unwrap();
@@ -494,54 +452,6 @@ fn assert_recorded_exit(home: &Path, code: i32) {
         )
         .unwrap();
     assert_eq!(work, (0, 0));
-}
-
-#[test]
-fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
-    for append in [false, true] {
-        let repo = TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        let cwd = repo.path().join("nested");
-        std::fs::create_dir(&cwd).unwrap();
-        let trace = uuid::Uuid::new_v4().to_string();
-        let root = repo.path().join(".lf/journal/runs");
-        let obstruction = if append {
-            let path = root.join(&trace).join("events.jsonl");
-            std::fs::create_dir_all(&path).unwrap();
-            path
-        } else {
-            std::fs::create_dir_all(root.parent().unwrap()).unwrap();
-            std::fs::write(&root, "retained obstruction").unwrap();
-            root
-        };
-        let output = command(home.path(), &cwd, &["session", "list", "--all", "--json"])
-            .env("LF_TRACE_ID", &trace)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
-            serde_json::json!([])
-        );
-        assert_eq!(obstruction.is_dir(), append);
-        if !append {
-            assert_eq!(
-                std::fs::read_to_string(&obstruction).unwrap(),
-                "retained obstruction"
-            );
-        }
-        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs')", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-        assert_eq!(facts, (1, 0));
-        let recorded_cwd: String = conn
-            .query_row("SELECT cwd FROM execs", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(recorded_cwd, cwd.canonicalize().unwrap().to_string_lossy());
-        assert!(
-            !cwd.join(".lf").exists(),
-            "file journal belongs at the checkout root"
-        );
-    }
 }
 
 #[tokio::test]

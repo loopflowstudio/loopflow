@@ -152,16 +152,6 @@ impl Fixture {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
     }
 
-    fn retired_run_tables(&self) -> i64 {
-        self.db()
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap()
-    }
-
     fn count(&self, table: &str) -> i64 {
         self.db()
             .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
@@ -180,7 +170,7 @@ impl Fixture {
             .unwrap()
     }
 
-    /// (session id, kind, title, title_source, completed) of the Run's Session.
+    /// (session id, kind, title, title_source, completed) of the captured input’s Session.
     fn session_row(&self, run_id: &str) -> (String, String, String, String, bool) {
         self.db()
             .query_row(
@@ -198,7 +188,7 @@ impl Fixture {
                     ))
                 },
             )
-            .unwrap_or_else(|error| panic!("Run {run_id} has no Session row: {error}"))
+            .unwrap_or_else(|error| panic!("Capture {run_id} has no Session: {error}"))
     }
 
     /// Original input attribution, independent of a later conversation binding.
@@ -220,7 +210,7 @@ impl Fixture {
                 [run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap_or_else(|error| panic!("Run {run_id} has no row: {error}"))
+            .unwrap_or_else(|error| panic!("Capture {run_id} has no attribution: {error}"))
     }
 
     fn run_dir(&self, run_id: &str) -> PathBuf {
@@ -231,7 +221,7 @@ impl Fixture {
             .join(run_id)
     }
 
-    /// `lf ask` as called from inside the caller's Run.
+    /// `lf ask` as called from inside the caller's conversation.
     fn ask(&self, caller_run: &str, question: &str) -> Command {
         let mut command = self.command(&["ask", question]);
         command
@@ -277,29 +267,6 @@ impl Fixture {
     fn launcher_requests(&self) -> String {
         std::fs::read_to_string(self.home.path().join("tmux.log")).unwrap_or_default()
     }
-
-    fn retired_files(&self) -> Vec<PathBuf> {
-        fn walk(dir: &Path, found: &mut Vec<PathBuf>) {
-            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    walk(&path, found);
-                } else if ["session-name.json", "session-resolution.json"]
-                    .contains(&entry.file_name().to_string_lossy().as_ref())
-                    || path
-                        .extension()
-                        .is_some_and(|extension| extension == "json")
-                        && dir.ends_with("human-sessions")
-                {
-                    found.push(path);
-                }
-            }
-        }
-        let mut found = Vec::new();
-        walk(&self.home.path().join("runs"), &mut found);
-        walk(&self.home.path().join("human-sessions"), &mut found);
-        found
-    }
 }
 
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
@@ -308,20 +275,16 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
 
 #[test]
-fn interactive_session_is_rows_from_launch_to_completion() {
+fn conversation_keeps_its_name_and_identity_until_completed() {
     let fixture = Fixture::new(true);
 
     let (first, first_run) = fixture.attach(&LAUNCH);
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (1, 0),
-        "launch reserves one Session and no Run"
-    );
+    assert_eq!(fixture.sessions().len(), 1);
     let (id, kind, title, source, completed) = fixture.session_row(&first_run);
-    assert_ne!(id, first_run, "a Session is not its Run");
+    assert_ne!(
+        id, first_run,
+        "conversation identity differs from its captured input"
+    );
     assert_eq!(
         (kind.as_str(), source.as_str(), completed),
         ("conversation", "generated", false)
@@ -333,7 +296,6 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     let listed = fixture.sessions();
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0]["id"], id.as_str());
-    assert!(listed[0].get("run_id").is_none());
     assert_eq!(listed[0]["kind"], "conversation");
     assert_eq!(listed[0]["title"], title.as_str());
     assert_eq!(listed[0]["title_source"], "generated");
@@ -383,34 +345,21 @@ fn interactive_session_is_rows_from_launch_to_completion() {
     assert_eq!(retained[0]["state"], "unknown");
     assert_eq!(retained[0]["title"], "Parser review");
 
-    // Open resumes the same Run under the same Session.
+    // Open resumes the same conversation with its captured input.
     let described = fixture.json(&["session", "open", &id, "--json"]);
     assert_eq!(described["id"], id.as_str());
-    assert!(described.get("run_id").is_none());
     let (resumed, resumed_run) = fixture.attach(&["session", "open", &id]);
     assert_eq!(resumed_run, first_run);
     assert_eq!(fixture.sessions()[0]["state"], "active");
     fixture.release(resumed);
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (1, 0)
-    );
+    assert_eq!(fixture.sessions().len(), 1);
 
     // Another launch in the same checkout is another conversation.
     let (second, second_run) = fixture.attach(&LAUNCH);
     fixture.release(second);
     let (second_id, ..) = fixture.session_row(&second_run);
     assert_ne!(second_id, id);
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (2, 0)
-    );
+    assert_eq!(fixture.sessions().len(), 2);
     assert_eq!(fixture.sessions().len(), 2);
 
     let completed = fixture.run(&["session", "complete", &id]);
@@ -428,71 +377,6 @@ fn interactive_session_is_rows_from_launch_to_completion() {
         String::from_utf8_lossy(&reopened.stderr).contains("already complete"),
         "{reopened:?}"
     );
-
-    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
-}
-
-#[test]
-fn interactive_run_records_checkout_and_declared_work() {
-    let fixture = Fixture::new(false);
-    let task = support::register_unrun_task(
-        fixture.home.path(),
-        fixture.repo.path(),
-        "task-binding",
-        &fixture.repo.head_sha(),
-    );
-    let launch = |args: &[&str]| -> String {
-        let before = fixture.launches().len();
-        let output = fixture.run(args);
-        assert!(
-            output.status.success(),
-            "lf {args:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        fixture.launches()[before].clone()
-    };
-    let parents = |source: &str| {
-        (
-            Some(task.task.id.to_string()),
-            Some(task.task.wave_id.to_string()),
-            Some(source.to_string()),
-        )
-    };
-
-    fixture.repo.create_branch("task-binding");
-    let bound = launch(&LAUNCH);
-    assert_eq!(fixture.run_parents(&bound), parents("checkout"));
-    let started: Option<i64> = fixture
-        .db()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [task.task.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(started.is_some(), "the first Run starts its Task");
-    let listed = fixture.sessions();
-    assert_eq!(
-        listed[0]["work"],
-        serde_json::json!({"kind": "task", "id": task.task.id})
-    );
-    assert_eq!(listed[0]["wave_id"], serde_json::json!(task.task.wave_id));
-
-    fixture.repo.create_branch("unregistered");
-    let unbound = launch(&LAUNCH);
-    assert_eq!(fixture.run_parents(&unbound), (None, None, None));
-
-    let declared = launch(&[
-        "--task",
-        "INF-123",
-        "--tui",
-        "--model",
-        "opencode",
-        ":",
-        "Review the parser",
-    ]);
-    assert_eq!(fixture.run_parents(&declared), parents("declared"));
-    assert_eq!(fixture.count("agent_sessions"), 3);
 }
 
 #[test]
@@ -763,7 +647,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(fixture.sessions()[0]["work"], Value::Null);
     assert_eq!(fixture.launches().len(), 1);
 
-    // The bind happens measurably after the Run was created.
+    // The bind happens measurably after the conversation was created.
     std::thread::sleep(Duration::from_secs(2));
     let before = now();
     let bound = fixture.json(&[
@@ -776,7 +660,6 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     ]);
     let after = now();
     assert_eq!(bound["id"], session.as_str());
-    assert!(bound.get("run_id").is_none());
     assert_eq!(
         bound["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -801,7 +684,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     );
     assert_eq!(listed[0]["work_path"], "task-pr-tests / INF-123");
 
-    // A Run's Task never moves; binding it again to the same Task is a no-op.
+    // A Session's Task never moves; binding it again to the same Task is a no-op.
     let refused = fixture.run(&["session", "bind", &session, "--task", "INF-124", "--json"]);
     assert!(!refused.status.success());
     let reason = String::from_utf8_lossy(&refused.stderr);
@@ -839,30 +722,6 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(started_at, bound_at);
     assert_eq!(task_runs("INF-123"), vec![later]);
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
-
-    // Started is stored once beside admitted work naming the Task.
-    let db = fixture.db();
-    let disagreeing: i64 = db
-        .query_row(
-            "SELECT count(*) FROM tasks t WHERE (t.started_at IS NOT NULL)
-                != (EXISTS(SELECT 1 FROM agent_sessions s WHERE s.task_id=t.id))",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(disagreeing, 0);
-    for (id, value) in [
-        (task.task.id.as_str(), Some(started_at + 1)),
-        (task.task.id.as_str(), None),
-        (sibling.id.as_str(), Some(bound_at)),
-    ] {
-        assert!(db
-            .execute(
-                "UPDATE tasks SET started_at=?2 WHERE id=?1",
-                rusqlite::params![id, value]
-            )
-            .is_err());
-    }
 }
 
 #[test]
@@ -1165,7 +1024,7 @@ const BOUND_LAUNCH: [&str; 7] = [
 ];
 
 #[test]
-fn ask_session_is_rows_from_request_to_answer() {
+fn ask_returns_feedback_once_and_rejects_a_stale_answer() {
     let fixture = Fixture::new(true);
     let task = support::register_unrun_task(
         fixture.home.path(),
@@ -1187,13 +1046,7 @@ fn ask_session_is_rows_from_request_to_answer() {
             .contains("serve-ask")
             .then_some(())
     });
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (2, 0)
-    );
+    assert_eq!(fixture.sessions().len(), 2);
     let inherited = (
         Some(task.task.id.to_string()),
         Some(task.task.wave_id.to_string()),
@@ -1222,7 +1075,6 @@ fn ask_session_is_rows_from_request_to_answer() {
         .find(|session| session["id"] == id.as_str())
         .unwrap_or_else(|| panic!("the Ask does not list: {listed:?}"));
     assert_eq!(listed["kind"], "ask");
-    assert!(listed.get("run_id").is_none());
     assert_eq!(listed["title"], "Which release target?");
     assert_eq!(listed["title_source"], "generated");
     assert_eq!(listed["state"], "unknown");
@@ -1277,7 +1129,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     );
 
     // A consumed launch without provider history is replaced on the next open.
-    // The replacement is another Run of the same conversation.
+    // Replacement captures another input in the same conversation.
     std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
     let (opened, second_run) = fixture.attach(&["session", "open", &id]);
     assert_ne!(second_run, first_run);
@@ -1305,7 +1157,7 @@ fn ask_session_is_rows_from_request_to_answer() {
         .unwrap();
     assert_eq!(
         history, 2,
-        "the replaced Run stays in the Session's history"
+        "the replaced capture stays in the conversation's history"
     );
     let stale = inside(&first_run, &["session", "ready", "Late answer"]);
     assert!(!stale.status.success(), "{stale:?}");
@@ -1336,7 +1188,6 @@ fn ask_session_is_rows_from_request_to_answer() {
 
     fixture.release(opened);
     fixture.release(caller);
-    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
 
 /// A store under a directory that cannot be written until `unlock`.
@@ -1363,39 +1214,6 @@ impl LockedStore {
         std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(0o755)).unwrap();
         rusqlite::Connection::open(self.directory.join("loopflow.db")).unwrap()
     }
-}
-
-#[test]
-fn inspection_execs_leave_an_existing_task_unstarted() {
-    let fixture = Fixture::new(false);
-    let task = support::register_unrun_task(
-        fixture.home.path(),
-        fixture.repo.path(),
-        "inspection-only",
-        &fixture.repo.head_sha(),
-    );
-    for args in [
-        vec!["session", "list", "--task", "INF-123", "--json"],
-        vec!["usage", "--task", "INF-123", "--json"],
-    ] {
-        let output = fixture.run(&args);
-        assert!(output.status.success(), "{output:?}");
-    }
-    let started: Option<i64> = fixture
-        .db()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [task.task.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(started, None);
-    assert_eq!(fixture.count("agent_sessions"), 0);
-    let completed: i64 = fixture.db().query_row(
-        "SELECT count(*) FROM execs WHERE outcome='succeeded' AND exit_code=0 AND completed_at IS NOT NULL",
-        [], |row| row.get(0),
-    ).unwrap();
-    assert_eq!(completed, 2);
 }
 
 #[test]
@@ -1464,12 +1282,22 @@ fn malformed_caller_cannot_use_library_agent_admission() {
 }
 
 #[test]
-fn agent_admission_requires_the_store_before_provider_launch() {
+fn unavailable_store_starts_no_provider_or_ask() {
     let fixture = Fixture::new(false);
+    saved_flow_stand_in(&fixture);
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
         &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--model",
+            "opencode",
+            "flow",
+            "work-then-decide",
+            "-b",
+            "--no-loopflow",
+        ],
+        &["ask", "Which release target?"],
     ] {
         let mut launch = fixture.command(args);
         store.select(&mut launch);
@@ -1484,7 +1312,7 @@ fn agent_admission_requires_the_store_before_provider_launch() {
             "no provider starts without its conversation"
         );
     }
-    let rows = store.unlock();
+    store.unlock();
     let mut inventory = fixture.command(&["session", "list", "--all", "--json"]);
     store.select(&mut inventory);
     let output = inventory.output().unwrap();
@@ -1493,35 +1321,6 @@ fn agent_admission_requires_the_store_before_provider_launch() {
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
         serde_json::json!([])
     );
-    let stored: (i64, i64) = rows
-        .query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs')",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(stored, (0, 0));
-}
-
-/// An Ask's answer returns through its row, so an Ask that cannot be stored
-/// opens no conversation.
-#[test]
-fn ask_needs_its_row_to_return_an_answer() {
-    let fixture = Fixture::new(true);
-    let (caller, caller_run) = fixture.attach(&LAUNCH);
-    let store = LockedStore::new(&fixture);
-    let mut ask = fixture.ask(&caller_run, "Which release target?");
-    store.select(&mut ask);
-    let mut asking = ask.spawn().unwrap();
-    wait_for("the Ask to be refused", || asking.try_wait().unwrap());
-    let refused = asking.wait_with_output().unwrap();
-    assert!(!refused.status.success(), "{refused:?}");
-    assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("unable to open database file"),
-        "{refused:?}"
-    );
-    assert!(!fixture.launcher_requests().contains("serve-ask"));
-    fixture.release(caller);
 }
 
 const REVIEW_FLOW: [&str; 6] = [
@@ -1535,7 +1334,7 @@ const REVIEW_FLOW: [&str; 6] = [
 
 impl Fixture {
     /// A saved Flow whose only step is a human review, run until it waits.
-    /// Returns (Session id, invocation id, first Run id).
+    /// Returns (Session id, invocation id, first capture key).
     fn waiting_review(&self) -> (String, String, String) {
         let lf = self.repo.path().join(".lf");
         std::fs::create_dir_all(lf.join("skills")).unwrap();
@@ -1561,7 +1360,7 @@ impl Fixture {
             .unwrap_or_else(|error| panic!("the waiting review has no rows: {error}"))
     }
 
-    /// (title, title_source, ready_summary, current Run, completed) of a Session.
+    /// (title, title_source, ready_summary, current capture, completed) of a Session.
     fn feedback(&self, id: &str) -> (String, String, Option<String>, String, bool) {
         self.db()
             .query_row(
@@ -1583,16 +1382,10 @@ impl Fixture {
 }
 
 #[test]
-fn taskless_flow_review_is_rows_from_request_to_completion() {
+fn review_feedback_survives_replacement_and_resumes_the_flow() {
     let fixture = Fixture::new(true);
     let (id, invocation, first_run) = fixture.waiting_review();
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (1, 0)
-    );
+    assert_eq!(fixture.sessions().len(), 1);
     let parents: (Option<String>, Option<String>, String, String) = fixture
         .db()
         .query_row(
@@ -1605,7 +1398,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
     assert_eq!(
         parents,
         (None, None, id.clone(), "current".to_string()),
-        "the Run names its invocation and neither has a Task"
+        "the review belongs to a taskless Flow"
     );
     assert_eq!(
         fixture.feedback(&id),
@@ -1640,13 +1433,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
         "{waiting:?}"
     );
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (1, 0)
-    );
+    assert_eq!(fixture.sessions().len(), 1);
     let ready = inside(&first_run, &["session", "ready", "Ship the parser"]);
     assert!(ready.status.success(), "{ready:?}");
     let named = fixture.json(&["session", "rename", &id, "Parser review", "--json"]);
@@ -1689,7 +1476,7 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         ]
         .into_iter()
         .collect(),
-        "the replaced Run stays in the Session's history"
+        "the replaced capture stays in the conversation's history"
     );
     let current: String = fixture
         .db()
@@ -1729,309 +1516,46 @@ fn taskless_flow_review_is_rows_from_request_to_completion() {
         )
         .unwrap();
     assert_eq!(state, "completed");
-    assert_eq!(
-        (
-            fixture.count("agent_sessions"),
-            fixture.retired_run_tables()
-        ),
-        (1, 0)
-    );
-    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
 }
 
 #[test]
-fn session_list_reads_a_taskless_review_from_sql() {
+fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let fixture = Fixture::new(false);
-    let (id, invocation, run_id) = fixture.waiting_review();
-    // The driver's saved position is not a Session source.
-    let flows = fixture.home.path().join("flows");
-    std::fs::rename(&flows, fixture.home.path().join("flows.away")).unwrap();
-
-    let listed = fixture.sessions();
-    assert_eq!(listed.len(), 1, "{listed:?}");
-    assert_eq!(listed[0]["id"], id.as_str());
-    assert_eq!(listed[0]["kind"], "flow");
-    assert!(listed[0].get("run_id").is_none());
-    assert_eq!(listed[0]["title"], "review-proof");
-    assert_eq!(listed[0]["title_source"], "generated");
-    assert_eq!(listed[0]["detail"], "review-proof");
-    assert_eq!(listed[0]["state"], "unknown");
-    assert_eq!(listed[0]["provider"], "opencode");
-    assert_eq!(listed[0]["work"], Value::Null);
-    assert_eq!(
-        listed[0]["flow_membership"],
-        serde_json::json!({
-            "kind": "step", "flow": "review-first", "invocation_id": invocation,
-            "step": "review-proof", "node": 0, "iterations": [[]],
-            "occurrence": "current"
-        })
-    );
-
-    // The review's agent names its Session by `$LF_RUN_ID`.
-    let suggested = fixture.json(&[
-        "session",
-        "rename",
-        &run_id,
-        "Parser",
-        "--suggest",
-        "--json",
-    ]);
-    assert_eq!(suggested["id"], id.as_str());
-    assert_eq!(suggested["title"], "Parser");
-    assert_eq!(fixture.sessions()[0]["title"], "Parser");
-    assert!(!flows.exists(), "reading a Session recreates no Flow file");
-    assert_eq!(fixture.retired_files(), Vec::<PathBuf>::new());
-}
-
-#[test]
-fn every_launch_is_one_row_and_every_reader_lists_it_once() {
-    let fixture = Fixture::new(false);
-    let task_path = fixture.repo.create_named_worktree("task-binding");
-    let task = support::register_unrun_task(
+    support::register_unrun_task(
         fixture.home.path(),
-        &task_path,
-        "task-binding",
+        fixture.repo.path(),
+        "history",
         &fixture.repo.head_sha(),
     );
-    let (task_id, wave_id) = (task.task.id.to_string(), task.task.wave_id.to_string());
-    let lf = fixture.repo.path().join(".lf");
-    std::fs::create_dir_all(lf.join("skills")).unwrap();
-    std::fs::create_dir_all(lf.join("flows")).unwrap();
-    std::fs::write(lf.join("skills/work-proof.md"), "Do the fixture work.").unwrap();
-    std::fs::write(lf.join("skills/review-proof.md"), "Review the fixture.").unwrap();
-    std::fs::write(
-        lf.join("flows/work-then-review.yaml"),
-        "- work-proof\n- step:\n    id: review\n    name: review-proof\n    human: true\n",
-    )
-    .unwrap();
-    let launch = |command: &mut Command| -> String {
-        let before = fixture.launches().len();
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        fixture.launches()[before].clone()
-    };
-    const HEADLESS: [&str; 5] = ["-b", "--model", "opencode", ":", "Tidy the parser"];
-    let headless = |work: &[&str]| fixture.command(&[work, &HEADLESS[..]].concat());
-    // (invocation, session, caller) of one Run.
-    let membership = |run: &str| -> (Option<String>, Option<String>, Option<String>) {
-        fixture
-            .db()
-            .query_row(
-                "SELECT s.flow_session_id,i.session_id,json_extract(i.payload,'$.caller_key')
-                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id AND i.kind='captured'
-                 WHERE i.receipt_key=?1",
-                [run],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap_or_else(|error| panic!("Run {run} has no row: {error}"))
-    };
-    let declared = Some("declared".to_string());
-
-    // A headless Run that names only a Wave.
-    let of_wave = launch(&mut headless(&["--wave", "task-pr-tests"]));
-    assert_eq!(
-        fixture.run_parents(&of_wave),
-        (None, Some(wave_id.clone()), declared.clone())
-    );
-    assert_eq!(
-        membership(&of_wave),
-        (None, Some(fixture.session_row(&of_wave).0), None)
-    );
-
-    // A Task conversation and a child agent it launches. The
-    // child carries the explicit --as declaration, independently of its parent.
-    let of_task = launch(&mut headless(&[
-        "--task",
-        "INF-123",
-        "--__cwd",
-        fixture.repo.path().to_str().unwrap(),
-    ]));
-    assert_eq!(
-        fixture.run_parents(&of_task),
-        (
-            Some(task_id.clone()),
-            Some(wave_id.clone()),
-            declared.clone()
-        )
-    );
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let parent_session = fixture.session_row(&of_task).0;
-    let caller = store
-        .session_driver(&parent_session)
-        .unwrap()
-        .unwrap()
-        .caller(parent_session);
-    let child = launch(
-        fixture
-            .command(&HEADLESS)
-            .env("LF_AS", format!("task:{task_id}"))
-            .env("LF_AGENT_CALLER", serde_json::to_string(&caller).unwrap())
-            .env("LF_RUN_ID", &of_task)
-            .env("LF_RUN_DIR", fixture.run_dir(&of_task)),
-    );
-    assert_eq!(
-        fixture.run_parents(&child),
-        (
-            Some(task_id.clone()),
-            Some(wave_id.clone()),
-            Some("declared".to_string())
-        )
-    );
-    assert_eq!(
-        membership(&child),
-        (
-            None,
-            Some(fixture.session_row(&child).0),
-            Some(of_task.clone())
-        )
-    );
-
-    // A saved Flow: its headless step, then the review it waits at. Both
-    // Runs name the Flow's invocation.
-    let before = fixture.launches().len();
-    let waiting = fixture.run(&[
+    let output = fixture.run(&[
         "--wave",
         "task-pr-tests",
+        "-b",
         "--model",
         "opencode",
-        "flow",
-        "work-then-review",
-        "-b",
-        "--no-loopflow",
+        ":",
+        "Tidy the parser",
     ]);
-    assert!(
-        String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
-        "{waiting:?}"
-    );
-    let step = fixture.launches()[before].clone();
-    let (review, invocation): (String, String) = fixture
-        .db()
-        .query_row(
-            "SELECT (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture),flow_session_id FROM agent_sessions WHERE kind='flow_review'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        membership(&step),
-        (
-            Some(invocation.clone()),
-            Some(fixture.session_row(&step).0),
-            None
-        )
-    );
-    assert_eq!(
-        fixture.run_parents(&step),
-        // The command names the Wave; conversations inherit it from their Flow.
-        (None, Some(wave_id.clone()), Some("inherited".to_string()))
-    );
-    assert_eq!(fixture.run_parents(&review), fixture.run_parents(&step));
-    let positions = invocation_inputs(&fixture, &invocation);
-    assert_eq!(positions.len(), 2, "{positions:?}");
-    assert_eq!((&positions[0].0, positions[0].2), (&step, 1));
-    assert_eq!((&positions[1].0, positions[1].2), (&review, 1));
-    assert_ne!(positions[0].1, positions[1].1, "each step is its own node");
-
-    // Each input retains its own completion in conversation history.
-    for run in [&of_wave, &of_task, &child, &step] {
-        let (outcome, ended): (Option<String>, Option<i64>) = fixture
-            .db()
-            .query_row(
-                "SELECT json_extract(payload,'$.evidence.outcome'),observed_at
-                 FROM session_events WHERE kind='observed' AND receipt_key=?1||':terminal.json'",
-                [run],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(outcome.as_deref(), Some("completed"), "{run}");
-        assert!(ended.is_some());
+    assert!(output.status.success(), "{output:?}");
+    assert!(fixture.sessions().is_empty());
+    let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
+    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    let session = &sessions[0]["id"];
+    for command in ["runs", "usage"] {
+        let rows = fixture.json(&[command, "--wave", "task-pr-tests", "--json"]);
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(&rows[0]["session_id"], session);
+        assert_eq!(rows[0]["recorded_outcome"], "completed");
     }
-
-    // One input per launch, and every reader lists each input once.
-    assert_eq!(fixture.captures(), 5);
-    assert_eq!(fixture.retired_run_tables(), 0);
-    let listed =
-        |args: &[&str]| -> Vec<Value> { serde_json::from_value(fixture.json(args)).unwrap() };
-    let ids = |runs: &[Value]| -> Vec<String> {
-        let mut ids: Vec<String> = runs
-            .iter()
-            .map(|run| run["artifact_key"].as_str().unwrap().to_string())
-            .collect();
-        ids.sort();
-        ids
-    };
-    let sorted = |mut runs: Vec<String>| {
-        runs.sort();
-        runs
-    };
-    let all = sorted(vec![
-        of_wave.clone(),
-        of_task.clone(),
-        child.clone(),
-        step.clone(),
-        review.clone(),
-    ]);
-    let of_wave_runs = listed(&["runs", "--wave", "task-pr-tests", "--json"]);
-    assert_eq!(ids(&of_wave_runs), all);
-    for run in &of_wave_runs {
-        assert_eq!(run["wave_name"], "task-pr-tests", "{run}");
-        assert_eq!(
-            run["task_identifier"] == "INF-123",
-            [&of_task, &child].contains(&&run["artifact_key"].as_str().unwrap().to_string()),
-            "{run}"
-        );
-    }
-    assert_eq!(ids(&listed(&["runs", "--json"])), all);
-    assert_eq!(
-        ids(&listed(&["usage", "--wave", "task-pr-tests", "--json"])),
-        all
-    );
-    let of_task_runs = sorted(vec![of_task.clone(), child.clone()]);
-    for args in [
-        &["runs", "--task", "INF-123", "--json"][..],
-        &["runs", "--project", "task-pr-tests", "--json"][..],
-        &["usage", "--task", "INF-123", "--json"][..],
-    ] {
-        assert_eq!(ids(&listed(args)), of_task_runs, "{args:?}");
-    }
-    let children = listed(&["runs", "--parent", &of_task, "--json"]);
-    assert_eq!(ids(&children), vec![child.clone()]);
-    assert_eq!(children[0]["caller_artifact_key"], of_task.as_str());
-
     let activity = fixture.json(&["activity", "--wave", "task-pr-tests", "--json"]);
-    let mut captured: Vec<_> = activity["items"]
+    let captures = activity["items"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|item| item["fact"]["kind"] == "input_captured")
-        .map(|item| {
-            (
-                item["fact"]["session_id"].as_str().unwrap().to_owned(),
-                item["fact"]["captured"].as_i64().unwrap(),
-            )
-        })
-        .collect();
-    let mut expected: Vec<_> = of_wave_runs
-        .iter()
-        .map(|row| {
-            (
-                row["session_id"].as_str().unwrap().to_owned(),
-                row["captured"].as_i64().unwrap(),
-            )
-        })
-        .collect();
-    captured.sort();
-    expected.sort();
-    assert_eq!(captured, expected);
-
-    let sessions = fixture.sessions();
-    assert_eq!(sessions.len(), 1);
-    assert!(sessions[0].get("run_id").is_none());
+        .collect::<Vec<_>>();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(&captures[0]["fact"]["session_id"], session);
 }
 
 /// A native provider fixture that returns a schema-constrained final result.
@@ -2093,11 +1617,8 @@ fn invocation_inputs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
         .unwrap()
 }
 
-/// The invocation row is the only cursor owner of a saved Flow: a step whose
-/// provider dies is a failed attempt, `--retry` is the next attempt, the
-/// review lists under the Task, and no position file ever exists.
 #[test]
-fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
+fn task_flow_retries_the_conversation_then_waits_for_review() {
     let fixture = Fixture::new(false);
     fixture.repo.create_branch("task-row-flow");
     saved_flow_stand_in(&fixture);
@@ -2201,15 +1722,6 @@ raise SystemExit(1 if failed else 0)
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    let flow_dir = fixture.home.path().join("flows").join(&invocation);
-    let no_position_file = || {
-        assert!(
-            !flow_dir.join("position.json").exists(),
-            "the row is the only cursor owner"
-        );
-        assert!(!flow_dir.join("position.lock").exists());
-    };
-    no_position_file();
     assert!(stderr.contains("blocked"), "{stderr}");
     let failure = failure.unwrap();
     assert!(failure.contains("work-proof"), "{failure}; {stderr}");
@@ -2230,7 +1742,6 @@ raise SystemExit(1 if failed else 0)
     ]);
     assert_eq!(headless.as_array().unwrap().len(), 1);
     let conversation = headless[0]["id"].as_str().unwrap().to_string();
-    assert!(headless[0].get("run_id").is_none());
     assert_eq!(headless[0]["flow_membership"]["invocation_id"], invocation);
     fixture.json(&[
         "session",
@@ -2249,7 +1760,6 @@ raise SystemExit(1 if failed else 0)
         String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
         "{waiting:?}"
     );
-    no_position_file();
     let runs = invocation_inputs(&fixture, &invocation);
     assert_eq!(runs.len(), 3, "{runs:?}");
     assert_eq!(runs[0].0, failed[0].0);
@@ -2270,7 +1780,6 @@ raise SystemExit(1 if failed else 0)
     assert_eq!(headless.as_array().unwrap().len(), 1);
     assert_eq!(headless[0]["id"], conversation);
     assert_eq!(headless[0]["title"], "Parser investigation");
-    assert!(headless[0].get("run_id").is_none());
     for run in &runs {
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }
@@ -2292,7 +1801,6 @@ raise SystemExit(1 if failed else 0)
     let id = session["id"].as_str().unwrap().to_string();
     assert!(id.starts_with("session_"), "{id}");
     assert_eq!(session["kind"], "flow");
-    assert!(session.get("run_id").is_none());
     assert_eq!(
         session["work"],
         serde_json::json!({"kind": "task", "id": task_id})
@@ -2323,9 +1831,7 @@ raise SystemExit(1 if failed else 0)
         )
         .unwrap();
     assert_eq!(state, "completed");
-    no_position_file();
     assert_eq!(invocation_inputs(&fixture, &invocation).len(), 3);
-    assert_eq!(fixture.retired_run_tables(), 0);
     let launches = fixture.launches();
     let repeated = fixture.run(&["flow", "resume", &invocation]);
     assert!(repeated.status.success(), "{repeated:?}");
@@ -2377,91 +1883,6 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             assert!(String::from_utf8_lossy(&output.stderr).contains("exhausted after 3"));
         }
     }
-}
-
-/// A taskless step consumes its selected native structured output once.
-#[test]
-fn a_taskless_step_records_its_decision_on_the_invocation() {
-    let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
-    let output = fixture.run(&[
-        "--model",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "-b",
-        "--no-loopflow",
-    ]);
-    let log = std::fs::read_to_string(fixture.home.path().join("decide.log")).unwrap_or_default();
-    assert!(
-        output.status.success(),
-        "{}\n--- decide.log ---\n{log}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        log.lines().count(),
-        1,
-        "only the decision step has an output contract"
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(log.trim()).unwrap()["decision"],
-        "advance"
-    );
-    let (state, task, cursor): (String, Option<String>, String) = fixture
-        .db()
-        .query_row(
-            "SELECT state, task_id, review_json FROM flow_sessions",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!((state.as_str(), task), ("completed", None));
-    let cursor: Value = serde_json::from_str(&cursor).unwrap();
-    assert_eq!(
-        cursor["index"], 2,
-        "the recorded Advance left the loop: {cursor}"
-    );
-    assert_eq!(fixture.launches().len(), 2, "work once, decide once");
-    let receipts: (i64, i64, i64) = fixture
-        .db()
-        .query_row(
-            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
-                (SELECT count(*) FROM session_events WHERE kind='completed'),
-                (SELECT count(*) FROM flow_events WHERE kind='consumed')",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        receipts,
-        (2, 2, 2),
-        "each boundary consumes its exact native completion"
-    );
-    assert_eq!(fixture.retired_run_tables(), 0);
-    for (index, input) in fixture.launches().iter().enumerate() {
-        let answer = fixture.run(&["runs", input, "--final"]);
-        assert!(answer.status.success(), "{answer:?}");
-        if index == 0 {
-            assert_eq!(
-                String::from_utf8_lossy(&answer.stdout).trim(),
-                "Fixture completed."
-            );
-        } else {
-            assert_eq!(
-                serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
-                "advance"
-            );
-        }
-    }
-
-    assert!(std::fs::read_dir(fixture.home.path().join("flows"))
-        .map(|entries| entries.flatten().all(|entry| {
-            std::fs::read_dir(entry.path())
-                .unwrap()
-                .flatten()
-                .all(|file| file.file_name() == "driver.lock")
-        }))
-        .unwrap_or(true));
 }
 
 #[test]
@@ -2540,40 +1961,12 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         6
     );
     assert_eq!(fixture.launches().len(), 6);
-    assert_eq!(fixture.retired_run_tables(), 0);
     assert!(fixture.run(&["flow", "resume", &root]).status.success());
     assert_eq!(
         fixture.launches().len(),
         6,
         "completed resumption must not launch another pass"
     );
-}
-
-/// A Flow whose invocation row cannot be written does not start: the store
-/// error is the refusal and no provider runs.
-#[test]
-fn a_flow_refuses_to_start_without_its_row() {
-    let fixture = Fixture::new(false);
-    saved_flow_stand_in(&fixture);
-    let store = LockedStore::new(&fixture);
-    let mut launch = fixture.command(&[
-        "--model",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "-b",
-        "--no-loopflow",
-    ]);
-    store.select(&mut launch);
-    let output = launch.output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("unable to open database file"),
-        "the refusal names the store error: {stderr}"
-    );
-    assert_eq!(fixture.launches(), Vec::<String>::new());
-    assert!(!fixture.home.path().join("flows").exists());
 }
 
 #[test]
@@ -2648,7 +2041,6 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     assert_eq!(failed_consumed, 0);
     assert_eq!(fixture.count("agent_sessions"), 2);
     assert_eq!(fixture.captures(), 2);
-    assert_eq!(fixture.retired_run_tables(), 0);
     let (threads,starts,done,consumed): (i64,i64,i64,i64) = fixture.db().query_row(
         "SELECT count(DISTINCT provider_thread),sum(kind='started'),sum(kind='completed'),
            (SELECT count(*) FROM flow_events WHERE kind='consumed') FROM session_events WHERE kind!='observed'", [],

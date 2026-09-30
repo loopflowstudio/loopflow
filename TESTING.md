@@ -472,18 +472,14 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 
 Use `--flow-driver-loss running` for a surviving turn during public resume,
 `--flow-driver-loss both` for explicit retry after both driver and engine die,
-`--flow-automatic-retry` for failed then successful turns in one command,
-and `--flow-decision-retry missing|replace|late` for typed native results after a failed
-turn, bounded invalid-output correction, and refusal of the removed decision command.
-The managed recovery unit fixture exercises the public Flow-to-Task dispatch,
-preserved adoption refusal, replacement claim and exact native-history consumption;
-its provider history is synthetic, with an owned process supplying exit evidence.
-Use
-`--flow-retry` for a recorded failure, and `--flow-engine-loss` for replacement
-after confirmed engine death. The fixture copies the candidate, uses private
-Homes, and stops only its identified engine children. These proofs establish
-native execution with synthetic upstream responses, not managed-account or
-installed-Home acceptance.
+`--flow-decision-retry missing|replace` for native structured-output exhaustion
+or successful retry, `--flow-blocked` for keyed feedback continuation, and
+`--public-connect` for a live headless-to-terminal handoff.
+The fixture copies the candidate, uses private Homes and stops only its identified
+engine children. Native execution uses synthetic Responses, not configured
+accounts or installed data. Ordinary retry, usage, binding and review behavior
+belong in `session_lifecycle_tests`; Chapter convergence belongs in
+`ops::chapter::tests`, including interrupted rotation and second-Home sync.
 
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
@@ -815,13 +811,13 @@ When adding features that need manual verification, write or extend a script in 
 ## Boundary-specific checks
 
 When changing Flow step or prepared Run ownership, include the invocation
-store tests and the saved-Flow cutover proofs. Human boundaries prepare their
+store tests and the public Session lifecycle proofs. Human boundaries prepare their
 Run before provider launch; fixtures must start that Run instead of binding a
 fresh capture.
 
 ```bash
 cargo test -p loopflow --lib store::sqlite::flows
-cargo nextest run -p loopflow --test session_cutover_tests -E 'test(a_task_flow_runs_on_its_row) | test(a_taskless_step_records)'
+cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
 
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming

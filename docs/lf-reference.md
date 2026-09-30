@@ -55,7 +55,7 @@ stable ordering rather than usage rankings.
 | `wave` | Maintain goals, memory, conversations, schedules, and chapters |
 | `session` | Open conversations, ask for input, and complete reviews |
 | `monitor` (`mon`) | Inspect history, live activity, replay, and usage |
-| `identity` (`id`) | Connect accounts, inspect capacity, and configure routing |
+| `account` | Connect accounts, inspect capacity, and configure routing |
 | `home` | Install Loopflow, inspect the machine, and reach other Homes |
 | `repo` | Release software, inspect CI, and configure repository integrations |
 
@@ -95,8 +95,7 @@ owner is visible; omitted-owner shortcuts are derived from that tree.
 ```bash
 lf monitor top                      # full name
 lf mon top                          # fixed short name
-lf identity status
-lf id status
+lf account status
 ```
 
 Commands have one canonical name and may advertise a fixed short name in help.
@@ -107,13 +106,12 @@ arbitrary prefix.
 | Full name | Short name |
 |---|---|
 | `monitor` | `mon` |
-| `identity` | `id` |
 | `pr` | `pr` |
 | `task` | `task` |
 | `land` | `land` |
 
-An explicit short name wins before owner omission. Thus `lf id` selects
-identity commands. Print the machine identifier with `lf home id`.
+An explicit short name wins before owner omission. Print the machine identifier
+with `lf home id`. The account family has no short alias.
 
 ### Commands take precedence over definitions
 
@@ -625,7 +623,7 @@ Wave owns the direction that work serves.
 ### Connect planning
 
 ```bash
-doppler run -- lf identity connect linear
+doppler run -- lf account connect linear
 lf wave connect designer --team-key DSG
 lf wave sync designer
 lf wave status designer --sync
@@ -1056,21 +1054,21 @@ older ledger gaps remain visible history without keeping every later doctor
 red. A failed target still proves the scheduler fired; its own receipt and
 target error remain the actionable evidence.
 
-## Identity: accounts, capacity, and routing
+## Account: connections, capacity, and routing
 
-The [proposed readiness overview](lf.md#accounts-and-access), `lf identity`,
+The [proposed readiness overview](lf.md#accounts-and-access), `lf account`,
 explains usable connections and what needs attention. Ordinary launches also
 check the access they need; the commands below provide explicit control.
 
 ```bash
-lf id status
-lf id status codex --verify
-lf id connect codex work@example.com --chrome-profile Work
-lf id route set codex work@ personal@
-lf id route show
+lf account status
+lf account status codex --verify
+lf account connect codex work@example.com --chrome-profile Work
+lf account route set codex work@ personal@
+lf account route show
 ```
 
-`id` is the short spelling of `identity`. Connect an existing provider login,
+Connect an existing provider login,
 inspect its credential state and observed capacity, and choose which accounts
 a repository may use. Account selection does not change the selected model.
 An incompatible explicit account/model combination reports an error.
@@ -1082,17 +1080,17 @@ stale capacity is labeled rather than treated as zero or unlimited.
 ### Connect and configure
 
 ```bash
-lf id connect claude personal@example.com --chrome-profile Personal
-lf id set claude personal@ --chrome-profile Personal
-lf id set claude personal@ --routing explicit-only
-lf id set claude personal@ --clear-cooldown
-lf id disconnect claude personal@
-doppler run -- lf id connect linear
+lf account connect claude personal@example.com --chrome-profile Personal
+lf account set claude personal@ --chrome-profile Personal
+lf account set claude personal@ --routing explicit-only
+lf account set claude personal@ --clear-cooldown
+lf account disconnect claude personal@
+doppler run -- lf account connect linear
 ```
 
 A managed login is an existing spending identity, not a new provider account.
 A browser profile is only the venue used to authenticate it. Saved browser
-choices can be reused on reconnect. `identity connect claude EMAIL --import`
+choices can be reused on reconnect. `account connect claude EMAIL --import`
 explicitly adopts an ambient Claude login.
 
 Claude and Codex accounts can be routed individually. Service credentials such
@@ -1114,10 +1112,10 @@ combined. Use these flags for terminal launches too, so the provider shares
 the managed credential rather than creating a competing login.
 
 ```bash
-lf id route set codex work@ personal@
-lf id route set codex personal@ --default
-lf id route set codex work@ --repo owner/repository
-lf id route show --json
+lf account route set codex work@ personal@
+lf account route set codex personal@ --default
+lf account route set codex work@ --repo owner/repository
+lf account route show --json
 ```
 
 Repository routes override the default route. Where automatic selection is
@@ -1247,7 +1245,7 @@ to the Task workflow; the signing secret is supplied through Doppler.
 lf task status DES-123 --json
 lf wave status designer --json
 lf mon list --task DES-123 --json
-lf id status --details --json
+lf account status --details --json
 ```
 
 Use `--json` on read commands that advertise it. Help lists the supported

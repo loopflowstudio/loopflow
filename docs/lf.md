@@ -91,15 +91,15 @@ on ordinary branches without creating a Task. Bare `land` keeps a Task open.
 ## Accounts and access
 
 ```bash
-lf identity                         # proposed readiness and account overview
-lf id status codex --verify          # refresh supported account observations
-lf id connect codex work@example.com --chrome-profile Work
+lf account                         # proposed readiness and account overview
+lf account status codex --verify          # refresh supported account observations
+lf account connect codex work@example.com --chrome-profile Work
 lf --account work@ run code          # prefer an account for this launch
 lf --only-account codex=work@ run code # restrict this launch and its children
-lf id route set codex work@ personal@ # set account selection order
+lf account route set codex work@ personal@ # set account selection order
 ```
 
-`id` is short for `identity`. Launches check the access their work requires;
+Launches check the access their work requires;
 explicit account controls inspect or override selection. Model and account
 selection are independent. An incompatible explicit choice reports an error.
 Readiness inheritance for background and remote children remains under design.

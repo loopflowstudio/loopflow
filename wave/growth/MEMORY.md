@@ -73,6 +73,16 @@ Jack Heart set these in one design session. Wording in quotes is his.
   jack works is probably more of like a blog post." Docs teach the
   product; his own practice is told in his voice, elsewhere.
 
+## CLI account naming decision (2026-09-30)
+
+Jack Heart: “i thought we decided on lf account instead of lf identity”.
+LOO-338 uses `lf account` for provider logins, status, connection, routing and
+its overview. `identity`/`id` are superseded draft names, with no account short
+alias. `lf home id` retains machine identity. Jack also requires a complete
+Clap-derived command and option catalog, including internal surfaces, with
+caller evidence and keep/rename/merge/delete verdicts before implementation.
+The catalog and before/after counts belong to LOO-338's demo review.
+
 ## CLI guide decisions (2026-09-29)
 
 Jack asked the CLI guide to lead with complete workflows and the outcomes
@@ -86,7 +96,7 @@ reference and capabilities in scope. Existing page addresses remain valid.
 The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
 are design previews. Local discovery now supports help without launching,
 flow-first untyped selection, strict typed definitions, and unique command
-shorthand. Owner moves and proposed monitor/identity overviews remain future
+shorthand. Owner moves and required monitor/account overviews remain future
 work. Fixture and read-only CLI evidence does not demonstrate the first local
 result, a live app walkthrough, or a complete autonomous lifecycle. Keep those
 proof obligations before publishing a walkthrough; compact help alone does not

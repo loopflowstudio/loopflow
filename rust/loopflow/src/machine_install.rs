@@ -213,6 +213,15 @@ pub struct InstallSelection {
 }
 
 impl InstallSelection {
+    pub(crate) fn verified_cli(&self) -> Result<&Path> {
+        let cli = self
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .context("selected installation has no CLI")?;
+        cli.verify()?;
+        Ok(&cli.path)
+    }
+
     fn validate(&self) -> Result<()> {
         if self.installation_id.is_empty() {
             return Err(anyhow!("installation id is empty"));

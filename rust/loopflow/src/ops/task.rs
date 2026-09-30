@@ -378,13 +378,11 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
 }
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSnapshot> {
-    if let Some(destination) = super::task_destination::existing_task(issue)
-        .and_then(|found| match found {
-            Some(found) => Ok(Some(found)),
-            None => super::task_destination::destination(),
-        })
-        .map_err(task_error)?
-    {
+    let destination = match super::task_destination::existing_task(issue).map_err(task_error)? {
+        Some(found) => Some(found),
+        None => super::task_destination::destination().map_err(task_error)?,
+    };
+    if let Some(destination) = destination {
         super::task_destination::check_task(&destination, issue).map_err(task_error)?;
         if let Some(parent) = &options.stack_on {
             super::task_destination::check_task(&destination, parent).map_err(task_error)?;

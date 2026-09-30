@@ -209,12 +209,7 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
     })
 }
 
-/// Resolve the selected installation at this child boundary, independently of
-/// execution placement. Uninstalled machines retain source execution.
-pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
-    if let Ok(Some(cli)) = official_lf_binary() {
-        return cli;
-    }
+fn uninstalled_lf_binary() -> PathBuf {
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
     }
@@ -254,13 +249,13 @@ pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
-/// The current Home `lf`, resolved to an absolute path that exists. Mirrors
-/// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
+/// Resolve the selected installation at this child boundary, independently of
+/// execution placement. Uninstalled machines retain source execution.
 pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     if let Some(cli) = official_lf_binary()? {
         return Ok(cli);
     }
-    let candidate = resolve_current_home_lf_binary();
+    let candidate = uninstalled_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
             Ok(candidate)
@@ -290,12 +285,7 @@ fn official_lf_binary() -> Result<Option<PathBuf>> {
     let Some(selection) = crate::machine_install::current_selection(&root)? else {
         return Ok(None);
     };
-    let cli = selection
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Cli)
-        .ok_or_else(|| anyhow!("selected installation has no CLI"))?;
-    cli.verify()?;
-    Ok(Some(cli.path.clone()))
+    Ok(Some(selection.verified_cli()?.to_path_buf()))
 }
 
 /// Resolve the current Home execution context for launching Work: the

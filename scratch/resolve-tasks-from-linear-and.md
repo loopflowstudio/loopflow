@@ -19,6 +19,13 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ### This slice — installed Task and review continuity
 
+Compression: shared Task identity matching and installed CLI verification; removed
+the unchecked review-launch resolver and its repeated installation lookup.
+The routing proof passed without a Run-event table, including changed/missing CLI
+refusal; all 19 Session unit tests and six disposable installation cases passed.
+Formatting, all-target Clippy and whitespace checks passed. The existing Linux
+unused-variable warning and full-design acceptance gaps remain unchanged.
+
 Preserved the incoming nullable-issue decoder/test/review edits in checkpoint
 `01158f839`, then implemented the next installation-switch cut. The full
 single-PR Done When remains unfulfilled; all acceptance cases 1–15 remain required.

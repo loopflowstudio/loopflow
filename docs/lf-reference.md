@@ -712,8 +712,9 @@ identity without assigning work. Confirmation submits its stable Task ID;
 existing Wave and Flow constraints are checked by the binding transaction.
 
 Connect uses the live engine where possible and retains conversation identity,
-name, feedback and native history. The new driver receives write authority; the
-old client can remain a passive display. `--replace` stops Loopflow-owned clients
+name, feedback and native history. `session open SESSION --try` lets the
+provider arbitrate an active native Session. The new driver receives write
+authority; the old client can remain a passive display. `--replace` stops Loopflow-owned clients
 before connecting here; with a live Codex engine, the active turn and sibling
 conversations continue in that engine. `--json --replace` prepares the command
 without stopping clients or transferring the driver. There is no separate
@@ -721,6 +722,15 @@ Session engine-restart command. `lf flow resume FLOW --retry` recovers a saved
 Flow after confirmed engine exit while retaining its native conversation;
 `lf task restart TASK` instead replaces the Task's saved workflow.
 Unsubmitted editor text requires its own surface-preservation proof.
+
+Session replacement and native client stopping require readable process evidence.
+If inspection fails, retry after it is available; the command leaves termination
+unconfirmed and preserves native history. Saved Ask or Flow feedback survives a
+cleanup failure, which is reported separately from completing the review.
+Native client publication and stopping share exact launch exclusion, so stopping waits
+for an in-flight launcher to publish its client before inspecting it. A Task
+with confirmed deletion cannot start an Ask or resume a native Session. Exact
+`runs --active --task ISSUE` still inspects its retained process evidence.
 
 Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered
 Task checkout takes precedence over inherited `LF_AS` when this command has no
@@ -755,56 +765,23 @@ Captured inputs and provider outcomes belong to AgentSession history. Exec
 history records the processes that performed commands.
 
 ```bash
-lf wave list --json                    # every durable Wave and its Home/runtime evidence
-lf wave list --current --json       # Waves that are not retired or abandoned
-lf wave status <wave> --json        # Work, Sessions, conditions, and metric_portfolio
-lf roadmap --json               # current plan plus that portfolio on every Wave
-lf activity                     # durable Work changes, newest first
-lf activity --task INF-123 --json # filter before the bounded typed snapshot
+lf activity --task INF-123 --json   # durable Work changes, newest first
 lf runs                             # recent Home-local conversation history
-lf runs --active --json          # live Sessions and observation gaps
-lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
-lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
-lf runs --project parser            # one Project's Session history, filtered before the result cap
+lf runs --active --watch --json     # stream live Sessions and observation gaps (macOS)
+lf runs --active --task INF-123     # exact Task attribution, independent of checkout
+lf runs --project parser            # filter before the result cap
 lf runs --parent INPUT --json       # captured inputs issued by this input, uncapped
-lf runs INPUT                       # inspect one captured input
-lf runs INPUT --final               # print the last durable provider conclusion
-lf runs INPUT --events              # print its retained event stream
-lf usage --project parser           # recorded provider usage for one Project
-lf usage --task INF-123 --json      # recorded usage evidence for one Task
-lf session list                  # Sessions, Work paths, actions and unavailable reasons
-lf session open sess_ab12         # resume an open conversation after provider exit
-lf session open sess_ab12 --try   # let the provider arbitrate an active session
-lf session open sess_ab12 --replace # stop Loopflow's client, then continue here
-lf session open sess_ab12 --json --replace # prepare a takeover command without stopping it yet
-lf session complete sess_ab12     # finish it; provider history remains resumable
+lf runs INPUT --final               # last durable provider conclusion
+lf runs INPUT --events              # retained event stream
 lf replay INPUT                     # execute the saved request again
-lf usage --days 30                  # provider-authored Session usage
-lf usage --days 0 --json        # all Session history; zero means all time
-lf ci --since 7d                # CI repair attempts, latency, and outcomes
-lf ci --since 7d --json         # complete machine-wide incident receipt
-lf ps                            # one OS-live process and call-tree snapshot
-lf ps --json                     # versioned flat nodes with stable parent ids
-lf top                           # refresh the same snapshot every two seconds on a TTY
-lf top --json                    # emit once; redirected output also emits once without ANSI
-lf prune --dry-run               # list stale receipts and registered orphan process groups
-lf prune                         # remove those receipts and reap those process groups
-lf doctor                       # audit continuity, identity, lineage, coverage, receipts
-lf doctor --json                # machine-readable audit
+lf usage --task INF-123 --json      # recorded provider usage for one Task
+lf usage --days 0 --json            # all retained history; default is 30 days
+lf ci --since 7d --json             # CI repair attempts, latency and outcomes
 ```
 
-Continue a conversation with `lf session connect SESSION`. The obsolete
-`lf runs INPUT --resume` entry is removed; `lf runs` only inspects history.
-`lf replay INPUT` separately launches its immutable recorded request.
-
-Session replacement and native client stopping require readable process evidence.
-If inspection fails, retry after it is available; the command leaves termination
-unconfirmed and preserves native history. Saved Ask or Flow feedback survives a
-cleanup failure, which is reported separately from completing the review.
-Native client publication and stopping share exact launch exclusion, so stopping waits
-for an in-flight launcher to publish its client before inspecting it. A Task
-with confirmed deletion cannot start an Ask or resume a native Session. Exact
-`runs --active --task ISSUE` still inspects its retained process evidence.
+`lf runs` inspects history. Continue its conversation with
+`lf session connect SESSION`, or use `lf replay INPUT` to launch the immutable
+recorded request again.
 
 `lf wave list` reads the local Wave registry. `--current` excludes abandoned and retired
 registrations. `lf roadmap --all` spans repositories without inheriting the
@@ -933,6 +910,14 @@ accepts a full ID or an unambiguous prefix. An `unknown` outcome means no termin
 observation, and says nothing about whether the process is alive. Discovery reads
 bounded command rows without loading conversation captures or transcripts.
 
+```bash
+lf ps --json          # one OS-live process and call-tree snapshot
+lf top                # refresh every two seconds on a TTY; emit once when redirected
+lf top --json         # emit one snapshot
+lf prune --dry-run    # inspect stale receipts and registered orphan process groups
+lf prune              # remove those receipts and reap those process groups
+```
+
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
 attach `lf` processes to call records; exact ancestry attaches provider
 processes. Completed calls and launches disappear. Unclaimed providers remain
@@ -946,29 +931,6 @@ retain the same private-data selection as other commands.
 `lf prune` is the separate write boundary. It removes dead Exec receipts and
 reaps only OpenCode process groups whose registered owner is absent. It never
 kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
-
-```bash
-lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route
-lf --account claude=jack@ --account codex=loopflow-eng@ implement
-lf --only-account codex=manabot-eng@ review             # no fallback login
-```
-
-`--account <email-prefix>` prefers each matching managed login before its
-provider's normal route. The first preferred attempt bypasses stored health;
-a missing credential continues through the healthy fallback route.
-`--only-account` restricts the launch and its children to exactly the
-selected provider accounts. Both flags are repeatable and accept
-`claude=<selector>` or `codex=<selector>`. They cannot be combined.
-
-Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
-into a managed login with a bare `codex login` creates a second session and
-evicts the managed one ("needs re-login"); entering through lf shares one
-session.
-
-Without an account flag, managed Claude and Codex launches use the repository
-route, then the default route. If neither exists, all automatic managed logins
-are eligible and Loopflow skips known cooling or limited accounts. If no
-managed login exists, the provider CLI uses its ambient default credentials.
 
 `lf usage` reads the same Home-local Session history as `lf runs`, newest first.
 `--days` defaults to 30; zero selects all retained history. Captures use their
@@ -1059,10 +1021,12 @@ lf --account claude=personal@ --account codex=work@ run feature
 lf --only-account codex=work@ skill review-design
 ```
 
-`--account` prefers matching accounts before the normal provider route.
-`--only-account` restricts the launch and its children to the selected accounts.
-Both accept provider-qualified selectors and can be repeated; they cannot be
-combined. Use these flags for terminal launches too, so the provider shares
+`--account <email-prefix>` prefers matching managed accounts before the normal
+provider route. The first preferred attempt bypasses stored health; a missing
+credential continues through the healthy fallback route. `--only-account`
+restricts the launch and its children to the selected accounts. Both accept
+provider-qualified selectors and can be repeated; they cannot be combined.
+Use these flags for terminal launches too (`--tui`), so the provider shares
 the managed credential rather than creating a competing login.
 
 ```bash
@@ -1072,9 +1036,10 @@ lf auth route set codex work@ --repo owner/repository
 lf auth route show --json
 ```
 
-Repository routes override the default route. Where automatic selection is
-used, accounts with known cooling or limited state are skipped. Selection,
-credential readiness, and observed capacity are reported separately.
+Repository routes override the default route. If neither exists, all automatic
+managed logins are eligible. Automatic selection skips known cooling or limited
+accounts; with no managed login, the provider CLI uses its ambient credentials.
+Selection, credential readiness, and observed capacity are reported separately.
 
 ## Home: installation and machines
 

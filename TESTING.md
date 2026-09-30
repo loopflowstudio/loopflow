@@ -439,31 +439,8 @@ missing-sample and PID-reuse counterexamples when changing the projection.
 Repeated samples of a reused body PID must remain Unknown; they cannot replace
 the observer's original body identity and later establish a stall for that captured input.
 
-When changing Task controls, include the GitHub-cache integration tests as well
-as controller tests. Bare interrupts prove local control during GitHub outages;
-steering publishes to Linear and belongs with the mocked Linear boundary tests.
-
-```bash
-cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
-```
-
-When changing Linear response shapes, run the client tests and PM-operation
-consumers together. Team migration also reads issue comments; its fixtures must
-include the requested pagination metadata.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
-```
-
-Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
-fixture, restore it afterward, and serialize environment changes with
-`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
-in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
-also resolves the executable for their open command, even with spawning mocked.
-Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
-the Session driver references share the same database. Simulated finite-provider
-harnesses must record their owned child exit; an absent endpoint is not exit
-evidence.
+See [boundary-specific checks](#boundary-specific-checks) for Task controls,
+Linear response shapes and isolated Session fixtures.
 
 `exec_ownership_tests::interruption_records_the_exec_without_a_fabricated_signal_name`
 checks the OS exit, durable Exec outcome and absence of its owned scorecard child.
@@ -871,9 +848,15 @@ cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | t
 
 ### Test without an installed Loopflow
 
-Tests that construct session commands must supply their own `LF_BIN` fixture,
-restore it afterward, and serialize environment changes with `test_env_lock`.
-Reuse `TestLfBinGuard` in Task controller tests. Session spawning remains mocked.
+Session-command fixtures must work without an installed `lf`. Supply an `LF_BIN`
+fixture, restore it afterward, and serialize environment changes with
+`test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
+in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
+also resolves the executable for their open command, even with spawning mocked.
+Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
+the Session driver references share the same database. Simulated finite-provider
+harnesses must record their owned child exit; an absent endpoint is not exit
+evidence.
 
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
@@ -898,7 +881,7 @@ an identity value.
 
 Session fixtures share `AMBIENT_TASK_ENV` in
 `rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Home,
-Captured-input identity/directory, Task authority, and review Session identity under the
+captured-input identity/directory, Task authority, and review Session identity under the
 suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 

@@ -112,3 +112,9 @@ reported 51 GiB free. Review confirmed that expired windows still render unknown
 unavailable verification retains dated observations, and cached reads keep their
 read-only store path. No additional production changes were needed. This closes
 only the marked live-status slice; the complete Task remains unfinished.
+
+Compression: paired failure setup with its diagnostic in the status regression,
+removed repeated output decoding, an unnecessary window clone and a redundant
+assertion. The isolated public-CLI status regression passed (1 test); formatting,
+all-target Clippy and diff checks passed. Production behavior is unchanged;
+earlier untouched proofs retain their scope. No real accounts or resets were used.

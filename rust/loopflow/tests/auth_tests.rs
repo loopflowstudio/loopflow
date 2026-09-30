@@ -297,39 +297,38 @@ esac
     let old_weekly = original_windows
         .iter()
         .find(|window| window.window == "weekly")
-        .unwrap()
-        .clone();
+        .unwrap();
     let cached_output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["auth", "status", "codex", "--cached"])
         .output()
         .expect("read cached auth accounts");
     assert!(cached_output.status.success());
-    assert!(String::from_utf8_lossy(&cached_output.stdout)
-        .contains("auth: cached connected · not checked"));
-    assert!(String::from_utf8_lossy(&cached_output.stdout).contains("session: usage unknown"));
-    assert!(!String::from_utf8_lossy(&cached_output.stdout).contains("100% used"));
+    let cached_text = String::from_utf8_lossy(&cached_output.stdout);
+    assert!(cached_text.contains("auth: cached connected · not checked"));
+    assert!(cached_text.contains("session: usage unknown"));
+    assert!(!cached_text.contains("100% used"));
 
     // Failed and incomplete refreshes must not turn an expired full window into
     // either current fullness or invented capacity. Preserve dated observations.
-    for unavailable in [true, false] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        command.args(["auth", "status", "codex"]);
-        if unavailable {
-            command.env("PATH", "/nonexistent");
-        } else {
-            command.env("LF_TEST_EMPTY_USAGE", "1");
-        }
-        let output = command.output().unwrap();
+    for (key, value, diagnostic) in [
+        ("PATH", "/nonexistent", "verification unavailable"),
+        (
+            "LF_TEST_EMPTY_USAGE",
+            "1",
+            "usage response has no recognized percentage windows",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["auth", "status", "codex"])
+            .env(key, value)
+            .output()
+            .unwrap();
         assert!(output.status.success());
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("session: usage unknown"));
         assert!(!text.contains("100% used"));
         assert!(!text.contains("0% used"));
-        assert!(text.contains(if unavailable {
-            "verification unavailable"
-        } else {
-            "usage response has no recognized percentage windows"
-        }));
+        assert!(text.contains(diagnostic));
         assert_eq!(
             runtime
                 .block_on(store.provider_account_limits(None))
@@ -376,7 +375,7 @@ esac
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["auth", "status", "codex"])
         .output()
-        .expect("run auth verify");
+        .expect("refresh auth status");
 
     assert!(
         output.status.success(),
@@ -400,7 +399,7 @@ esac
         .block_on(store.provider_account_limits(None))
         .unwrap();
     assert_eq!(observed.len(), 2);
-    assert_eq!(observed[1], old_weekly);
+    assert_eq!(&observed[1], old_weekly);
     assert!(stdout
         .lines()
         .find(|line| line.contains("weekly: 34%"))
@@ -410,8 +409,7 @@ esac
     assert_eq!(observed[0].resets_at, Some(1900000000));
     assert_eq!(observed[0].plan.as_deref(), Some("team"));
     assert_eq!(observed[0].source, "poll");
-    assert!(stdout.contains("session: 12%"));
-    assert!(stdout.contains("12% used, 88% left"));
+    assert!(stdout.contains("session: 12% used, 88% left"));
 
     let before = runtime
         .block_on(store.list_provider_accounts(None))

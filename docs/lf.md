@@ -76,11 +76,11 @@ lf roadmap --json                   # current plans across Waves
 ## Publish and finish
 
 ```bash
-lf task pr publish                  # push and create/update a ready PR
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # prepare, request auto-merge, and return
-lf task pr land                     # prepare, watch, repair CI, and finish merged
-lf task pr land -c                  # also complete the owning Task
+lf task pr EXP-12 publish           # push and create/update a ready PR
+lf task pr EXP-12 submit            # prepare for a reviewer's merge click
+lf task pr EXP-12 arm               # prepare, request auto-merge, and return
+lf task pr EXP-12 land              # prepare, watch, repair CI, and finish merged
+lf task pr EXP-12 land -c           # also complete the owning Task
 lf repo release run patch           # verify, prepare notes, tag, and publish a release
 ```
 
@@ -123,10 +123,11 @@ explicitly. See [Authoring](authoring.md) to define either.
 
 ```bash
 lf task checkout EXP-12              # prepare a Task's worktree without starting it
-lf task worktree create csv-export   # create a worktree without a tracked Task
-lf task commit -m "Add CSV export"  # save local changes
+lf wt create csv-export             # create a worktree without a tracked Task
+lf commit -m "Add CSV export"       # save local changes
 lf sync --plan                       # inspect the integration strategy
-lf task pr checks --watch            # follow the PR's checks
+lf task pr EXP-12 checks --watch     # follow the PR's checks
+lf task sync EXP-12 --plan           # inspect this Task's integration
 ```
 
 These controls operate on the same work as the higher-level workflows.
@@ -148,16 +149,14 @@ definition and feedback. See [decision and retry controls](lf-reference.md#flow-
 
 ```bash
 lf help                             # overview
-lf help task pr land                 # arguments and effects of one operation
+lf help pr land                      # arguments and effects of one operation
 lf help feature                     # inspect a workflow without starting it
 lf list                             # commands, skills, and flows
 lf help --all                       # full command tree
 ```
 
-Omit unambiguous owners: `lf land` resolves to `lf task pr land`. Multiple
-matches list the canonical choices and execute nothing. Exact commands win;
-installed skills do not change command resolution. Use `lf run land` to
-select an authored definition instead.
+Use `lf pr land` in the checkout or `lf task pr EXP-12 land` from elsewhere.
+Use `lf run land` to select an authored definition instead.
 
 Help accepts either `lf help PATH` or `lf PATH --help`. Help and list do not
 launch agents, connect accounts, or fetch definitions. Use canonical paths

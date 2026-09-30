@@ -148,7 +148,9 @@ there is no separate CLI or server surface for it.
 Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
 after an incomplete operation, even after planning refresh or chapter replacement.
 Missing provider data does not confirm deletion.
-Deletion preserves authored files and retained PRs; it does not certify process termination.
+Deletion cancels unfinished placed work or cleans completed delivery before trashing
+the issue. Live or unresolved workers and dirty checkouts block it. Task, PR and
+Run history remain readable; confirmed provider trash makes retries idempotent.
 
 ## Ship
 

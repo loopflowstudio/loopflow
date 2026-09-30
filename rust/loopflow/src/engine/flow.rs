@@ -148,11 +148,6 @@ pub struct Flow {
     pub items: Vec<Step>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Goal {
-    pub prompt: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteSkill {
     pub skill: Skill,
@@ -219,45 +214,6 @@ pub(crate) fn repo_flow_names(repo: &Path) -> Vec<String> {
     names.sort();
     names.dedup();
     names
-}
-
-pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
-    if let Ok(goal_path) = find_goal_path(name, repo) {
-        let content = fs::read_to_string(goal_path)?;
-        let prompt = split_frontmatter(&content)
-            .map(|(_, body)| body)
-            .unwrap_or(content);
-        return Ok(Goal { prompt });
-    }
-
-    if let Some(key) = crate::engine::builtins::resolve_builtin_goal(name) {
-        let prompt = crate::engine::builtins::get_builtin_goal(key)
-            .expect("resolve_builtin_goal returned a known key");
-        return Ok(Goal {
-            prompt: prompt.to_string(),
-        });
-    }
-
-    Err(LoadError::GoalNotFound(name.to_string()))
-}
-
-/// Render the goal and available flows; authored Wave files enter through prompt gathering.
-pub fn render_goal(goal: &Goal, flows: &[String]) -> String {
-    let flows = if flows.is_empty() {
-        "No flows are available.".to_string()
-    } else {
-        flows
-            .iter()
-            .map(|flow| format!("- {flow}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    format!(
-        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>",
-        goal.prompt.trim(),
-        flows,
-    )
 }
 
 /// Load an authored flow without adapting a skill into a flow.
@@ -648,52 +604,6 @@ pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
     }
     let path = agent_skill_path(name, repo);
     path.is_file().then_some(path)
-}
-
-fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let wave_goal = repo.join("wave").join(name).join("GOAL.md");
-    if exact_path_exists(&wave_goal) {
-        return Ok(wave_goal);
-    }
-
-    if let Some((prefix, goal_name)) = name.split_once('/') {
-        let repo_ns = markdown_path(&repo.join(".lf/goals").join(prefix), goal_name);
-        if repo_ns.exists() {
-            return Ok(repo_ns);
-        }
-        if let Some(home) = home_dir() {
-            let home_ns = markdown_path(&home.join(".lf/goals").join(prefix), goal_name);
-            if home_ns.exists() {
-                return Ok(home_ns);
-            }
-        }
-    }
-
-    if let Some(path) = first_existing_path([markdown_path(&repo.join(".lf/goals"), name)]) {
-        return Ok(path);
-    }
-
-    if let Some(home) = home_dir() {
-        if let Some(path) = first_existing_path([markdown_path(&home.join(".lf/goals"), name)]) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::GoalNotFound(name.to_string()))
-}
-
-fn exact_path_exists(path: &Path) -> bool {
-    let Some(parent) = path.parent() else {
-        return false;
-    };
-    let Some(file_name) = path.file_name() else {
-        return false;
-    };
-    std::fs::read_dir(parent).is_ok_and(|entries| {
-        entries
-            .filter_map(Result::ok)
-            .any(|entry| entry.file_name() == file_name)
-    })
 }
 
 /// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
@@ -1092,8 +1002,8 @@ mod tests {
 
     use super::{
         build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcreteStep,
-        DefinitionLoader, Flow, Goal, Skill, Step, XorDef, XorPath,
+        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader, Flow, Skill,
+        Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1122,52 +1032,6 @@ mod tests {
         let skill = load_skill("myskill", tmp.path()).unwrap();
         assert_eq!(skill.name, "myskill");
         assert!(skill.content.unwrap().contains("Do the thing"));
-    }
-
-    #[test]
-    fn load_goal_finds_repo_goal_override() {
-        let tmp = TempDir::new().unwrap();
-        let goals_dir = tmp.path().join(".lf/goals");
-        fs::create_dir_all(&goals_dir).unwrap();
-        fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
-
-        let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
-        assert_eq!(goal.prompt, "Repo goal prompt.");
-    }
-
-    #[test]
-    fn load_goal_prefers_wave_goal_md() {
-        let tmp = TempDir::new().unwrap();
-        let goals_dir = tmp.path().join(".lf/goals");
-        let wave_dir = tmp.path().join("wave/goals");
-        fs::create_dir_all(&goals_dir).unwrap();
-        fs::create_dir_all(&wave_dir).unwrap();
-        fs::write(goals_dir.join("goals.md"), "Repo goal prompt.").unwrap();
-        fs::write(
-            wave_dir.join("GOAL.md"),
-            "---\nmetrics:\n  - tests pass\n---\nWave goal prompt.",
-        )
-        .unwrap();
-
-        let goal = load_goal("goals", tmp.path()).unwrap();
-        assert_eq!(goal.prompt, "Wave goal prompt.");
-    }
-
-    #[test]
-    fn load_goal_ignores_legacy_goal_paths() {
-        let tmp = TempDir::new().unwrap();
-        let singular_dir = tmp.path().join(".lf/goal");
-        let root_dir = tmp.path().join("goal");
-        let wave_dir = tmp.path().join("wave/custom");
-        fs::create_dir_all(&singular_dir).unwrap();
-        fs::create_dir_all(&root_dir).unwrap();
-        fs::create_dir_all(&wave_dir).unwrap();
-        fs::write(singular_dir.join("custom.md"), "Singular goal.").unwrap();
-        fs::write(root_dir.join("custom.md"), "Root goal.").unwrap();
-        fs::write(wave_dir.join("goal.md"), "Lowercase wave goal.").unwrap();
-
-        let err = load_goal("custom", tmp.path()).unwrap_err();
-        assert!(matches!(err, LoadError::GoalNotFound(name) if name == "custom"));
     }
 
     #[test]
@@ -1308,28 +1172,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("valid only on skill nodes"));
-    }
-
-    #[test]
-    fn render_goal_includes_available_flows() {
-        let goal = Goal {
-            prompt: "Drive the work.".to_string(),
-        };
-        let rendered = render_goal(&goal, &["build".to_string(), "qa".to_string()]);
-
-        assert!(rendered.contains("Drive the work."));
-        assert!(rendered.contains("- build"));
-        assert!(rendered.contains("- qa"));
-    }
-
-    #[test]
-    fn render_goal_handles_no_flows() {
-        let goal = Goal {
-            prompt: "Drive the work.".to_string(),
-        };
-        let rendered = render_goal(&goal, &[]);
-
-        assert!(rendered.contains("No flows are available."));
     }
 
     #[test]

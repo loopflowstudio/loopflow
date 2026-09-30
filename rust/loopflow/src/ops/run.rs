@@ -58,17 +58,15 @@ pub(crate) fn render_task_context(
     )
 }
 
-pub(crate) fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
-    let goal = crate::engine::render_goal(
-        &crate::engine::Goal {
-            prompt: format!(
-                "Drive the '{wave}' Wave's goal forward using its checkout-local files."
-            ),
-        },
-        &crate::engine::available_flow_names(repo),
-    );
+fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
+    // Authored goals and memory enter once through the prompt document gatherer.
+    let flows = crate::engine::available_flow_names(repo)
+        .iter()
+        .map(|flow| format!("- {flow}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
-        "{goal}\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
+        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable flows:\n{flows}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
     )
 }
 
@@ -968,10 +966,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_binding_carries_the_shared_metric_context() {
+    async fn direct_wave_binding_carries_flows_and_shared_metric_context() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join("wave/runtime")).unwrap();
+        std::fs::create_dir_all(repo.join(".lf/flows")).unwrap();
+        std::fs::write(repo.join(".lf/flows/local-delivery.yaml"), "- implement\n").unwrap();
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),
@@ -1016,6 +1016,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(binding.work, WorkRef::Wave(wave.id().clone()));
+        assert!(binding
+            .context
+            .contains("Drive the 'runtime' Wave's goal forward"));
+        assert!(binding.context.contains("- local-delivery\n"));
+        assert!(binding.context.contains("- feature\n"));
         assert!(binding.context.contains("metric-portfolio"));
         assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
             .await

@@ -745,6 +745,7 @@ async fn worktree_reads_its_own_wave_memory() {
         repo_root: binding.cwd,
         wave: Some(binding.wave_name),
         message: Some(binding.context),
+        operate: true,
         ..Default::default()
     })
     .unwrap();
@@ -752,6 +753,8 @@ async fn worktree_reads_its_own_wave_memory() {
     let prompt = render_prompt(components);
     assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
     assert_eq!(prompt.matches("Checkout goal.").count(), 1);
+    assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+    assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
     assert!(!prompt.contains("origin memory is the truth"));
     assert!(!prompt.contains("Origin goal."));
 }

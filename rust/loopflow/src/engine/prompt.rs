@@ -1941,51 +1941,6 @@ mod tests {
     }
 
     #[test]
-    fn wave_files_render_once_with_goal_seed() {
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".into(),
-        };
-        let seed = crate::engine::flow::render_goal(&goal, &[]);
-        let components = PromptComponents {
-            wave: Some("goals".into()),
-            docs: vec![Document {
-                path: "wave/goals/MEMORY.md".into(),
-                content: "One source of truth.".into(),
-                source: DocumentSource::Wave,
-            }],
-            message: Some(seed),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("One source of truth.").count(), 1);
-        assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
-    }
-
-    /// The wave agent's inline run: the render_goal seed rides as the task
-    /// message of an assembled prompt (operate on), and the loopflow document
-    /// lands exactly once — from assembly, not the seed.
-    #[test]
-    fn wave_agent_seed_carries_loopflow_document_once() {
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".to_string(),
-        };
-        let seed = crate::engine::flow::render_goal(&goal, &[]);
-        assert!(
-            !seed.contains("<lf:loopflow>"),
-            "the seed itself carries no loopflow section"
-        );
-
-        let components = PromptComponents {
-            operate: true,
-            wave: Some("goals".to_string()),
-            message: Some(seed),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
-    }
-
-    #[test]
     fn format_prompt_with_docs() {
         let components = PromptComponents {
             docs: vec![

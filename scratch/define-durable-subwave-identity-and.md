@@ -117,6 +117,29 @@ with inherited LF_/LOOPFLOW_ authority removed; resource preflight reported
 recorded above; this pass did not rerun those suites or establish installed/demo
 acceptance.
 
+A second compression review found that checkout-local document gathering had
+removed `load_goal`'s last runtime caller. Wave context now renders its operating
+instruction and available Flow list directly. The unused `Goal` wrapper, goal
+loader/fallback search, goal errors, builtin goal registration and six unreachable
+goal assets are removed together. S1–S5 skills and Flows remain registered; this
+removes the separate goal catalog, not their operating instructions. The removed
+Rust goal APIs have no repository callers; external source consumers were not
+inventoried. Goals and memory continue through `gather_context`.
+
+The two synthetic goal-seed prompt tests are folded into the existing checkout
+binding proof, which now checks that goal, memory and LOOPFLOW instructions each
+appear once. The direct Wave binding proof also checks local and builtin Flow
+names alongside metrics. This keeps proof at the user path instead of retaining
+an unused loader for its tests. Parent identity and migration code are unchanged.
+
+This follow-up passed 150 focused tests (42 Flow, 72 prompt, 13 builtin catalog,
+seven Work binding/history and 16 context), all-target Clippy, formatting,
+architecture coverage and diff checks. Evidence is in
+`.lf/tmp/subwaves/compress-followup-verification.log`; resource preflight passed
+at 45.9 GiB free in `compress-followup-resource.log`. Checks used a disposable
+Home, cleared inherited LF_/LOOPFLOW_ authority and pinned the checkout CLI.
+No full gate, provider/Desktop demo, live planning or schedule operation ran.
+
 ## The dream
 
 You say `infrastructure/release` and every part of Loopflow means the same

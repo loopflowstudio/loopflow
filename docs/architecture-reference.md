@@ -631,8 +631,8 @@ Task row ----> managed worktree ----> commits
    invocation has one worker through the same execution components.
 3. `lf commit` snapshots the worktree. `lf pr publish` creates or refreshes the
    current PR without opening a browser.
-4. `lf pr submit` leaves the exact-head merge click to a person. `lf pr arm`
-   requests exact-head auto-merge and returns; `lf pr land` watches through
+4. `lf task pr submit` leaves the exact-head merge click to a person. `lf task pr arm`
+   requests exact-head auto-merge and returns; `lf task pr land` watches through
    merge. All three operate on Task delivery state when it exists and require
    no Flow-driving claim or execution receipt.
 5. PR landing is fenced by landing generation. The supervisor repairs current

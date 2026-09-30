@@ -385,12 +385,12 @@ fn wt_switch_prefers_exact_branch_match_over_sibling_name() {
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "switch", exact_branch])
+        .args(["task", "worktree", "switch", exact_branch])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf wt switch");
-    assert!(status.success(), "lf wt switch should succeed");
+        .expect("run lf task worktree switch");
+    assert!(status.success(), "lf task worktree switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -417,12 +417,12 @@ fn wt_switch_finds_exact_branch_match() {
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "switch", "jack/feature"])
+        .args(["task", "worktree", "switch", "jack/feature"])
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf wt switch");
-    assert!(status.success(), "lf wt switch should succeed");
+        .expect("run lf task worktree switch");
+    assert!(status.success(), "lf task worktree switch should succeed");
 
     let directive = fs::read_to_string(&directive_path).expect("read directive");
     let target = PathBuf::from(
@@ -455,13 +455,13 @@ fn wt_switch_does_not_map_branch_name_to_unrelated_worktree_path() {
     assert!(status.success(), "git branch should succeed");
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "switch", "jack/feature"])
+        .args(["task", "worktree", "switch", "jack/feature"])
         .current_dir(repo.path())
         .output()
-        .expect("run lf wt switch");
+        .expect("run lf task worktree switch");
     assert!(
         !output.status.success(),
-        "lf wt switch should fail for unrelated branch/worktree reuse"
+        "lf task worktree switch should fail for unrelated branch/worktree reuse"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -617,7 +617,7 @@ fn branch_from_squash_merged_parent_stays_fresh() {
 
 // --- Inspection surface is side-effect free (W2-169, R5) ---------------------
 //
-// `lf wt list` used to call `sync_main`, which fetches origin and hard-resets
+// `lf task worktree list` used to call `sync_main`, which fetches origin and hard-resets
 // (auto-stashing) whichever worktree has main checked out. An inspection command
 // must never rewrite the canonical checkout the Wave/Project control-plane turns
 // depend on being clean. These pin the boundary: reads leave main untouched, and
@@ -635,14 +635,14 @@ fn repo_state(path: &std::path::Path) -> Vec<String> {
 }
 
 fn run_wt_list(repo: &TestRepo, extra: &[&str]) -> std::process::Output {
-    let mut args = vec!["wt", "list"];
+    let mut args = vec!["task", "worktree", "list"];
     args.extend_from_slice(extra);
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(&args)
         .current_dir(repo.path())
         .env("LOOPFLOW_DIRECTIVE_FILE", repo.path().join("directive.txt"))
         .output()
-        .expect("run lf wt list")
+        .expect("run lf task worktree list")
 }
 
 /// Put origin/main one commit ahead of local main, so a stray `sync_main` would
@@ -672,19 +672,19 @@ fn wt_list_leaves_canonical_main_byte_for_byte_unchanged() {
     let out = run_wt_list(&repo, &[]);
     assert!(
         out.status.success(),
-        "lf wt list should succeed: {}",
+        "lf task worktree list should succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let after = repo_state(repo.path());
 
     assert_eq!(
         before, after,
-        "lf wt list must not fetch, reset, or stash canonical main"
+        "lf task worktree list must not fetch, reset, or stash canonical main"
     );
     assert_ne!(
         repo.head_sha(),
         upstream,
-        "lf wt list must not advance main to origin/main"
+        "lf task worktree list must not advance main to origin/main"
     );
 }
 
@@ -702,7 +702,7 @@ fn wt_list_sync_flag_owns_the_fast_forward() {
     let out = run_wt_list(&repo, &["--sync"]);
     assert!(
         out.status.success(),
-        "lf wt list --sync should succeed: {}",
+        "lf task worktree list --sync should succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 

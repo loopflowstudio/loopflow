@@ -42,7 +42,7 @@ If conflicts occur:
 git status
 
 # After resolving the current conflict
-lf rebase --continue
+lf task rebase --continue
 ```
 
 **Conflict resolution strategy:**
@@ -55,7 +55,7 @@ lf rebase --continue
   `lf ask "<exact request>"`; the session shares the checkout and blocks
   until explicit resolution.
 
-`lf rebase --continue` stages the resolved conflict paths and checks that this
+`lf task rebase --continue` stages the resolved conflict paths and checks that this
 agent owns the operation. Repeat until it reports completion. Loopflow records
 the reviewed resolution for later identical conflicts; rerere auto-staging stays
 disabled, so unrelated paths are never staged with it.
@@ -67,13 +67,13 @@ after the rebase completes. Do not expand into the whole project suite or
 unrelated static-analysis or build checks here. Gate and CI own that broader
 proof.
 
-Do not push. Exit after the focused proof; the waiting `lf rebase` process owns
+Do not push. Exit after the focused proof; the waiting `lf task rebase` process owns
 Git postconditions and the single push.
 
 ## Abort
 
 ```bash
-lf rebase --abort
+lf task rebase --abort
 ```
 
 Then:

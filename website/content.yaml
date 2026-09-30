@@ -142,7 +142,7 @@ homepage:
           lf task comment AUTH-12 \
             "prefer the middleware approach"
           lf task status AUTH-12 --json
-          lf pr land -c
+          lf task pr land -c
       - label: "A wave"
         filename: "wave/auth/GOAL.md"
         content: |

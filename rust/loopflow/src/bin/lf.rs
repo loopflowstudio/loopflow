@@ -592,7 +592,7 @@ fn execute_target(
                     if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
-                            message: Some(format!("lf commit: {name}")),
+                            message: Some(format!("lf task commit: {name}")),
                             ..loopflow::ops::CommitOptions::for_task(name)
                         };
                         loopflow::ops::commit_workflow(
@@ -970,6 +970,26 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
         serde_json::to_string(&cli.step_args())?,
     );
     match command {
+        TaskCommand::Pr { cmd } => loopflow::lf::commands::ops::run_pr(cmd.as_ref(), agent),
+        TaskCommand::Worktree { cmd } => loopflow::lf::commands::ops::run_wt(cmd),
+        TaskCommand::Rebase {
+            plan,
+            manual,
+            continue_rebase,
+            abort,
+            adopt,
+            onto,
+        } => loopflow::lf::commands::ops::run_rebase(
+            onto.as_deref(),
+            *plan,
+            *manual,
+            *continue_rebase,
+            *abort,
+            *adopt,
+        ),
+        TaskCommand::Commit { message, no_add } => {
+            loopflow::lf::commands::ops::run_commit(message.as_deref(), *no_add, agent)
+        }
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
         TaskCommand::Checkout {
             issue,
@@ -1591,44 +1611,6 @@ fn execute_command(
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
         Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
-        Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
-        }),
-        Some(Commands::Wt { cmd }) => {
-            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
-        }
-        Some(Commands::Rebase {
-            plan,
-            manual,
-            continue_rebase,
-            abort,
-            adopt,
-            onto,
-        }) => {
-            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
-            with_runtime(&repo, args, || {
-                loopflow::lf::commands::ops::run_rebase(
-                    onto.as_deref(),
-                    *plan,
-                    *manual,
-                    *continue_rebase,
-                    *abort,
-                    *adopt,
-                )
-            })
-        }
-        Some(Commands::Commit {
-            message,
-            push,
-            no_add,
-        }) => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_commit(
-                message.as_deref(),
-                *push,
-                *no_add,
-                cli.model.as_deref(),
-            )
-        }),
         Some(Commands::Auth { cmd }) => loopflow::lf::commands::auth::run(cmd),
         Some(Commands::Release { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
@@ -1680,6 +1662,15 @@ fn execute_command(
                 | WaveCommand::Retire { .. }),
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
+        Some(Commands::Task {
+            cmd: cmd @ TaskCommand::Rebase { .. },
+        }) => {
+            let repo =
+                loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf task rebase")?;
+            with_runtime(&repo, args, || {
+                run_task_command(&repo, cmd, cli.model.as_deref())
+            })
+        }
         Some(Commands::Task {
             cmd: TaskCommand::Worker { task_id },
         }) => in_repo_runtime(args, |_| {
@@ -1804,7 +1795,6 @@ fn execute_command(
         Some(Commands::Screenshot { .. } | Commands::ScreenshotSupervisor { .. }) => {
             unreachable!("screenshot dispatches before home routing")
         }
-        Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
         Some(Commands::Ssh {
             target,
             repo,
@@ -1902,7 +1892,11 @@ mod tests {
         std::fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
         std::fs::write(repo.path().join(".lf/skills/land.md"), "Review landing.").unwrap();
-        std::fs::write(repo.path().join(".lf/flows/land.yaml"), "- cmd: pr land\n").unwrap();
+        std::fs::write(
+            repo.path().join(".lf/flows/land.yaml"),
+            "- cmd: task pr land\n",
+        )
+        .unwrap();
         let _cwd = CwdGuard::enter(repo.path()).unwrap();
         let resolve = |args: &[&str]| {
             let args = loopflow::lf::navigation::normalize_args(
@@ -1927,7 +1921,14 @@ mod tests {
         };
         assert_eq!(
             command.argv(),
-            ["lf", "pr", "land", "--message", "Keep this together"]
+            [
+                "lf",
+                "task",
+                "pr",
+                "land",
+                "--message",
+                "Keep this together"
+            ]
         );
         assert!(message.is_none());
         assert!(matches!(resolve(&["lf", "run", "land"]).0, Target::Flow(_)));
@@ -2010,10 +2011,6 @@ mod tests {
             ":",
             "desktop",
             "screenshot",
-            "pr",
-            "wt",
-            "rebase",
-            "commit",
             "auth",
             "release",
             "repo",
@@ -2146,37 +2143,6 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "wave", "serve", "goals"]).is_err());
     }
 
-    /// The `lf op` namespace is retired, and a caller who still types it hears
-    /// where the operation went. `op next` is the one with nowhere to go: the
-    /// ephemeral rotation it drove was deleted, not renamed.
-    #[test]
-    fn retired_op_namespace_names_its_replacement() {
-        let removed = Cli::try_parse_from(["lf", "op", "next"])
-            .expect_err("`lf op next` cannot parse")
-            .to_string();
-        assert!(
-            removed.contains("no replacement") && removed.contains("lf task run"),
-            "`lf op next` should state the removal and how work is dispatched now: {removed}"
-        );
-
-        let landed = Cli::try_parse_from(["lf", "op", "land"])
-            .expect_err("`lf op land` cannot parse")
-            .to_string();
-        assert!(
-            landed.contains("`lf pr land`"),
-            "`lf op land` should name `lf pr land`: {landed}"
-        );
-
-        // Bare `lf op` has no verb to map, so it falls to the namespace line.
-        let bare = Cli::try_parse_from(["lf", "op"])
-            .expect_err("bare `lf op` cannot parse")
-            .to_string();
-        assert!(
-            bare.contains("top-level"),
-            "bare `lf op` should say the operations are top-level: {bare}"
-        );
-    }
-
     #[test]
     fn removed_dispatch_flag_is_rejected() {
         assert!(Cli::try_parse_from(["lf", "--dispatch", "implement", "ship it"]).is_err());
@@ -2282,13 +2248,14 @@ mod tests {
     fn reorder_args_known_command_unchanged() {
         let args = vec![
             "lf".to_string(),
+            "task".to_string(),
             "commit".to_string(),
             "-m".to_string(),
             "msg".to_string(),
         ];
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
-        assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+        assert_eq!(result, vec!["lf", "task", "commit", "-m", "msg"]);
     }
 
     #[test]
@@ -2356,8 +2323,8 @@ mod tests {
             .map(String::from)
             .to_vec();
         assert_eq!(
-            reorder_args(args),
-            vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
+            reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
+            vec!["lf", "--wave", "goals", "task", "commit", "-m", "ship it"]
         );
     }
 
@@ -2403,36 +2370,40 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
+        let args: Vec<String> = ["lf", "task", "pr", "-m", "codex", "open"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
+        assert_eq!(reordered, vec!["lf", "task", "pr", "open", "-m", "codex"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Open { .. })
+            Some(Commands::Task {
+                cmd: TaskCommand::Pr {
+                    cmd: Some(PrCommand::Open { .. })
+                }
             })
         ));
 
-        let args: Vec<String> = ["lf", "pr", "--strict", "submit"]
+        let args: Vec<String> = ["lf", "task", "pr", "--strict", "submit"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pr", "submit", "--strict"]);
+        assert_eq!(reordered, vec!["lf", "task", "pr", "submit", "--strict"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Submit { strict: true, .. })
+            Some(Commands::Task {
+                cmd: TaskCommand::Pr {
+                    cmd: Some(PrCommand::Submit { strict: true, .. })
+                }
             })
         ));
 
-        let args: Vec<String> = ["lf", "wt", "--force", "remove", "old-tree"]
+        let args: Vec<String> = ["lf", "task", "worktree", "--force", "remove", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "wt", "remove", "--force", "old-tree"]
+            vec!["lf", "task", "worktree", "remove", "--force", "old-tree"]
         );
     }
 

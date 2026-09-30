@@ -45,7 +45,7 @@ First clear the decks: ship work that is close, abandon cruft, and prune stale r
 
 Run the scan headlessly before discussion. Gather:
 
-- Local worktrees: `lf wt list --format json`
+- Local worktrees: `lf task worktree list --json`
 - Open PRs authored by the user: `gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`
 - Remote branches authored by the user: `git branch -r --format='%(refname:short) %(committerdate:iso8601)'` filtered by the current git user / branch schema
 - Stale candidates: remote branches with no open PR and no commits in 60 days

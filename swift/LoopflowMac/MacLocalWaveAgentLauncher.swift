@@ -58,17 +58,17 @@ enum LocalWaveAgentLauncher {
     }
 
     /// Open the branch's PR for review from `worktree`. This delegates to
-    /// `lf pr open` — the single presentation boundary — instead of building a
+    /// `lf task pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
     /// honored in one place. Only an explicit user review action calls this;
-    /// background app work publishes with `lf pr publish`.
+    /// background app work publishes with `lf task pr publish`.
     static func reviewPullRequest(worktree: String) throws {
         let lfPath = try controlLfPath()
         try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
     }
 
     static func pullRequestReviewCommand(lfPath: String) -> [String] {
-        [lfPath, "pr", "open"]
+        [lfPath, "task", "pr", "open"]
     }
 
     /// Ensure Task Work and its checkout without starting a worker; returns

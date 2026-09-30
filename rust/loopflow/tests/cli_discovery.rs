@@ -68,6 +68,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "land"],
             vec!["land", "--help"],
+            vec!["task", "pr", "land", "--help"],
             vec!["pr", "land", "--help"],
         ],
         vec![
@@ -185,9 +186,11 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
-        &["wt", "list", "--full"][..],
+        &["task", "worktree", "list", "--full"][..],
         &["wave", "status", "--no-sync"],
-        &["wt", "rm", "unused"],
+        &["task", "worktree", "list", "--format", "json"],
+        &["task", "commit", "--push"],
+        &["task", "worktree", "rm", "unused"],
         &["-M", "unused", "run", "solo"],
         &["-C", "run", "solo"],
     ] {
@@ -299,7 +302,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let repo = fixture();
     fs::write(
         repo.path().join(".lf/flows/commands.yaml"),
-        "- cmd: pr land --local\n",
+        "- cmd: task pr land --local\n",
     )
     .unwrap();
     let flow = load_flow("commands", repo.path()).unwrap();
@@ -307,7 +310,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let ConcreteStep::Command(step) = &steps[0] else {
         panic!("expected command")
     };
-    assert_eq!(step.item.argv(), ["lf", "pr", "land", "--local"]);
+    assert_eq!(step.item.argv(), ["lf", "task", "pr", "land", "--local"]);
     let adapted = Target::Command(step.item.clone()).into_flow();
     assert_eq!(adapted.items, flow.items);
 
@@ -316,7 +319,11 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
         "flow_parents": ["commands"]
     }});
     let restored: ConcreteStep = serde_json::from_value(saved.clone()).unwrap();
-    assert_eq!(restored, steps[0]);
+    let ConcreteStep::Command(captured) = &restored else {
+        panic!("expected saved command");
+    };
+    let canonical = normalize_args(captured.item.argv()).unwrap();
+    assert_eq!(canonical, step.item.argv());
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     fs::write(
@@ -340,7 +347,7 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     );
     assert_eq!(
         normalized(&["lf", "land", "--next", "show"]),
-        ["lf", "pr", "land", "--next", "show"]
+        ["lf", "task", "pr", "land", "--next", "show"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),

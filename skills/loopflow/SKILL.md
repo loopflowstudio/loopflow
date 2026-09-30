@@ -36,18 +36,19 @@ authority, and never impersonates the User in chat.
 ## Git, Worktrees, GitHub → `lf`
 
 ```bash
-lf commit -m "message" -p            # commit and push
-lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf pr submit                         # done; the user clicks merge
-lf pr land                           # done; loopflow lands it hands-off
-lf pr land -c                        # land and complete the owning Task
-lf rebase --plan                     # show strategy; bare `lf rebase` applies it
+lf task commit -m "message" # commit locally
+lf task pr open # push, prepare a draft, and open its review page
+lf task pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
+lf task pr submit                         # done; the user clicks merge
+lf task pr land                           # done; loopflow lands it hands-off
+lf task pr land -c                        # land and complete the owning Task
+lf task rebase --plan                     # show strategy; bare `lf task rebase` applies it
 lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
 prepares it for the user's merge click; **arm/land** request auto-merge.
-`lf pr open` creates or updates a draft and opens its page when a person asks
+`lf task pr open` creates or updates a draft and opens its page when a person asks
 to see it. Existing ready PRs stay ready; opening a draft does not publish it.
 Publish/submit/arm/land make drafts ready.
 
@@ -137,7 +138,7 @@ is required.
 ## Checkpoint And Proceed
 
 Do not ask permission for reversible work: editing files, sketching code,
-running local builds and tests. Tree dirty? `lf commit -m "checkpoint: <state>"`
+running local builds and tests. Tree dirty? `lf task commit -m "checkpoint: <state>"`
 first. Still ask before pushing, opening or closing PRs, sending messages,
 calling external APIs with side effects, or destructive operations.
 

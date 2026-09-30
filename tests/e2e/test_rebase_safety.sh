@@ -29,7 +29,7 @@ printf '%s %s %s\n' "${SENTINEL_MODE:-unknown}" "${LF_WORKTREE_WRITER_ID:-missin
 case "${SENTINEL_MODE:-noop}" in
   resolve)
     printf 'resolved by owned recovery\n' >conflict.txt
-    "$LF_TEST_BIN" rebase --continue
+    "$LF_TEST_BIN" task rebase --continue
     ;;
   hold)
     echo $$ >"$SENTINEL_PID_FILE"
@@ -42,7 +42,7 @@ case "${SENTINEL_MODE:-noop}" in
     exit 0
     ;;
   nested_rebase)
-    "$LF_TEST_BIN" rebase
+    "$LF_TEST_BIN" task rebase
     ;;
 esac
 SENTINEL
@@ -119,7 +119,7 @@ create_clean_repo() {
 create_clean_repo clean
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/clean.log"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 test ! -s "$SENTINEL_LOG"
 echo "PASS clean rebase used no provider"
 
@@ -129,12 +129,12 @@ create_clean_repo deleted
 published_head=$(git -C "$REPO" rev-parse origin/feature)
 git --git-dir="$REMOTE" update-ref -d refs/heads/feature
 test "$(git -C "$REPO" rev-parse origin/feature)" = "$published_head"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 git -C "$REPO" merge-base --is-ancestor origin/main HEAD
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test "$(git --git-dir="$REMOTE" show feature:feature.txt)" = feature
 test "$(git --git-dir="$REMOTE" show feature:main.txt)" = main
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 test "$(git -C "$REPO" rev-parse '@{upstream}')" = "$(git -C "$REPO" rev-parse HEAD)"
 echo "PASS deleted remote branch recreated with usable tracking"
 
@@ -173,17 +173,17 @@ export GH_LOG="$TMP_ROOT/publication.gh.log" GH_STATE="$TMP_ROOT/publication.gh.
 export OPEN_LOG="$TMP_ROOT/publication.open.log"
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/publication.provider.log"
 : >"$GH_LOG"; : >"$OPEN_LOG"; : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" pr publish --title "behind branch" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" task pr publish --title "behind branch" --body "proof" >/dev/null)
 published_head=$(git -C "$REPO" rev-parse HEAD)
 test "$(git -C "$REPO" rev-list --count "$pre_publish_head..$published_head")" = 1
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$published_head"
 test ! -e "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
 test ! -s "$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" pr open --title "behind branch" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" task pr open --title "behind branch" --body "proof" >/dev/null)
 test "$(git -C "$REPO" rev-parse HEAD)" = "$published_head"
 test "$(wc -l <"$OPEN_LOG" | tr -d ' ')" = 1
 test ! -s "$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 git -C "$REPO" merge-base --is-ancestor origin/main HEAD
 test "$(git -C "$REPO" rev-parse HEAD)" != "$published_head"
 echo "PASS publication stayed integration-free until explicit rebase"
@@ -210,7 +210,7 @@ writer_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
 writer_head=$(git -C "$REPO" rev-parse HEAD)
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/writer.rebase.out" 2>&1)
+(cd "$REPO" && "$LF_BIN" task rebase >"$TMP_ROOT/writer.rebase.out" 2>&1)
 writer_rebase_status=$?
 test "$writer_rebase_status" -eq 0
 test "$(git -C "$REPO" rev-parse HEAD)" != "$writer_head"
@@ -229,19 +229,19 @@ export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/foreign.log"
 export SENTINEL_READY="$TMP_ROOT/foreign.ready" SENTINEL_RELEASE="$TMP_ROOT/foreign.release"
 export SENTINEL_PID_FILE="$TMP_ROOT/sentinel.pid"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && exec "$LF_BIN" rebase >"$TMP_ROOT/foreign.owner.out" 2>&1) &
+(cd "$REPO" && exec "$LF_BIN" task rebase >"$TMP_ROOT/foreign.owner.out" 2>&1) &
 foreign_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
 owned_head=$(git -C "$REPO" rev-parse HEAD)
 set +e
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/foreign.rebase.out" 2>&1)
+(cd "$REPO" && "$LF_BIN" task rebase >"$TMP_ROOT/foreign.rebase.out" 2>&1)
 foreign_rebase_status=$?
 (cd "$REPO" && "$LF_BIN" implement >"$TMP_ROOT/foreign.agent.out" 2>&1)
 foreign_agent_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" rebase --continue >"$TMP_ROOT/foreign.continue.out" 2>&1)
+(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" task rebase --continue >"$TMP_ROOT/foreign.continue.out" 2>&1)
 foreign_continue_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" rebase --abort >"$TMP_ROOT/foreign.abort.out" 2>&1)
+(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" task rebase --abort >"$TMP_ROOT/foreign.abort.out" 2>&1)
 foreign_abort_status=$?
 set -e
 test "$foreign_rebase_status" -ne 0
@@ -264,7 +264,7 @@ create_conflict_repo authorized
 authorized_original=$(git -C "$REPO" rev-parse HEAD)
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/authorized.log"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 grep -Eq '^resolve missing gitop_[^ ]+$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
@@ -277,7 +277,7 @@ echo "PASS authorized recovery continued the original sequencer"
 git -C "$REPO" reset --hard "$authorized_original" >/dev/null
 : >"$SENTINEL_LOG"
 printf 'unrelated\n' >"$REPO/unrelated.tmp"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" task rebase >/dev/null)
 test ! -s "$SENTINEL_LOG"
 test "$(cat "$REPO/conflict.txt")" = "resolved by owned recovery"
 test -f "$REPO/unrelated.tmp"
@@ -303,7 +303,7 @@ PUSH_HOOK
 chmod +x "$REMOTE/hooks/update"
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/land-recovery.provider.log"
 : >"$SENTINEL_LOG"; : >"$land_push_log"; rm -f "$GH_STATE"
-(cd "$REPO" && "$LF_BIN" pr arm --title "one replay" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" task pr arm --title "one replay" --body "proof" >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 test "$(grep -c '^refs/heads/feature$' "$land_push_log")" = 1
 test "$(git -C "$REPO" rev-list --count origin/main..HEAD)" = 1
@@ -318,7 +318,7 @@ create_conflict_repo incomplete
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/incomplete.log"
 : >"$SENTINEL_LOG"
 set +e
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/incomplete.out" 2>&1)
+(cd "$REPO" && "$LF_BIN" task rebase >"$TMP_ROOT/incomplete.out" 2>&1)
 incomplete_status=$?
 set -e
 test "$incomplete_status" -ne 0
@@ -333,7 +333,7 @@ export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/stale.log"
 export SENTINEL_READY="$TMP_ROOT/stale.ready" SENTINEL_RELEASE="$TMP_ROOT/stale.release"
 export SENTINEL_PID_FILE="$TMP_ROOT/sentinel.pid"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && exec "$LF_BIN" rebase >"$TMP_ROOT/stale.owner.out" 2>&1) &
+(cd "$REPO" && exec "$LF_BIN" task rebase >"$TMP_ROOT/stale.owner.out" 2>&1) &
 stale_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
@@ -346,9 +346,9 @@ if [ -f "$SENTINEL_PID_FILE" ]; then
 fi
 printf 'resolved after owner death\n' >"$REPO/conflict.txt"
 set +e
-(cd "$REPO" && "$LF_BIN" rebase --continue >"$TMP_ROOT/adopt.one" 2>&1) &
+(cd "$REPO" && "$LF_BIN" task rebase --continue >"$TMP_ROOT/adopt.one" 2>&1) &
 adopt_one=$!
-(cd "$REPO" && "$LF_BIN" rebase --continue >"$TMP_ROOT/adopt.two" 2>&1) &
+(cd "$REPO" && "$LF_BIN" task rebase --continue >"$TMP_ROOT/adopt.two" 2>&1) &
 adopt_two=$!
 wait "$adopt_one"; adopt_one_status=$?
 wait "$adopt_two"; adopt_two_status=$?
@@ -385,9 +385,9 @@ git -C "$REPO" commit -m main >/dev/null
 git -C "$REPO" push origin main >/dev/null
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/linked.log"
 : >"$SENTINEL_LOG"
-(cd "$TMP_ROOT/linked.one" && "$LF_BIN" rebase >"$TMP_ROOT/linked.one.out" 2>&1) &
+(cd "$TMP_ROOT/linked.one" && "$LF_BIN" task rebase >"$TMP_ROOT/linked.one.out" 2>&1) &
 linked_one=$!
-(cd "$TMP_ROOT/linked.two" && "$LF_BIN" rebase >"$TMP_ROOT/linked.two.out" 2>&1) &
+(cd "$TMP_ROOT/linked.two" && "$LF_BIN" task rebase >"$TMP_ROOT/linked.two.out" 2>&1) &
 linked_two=$!
 wait "$linked_one"
 wait "$linked_two"

@@ -2129,7 +2129,7 @@ async fn verify_task_pr_range_mode(
             StaleBaseAction::Accept => return Ok(()),
             StaleBaseAction::Refuse => {
                 return Err(task_error(format!(
-                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
+                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf task rebase` before publishing.",
                     short(&base),
                     short(&merge_base),
                 )));
@@ -2912,7 +2912,7 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
 /// settlement. Merged evidence remains available to completion retries.
 ///
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
-/// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
+/// deciding it — `lf task pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
 async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
     if let Some(active) = store
@@ -3276,7 +3276,7 @@ pub(crate) async fn task_recovery_adoption(
     {
         return Err(task_error(format!(
             "Task {identifier} cannot recover between PRs while {} has uncommitted changes; \
-             carry them forward with `lf pr next` or commit before resuming, recovery refused \
+             carry them forward with `lf task pr next` or commit before resuming, recovery refused \
              before moving any ownership",
             worktree.display()
         )));
@@ -3306,7 +3306,7 @@ pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, task: &Task) -
     }
     Err(task_error(format!(
         "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
-         forward with `lf pr next` or commit before resuming",
+         forward with `lf task pr next` or commit before resuming",
         task.plan.identifier,
         task.worktree.display()
     )))
@@ -3320,7 +3320,7 @@ pub(crate) async fn ensure_working_pr(
 }
 
 /// How a serial-PR rotation treats the worktree. Automated settlement rotates
-/// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
+/// only a clean tree (`carry_dirty = false`); the operator's `lf task pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
 /// (`carry_dirty = true`) and may name that branch via `slug_override`.
 #[derive(Debug, Clone, Default)]
@@ -3776,7 +3776,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 .map(|github| format!("#{}", github.number))
                 .unwrap_or_else(|| format!("sequence {}", active.sequence));
             return Err(task_error(format!(
-                "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
+                "current PR {which} is not merged yet; land it or wait for the merge before `lf task pr next`"
             )));
         }
         if matches!(
@@ -3998,7 +3998,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let outcome =
         crate::ops::pm::pm_link_pr_async(&task.worktree, wave.name(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
-    // reading, but an operator running `lf pr open` should not have to go looking.
+    // reading, but an operator running `lf task pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
         tracing::warn!(
             issue = task.plan.identifier,
@@ -4179,10 +4179,10 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open; merge it or run `lf pr abandon`"
+                "pull request {which} is open; merge it or run `lf task pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
-                "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
+                "pull request {which} is still publishing; wait for it to land or run `lf task pr abandon`"
             )),
             // An unpublished PR means three different things; say which. The
             // classification is inert: a gate that goes on to refuse leaves the
@@ -4192,11 +4192,11 @@ pub(crate) async fn task_completion_gate(
                     gate.discardable_successor = Some(pr.clone());
                 }
                 CommittedFollowUp::ProvenEmpty => gate.blockers.push(format!(
-                    "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
+                    "pull request {which} is unpublished; publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
                     "follow-up work is committed on unpublished pull request {which}; \
-                     publish and merge it or run `lf pr abandon`"
+                     publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove unpublished pull request {which} is empty: {reason}"

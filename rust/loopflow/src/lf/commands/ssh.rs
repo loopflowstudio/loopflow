@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn preamble_exports_every_credential_and_execs_command() {
-        let cmd = vec!["lf".to_string(), "op".to_string(), "pr".to_string()];
+        let cmd = vec!["lf".to_string(), "task".to_string(), "pr".to_string()];
         let handle = lease_handle();
         let preamble = build_preamble(
             &full_credentials(),
@@ -924,7 +924,7 @@ mod tests {
         assert!(preamble.contains("password=$GH_TOKEN"));
         // cd into the repo and run under the cleanup trap.
         assert!(preamble.contains("cd \"$HOME\"/'src/loopflow'"));
-        assert!(preamble.trim_end().ends_with("'lf' 'op' 'pr'"));
+        assert!(preamble.trim_end().ends_with("'lf' 'task' 'pr'"));
     }
 
     #[test]

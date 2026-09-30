@@ -1,8 +1,8 @@
 # lf CLI
 
 > Design draft. Discovery (`run`, `help`, `list`, typed definitions, and unique
-> command shorthand) is implemented on this branch. Owner moves and proposed
-> overviews below remain unimplemented.
+> command shorthand) and Task delivery owners are implemented on this branch.
+> The other owner moves and proposed overviews below remain unimplemented.
 
 ## Run a workflow
 

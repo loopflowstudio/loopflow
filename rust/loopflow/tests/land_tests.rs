@@ -1728,6 +1728,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "task",
             "pr",
             "arm",
             "--strict",
@@ -1742,16 +1743,16 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
         .env_remove("LF_PROCESS_ID")
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf pr arm");
-    assert!(status.success(), "lf pr arm should succeed");
+        .expect("run lf task pr arm");
+    assert!(status.success(), "lf task pr arm should succeed");
     assert!(
         remote_branch_exists(&repo, branch),
-        "lf pr arm should push its branch"
+        "lf task pr arm should push its branch"
     );
     let gh_log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(
         gh_log.lines().any(|line| line.starts_with("pr create ")),
-        "lf pr arm should create its missing PR, got: {gh_log}"
+        "lf task pr arm should create its missing PR, got: {gh_log}"
     );
 
     // The wave home is permanent: arm never rotates the worktree or cds away.
@@ -2009,7 +2010,7 @@ fi"#;
         }
         assert!(
             output.status.success(),
-            "lf pr land failed: {}\nNested rebase: {}",
+            "lf task pr land failed: {}\nNested rebase: {}",
             String::from_utf8_lossy(&output.stderr),
             fs::read_to_string(&rebase_log).unwrap_or_default(),
         );

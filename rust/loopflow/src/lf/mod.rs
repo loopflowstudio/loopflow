@@ -318,45 +318,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Pull request lifecycle
-    Pr {
-        #[command(subcommand)]
-        cmd: Option<PrCommand>,
-    },
-    /// Worktree operations
-    Wt {
-        #[command(subcommand)]
-        cmd: WtCommand,
-    },
-    /// Rebase current branch onto target (default: main)
-    Rebase {
-        /// Print the planned rebase strategy without mutating git
-        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
-        plan: bool,
-        /// Keep the rebase local and leave conflicts for this process to resolve
-        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
-        manual: bool,
-        /// Stage resolved conflict paths and continue the local rebase
-        #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
-        continue_rebase: bool,
-        /// Abort the local rebase in progress
-        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
-        abort: bool,
-        /// Explicitly claim a raw rebase that has no Loopflow owner
-        #[arg(long, conflicts_with_all = ["plan", "manual"])]
-        adopt: bool,
-        /// Branch to rebase onto
-        onto: Option<String>,
-    },
-    /// Commit changes
-    Commit {
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        #[arg(short = 'p', long = "push")]
-        push: bool,
-        #[arg(long = "no-add")]
-        no_add: bool,
-    },
     /// Provider authentication for local lf skills and ops
     Auth {
         #[command(subcommand)]
@@ -402,7 +363,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Linear-backed Task work and bounded workers
+    /// Concrete work, worktrees, commits, and pull requests
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
@@ -579,23 +540,6 @@ pub enum Commands {
     Replay {
         /// Full Run id or an unambiguous displayed prefix
         run: String,
-    },
-    // architecture-shim: retired-op
-    // Same reservation for the retired `lf op` namespace, which held every
-    // operation before the runtime collapsed to waves, projects, and tasks.
-    // Without it, `lf op land` reports a missing skill named `op` instead of
-    // naming the command that replaced it.
-    #[command(
-        name = "op",
-        hide = true,
-        about = "Removed; the operations are top-level (`lf pr`, `lf rebase`, `lf wt`, `lf task`)",
-        arg_required_else_help = true
-    )]
-    RetiredOp {
-        #[arg(required = true, value_name = "COMMAND", value_parser = reject_retired_op)]
-        removed: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        rest: Vec<String>,
     },
     /// Run lf on a Home or SSH host carrying your local credentials.
     ///
@@ -835,31 +779,6 @@ pub enum SessionCommand {
     StopRun { run_id: String },
 }
 
-/// Name the surviving spelling for each retired `lf op` verb. Prompts, `.lf/`
-/// adaptations, and older installed binaries still say `lf op …`; a caller who
-/// types it should learn where the operation went, not that a skill named `op`
-/// is missing. Nothing here executes — it only fails with a memory.
-fn reject_retired_op(sub: &str) -> Result<String, String> {
-    let hint = match sub {
-        // Ephemeral rotation is gone, not renamed: a worker forks from and
-        // targets its parent branch, so no branch rotates through a worktree.
-        "next" | "advance" => {
-            "it has no replacement — dispatch work with `lf task run <issue-id>`, \
-             and the worker forks from and targets its parent branch"
-                .to_string()
-        }
-        "pr" => "use `lf pr open`".to_string(),
-        "submit" => "use `lf pr submit`".to_string(),
-        "land" => "use `lf pr land`".to_string(),
-        "dispatch" => "use `lf task run <issue-id>`".to_string(),
-        "auth" | "commit" | "cron" | "doctor" | "rebase" | "release" | "sync-skills" | "wt" => {
-            format!("use `lf {sub}`")
-        }
-        _ => "the operations are top-level now — see `lf --help`".to_string(),
-    };
-    Err(format!("`lf op {sub}` was removed; {hint}"))
-}
-
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
     /// List every wave in the registry (running and stopped), marking which
@@ -964,6 +883,43 @@ pub enum WaveCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Pull request lifecycle
+    Pr {
+        #[command(subcommand)]
+        cmd: Option<PrCommand>,
+    },
+    /// Worktree operations
+    Worktree {
+        #[command(subcommand)]
+        cmd: WtCommand,
+    },
+    /// Rebase current branch onto target (default: main)
+    Rebase {
+        /// Print the planned rebase strategy without mutating git
+        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
+        plan: bool,
+        /// Keep the rebase local and leave conflicts for this process to resolve
+        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+        manual: bool,
+        /// Stage resolved conflict paths and continue the local rebase
+        #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
+        continue_rebase: bool,
+        /// Abort the local rebase in progress
+        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+        abort: bool,
+        /// Explicitly claim a raw rebase that has no Loopflow owner
+        #[arg(long, conflicts_with_all = ["plan", "manual"])]
+        adopt: bool,
+        /// Branch to rebase onto
+        onto: Option<String>,
+    },
+    /// Commit changes
+    Commit {
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "no-add")]
+        no_add: bool,
+    },
     /// Internal: drive a Task Flow from its claimed boundary
     #[command(name = "__worker", hide = true)]
     Worker { task_id: crate::work::task::TaskId },
@@ -1622,7 +1578,7 @@ pub enum WtCommand {
     /// List worktrees (read-only; reflects the last-synced main)
     List {
         #[arg(long)]
-        format: Option<String>,
+        json: bool,
         /// Fetch origin and fast-forward main before listing (mutates the
         /// canonical checkout). Off by default so a list never touches it.
         #[arg(long)]
@@ -1662,6 +1618,12 @@ mod tests {
                 "removed root command {verb}"
             );
         }
+        for name in ["pr", "wt", "commit", "rebase", "op"] {
+            assert!(
+                command.find_subcommand(name).is_none(),
+                "removed root {name}"
+            );
+        }
         for verb in ["enable", "disable", "serve"] {
             assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
         }
@@ -1681,7 +1643,7 @@ mod tests {
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
-            vec!["lf", "pr", "checks"],
+            vec!["lf", "task", "pr", "checks"],
             vec!["lf", "wave", "sync", "product"],
             vec!["lf", "wave", "sync", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
@@ -1704,7 +1666,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "list", "--full"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "worktree", "list", "--full"]).is_err());
     }
 
     #[test]
@@ -1777,9 +1739,9 @@ mod tests {
             })
         ));
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "task", "pr", "checks", "--logs"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "worktree", "ci"]).is_err());
     }
 
     #[test]
@@ -2381,30 +2343,39 @@ mod tests {
             }) if issue == "INF-123" && summary == "Root cause recorded"
         ));
 
-        let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
+        let land =
+            Cli::try_parse_from(["lf", "task", "pr", "land", "-c"]).expect("parse completing land");
         assert!(matches!(
             land.command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Land {
-                    complete: true,
-                    next: None,
-                    ..
-                })
+            Some(Commands::Task {
+                cmd: TaskCommand::Pr {
+                    cmd: Some(PrCommand::Land {
+                        complete: true,
+                        next: None,
+                        ..
+                    })
+                }
             })
         ));
 
-        let submit =
-            Cli::try_parse_from(["lf", "pr", "submit", "--next", "released-upgrade-proof"])
-                .expect("parse continuation submit");
+        let submit = Cli::try_parse_from([
+            "lf",
+            "task",
+            "pr",
+            "submit",
+            "--next",
+            "released-upgrade-proof",
+        ])
+        .expect("parse continuation submit");
         assert!(matches!(
             submit.command,
-            Some(Commands::Pr {
+            Some(Commands::Task { cmd: TaskCommand::Pr{
                 cmd: Some(PrCommand::Submit {
                     complete: false,
                     next: Some(next),
                     ..
                 })
-            }) if next == "released-upgrade-proof"
+            } }) if next == "released-upgrade-proof"
         ));
     }
 
@@ -2743,30 +2714,34 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "pr", "stack"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "task", "worktree", "create", "child", "--stack"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["lf", "task", "worktree", "create", "child", "--child"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "task", "worktree", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "worktree", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "pr", "stack"]).is_err());
     }
 
     #[test]
     fn rebase_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "rebase", "--manual", "origin/main"])
+        let manual = Cli::try_parse_from(["lf", "task", "rebase", "--manual", "origin/main"])
             .expect("parse manual rebase");
         assert!(matches!(
             manual.command,
-            Some(Commands::Rebase {
+            Some(Commands::Task { cmd: TaskCommand::Rebase{
                 manual: true,
                 continue_rebase: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            }) if onto == "origin/main"
+            } }) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "rebase", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "rebase", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "rebase", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "rebase", "--plan", "--manual"]).is_err());
     }
 
     #[test]
@@ -2899,9 +2874,12 @@ mod tests {
 
     #[test]
     fn pr_open_accepts_model_override() {
-        let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
+        let cli = Cli::try_parse_from(["lf", "task", "pr", "open", "-m", "codex"]).expect("parse");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Pr {
+                    cmd: Some(PrCommand::Open { model, title, body }),
+                },
         }) = cli.command
         else {
             panic!("expected pr command");
@@ -2914,9 +2892,12 @@ mod tests {
 
     #[test]
     fn top_level_model_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
+        let cli = Cli::try_parse_from(["lf", "-m", "codex", "task", "pr", "open"]).expect("parse");
+        let Some(Commands::Task {
+            cmd:
+                TaskCommand::Pr {
+                    cmd: Some(PrCommand::Open { model, title, body }),
+                },
         }) = cli.command
         else {
             panic!("expected pr command");

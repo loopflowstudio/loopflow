@@ -164,11 +164,11 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr open      # push + create or update a draft, then open its page
-lf pr publish   # push + create or update PR and mark ready (no browser)
-lf pr submit    # prepare the exact head; you click merge
-lf pr arm       # arm exact-head auto-merge and return
-lf pr land      # watch, repair CI, and return after GitHub merges
+lf task pr open      # push + create or update a draft, then open its page
+lf task pr publish   # push + create or update PR and mark ready (no browser)
+lf task pr submit    # prepare the exact head; you click merge
+lf task pr arm       # arm exact-head auto-merge and return
+lf task pr land      # watch, repair CI, and return after GitHub merges
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the

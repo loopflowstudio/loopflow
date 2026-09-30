@@ -136,13 +136,13 @@ Four commitment levels, all headless — pick by how done the work is and who
 lands it:
 
 ```bash
-lf pr publish    # make work visible mid-stream; the agent's default verb
-lf pr submit     # done, a person clicks merge
-lf pr arm        # request exact-head auto-merge and return
-lf pr land       # watch, repair CI, and return only after merge
+lf task pr publish    # make work visible mid-stream; the agent's default verb
+lf task pr submit     # done, a person clicks merge
+lf task pr arm        # request exact-head auto-merge and return
+lf task pr land       # watch, repair CI, and return only after merge
 ```
 
-`lf pr open` is the one presenting verb — it opens a browser. Agents reach for
+`lf task pr open` is the one presenting verb — it opens a browser. Agents reach for
 it only when a person asked to see the PR.
 
 ## Observe

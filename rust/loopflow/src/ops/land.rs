@@ -191,7 +191,7 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
         )));
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
@@ -478,7 +478,7 @@ fn ensure_pr(
             .map(Some);
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
             )));
         }
     }

@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use crate::engine::flow::Command as FlowCommand;
 use crate::engine::git::get_default_branch;
 use crate::engine::process::ProcessGroupGuard;
-use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
+use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, TaskCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
@@ -28,14 +28,19 @@ pub fn execute_flow_command(
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
     match cli.command {
-        Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
-        Some(Commands::Rebase {
-            plan,
-            manual,
-            continue_rebase,
-            abort,
-            adopt,
-            onto,
+        Some(Commands::Task {
+            cmd: TaskCommand::Pr { cmd: Some(pr) },
+        }) => execute_pr(repo, pr, progress),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Rebase {
+                    plan,
+                    manual,
+                    continue_rebase,
+                    abort,
+                    adopt,
+                    onto,
+                },
         }) => {
             if manual || continue_rebase || abort || adopt {
                 return Err(OpsError::Message(
@@ -58,18 +63,16 @@ pub fn execute_flow_command(
             )?;
             Ok(())
         }
-        Some(Commands::Commit {
-            message,
-            push,
-            no_add,
+        Some(Commands::Task {
+            cmd: TaskCommand::Commit { message, no_add },
         }) => {
             crate::ops::task::guard_task_mutation(repo)?;
             commit_workflow(
                 repo,
                 &CommitOptions {
                     add: !no_add,
-                    push,
-                    create_draft_pr: true,
+                    push: false,
+                    create_draft_pr: false,
                     message,
                     ..CommitOptions::for_task("commit")
                 },
@@ -392,7 +395,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
+        "cmd item must be one of task pr open, task pr publish, task pr submit, task pr arm, task pr land, task pr abandon, task rebase, task commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }

@@ -1331,7 +1331,11 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(flows.join("invalid.yaml"), "- cmd: rebase\n  human: true\n").unwrap();
+        fs::write(
+            flows.join("invalid.yaml"),
+            "- cmd: task rebase\n  human: true\n",
+        )
+        .unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()
@@ -1704,7 +1708,7 @@ Design the feature.
     #[test]
     fn parse_command_mapping_accepts_command_and_args() {
         let yaml = r#"
-- cmd: pr land
+- cmd: task pr land
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1715,8 +1719,8 @@ Design the feature.
                 target: Target::Command(item),
                 ..
             } => {
-                assert_eq!(item.command, "pr");
-                assert_eq!(item.args, vec!["land"]);
+                assert_eq!(item.command, "task");
+                assert_eq!(item.args, vec!["pr", "land"]);
             }
             other => panic!("expected command item, got {other:?}"),
         }
@@ -1907,7 +1911,7 @@ Design the feature.
         fs::write(tmp.path().join(".lf/skills/work.md"), "Captured work").unwrap();
         fs::write(
             tmp.path().join(".lf/flows/inner.yaml"),
-            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: pr land --local\n",
+            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: task pr land --local\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".lf/flows/outer.yaml"),
@@ -1941,7 +1945,7 @@ Design the feature.
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
             panic!("command")
         };
-        assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);
+        assert_eq!(command.item.argv(), ["lf", "task", "pr", "land", "--local"]);
     }
 
     #[test]

@@ -140,7 +140,7 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
         pr.branch,
         &pr.base_commit[..pr.base_commit.len().min(12)]
     );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
+    println!("Push your follow-up edits, then `lf task pr open` when ready.");
     Ok(())
 }
 
@@ -225,7 +225,7 @@ pub fn run_rebase(
     adopt: bool,
 ) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task rebase")?;
     if onto.is_some() && (continue_rebase || abort) {
         return Err(anyhow!(
             "a rebase target cannot be combined with --continue or --abort"
@@ -233,7 +233,7 @@ pub fn run_rebase(
     }
     if adopt && !(continue_rebase || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf rebase --continue` or `lf rebase --abort`"
+            "--adopt is only valid with `lf task rebase --continue` or `lf task rebase --abort`"
         ));
     }
     if continue_rebase {
@@ -637,19 +637,14 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_commit(
-    message: Option<&str>,
-    push: bool,
-    no_add: bool,
-    agent_override: Option<&str>,
-) -> Result<()> {
+pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
             add: !no_add,
-            push,
-            create_draft_pr: true,
+            push: false,
+            create_draft_pr: false,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
@@ -1497,7 +1492,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::List { format, sync } => wt_list(format.as_deref(), *sync),
+        WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
@@ -1622,7 +1617,7 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
+fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let default_branch = get_default_branch(&main_repo)?;
@@ -1636,7 +1631,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     }
     let worktrees = list_worktrees(&main_repo)?;
 
-    if matches!(format, Some("json")) {
+    if json {
         let json = serde_json::to_string_pretty(&worktrees)?;
         println!("{}", json);
         return Ok(());
@@ -1948,7 +1943,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
 
     // A development binary owns an isolated `.lf-dev` registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf task worktree prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

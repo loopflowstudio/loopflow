@@ -128,7 +128,7 @@ pub fn create_or_update_pr(
     let commit_options = CommitOptions {
         add: true,
         push: false,
-        message: Some("lf pr open: prepare branch".to_string()),
+        message: Some("lf task pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
@@ -2643,13 +2643,14 @@ pm: add linear provider
     fn parse_generated_pr_copy_handles_unescaped_quotes_inside_body() {
         let raw = r###"{"title":"ops: harden pr copy parsing","body":"## Summary
 
-Use "lf pr open" after gating to open or update the PR."}"###;
+Use "lf task pr open" after gating to open or update the PR."}"###;
         assert_eq!(
             parse_generated_pr_copy(raw),
             Some(PrCopy {
                 title: "ops: harden pr copy parsing".to_string(),
-                body: "## Summary\n\nUse \"lf pr open\" after gating to open or update the PR."
-                    .to_string(),
+                body:
+                    "## Summary\n\nUse \"lf task pr open\" after gating to open or update the PR."
+                        .to_string(),
             })
         );
     }

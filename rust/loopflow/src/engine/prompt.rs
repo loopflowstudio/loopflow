@@ -1920,7 +1920,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains("lf commit"));
+        assert!(prompt.contains("lf task commit"));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -1933,7 +1933,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains("lf commit"));
+        assert!(!prompt.contains("lf task commit"));
         assert!(!prompt.contains("lf chat"));
     }
 
@@ -1953,7 +1953,7 @@ mod tests {
             assert!(prompt.contains("Execute Here First"));
             assert!(prompt.contains("Evidence Loop"));
             assert!(prompt.contains("all relevant recorded evidence"));
-            assert!(prompt.contains("lf pr land"));
+            assert!(prompt.contains("lf task pr land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 

@@ -9,9 +9,9 @@ state records enough evidence to resume the workflow safely.
 ```bash
 lf task checkout INF-123
 lf --task INF-123 implement
-lf commit -m "parser: accept nested groups"
-lf pr publish --title "Parser: accept nested groups"
-lf pr land -c
+lf task commit -m "parser: accept nested groups"
+lf task pr publish --title "Parser: accept nested groups"
+lf task pr land -c
 ```
 
 ## Delivery flow
@@ -68,11 +68,11 @@ The parent Task does not hold two simultaneously open PRs.
 ## Commit and publish
 
 ```bash
-lf commit -m "checkpoint: parser proof"       # local checkpoint
-lf commit -m "parser: accept nested groups" -p # commit and push
-lf pr publish                                  # visible, still in flight
-lf pr arm                                      # request exact-head auto-merge and return
-lf pr land                                     # prepared and auto-merged
+lf task commit -m "parser: accept nested groups" # local checkpoint
+lf task pr open                                # prepare a draft and open its page
+lf task pr publish                             # ready for review
+lf task pr arm                                 # request auto-merge and return
+lf task pr land                                # watch through merge
 ```
 
 `publish` creates or refreshes the current PR without rebasing. `arm` and
@@ -100,7 +100,7 @@ fields; omitted copy is preserved. Dirty source or a new local commit still
 prepares and publishes a replacement head. Task requests must also match the
 requested completion/continuation disposition.
 
-`lf pr open` is the presenting verb; it opens the review surface after
+`lf task pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.
 
 ## Serialize the exact Git races
@@ -204,7 +204,7 @@ checks unknown until the caller reobserves; an unreadable page cannot supply a
 partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
-Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
+Rerun `lf task pr land` after resolving a blocker. It resumes the existing landing
 under a fresh supervisor generation, including when the SHA has not changed.
 The waiting CLI displays completed `ci-fix` conclusions from recorded conversation
 records for this worktree, while the local process supervises the landing. Use
@@ -218,8 +218,8 @@ keeps its normal polling interval, and a repeated repair waits for that interval
 and a fresh observation before starting.
 Provider exit code zero alone does not mean the repair succeeded.
 
-After merge, bare `lf pr land` settles that PR and leaves the Task open.
-`lf pr land -c` completes the Task. `lf pr land --next <slug>` rotates the
+After merge, bare `lf task pr land` settles that PR and leaves the Task open.
+`lf task pr land -c` completes the Task. `lf task pr land --next <slug>` rotates the
 serial chain to a new branch from fetched main.
 
 ## Failure and recovery

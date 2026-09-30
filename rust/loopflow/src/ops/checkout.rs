@@ -179,7 +179,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
             git(&checkout, &["merge", "--abort"])?;
         }
         merge.map_err(|error| OpsError::Message(format!(
-            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf rebase`: {error}", checkout.display()
+            "could not update {branch} in {}; original commits retained. Resolve the upstream/local conflict before retrying `lf task rebase`: {error}", checkout.display()
         )))?;
         if !is_ancestor(&checkout, &upstream, "HEAD")? {
             return Err(OpsError::Message(format!(

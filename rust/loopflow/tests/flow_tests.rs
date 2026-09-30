@@ -2455,7 +2455,7 @@ fn command_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- cmd: pr land
+- cmd: task pr land
 "#,
     );
 
@@ -2466,8 +2466,8 @@ fn command_item_parses_and_expands() {
             target: loopflow::engine::target::Target::Command(item),
             ..
         } => {
-            assert_eq!(item.command, "pr");
-            assert_eq!(item.args, vec!["land"]);
+            assert_eq!(item.command, "task");
+            assert_eq!(item.args, vec!["pr", "land"]);
         }
         other => panic!("expected command item, got {other:?}"),
     }
@@ -2646,7 +2646,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     ] {
         write_skill(repo.path(), skill, "Fixture step.");
     }
-    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: pr land -c\n";
+    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: task pr land -c\n";
     write_flow(repo.path(), "two-loops", two_loops);
 
     // Before any Flow: the recommendation, Start, and no invented history.
@@ -2737,7 +2737,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
             "decide-proof",
             "demo-proof",
             "decide-proof",
-            "pr land -c"
+            "task pr land -c"
         ]
     );
     assert_eq!(record["current"], 1);

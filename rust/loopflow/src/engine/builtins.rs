@@ -359,7 +359,7 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- cmd: pr land -c"));
+            .contains("- cmd: task pr land -c"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());

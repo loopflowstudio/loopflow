@@ -274,9 +274,9 @@ record, return.
 lf task checkout INF-123
 lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
-lf commit -m "Reconcile Task research"
-lf pr publish
-lf pr submit
+lf task commit -m "Reconcile Task research"
+lf task pr publish
+lf task pr submit
 lf task status INF-123 --json
 ```
 

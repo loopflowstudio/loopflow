@@ -8,7 +8,7 @@ Inspect the intended outcome, diff, proof and repository delivery requirements.
 Preserve unrelated active contributions. Fix clear readiness gaps and retain
 useful design conclusions in their durable owner before scratch cleanup.
 
-Run `lf pr submit --create-pr`. It stages the change, rebases, clears scratch,
+Run `lf task pr submit --create-pr`. It stages the change, rebases, clears scratch,
 creates or updates the PR, marks it ready and assigns the reviewer. It consumes
 valid prepared copy or generates it through pr-message. Supply explicit copy
 only for an intentional override, then check the returned scope and proof claims.

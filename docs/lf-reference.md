@@ -256,7 +256,7 @@ commit. Several AgentSessions may concern the same Task; attribution does not gr
 exclusive ownership of its files.
 
 Put global options before the command. Command-local options retain their
-meaning after shorthand expansion: `lf commit -m "Fix startup"` supplies a
+meaning after shorthand expansion: `lf task commit -m "Fix startup"` supplies a
 commit message, not a model. `--` ends option interpretation where literal
 arguments are accepted.
 
@@ -504,7 +504,7 @@ operations require UTF-8 files within 1 MB and exclude symlinks and Git metadata
 lf task worktree create parser
 lf task worktree create parser --plan
 lf task worktree switch parser
-lf task worktree list
+lf task worktree list --json
 lf task worktree prune --dry-run
 lf task worktree remove parser
 ```

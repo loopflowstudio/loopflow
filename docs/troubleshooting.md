@@ -103,20 +103,20 @@ Other options:
 List all worktrees, then clean up stale entries:
 
 ```bash
-lf wt list
-lf wt prune --dry-run    # show clean terminal or week-stale worktrees
-lf wt prune              # remove those worktrees and their branches
+lf task worktree list
+lf task worktree prune --dry-run    # show clean terminal or week-stale worktrees
+lf task worktree prune              # remove those worktrees and their branches
 ```
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
+`lf task worktree remove NAME --force` only when intentionally discarding a worktree.
 
 Feature-worktree integration fetches and pins `origin/<default>` without
 moving the default-branch checkout:
 
 ```bash
-lf rebase
+lf task rebase
 ```
 
 The feature branch uses the current remote base even when the sibling default

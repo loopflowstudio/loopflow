@@ -50,22 +50,20 @@ No competing model migration belongs here.
 
 ## This slice
 
-Jack expanded scope before owner implementation: catalog every command,
-subcommand and option, including hidden/internal surfaces, from Clap itself.
-For every row retain the current canonical path, owner, purpose, actual caller
-citations, overlap and a keep/rename/merge/delete verdict. Commit this catalog
-before implementing owner changes. Then implement all verdicts across parser,
-dispatch, docs, skills, Desktop and tests. Demo includes before/after command
-and option counts. Absence of a repository caller alone does not establish
-absence of public users; inspect defaults and positional inputs too.
+Move Task PR/worktree/commit/rebase ownership end to end. The catalog prerequisite
+is complete at `ad023a72c`; this pass starts at `590541b9a`. Replace root parser
+variants, move typed Flow dispatch and Desktop argv, migrate current scripts,
+skills and docs, delete commit publication flags and the retired `op` shim, and
+replace worktree `--format` with `--json`. Task delivery must still operate on an
+ordinary repository branch without creating a Task. Unique tree-derived shorthand
+continues to work; no predecessor alias is introduced. Retained command bytes
+remain historical evidence, resolved by the existing navigation path.
 
-The earlier in-progress owner edits were restored to HEAD when this direction
-arrived. The catalog prerequisite is complete at `ad023a72c`; the first culling
-slice below is verified. The next implementation slice should switch accepted
-object owners and their consumers end to end. Do not repeat the baseline audit
-or treat this first cleanup as convergence. Integrate/coordinate LOO-298 before
-monitor's Exec/Session reader cut. The broader overviews, first local result,
-child readiness and every remaining catalog verdict still block demo readiness.
+The complete target above remains required. Next owner slices still include
+Account, Repo release, Home, Wave and Session. Integrate LOO-298 before Monitor's
+Exec/Session reader cut. Overviews, local Wave/unlinked work discovery, child
+readiness, a real first provider result and Jack's demo remain required; this
+slice cannot establish whole-Task readiness or authorize landing.
 
 ## Slice ledger
 
@@ -186,3 +184,64 @@ LOO-298 before monitor identity work. Overviews, local Wave/unlinked work
 discovery, child readiness, remaining catalog verdicts, real first-result
 walkthrough and Jack's demo remain required. Full Done when claims do not hold,
 so this review does not publish, land, complete the Task or choose Flow navigation.
+
+### Task delivery owner implementation · 2026-09-30
+
+Starting revision: `590541b9a`. Switched Task PR/worktree/commit/rebase from root
+parser variants to the existing Task owner; CLI and typed Flow dispatch reuse
+the original operations. Updated builtin Flow commands, operating guidance,
+Desktop review argv, scripts, current documentation and test consumers. Removed
+`commit --push`, worktree `--format` (replaced by `--json`) and the retired
+`op` parser/rejection shim. Existing PR/commit/rebase shorthand comes from the
+Clap tree; no compatibility alias or storage migration was added. Historical
+chapter/release/migration bytes and the catalog baseline stay unchanged.
+
+Review found two boundary details worth preserving: saved `pr land` command
+bytes must remain readable independently of newly authored `task pr land`, and
+rebase outside a repository must retain its actionable error with the canonical
+path. The public discovery proof checks the former; the missing-repository
+proof checks the latter. A mechanical text replacement briefly treated the
+`pr-review` skill as a PR command; review corrected it before verification.
+
+The first `cargo test -p loopflow --bin lf reorder_args --jobs 4` failed 2/16
+tests: they bypassed normalization with the former root `commit` input. The
+process entry normalizes before reordering. One fixture now uses canonical
+input, and the global-Wave/commit-message case exercises normalization then
+reordering, preserving the `-m` ownership assertion. The rerun passed 16/16;
+no production normalization or authority rule was weakened.
+
+The ordinary-branch public-CLI proof passed with a real temporary Git repository
+and local bare remote, synthetic GitHub responses and a browser stub. Commit
+changed HEAD without pushing or creating a PR; rebase preview preserved HEAD;
+worktree stdout parsed as one JSON array; open produced a draft and publish
+made it ready; the store still had no Tasks. This proves ordinary-branch
+delivery ownership, not hosted GitHub, provider execution or the required
+first-local-result journey.
+
+Focused proof (all passed; no affected-suite/full gate was run):
+
+- `cargo test -p loopflow --test pr_tests task_delivery_works_on_an_ordinary_branch_without_registration --jobs 4`: 1 passed.
+- `cargo test -p loopflow --test pr_tests draft_open_stays_draft_until_publish_in_cli_and_flow --jobs 4`: 1 passed, CLI and typed Flow with simulated GitHub/browser.
+- `cargo test -p loopflow --test cli_discovery --jobs 4`: 10 passed, including removed options, reserved help, canonical/shorthand equivalence and saved-command bytes.
+- `cargo test -p loopflow --lib lf::tests --jobs 4`: 52 passed.
+- `cargo test -p loopflow --bin lf reorder_args --jobs 4`: final 16 passed after the two fixture corrections above.
+- `cargo test -p loopflow --lib engine::flow_graph::tests --jobs 4`: 5 passed.
+- `cargo test -p loopflow --test global_commands missing_repository_and_missing_home_are_distinct --jobs 4`: 1 passed.
+- `cargo test -p loopflow --test worktree_tests wt_list_ --jobs 4`: 2 passed, unchanged ordinary reads and explicit sync.
+- `cargo test -p loopflow --test golden_prompt --jobs 4`: 1 passed across current prompt goldens.
+- `swift test --package-path swift --filter LocalWaveAgentLauncherTests`: 8 passed. Compiler warnings about existing weak variables elsewhere remain unrelated; no rendered app acceptance is claimed.
+- `uv run pytest python/tests/test_loopflow_skill_alignment.py -q`: 4 passed.
+- `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py -q`: 1 passed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py`, shell syntax and `git diff --check`: passed.
+- `uv run python website/dev.py sync-docs --source docs` and `uv run --project website python scripts/render_architecture_html.py`: regenerated website copies and tracked architecture HTML.
+- `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-current.json`: regenerated the compiled extraction. Current counts: **139 commands below root, 17 hidden, 435 flags, 92 positionals, 0 extra aliases**. Baseline: 141 / 18 / 440 / 95 / 10. This pass deletes one namespace, its automatic help flag, two positionals and commit's push flag; moving owners does not remove leaf operations.
+
+Measured production Rust and builtin instruction diff from `590541b9a` to this
+pass: **+168 / −218 lines**, excluding test modules/integration tests, catalog
+tooling, generated artifacts, docs/style, scratch and the external skill copy.
+This is a consumer replacement, not a completed repository reorganization.
+
+Full-design checks remain incomplete: remaining owner moves, both overviews,
+LOO-298 integration, local discovery, child readiness and real provider
+walkthrough still precede Jack's demo. No publication, landing or Task completion
+is implied by this pass.

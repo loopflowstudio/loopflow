@@ -1465,7 +1465,7 @@ fn active_candidate_preparation_blocks_concurrent_cleanup_until_exit() {
     assert!(fixture.worktree.exists());
     let branch_head = git_output(&repo, &["rev-parse", &fixture.branch]);
     let removal = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "remove", fixture.worktree_name.as_str()])
+        .args(["task", "worktree", "remove", fixture.worktree_name.as_str()])
         .current_dir(repo.path())
         .output()
         .expect("attempt concurrent candidate cleanup");
@@ -2029,7 +2029,7 @@ exit 1
     wait_for_path(&ready);
     assert!(publisher_worktree.exists());
     let removal = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["wt", "remove", "publish-default-v0-9-1"])
+        .args(["task", "worktree", "remove", "publish-default-v0-9-1"])
         .current_dir(repo.path())
         .output()
         .expect("attempt concurrent cleanup");

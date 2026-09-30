@@ -353,7 +353,7 @@ Test skill body.
         )
         .expect("prepare prompt");
         assert!(prepared.prompt.contains("<lf:loopflow>"));
-        assert!(prepared.config.system_prompt.contains("lf commit"));
+        assert!(prepared.config.system_prompt.contains("lf task commit"));
         assert!(prepared.config.system_prompt.contains("Execute Here First"));
         assert!(!prepared.config.system_prompt.contains("lf pm show"));
         assert!(!prepared.config.system_prompt.contains("lf loop <flow>"));
@@ -376,7 +376,7 @@ Test skill body.
         )
         .expect("prepare prompt");
         assert!(!prepared.prompt.contains("<lf:loopflow>"));
-        assert!(!prepared.config.system_prompt.contains("lf commit"));
+        assert!(!prepared.config.system_prompt.contains("lf task commit"));
     }
 
     #[test]

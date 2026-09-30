@@ -64,7 +64,7 @@ jobs:
           tar -xzf lf-${{ matrix.target }}.tar.gz -C package-smoke
           package-smoke/lf --version
           package-smoke/lf --help > /dev/null
-          package-smoke/lf catalog > /dev/null
+          package-smoke/lf list > /dev/null
           if [ -n "${LOOPFLOW_RELEASE_TAG}" ]; then
             expected="${LOOPFLOW_RELEASE_TAG##*/}"
             expected="${expected#v}"

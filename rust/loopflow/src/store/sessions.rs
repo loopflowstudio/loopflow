@@ -15,29 +15,11 @@ impl Store {
     pub(crate) async fn input_final_answer(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
         let input = input.to_owned();
         run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
     }
 
-    pub(crate) async fn historical_session_inputs(
-        &self,
-    ) -> StoreResult<Vec<(Option<AgentSession>, crate::session::SessionObservation)>> {
-        run_sqlite(&self.sqlite, |store| store.historical_session_inputs()).await
-    }
-
-    pub(crate) async fn import_session(
-        &self,
-        session: AgentSession,
-        review: Option<FlowSession>,
-        history: Vec<crate::session::SessionObservation>,
-        dry_run: bool,
-    ) -> StoreResult<bool> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.import_session(session, review.as_ref(), &history, dry_run)
-        })
-        .await
-    }
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -131,7 +113,7 @@ impl Store {
     pub(crate) async fn conversation_history(
         &self,
         since: i64,
-    ) -> StoreResult<Vec<crate::run_record::SessionHistory>> {
+    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
         run_sqlite(&self.sqlite, move |store| {
             store.conversation_history(None, None, None, None, since, true)
         })

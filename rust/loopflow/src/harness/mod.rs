@@ -250,15 +250,14 @@ mod environment_tests {
         let mut command = tokio::process::Command::new("vendor");
         command
             .env(crate::durable::RUN_ID_ENV, "run_stale")
-            .env(crate::run_record::RUN_DIR_ENV, "/stale/run")
-            .env("LF_PARENT_RUN_ID", "run_stale_parent");
+            .env(crate::session_record::RUN_DIR_ENV, "/stale/run");
         let mut config = crate::engine::agent::AgentConfig::default();
         config.env.insert(
             crate::durable::RUN_ID_ENV.to_string(),
             "run_fresh".to_string(),
         );
         config.env.insert(
-            crate::run_record::RUN_DIR_ENV.to_string(),
+            crate::session_record::RUN_DIR_ENV.to_string(),
             "/fresh/run".to_string(),
         );
 
@@ -274,10 +273,9 @@ mod environment_tests {
             Some(OsString::from("run_fresh"))
         );
         assert_eq!(
-            environment[crate::run_record::RUN_DIR_ENV],
+            environment[crate::session_record::RUN_DIR_ENV],
             Some(OsString::from("/fresh/run"))
         );
-        assert_eq!(environment["LF_PARENT_RUN_ID"], None);
     }
 
     #[test]

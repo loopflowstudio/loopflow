@@ -4,7 +4,7 @@ description: Control Loopflow from a live terminal conversation.
 
 # Terminal control
 
-When the human wants to step back and rethink a Task mid-flight, use
+When the user wants to step back and rethink a Task mid-flight, use
 `concept-review` to examine its product concepts, core types, and APIs together.
 
 Keep this conversation open as the User's terminal-native Loopflow control
@@ -16,18 +16,18 @@ At the beginning of every User turn, and again after any Session mutation, run:
 lf session list --json
 ```
 
-Treat that command as the only current unresolved work awaiting review. Never rely
+Use the fresh list to identify conversations and unresolved reviews. Never rely
 on Session content remembered from an earlier turn or embedded in the launch
 prompt.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
-repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf
-status` is already single-Wave and repo-resolved.
+repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
+status` resolves one Wave within the repository.
 
 When the User selects a Session, run `lf session open <session-id> --json`.
-It prepares or recovers the boundary's ordinary provider Run and returns its
+It prepares or recovers the boundary's AgentSession and captured input and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
 the conversation opened; verify provider readiness in the requested terminal.
@@ -37,7 +37,7 @@ installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new session,
+ordinary `lf --as <work> : "<prompt>"` contribution. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
 ## Launching and advancing work
@@ -170,9 +170,11 @@ be forwarded; durable workers use credentials installed on their Home.
 Prepare a Task without launching it with `lf task checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
-selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
-asserts the existing identity. A bounded Run does not advance the Work's Flow
-or claim exclusive ownership. Task execution uses its existing checkout.
+attributes a skill, inline prompt, or Flow. Attribution resolves this command's
+`--as`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
+Process ancestry supplies no Work attribution. A direct contribution does not
+advance the Task's selected managed Flow or claim exclusive ownership. `task run`
+sets the same declaration and drives the ordinary Flow in the Task checkout.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
@@ -186,7 +188,7 @@ When evidence invalidates the attempt, update the Task and wait for required
 contributions, then `lf task restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
-Task worker; independent bounded Runs remain independent. Reconcile prior
+Task worker; other attributed Flows and conversations remain independent. Reconcile prior
 scratch against the new evidence rather than treating it as approved design.
 An explicitly selected Flow governs even when it differs from that default.
 
@@ -199,8 +201,8 @@ Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
-Inspect `lf auth status` before proposing an account repair. It is offline;
-use `lf auth status --verify --json` for managed provider acceptance. Local
+Inspect `lf auth status --cached` before proposing an account repair. It is offline;
+use `lf auth status --json` for managed provider acceptance. Local
 service state and managed logins are separate evidence. OAuth client
 credentials resolve from environment first, then Doppler when configured. For
 a repository using Doppler, give `doppler run -- lf auth connect <provider>` when those

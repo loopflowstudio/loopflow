@@ -300,21 +300,6 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            None,
-        ),
-        "chat history (no ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
             &["wave", "status", "--wave", "definitely-unknown"],
             None,
         ),
@@ -331,21 +316,6 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
     );
 
     // Valid ambient does not rescue an unknown explicit: explicit wins.
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &[
-                "chat",
-                "--history",
-                "--json",
-                "--wave",
-                "definitely-unknown",
-            ],
-            Some(uuid),
-        ),
-        "chat history (with ambient)",
-    );
     assert_rejected(
         lf(
             &home,

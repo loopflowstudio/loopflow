@@ -19,9 +19,9 @@ pub struct ContextSourceOverrides {
     pub clipboard: Option<bool>,
 }
 
-/// Canonical launch-prep input shared by CLI and Work-runner call sites.
+/// Canonical Exec preparation input shared by CLI and Work-runner call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LaunchPromptInput {
+pub struct ExecPromptInput {
     pub repo_root: PathBuf,
     pub skill: Option<String>,
     pub resolved_skill: Option<Skill>,
@@ -43,21 +43,21 @@ pub struct LaunchPromptInput {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
-/// Canonical launch-prep output.
+/// Canonical Exec preparation output.
 #[derive(Debug, Clone)]
-pub struct PreparedLaunchPrompt {
+pub struct PreparedExecPrompt {
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplicated_docs: Vec<Document>,
     pub prompt: String,
 }
 
-/// Build context + launch config from canonical launch-prep input.
-pub fn prepare_launch_prompt(
+/// Build context + Exec config from canonical Exec preparation input.
+pub fn prepare_exec_prompt(
     config: &Config,
-    input: LaunchPromptInput,
-) -> Result<PreparedLaunchPrompt, CoreError> {
-    let LaunchPromptInput {
+    input: ExecPromptInput,
+) -> Result<PreparedExecPrompt, CoreError> {
+    let ExecPromptInput {
         repo_root,
         skill,
         resolved_skill,
@@ -117,6 +117,7 @@ pub fn prepare_launch_prompt(
         });
     }
 
+    crate::engine::context_budget::bound_context(&mut components)?;
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -154,8 +155,12 @@ pub fn prepare_launch_prompt(
         )]
         .into(),
     };
+    crate::engine::context_budget::check_input(
+        &crate::engine::agent::system_prompt_with_structured_replies(&launch),
+        &launch.task_prompt,
+    )?;
 
-    Ok(PreparedLaunchPrompt {
+    Ok(PreparedExecPrompt {
         config: launch,
         components,
         deduplicated_docs,
@@ -251,6 +256,174 @@ Test skill body.
     }
 
     #[test]
+    fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
+        use crate::engine::context_budget::{
+            GOAL_TOKENS, INPUT_BYTES, INPUT_TOKENS, MEMORY_TOKENS, SCRATCH_TOKENS,
+        };
+        use crate::engine::prompt::count_tokens;
+
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+        let evidence =
+            "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
+        for index in 0..14 {
+            fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
+        }
+        let message = format!(
+            "Task definition\n{}\nLatest direction: preserve the public API",
+            (0..384)
+                .map(|id| format!(
+                    "Comment {id}: {}\n",
+                    "A recorded implementation result. ".repeat(100)
+                ))
+                .collect::<String>()
+        );
+        assert!(message.len() > 1_048_576);
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("test".into()),
+                wave: Some("infrastructure".into()),
+                wave_memory: Some(evidence.clone()),
+                message: Some(message.clone()),
+                surface: Surface::Headless,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let config = &prepared.config;
+        let bytes = config.system_prompt.len() + config.task_prompt.len();
+        let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
+        assert!(bytes <= INPUT_BYTES, "{bytes}");
+        assert!(tokens <= INPUT_TOKENS, "{tokens}");
+        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
+        assert!(
+            count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
+                <= MEMORY_TOKENS
+        );
+        assert!(
+            prepared
+                .components
+                .docs
+                .iter()
+                .filter(|doc| doc.source == DocumentSource::Scratch)
+                .map(|doc| count_tokens(&doc.content))
+                .sum::<usize>()
+                <= SCRATCH_TOKENS
+        );
+        assert!(config.task_prompt.contains("Task definition"));
+        assert!(config
+            .task_prompt
+            .contains("Latest direction: preserve the public API"));
+        assert!(config.task_prompt.contains("scratch/13.md"));
+        let sources: Vec<_> = fs::read_dir(tmp.path().join(".lf/tmp/context"))
+            .unwrap()
+            .collect();
+        assert_eq!(sources.len(), 3);
+        assert_eq!(prepared.components.budget_decisions.len(), 3);
+        let path = sources
+            .iter()
+            .map(|entry| entry.as_ref().unwrap().path())
+            .find(|path| fs::read_to_string(path).unwrap() == message)
+            .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), message);
+        assert!(config.task_prompt.contains(path.to_str().unwrap()));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("scratch/00.md")).unwrap(),
+            evidence
+        );
+        eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
+    }
+
+    #[test]
+    fn oversized_explicit_instructions_report_local_input_budget() {
+        let tmp = create_repo_fixture();
+        let error = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                resolved_skill: Some(Skill {
+                    content: Some("Follow this instruction. ".repeat(100_000)),
+                    ..Skill::named("large")
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("exceeds the input budget"));
+    }
+
+    #[test]
+    fn structured_reply_guidance_counts_toward_the_launch_budget() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let input = |content: String, has_ui| ExecPromptInput {
+            repo_root: tmp.path().to_path_buf(),
+            resolved_skill: Some(Skill {
+                content: Some(content),
+                ..Skill::named("budget")
+            }),
+            client_context: ClientContext {
+                has_ui,
+                compact: false,
+            },
+            ..Default::default()
+        };
+        let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
+        let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
+            + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
+        let content = " x".repeat(crate::engine::context_budget::INPUT_TOKENS - overhead - 32);
+        prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
+        let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
+            panic!("structured reply guidance exceeded the launch budget without rejection");
+        };
+        assert!(error.to_string().contains("exceeds the input budget"));
+    }
+
+    #[test]
+    fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
+        let plan = "Jack Heart accepted the design on 2026-09-30. Build Unit 1 first.";
+        let intent = "> $kickoff\n> ok just run kickoff here then";
+        fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
+        fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("implement".into()),
+                agent: Some("codex".into()),
+                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                message: Some(
+                    "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
+                        .into(),
+                ),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let submitted = &prepared.config.task_prompt;
+        assert!(submitted.contains("<lf:skill:implement>"));
+        assert!(submitted.contains("Turn the design doc into working code."));
+        assert!(submitted.contains(plan));
+        assert!(submitted.contains("scratch/nested/intent.md"));
+        assert_eq!(submitted.matches("&#36;kickoff").count(), 3);
+        assert!(!submitted.contains("$kickoff"));
+        assert!(!submitted.contains("<lf:skill:kickoff>"));
+        assert!(prepared
+            .components
+            .docs
+            .iter()
+            .any(|doc| doc.content == intent));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("scratch/nested/intent.md")).unwrap(),
+            intent
+        );
+    }
+
+    #[test]
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
         let _lock = crate::journal::test_env_lock();
         let _name = crate::lf::commands::flow::EnvVarGuard::set(
@@ -266,9 +439,9 @@ Test skill body.
                 Surface::Iphone,
                 Surface::Headless,
             ] {
-                let prepared = prepare_launch_prompt(
+                let prepared = prepare_exec_prompt(
                     &default_test_config(),
-                    LaunchPromptInput {
+                    ExecPromptInput {
                         repo_root: tmp.path().to_path_buf(),
                         surface,
                         agent: Some(agent.into()),
@@ -302,53 +475,53 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_skill_agent_when_no_override() {
+    fn prepare_exec_prompt_prefers_skill_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_explicit_agent_override() {
+    fn prepare_exec_prompt_prefers_explicit_agent_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]
-    fn prepare_launch_prompt_includes_loopflow_by_default() {
+    fn prepare_exec_prompt_includes_loopflow_by_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -361,17 +534,17 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_omits_loopflow_when_disabled() {
+    fn prepare_exec_prompt_omits_loopflow_when_disabled() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
                 no_loopflow: true,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -380,7 +553,7 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_default_agent_when_no_user_config() {
+    fn prepare_exec_prompt_uses_default_agent_when_no_user_config() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -395,16 +568,16 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = None;
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
@@ -412,16 +585,16 @@ Test skill body.
     #[test]
     fn unmarked_builtin_skill_defaults_to_codex() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &Config::default(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
     }
@@ -429,22 +602,22 @@ Test skill body.
     #[test]
     fn marked_builtin_skill_keeps_claude_default() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &Config::default(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("kickoff".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
     }
 
     #[test]
-    fn prepare_launch_prompt_user_config_overrides_default_agent() {
+    fn prepare_exec_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -459,22 +632,22 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = Some("codex:o3".to_string());
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_config_docs() {
+    fn prepare_exec_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
         fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
@@ -483,14 +656,14 @@ Test skill body.
             ..default_test_config()
         };
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert!(prepared
             .components
@@ -500,22 +673,22 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_injects_structured_replies_for_ui_context() {
+    fn prepare_exec_prompt_injects_structured_replies_for_ui_context() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 client_context: ClientContext {
                     has_ui: true,
                     compact: true,
                 },
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.structured_replies.len(), 1);
         assert_eq!(
@@ -537,12 +710,12 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_resolved_skill_skill_without_loading_by_name() {
+    fn prepare_exec_prompt_uses_resolved_skill_skill_without_loading_by_name() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("npx/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
@@ -553,10 +726,10 @@ Test skill body.
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(
             prepared
@@ -570,16 +743,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_rejects_unsupported_opencode_variants() {
+    fn prepare_exec_prompt_rejects_unsupported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let err = prepare_launch_prompt(
+        let err = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect_err("unsupported OpenCode model should fail");
@@ -590,15 +763,15 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_rejects_unknown_harnesses() {
+    fn prepare_exec_prompt_rejects_unknown_harnesses() {
         let tmp = create_repo_fixture();
-        let err = prepare_launch_prompt(
+        let err = prepare_exec_prompt(
             &default_test_config(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("retired-agent".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect_err("unknown harness should fail");
@@ -609,16 +782,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_accepts_supported_opencode_variants() {
+    fn prepare_exec_prompt_accepts_supported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("supported OpenCode model should pass");
@@ -630,16 +803,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_accepts_the_users_opencode_default() {
+    fn prepare_exec_prompt_accepts_the_users_opencode_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("bare OpenCode should defer to the user's default");

@@ -6,10 +6,11 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use base64::Engine;
 use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
-use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
+use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::{expand_flow, load_flow};
+use loopflow::engine::{compile_flow, load_flow};
 use loopflow::id::{ExecId, TraceId};
 use support::codex_app_server_script;
 use tempfile::TempDir;
@@ -50,7 +51,7 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
         write_flow(
             repo.path(),
             "path-proof",
-            "- op: rebase --plan\n- op: rebase --plan\n",
+            "- cmd: sync --plan\n- cmd: sync --plan\n",
         );
         // A replacement executable delegates the actual effect to lf, then
         // simulates a future build committing an additive schema migration.
@@ -143,82 +144,13 @@ SQL
 }
 
 #[test]
-fn mechanical_flow_boundaries_each_have_their_own_child_exec() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    write_flow(
-        repo.path(),
-        "mechanical-proof",
-        "- op: rebase --plan\n- op: rebase --plan\n",
-    );
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &["flow", "mechanical-proof", "-b", "--no-loopflow"],
-        None,
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let counts: (i64, i64, i64) = conn.query_row(
-        "SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM execs)",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).unwrap();
-    assert_eq!(
-        counts,
-        (0, 0, 3),
-        "the driver and two real step processes create no conversations"
-    );
-    let history: Vec<(String, i64, String)> = conn
-        .prepare("SELECT kind,node,exec_id FROM flow_events ORDER BY seq")
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(
-        history
-            .iter()
-            .map(|(kind, node, _)| (kind.as_str(), *node))
-            .collect::<Vec<_>>(),
-        vec![
-            ("operation_started", 0),
-            ("operation_completed", 0),
-            ("operation_started", 1),
-            ("operation_completed", 1)
-        ]
-    );
-    assert_eq!(history[0].2, history[1].2);
-    assert_eq!(history[2].2, history[3].2);
-    assert_ne!(history[0].2, history[2].2);
-    let children: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM execs child JOIN execs driver ON driver.id=child.parent_exec_id
-         WHERE child.via_agent=0 AND child.outcome='succeeded' AND driver.parent_exec_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(children, 2);
-    assert_eq!(
-        conn.query_row("SELECT state FROM flow_sessions", [], |row| row
-            .get::<_, String>(0))
-            .unwrap(),
-        "completed"
-    );
-}
-
-#[test]
 fn mechanical_failure_retains_earlier_step_success() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     write_flow(
         repo.path(),
         "mechanical-failure",
-        "- op: rebase --plan\n- op: __telemetry-scorecard\n",
+        "- cmd: sync --plan\n- cmd: __telemetry-scorecard\n",
     );
     let output = run_lf(
         repo.path(),
@@ -277,140 +209,16 @@ fn mechanical_failure_retains_earlier_step_success() {
         .unwrap(),
         "failed"
     );
-    assert_eq!(
-        conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='runs'",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn mechanical_task_step_owns_its_effect_without_taking_the_driver_claim() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
-        home.path(),
-        repo.path(),
-        "mechanical-task",
-        &repo.head_sha(),
-    );
-    write_flow(repo.path(), "task-op", "- op: rebase --plan\n");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let flow = runtime
-        .block_on(task.store.start_task_flow(
-            &task.task.id,
-            FlowSession {
-                parent_id: None,
-                invocation: QueuedInvocation::load(repo.path(), "task-op").unwrap(),
-                cursor: Default::default(),
-                version: 0,
-                task_id: Some(task.task.id.clone()),
-                wave_id: Some(task.task.wave_id.clone()),
-                cwd: repo.path().to_owned(),
-                message: None,
-                model: None,
-                current_attempt: None,
-                pending_session_id: None,
-                ready_summary: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            },
-        ))
-        .unwrap();
-    let TaskWorkerClaimOutcome::Claimed(claim) = runtime
-        .block_on(task.store.claim_task_worker(
-            &task.task.id,
-            flow.id(),
-            flow.version,
-            &TaskWorkerOwner {
-                trace_id: TraceId::new(),
-                exec_id: ExecId::new(),
-                pid: std::process::id(),
-                started_at: 1,
-            },
-            time::OffsetDateTime::now_utc(),
-        ))
-        .unwrap()
-    else {
-        panic!("claim not acquired")
-    };
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    fs::remove_file(repo.path().join(".lf/flows/task-op.yaml")).unwrap();
-    let invoke = |version: u64| {
-        lf_command(
-            repo.path(),
-            home.path(),
-            &["__flow-step", flow.id(), &version.to_string()],
-            None,
-        )
-        .env(
-            loopflow::durable::TASK_WORKER_CLAIM_ENV,
-            serde_json::to_string(&claim).unwrap(),
-        )
-        .output()
-        .unwrap()
-    };
-    assert!(!invoke(flow.version + 1).status.success());
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    let output = invoke(flow.version);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    let current = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(current.claim.as_ref(), Some(&claim));
-    assert_eq!(current.cursor, flow.cursor, "the driver owns navigation");
-    assert!(
-        invoke(flow.version).status.success(),
-        "completed effect is retained on replay"
-    );
-    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (starts, results, conversations): (i64, i64, i64) = conn.query_row(
-        "SELECT (SELECT count(*) FROM flow_events WHERE kind='operation_started'),
-        (SELECT count(*) FROM flow_events WHERE kind='operation_completed'), (SELECT count(*) FROM agent_sessions)",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
-    assert_eq!((starts, results, conversations), (1, 1, 0));
-    let effect_exec: String = conn
+    let (children, conversations): (i64, i64) = conn
         .query_row(
-            "SELECT exec_id FROM flow_events WHERE kind='operation_started'",
+            "SELECT (SELECT count(*) FROM execs c JOIN execs p ON c.parent_exec_id=p.id
+             WHERE c.via_agent=0 AND p.parent_exec_id IS NULL),
+            (SELECT count(*) FROM agent_sessions)",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_ne!(effect_exec, claim.owner.exec_id.as_str());
-    assert_eq!(
-        conn.query_row(
-            "SELECT outcome FROM execs WHERE id=?1",
-            [&effect_exec],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        "succeeded"
-    );
-    assert!(conn
-        .execute(
-            "UPDATE tasks SET started_at=started_at+1 WHERE id=?1",
-            [task.task.id.as_str()]
-        )
-        .is_err());
+    assert_eq!((children, conversations), (2, 0));
 }
 
 #[test]
@@ -442,7 +250,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     write_flow(
         repo.path(),
         "survive",
-        "- op: __telemetry-scorecard\n- op: rebase --plan\n",
+        "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
     );
     let mut driver = lf_command(repo.path(), home.path(), &["-b", "flow", "survive"], None)
         .stdout(std::process::Stdio::null())
@@ -563,7 +371,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
 
 fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let flow = load_flow(name, repo).unwrap();
-    expand_flow(&flow, repo).unwrap()
+    compile_flow(&flow, repo).unwrap()
 }
 
 fn assert_skill_name(item: &ConcreteStep, expected: &str) {
@@ -596,9 +404,16 @@ fn write_executable(path: &Path, content: &str) {
 fn register_codex_account(home: &Path) {
     let account_home = home.join("accounts/codex/fixture");
     fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
     fs::write(
         account_home.join("auth.json"),
-        r#"{"tokens":{"access_token":"synthetic-fixture-token"}}"#,
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
@@ -608,7 +423,11 @@ fn register_codex_account(home: &Path) {
             provider: "codex".into(),
             account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
             home: Some(account_home),
-            login_email: None,
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,
             plan: None,
@@ -674,6 +493,17 @@ fn publish_stack_fixture_pr(
         merge: None,
     });
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(store.append_task_event(
+            task,
+            &loopflow::work::task::TaskEventKind::PrStarted {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                base_commit: pr.base_commit.clone(),
+            },
+        ))
+        .unwrap();
     pr
 }
 
@@ -872,7 +702,6 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 &child.task.id,
                 FlowSession {
                     task_id: Some(child.task.id.clone()),
-                    parent_id: None,
                     wave_id: Some(child.task.wave_id.clone()),
                     cwd: child.task.worktree.clone(),
                     message: None,
@@ -981,7 +810,6 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                         claim: Some(claim.clone()),
                         session_id: session.id,
                         after: 0,
-                        caller_token: None,
                     }),
                     ..Default::default()
                 })
@@ -1071,7 +899,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["--tui", "identity-proof", "--no-loopflow"],
+            &["--tui", "skill", "identity-proof", "--no-loopflow"],
             Some(&path),
         );
         assert!(
@@ -1129,31 +957,23 @@ fn flow_parsing_parity() {
     let flow = load_flow("sample", repo).unwrap();
     assert_eq!(flow.name, "sample");
     assert_eq!(flow.items.len(), 2);
-    assert_eq!(
-        flow.items[0],
-        Step::Skill(SkillStep {
-            skill: Skill {
-                name: "implement".to_string(),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-                content: None,
-            },
-            policy: Default::default(),
-        })
+    assert!(
+        matches!(&flow.items[0].target, loopflow::engine::target::Target::Skill(skill) if skill.name == "implement")
     );
     assert_eq!(
         flow.items[1],
-        Step::Skill(SkillStep {
-            skill: Skill {
+        Step {
+            target: loopflow::engine::target::Target::Skill(Skill {
                 name: "review".to_string(),
                 agent: None,
                 default_agent: None,
                 action_style: None,
                 content: None,
-            },
-            policy: Default::default(),
-        })
+            }),
+            id: None,
+            human: false,
+            repeat: None,
+        }
     );
 }
 
@@ -1317,8 +1137,8 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     assert_eq!(commands.len(), 1, "one actual skill Exec: {commands:?}");
     let argv: Vec<String> = serde_json::from_str(&commands[0]).unwrap();
     assert!(argv
-        .windows(2)
-        .any(|pair| pair == ["skill", "saved-review"]));
+        .windows(3)
+        .any(|args| args == ["skill", "--", "saved-review"]));
     assert_eq!(
         conn.query_row("SELECT state FROM flow_sessions", [], |row| row
             .get::<_, String>(0))
@@ -1475,23 +1295,14 @@ fn agent_step_survives_driver_death_without_another_turn() {
          WHERE used.kind='consumed' AND done.kind='completed'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
     ).unwrap();
     assert_eq!(consumed, (1, step.clone(), "completed".into()));
-    let skill_events: i64 = conn.query_row(
-        "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='skill' AND event IN ('started','completed')",
-        [&step], |r| r.get(0),
-    ).unwrap();
-    assert_eq!(skill_events, 2, "the skill child owns its journal events");
     let resumed: i64 = conn
         .query_row(
-            "SELECT count(*) FROM run_events event JOIN execs e ON e.id=event.process_id
-         WHERE e.command LIKE '%resume%' AND event.node='flow' AND event.event='completed'",
+            "SELECT count(*) FROM execs WHERE command LIKE '%resume%' AND outcome='succeeded'",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(
-        resumed, 2,
-        "each resume command journals its observed completion"
-    );
+    assert_eq!(resumed, 2);
 
     assert_eq!(
         conn.query_row(
@@ -1542,22 +1353,15 @@ fn observing_and_preparing_a_task_are_not_execution() {
     };
     assert_eq!(starts(), 0);
     assert!(!started(), "a prepared, unrun Task is not started");
-    let read = run_lf(
-        repo.path(),
-        home.path(),
-        &["runs", "--active", "--task", "INF-123", "--json"],
-        None,
-    );
-    assert!(
-        read.status.success(),
-        "{}",
-        String::from_utf8_lossy(&read.stderr)
-    );
-    assert_eq!(
-        starts(),
-        0,
-        "a filtered active-Run read cannot start its Task"
-    );
+    for args in [
+        vec!["runs", "--active", "--task", "INF-123", "--json"],
+        vec!["session", "list", "--task", "INF-123", "--json"],
+        vec!["usage", "--task", "INF-123", "--json"],
+    ] {
+        let read = run_lf(repo.path(), home.path(), &args, None);
+        assert!(read.status.success(), "{read:?}");
+        assert_eq!(started_at(), None, "inspection cannot start its Task");
+    }
 
     write_skill(repo.path(), "review-proof", "Review the fixture.");
     write_flow(
@@ -1598,7 +1402,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert_eq!(sessions.len(), 1);
     assert!(sessions[0]["id"].as_str().is_some());
-    assert!(sessions[0].get("run_id").is_none());
     // A Flow about the Task names it on its review Run, and the first Run
     // that names a Task starts it, opened or not.
     assert_eq!(starts(), 1, "a review Run naming the Task starts it");
@@ -1606,41 +1409,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
         started(),
         "a reserved Run naming the Task is start evidence"
     );
-
-    write_skill(repo.path(), "first-work", "Do this proof-owned work.");
-    register_codex_account(home.path());
-    let bin = TempDir::new().unwrap();
-    write_executable(
-        &bin.path().join("codex"),
-        &codex_app_server_script("done", ""),
-    );
-    let path = format!(
-        "{}:{}",
-        bin.path().display(),
-        std::env::var("PATH").unwrap()
-    );
-    let mut first = None;
-    for _ in 0..2 {
-        let launched = run_lf(
-            repo.path(),
-            home.path(),
-            &["--task", "INF-123", "first-work", "-b", "--no-loopflow"],
-            Some(&path),
-        );
-        assert!(
-            launched.status.success(),
-            "{}",
-            String::from_utf8_lossy(&launched.stderr)
-        );
-        assert_eq!(starts(), 1, "independent execution starts its Task");
-        assert!(started(), "a launched Run is durable start evidence");
-        assert_eq!(
-            *first.get_or_insert(started_at()),
-            started_at(),
-            "a later Run leaves Started alone"
-        );
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
 }
 
 #[test]
@@ -1798,6 +1566,9 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     };
 
     write_skill(repo.path(), "binding-work", "Do proof-owned work.");
+    // Both branches keep their definitions when an unbound command checkpoints.
+    repo.stage_all();
+    repo.commit("Keep the shared launch fixture skill across branches");
     // An explicit `--task` launch runs in that Task's worktree, which has its
     // own uncommitted catalog.
     write_skill(&sibling_worktree, "binding-work", "Do proof-owned work.");
@@ -1909,33 +1680,6 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 }
 
 #[test]
-fn historical_start_evidence_still_prevents_backlog_retirement() {
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let task = support::register_unrun_task(
-        home.path(),
-        repo.path(),
-        "historical-start",
-        &repo.head_sha(),
-    );
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)", [task.task.id.as_str()]).unwrap();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
-    assert!(
-        runtime
-            .block_on(task.store.chapter_task_evidence(&task.task.id))
-            .unwrap()
-            .begun
-    );
-    assert!(!runtime
-        .block_on(task.store.retire_chapter_backlog(&task.task.id))
-        .unwrap());
-}
-
-#[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
@@ -1946,13 +1690,12 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
-    write_flow(repo.path(), "claim-proof", "- op: rebase --plan\n");
+    write_flow(repo.path(), "claim-proof", "- cmd: sync --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "claim-proof").unwrap(),
                 cursor: Default::default(),
                 version: 0,
@@ -2118,7 +1861,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation:
                     QueuedInvocation::new("restart-proof", flow.invocation.steps.clone()).unwrap(),
                 ..flow.clone()
@@ -2178,8 +1920,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         write_skill(repo.path(), skill, &format!("Execute {skill}."));
     }
     write_flow(repo.path(), "contribution", "- first\n- second\n");
-    // A real collision: bare and explicit skill must choose the skill, explicit
-    // flow must execute both steps, including when Work-bound.
+    // A real collision: bare and explicit run select the flow; typed skill
+    // selects the single skill, including when Work-bound.
     write_skill(
         repo.path(),
         "contribution",
@@ -2197,7 +1939,6 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
@@ -2238,6 +1979,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     write_flow(repo.path(), "two-steps", "- first\n- second\n");
     for args in [
         vec!["--task", "INF-123", "two-steps"],
+        vec!["--task", "INF-123", "contribution"],
+        vec!["--task", "INF-123", "run", "contribution"],
         vec!["--task", "INF-123", "flow", "contribution"],
         vec!["--as", "task:INF-123", "flow", "contribution"],
     ] {
@@ -2292,16 +2035,12 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let output = run_lf(repo.path(), home.path(), &["runs", "--json"], None);
     assert!(output.status.success());
     let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(runs.len(), 6);
+    assert_eq!(runs.len(), 10);
     for run in runs {
         assert_eq!(run["task_identifier"], task.task.plan.identifier);
         assert_eq!(run["recorded_outcome"], "completed");
     }
-    for invocation in [
-        vec!["contribution"],
-        vec!["skill", "contribution"],
-        vec!["design"],
-    ] {
+    for invocation in [vec!["skill", "contribution"], vec!["design"]] {
         let _ = fs::remove_file(home.path().join("prompts"));
         let mut args = vec!["--task", "INF-123"];
         args.extend(invocation);
@@ -2414,7 +2153,6 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
     assert_eq!(opened["title"], "Contribution review");
     assert_eq!(opened["id"], session_id);
-    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["work"], session["work"]);
     assert!(!home.path().join("prompts").exists());
     assert_eq!(
@@ -2427,7 +2165,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
 }
 
 #[test]
-fn flow_ref_parses_into_items() {
+fn flow_names_load_into_targets() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -2448,12 +2186,21 @@ fn flow_ref_parses_into_items() {
 
     let flow = load_flow("parent", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
-    assert!(matches!(flow.items[0], Step::FlowRef(_)));
-    assert!(matches!(flow.items[1], Step::Skill(_)));
+    assert!(matches!(
+        &flow.items[0].target,
+        loopflow::engine::target::Target::Flow(_)
+    ));
+    assert!(matches!(
+        flow.items[1],
+        Step {
+            target: loopflow::engine::target::Target::Skill(_),
+            ..
+        }
+    ));
 }
 
 #[test]
-fn ops_item_parses_and_expands() {
+fn command_item_parses_and_expands() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -2461,22 +2208,25 @@ fn ops_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- op: pr land
+- cmd: pr land
 "#,
     );
 
     let flow = load_flow("ship-ish", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
-        Step::Op(item) => {
+        Step {
+            target: loopflow::engine::target::Target::Command(item),
+            ..
+        } => {
             assert_eq!(item.command, "pr");
             assert_eq!(item.args, vec!["land"]);
         }
-        other => panic!("expected ops item, got {other:?}"),
+        other => panic!("expected command item, got {other:?}"),
     }
 
-    let expanded = expand_flow(&flow, repo).unwrap();
-    assert!(matches!(&expanded[1], ConcreteStep::Op(_)));
+    let expanded = compile_flow(&flow, repo).unwrap();
+    assert!(matches!(&expanded[1], ConcreteStep::Command(_)));
 }
 
 #[test]
@@ -2519,7 +2269,7 @@ fn scheduled_release_flow_propagates_the_operation_failure() {
 }
 
 #[test]
-fn expand_flow_tracks_parents() {
+fn compile_flow_tracks_sources() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -2539,11 +2289,11 @@ fn expand_flow_tracks_parents() {
     );
 
     let flow = load_flow("parent", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = compile_flow(&flow, repo).unwrap();
     match &items[0] {
         ConcreteStep::Skill(skill) => {
             assert_eq!(skill.skill.name, "implement");
-            assert_eq!(skill.flow_parents, vec!["parent", "child"]);
+            assert_eq!(skill.sources, vec!["parent", "child"]);
         }
         _ => panic!("expected expanded skill"),
     }
@@ -2552,7 +2302,7 @@ fn expand_flow_tracks_parents() {
 /// Plain string items in flow YAML that match a sub-flow name should be
 /// expanded as sub-flows, not treated as skill names.
 #[test]
-fn expand_flow_resolves_plain_string_as_subflow() {
+fn compile_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
@@ -2560,7 +2310,7 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     write_skill(repo, "skill-b", "Second captured skill.");
     write_flow(repo, "publish", "- skill-a\n- skill-b");
     write_skill(repo, "review", "Review the supplied evidence.");
-    write_flow(repo, "parent", "- review\n- publish");
+    write_flow(repo, "parent", "- step: review\n- publish");
 
     let items = expand_named_flow(repo, "parent");
 
@@ -2569,39 +2319,32 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     match &items[1] {
         ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-a");
-            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+            assert_eq!(s.sources, vec!["parent", "publish"]);
         }
         _ => panic!("expected skill from publish sub-flow"),
     }
     match &items[2] {
         ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-b");
-            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+            assert_eq!(s.sources, vec!["parent", "publish"]);
         }
         _ => panic!("expected skill from publish sub-flow"),
     }
 }
 
-/// A plain string that is both a skill name AND a flow name should NOT
-/// be expanded as a sub-flow (skill takes priority to avoid ambiguity).
 #[test]
-fn expand_flow_prefers_skill_over_single_skill_flow() {
+fn adding_a_flow_changes_an_untyped_reference_but_not_an_explicit_skill() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
-
-    write_skill(repo, "review", "Review the code.");
-    write_flow(repo, "parent", "- review");
-
-    let items = expand_named_flow(repo, "parent");
-
-    assert_eq!(items.len(), 1);
-    match &items[0] {
-        ConcreteStep::Skill(s) => {
-            assert_eq!(s.skill.name, "review");
-            assert_eq!(s.flow_parents, vec!["parent"]);
-        }
-        _ => panic!("expected skill"),
-    }
+    write_skill(repo, "custom-review", "Review the code.");
+    write_skill(repo, "replacement", "Follow the new review workflow.");
+    write_flow(repo, "parent", "- custom-review\n- step: custom-review");
+    let initial = expand_named_flow(repo, "parent");
+    assert_skill_name(&initial[0], "custom-review");
+    write_flow(repo, "custom-review", "- step: replacement");
+    let changed = expand_named_flow(repo, "parent");
+    assert_skill_name(&changed[0], "replacement");
+    assert_skill_name(&changed[1], "custom-review");
 }
 
 #[test]
@@ -2611,7 +2354,7 @@ fn builtin_deploy_uses_ops_land_item() {
 
     let items = expand_named_flow(repo, "deploy");
     assert!(!items.is_empty());
-    assert!(matches!(&items[1], ConcreteStep::Op(_)));
+    assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
 fn roadmap_flow(repo: &Path, home: &Path) -> serde_json::Value {
@@ -2656,7 +2399,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     ] {
         write_skill(repo.path(), skill, "Fixture step.");
     }
-    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- op: pr land -c\n";
+    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: pr land -c\n";
     write_flow(repo.path(), "two-loops", two_loops);
 
     // Before any Flow: the recommendation, Start, and no invented history.
@@ -2694,7 +2437,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "two-loops").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
@@ -2831,7 +2573,7 @@ fn flow_step_executable_falls_back_without_losing_its_store() {
     assert!(!loopflow::machine_install::root().unwrap().exists());
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    write_flow(repo.path(), "fallback-proof", "- op: rebase --plan\n");
+    write_flow(repo.path(), "fallback-proof", "- cmd: sync --plan\n");
     let execute = |driver: &Path, path: &str, expected: &Path| {
         let mut command = Command::new(driver);
         for (key, _) in std::env::vars_os() {
@@ -2871,4 +2613,213 @@ fn flow_step_executable_falls_back_without_losing_its_store() {
     fs::copy(&installed.cli, &alias).unwrap();
     execute(&alias, "/usr/bin:/bin", &installed.cli);
     execute(&alias, &path, &installed.cli);
+}
+
+#[test]
+fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
+    use base64::Engine;
+    use loopflow::store::{
+        CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+    };
+    use sha2::{Digest, Sha256};
+
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let _env = support::EnvGuard::with_lf_home(&[], home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    for provider in ["claude", "codex"] {
+        for label in ["chosen", "other"] {
+            let id = format!("{provider}-{label}");
+            let email = format!("{id}@example.com");
+            let account_home = home.path().join("accounts").join(provider).join(&id);
+            fs::create_dir_all(&account_home).unwrap();
+            let credential = if provider == "claude" {
+                serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
+            } else {
+                let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(serde_json::json!({"email":email,"sub":id}).to_string());
+                serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
+            };
+            fs::write(
+                account_home.join(if provider == "claude" {
+                    ".credentials.json"
+                } else {
+                    "auth.json"
+                }),
+                &credential,
+            )
+            .unwrap();
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            runtime
+                .block_on(
+                    store.upsert_provider_account(&ProviderAccount {
+                        provider: provider.into(),
+                        account_id: ProviderAccountId::parse(&id).unwrap(),
+                        home: Some(account_home),
+                        login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+                        observed_email: Some(email),
+                        observed_subject: Some(id),
+                        observed_credential_digest: (provider == "claude")
+                            .then(|| format!("{:x}", Sha256::digest(credential.as_bytes()))),
+                        observed_plan: None,
+                        credential_state: CredentialState::Connected,
+                        // Explicit selection must work even when automatic routing prefers another login.
+                        routing_state: if label == "chosen" {
+                            RoutingState::ExplicitOnly
+                        } else {
+                            RoutingState::Automatic
+                        },
+                        plan: None,
+                        paid_through: None,
+                        utilization_percent: None,
+                        cooldown_until: None,
+                        cooldown_reason: None,
+                        last_selected_at: None,
+                        created_at: now,
+                        updated_at: now,
+                    }),
+                )
+                .unwrap();
+        }
+    }
+    for (skill, provider) in [
+        ("c1", "claude"),
+        ("d1", "codex"),
+        ("c2", "claude"),
+        ("d2", "codex"),
+        ("d-review", "codex"),
+    ] {
+        write_skill(
+            repo.path(),
+            skill,
+            &format!("---\nagent: {provider}\n---\nRun {skill}."),
+        );
+    }
+    write_flow(
+        repo.path(),
+        "pair",
+        "- c1\n- d1\n- c2\n- d2\n- step:\n    id: review\n    name: d-review\n    human: true\n",
+    );
+    run_git(repo.path(), &["add", "."]);
+    run_git(repo.path(), &["commit", "-m", "mixed provider fixture"]);
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("claude"),
+        r#"#!/bin/sh
+case "$1" in --version) exit 0;; esac
+printf 'claude:%s\n' "$CLAUDE_CONFIG_DIR" >> "$LF_HOME/selected"
+if [ -f "$LF_HOME/first-claude" ] && [ ! -f "$LF_HOME/retry" ]; then exit 23; fi
+touch "$LF_HOME/first-claude"
+read -r input
+echo '{"type":"system","subtype":"init","session_id":"account-fixture"}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"account-fixture"}'
+"#,
+    );
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script(
+            "done",
+            r#"if [ "$1" = --version ]; then exit 0; fi
+printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
+case "$*" in *app-server*) ;; *)
+  printf '%s' '{"schema_version":1,"provider_session_id":"review-fixture","account_id":null}' > "$LF_RUN_DIR/provider-session.json"
+  exit 0;; esac"#,
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--account",
+            "claude=claude-chosen@",
+            "--account",
+            "codex=codex-chosen@",
+            "-b",
+            "flow",
+            "pair",
+        ],
+        Some(&path),
+    );
+    assert!(
+        !output.status.success(),
+        "fixture pauses on second Claude step"
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (id, cursor): (String, u32) = db
+        .query_row("SELECT id,step_index FROM flow_sessions", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(cursor, 2, "{}", String::from_utf8_lossy(&output.stderr));
+    fs::write(home.path().join("retry"), "").unwrap();
+    // A new CLI has no broker. New flags must not replace saved invocation intent.
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--account",
+            "claude=claude-other@",
+            "--account",
+            "codex=codex-other@",
+            "-b",
+            "flow",
+            "resume",
+            &id,
+            "--retry",
+        ],
+        Some(&path),
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("waiting for human input"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sessions = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--json"],
+        Some(&path),
+    );
+    let sessions: serde_json::Value = serde_json::from_slice(&sessions.stdout).unwrap();
+    let session = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["kind"] == "flow")
+        .unwrap_or(&sessions[0]);
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "open", session["id"].as_str().unwrap()],
+        Some(&path),
+    );
+    // The TUI fixture exits immediately; it proves account delivery, not native resume.
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("before becoming resumable"));
+    let selected = fs::read_to_string(home.path().join("selected")).unwrap();
+    let expected = ["claude", "codex", "claude", "claude", "codex", "codex"].map(|provider| {
+        format!(
+            "{provider}:{}",
+            home.path()
+                .join("accounts")
+                .join(provider)
+                .join(format!("{provider}-chosen"))
+                .display()
+        )
+    });
+    assert_eq!(
+        selected.lines().collect::<Vec<_>>(),
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
 }

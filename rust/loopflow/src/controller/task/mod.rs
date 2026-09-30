@@ -14,7 +14,7 @@ async fn load_task(store: &SharedStore, task_id: &TaskId) -> Result<Task> {
 
 pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
     let launch_claim =
-        take_task_launch_env(crate::durable::TASK_WORKER_CLAIM_ENV, "Task worker claim")?
+        take_task_exec_env(crate::durable::TASK_WORKER_CLAIM_ENV, "Task worker claim")?
             .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
             .transpose()
             .map_err(|error| anyhow!("invalid Task worker claim: {error}"))?
@@ -43,7 +43,7 @@ async fn drive_task(
         anyhow::bail!("Task driver launch claim is stale");
     }
     let options: Vec<String> =
-        take_task_launch_env(crate::lf::TASK_SKILL_OPTIONS_ENV, "Task skill options")?
+        take_task_exec_env(crate::lf::TASK_SKILL_OPTIONS_ENV, "Task skill options")?
             .map(|value| serde_json::from_str(&value))
             .transpose()?
             .unwrap_or_default();
@@ -84,7 +84,7 @@ pub async fn run_worker(task_id: TaskId) -> Result<()> {
     run(store, task_id).await
 }
 
-fn take_task_launch_env(key: &'static str, label: &str) -> Result<Option<String>> {
+fn take_task_exec_env(key: &'static str, label: &str) -> Result<Option<String>> {
     let Some(value) = std::env::var_os(key) else {
         return Ok(None);
     };
@@ -115,9 +115,9 @@ pub(crate) async fn complete_human_flow_step(
             anyhow!("review is not ready; its agent must run `lf session ready` first")
         })?;
     let step = expected.current();
-    if !step.policy.human
+    if !step.human
         || step.invocation_id != token.invocation_id
-        || step.policy.id.as_deref() != Some(token.node_id.as_str())
+        || step.id.as_deref() != Some(token.node_id.as_str())
         || step.step != token.skill.name
         || step.iteration != token.iteration
         || step.flow != token.flow
@@ -183,7 +183,6 @@ pub(crate) async fn park_at_review(
     let flow = store.reserve_task_review(flow.id(), flow.version).await?;
     let node_id = flow
         .current()
-        .policy
         .id
         .ok_or_else(|| anyhow!("Task review step has no stable node id"))?;
     checkpoint_worktree_before_human(task, &node_id).await;
@@ -209,7 +208,6 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
 fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
     Ok(FlowSession {
-        parent_id: None,
         invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,
@@ -270,7 +268,7 @@ mod planning_tests {
     use crate::ops::human_session::{self, SessionFlowMembership};
     use crate::ops::task_input::task_seed;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::run_record::SessionTitleSource;
+    use crate::session_record::SessionTitleSource;
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -320,7 +318,7 @@ mod planning_tests {
     }
 
     /// The Run the claim reserved for the current step.
-    async fn reserved_run(store: &SharedStore, task: &Task) -> String {
+    async fn reserved_capture(store: &SharedStore, task: &Task) -> String {
         let flow = store.task_flow(&task.id).await.unwrap().unwrap();
         store
             .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
@@ -351,7 +349,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         finish(&mut position).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "rebase", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(!finish(&mut position).unwrap());
             }
@@ -423,7 +421,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         finish(&mut position).unwrap();
-        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
             assert_eq!(finished, expected == "pr land -c");
@@ -491,7 +489,7 @@ mod planning_tests {
                 else {
                     panic!("decision claim")
                 };
-                let run = reserved_run(&store, &task).await;
+                let run = reserved_capture(&store, &task).await;
                 let publish = {
                     let (store, id, version, claim) = (
                         store.clone(),
@@ -510,8 +508,8 @@ mod planning_tests {
                         )
                     }
                 };
-                let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
-                    crate::run_record::RunSpec {
+                let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
+                    crate::session_record::SessionCaptureSpec {
                         harness: "proof".into(),
                         model: None,
                         surface: "headless".into(),
@@ -520,8 +518,8 @@ mod planning_tests {
                         worktree: None,
                         skill: Some("loop-decide".into()),
                         subjects: vec![],
-                        flow: crate::run_record::RunFlowMembership::Step(
-                            crate::run_record::RunFlowStep::of(&flow).unwrap(),
+                        flow: crate::session_record::SessionFlowMembership::Step(
+                            crate::session_record::SessionFlowStep::of(&flow).unwrap(),
                         ),
                         work: None,
                     },
@@ -533,7 +531,7 @@ mod planning_tests {
                 .unwrap();
                 capture.record_input("initial", "Fixture decision is active");
                 std::env::set_var(crate::durable::RUN_ID_ENV, run.as_str());
-                std::env::set_var(crate::run_record::RUN_DIR_ENV, capture.artifact_dir());
+                std::env::set_var(crate::session_record::RUN_DIR_ENV, capture.artifact_dir());
                 let before = store.task_flow(&task.id).await.unwrap().unwrap();
                 let key = crate::ops::human_session::task_unblock_key(&before).unwrap();
                 let ask = async {
@@ -622,7 +620,7 @@ mod planning_tests {
                 );
                 assert!(before.cursor.leaf().progress.verdict.is_none());
                 std::env::remove_var(crate::durable::RUN_ID_ENV);
-                std::env::remove_var(crate::run_record::RUN_DIR_ENV);
+                std::env::remove_var(crate::session_record::RUN_DIR_ENV);
                 std::env::remove_var(crate::ops::human_session::HUMAN_SESSION_ENV);
                 Ok(())
             })
@@ -1003,7 +1001,7 @@ mod planning_tests {
         // A launched Run keeps the provider it launched with.
         store
             .sqlite
-            .publish_review_run(
+            .publish_review_capture(
                 &review_id,
                 store
                     .sqlite
@@ -1082,7 +1080,15 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Account launch intent is process-scoped.
     async fn active_task_invocation_ignores_later_flow_and_skill_edits() {
+        let _lock = crate::journal::test_env_lock();
+        let accounts = crate::provider_account::lease::AccountSelection::from_flags(
+            &["claude=first@".into(), "codex=second@".into()],
+            &[],
+        )
+        .unwrap();
+        let selected = accounts.activate().unwrap();
         let (store, task, _) = human_task_fixture().await;
         let flow_dir = task.worktree.join(".lf/flows");
         let skill_dir = task.worktree.join(".lf/skills");
@@ -1090,7 +1096,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- op: rebase --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -1099,11 +1105,12 @@ mod planning_tests {
         )
         .unwrap();
         let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        drop(selected);
         store.start_task_flow(&task.id, flow.clone()).await.unwrap();
 
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- replacement-proof\n- op: doctor\n",
+            "- replacement-proof\n- cmd: doctor\n",
         )
         .unwrap();
         std::fs::write(
@@ -1118,6 +1125,7 @@ mod planning_tests {
         .unwrap();
 
         let persisted = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let crate::engine::ConcreteStep::Skill(active_skill) = persisted.current_plan() else {
             panic!("active first step is a skill")
         };
@@ -1128,10 +1136,10 @@ mod planning_tests {
             .as_deref()
             .unwrap()
             .contains("captured at Flow start"));
-        let crate::engine::ConcreteStep::Op(active_op) = &persisted.invocation.steps[1] else {
+        let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.command, "sync");
         assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();
@@ -1139,7 +1147,7 @@ mod planning_tests {
             panic!("future first step is a skill")
         };
         assert_eq!(future_skill.skill.name, "replacement-proof");
-        let crate::engine::ConcreteStep::Op(future_op) = &future.invocation.steps[1] else {
+        let crate::engine::ConcreteStep::Command(future_op) = &future.invocation.steps[1] else {
             panic!("future second step is an op")
         };
         assert_eq!(future_op.item.command, "doctor");
@@ -1166,7 +1174,7 @@ mod planning_tests {
             task_id: task.id.clone(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
-            node_id: step.policy.id.unwrap(),
+            node_id: step.id.unwrap(),
             skill: planned.skill.clone(),
             iteration: position.cursor.iteration,
         }
@@ -1212,8 +1220,8 @@ mod planning_tests {
                 let position = parked(&store, &task, flow).await;
                 let id = human_session::flow_id(&position).unwrap();
                 let (position, first) = store.reserve_review_run(&position).await.unwrap();
-                let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
-                    crate::run_record::RunSpec {
+                let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
+                    crate::session_record::SessionCaptureSpec {
                         harness: "codex".into(),
                         model: None,
                         surface: "tui".into(),
@@ -1222,8 +1230,8 @@ mod planning_tests {
                         worktree: None,
                         skill: None,
                         subjects: Vec::new(),
-                        flow: crate::run_record::RunFlowMembership::Step(
-                            crate::run_record::RunFlowStep::of(&position).unwrap(),
+                        flow: crate::session_record::SessionFlowMembership::Step(
+                            crate::session_record::SessionFlowStep::of(&position).unwrap(),
                         ),
                         work: None,
                     },
@@ -1231,7 +1239,7 @@ mod planning_tests {
                     None,
                     &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
                     |run| {
-                        store.sqlite.publish_review_run(
+                        store.sqlite.publish_review_capture(
                             &id,
                             store.sqlite.captured_sequence(run).unwrap().unwrap(),
                             position.version,
@@ -1256,7 +1264,7 @@ mod planning_tests {
                 let pause = LookupPause::at(action, &selector);
                 // Rename starts acquiring this lock after its initial lookup.
                 // Replacement owns it until B and retained feedback are published.
-                let replacement_lock = human_session::lock_session_launch(&id).unwrap();
+                let replacement_lock = human_session::lock_session_exec(&id).unwrap();
                 let request = async {
                     match action {
                         "complete" => human_session::complete(&store, &selector).await,
@@ -1285,7 +1293,7 @@ mod planning_tests {
                     let (reserved, replacement) = store.reserve_review_run(&before).await.unwrap();
                     store
                         .sqlite
-                        .publish_review_run(
+                        .publish_review_capture(
                             &id,
                             store
                                 .sqlite
@@ -1413,12 +1421,12 @@ mod planning_tests {
         ));
 
         let home = crate::store::observability_home_dir();
-        let first_dir = crate::run_record::record_dir(&home, &first.artifact_key).unwrap();
+        let first_dir = crate::session_record::record_dir(&home, &first.artifact_key).unwrap();
         std::fs::create_dir_all(&first_dir).unwrap();
-        let manifest = crate::run_record::RunManifest {
+        let manifest = crate::session_record::SessionCaptureManifest {
             schema_version: 1,
-            run_id: first.artifact_key.clone(),
-            parent_run_id: None,
+            artifact_key: first.artifact_key.clone(),
+            caller_artifact_key: None,
             created_at: time::OffsetDateTime::now_utc(),
             harness: "codex".into(),
             model: None,
@@ -1428,10 +1436,10 @@ mod planning_tests {
             worktree: None,
             skill: None,
             subjects: Vec::new(),
-            flow: Some(crate::run_record::RunFlowMembership::Step(
-                crate::run_record::RunFlowStep::of(&position).unwrap(),
+            flow: Some(crate::session_record::SessionFlowMembership::Step(
+                crate::session_record::SessionFlowStep::of(&position).unwrap(),
             )),
-            launch: None,
+            exec: None,
             context: None,
             runtime_path: None,
             runtime_digest: None,
@@ -1571,7 +1579,7 @@ mod planning_tests {
         let position = parked(&store, &task, flow).await;
         let session_id = human_session::flow_id(&position).unwrap();
         let (reserved, run) = store.reserve_review_run(&position).await.unwrap();
-        let spec = crate::run_record::RunSpec {
+        let spec = crate::session_record::SessionCaptureSpec {
             harness: "codex".into(),
             model: None,
             surface: "tui".into(),
@@ -1580,13 +1588,13 @@ mod planning_tests {
             worktree: None,
             skill: None,
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Step(
-                crate::run_record::RunFlowStep::of(&reserved).unwrap(),
+            flow: crate::session_record::SessionFlowMembership::Step(
+                crate::session_record::SessionFlowStep::of(&reserved).unwrap(),
             ),
             work: None,
         };
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-        let interrupted = crate::run_record::CaptureHandle::begin_reserved_with_context(
+        let interrupted = crate::session_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
             run.artifact_key.clone(),
             None,
@@ -1598,21 +1606,23 @@ mod planning_tests {
             },
         );
         assert!(interrupted.is_err());
-        let dir =
-            crate::run_record::record_dir(&crate::store::authority_home_dir(), &run.artifact_key)
-                .unwrap();
+        let dir = crate::session_record::record_dir(
+            &crate::store::authority_home_dir(),
+            &run.artifact_key,
+        )
+        .unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         assert!(!dir.join("terminal.json").exists());
         let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();
         assert_eq!(same_run, run);
         assert_eq!(retry, reserved);
-        let capture = crate::run_record::CaptureHandle::begin_reserved_with_context(
+        let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
             spec.clone(),
             run.artifact_key.clone(),
             None,
             &context,
             |id| {
-                store.sqlite.publish_review_run(
+                store.sqlite.publish_review_capture(
                     &session_id,
                     store.sqlite.captured_sequence(id).unwrap().unwrap(),
                     retry.version,
@@ -1622,7 +1632,7 @@ mod planning_tests {
             },
         )
         .unwrap();
-        assert_eq!(capture.run_id(), run.artifact_key);
+        assert_eq!(capture.artifact_key(), run.artifact_key);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
         assert_eq!(store.session_inputs(&session_id).await.unwrap().len(), 1);
         assert!(
@@ -1634,12 +1644,12 @@ mod planning_tests {
                 .input_published
         );
         assert!(
-            crate::run_record::CaptureHandle::begin_reserved_with_context(
+            crate::session_record::CaptureHandle::begin_reserved_with_context(
                 spec,
                 run.artifact_key.clone(),
                 None,
                 &context,
-                |id| store.sqlite.publish_review_run(
+                |id| store.sqlite.publish_review_capture(
                     &session_id,
                     store.sqlite.captured_sequence(id).unwrap().unwrap(),
                     retry.version,
@@ -1781,7 +1791,7 @@ mod planning_tests {
             &step.flow,
             replacement.cursor.index as u32,
             &step.step,
-            step.policy.id.as_deref(),
+            step.id.as_deref(),
             true,
         );
         store
@@ -1857,34 +1867,58 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn final_skill_completion_removes_the_flow_without_restarting_it() {
-        let (store, task, _) = human_task_fixture().await;
-        let mut position = super::start_task_flow(&task, "task-design").unwrap();
-        position.invocation.steps.truncate(1);
-        position.cursor.iteration = 3;
-        let position = store.start_task_flow(&task.id, position).await.unwrap();
-        let held = claim(&store, &task, &position, 101).await;
-        let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let completed = finish(&mut position).unwrap();
-        assert!(completed);
-        assert_eq!(position.cursor.iteration, 3);
-        store
-            .end_flow(position.id(), position.version, Some(&held), "done")
-            .await
-            .unwrap();
-
-        assert!(store.task_flow(&task.id).await.unwrap().is_none());
-        assert_eq!(
-            store
-                .work_status(&WorkRef::Task(task.id.clone()))
-                .await
-                .unwrap(),
-            crate::durable::WorkStatus::Ready
-        );
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert!(events.iter().any(|event| matches!(
-            &event.kind, TaskEventKind::FlowFinished { summary, .. } if summary == "done"
-        )));
+    async fn finished_task_or_final_skill_retires_the_worker_without_restarting() {
+        for task_done in [false, true] {
+            let (store, task, _) = human_task_fixture().await;
+            let mut position = super::start_task_flow(&task, "task-design").unwrap();
+            if !task_done {
+                position.invocation.steps.truncate(1);
+            }
+            position.cursor.iteration = 3;
+            let position = store.start_task_flow(&task.id, position).await.unwrap();
+            let held = claim(&store, &task, &position, 101).await;
+            let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
+            if task_done {
+                store.complete_task(&task, None).await.unwrap();
+                let launcher = <crate::lf::Cli as clap::Parser>::try_parse_from(["lf"]).unwrap();
+                let result = crate::lf::commands::flow::drive(
+                    store.clone(),
+                    position,
+                    Some(held),
+                    &launcher,
+                )
+                .await;
+                assert!(result.unwrap_err().to_string().contains("unsettled PR"));
+                assert!(task.worktree.exists());
+            } else {
+                assert!(finish(&mut position).unwrap());
+                assert_eq!(position.cursor.iteration, 3);
+                store
+                    .end_flow(position.id(), position.version, Some(&held), "done")
+                    .await
+                    .unwrap();
+            }
+            assert!(store.task_flow(&task.id).await.unwrap().is_none());
+            assert_eq!(
+                store
+                    .work_status(&WorkRef::Task(task.id.clone()))
+                    .await
+                    .unwrap(),
+                if task_done {
+                    crate::durable::WorkStatus::Done
+                } else {
+                    crate::durable::WorkStatus::Ready
+                }
+            );
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
+                    .count(),
+                1
+            );
+        }
     }
 
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
@@ -1893,7 +1927,7 @@ mod planning_tests {
         let (position, run) = store.reserve_review_run(&position).await.unwrap();
         store
             .sqlite
-            .publish_review_run(&id, run.captured.unwrap(), position.version, "codex", None)
+            .publish_review_capture(&id, run.captured.unwrap(), position.version, "codex", None)
             .unwrap();
         store
             .ready_session(&id, run.captured, feedback)
@@ -1954,7 +1988,7 @@ mod planning_tests {
                     },
                 )]
                 .into(),
-                flow_parents: vec![],
+                sources: vec![],
             }),
             suffix,
         ];
@@ -2105,20 +2139,18 @@ mod planning_tests {
             .push(crate::engine::ConcreteStep::Skill(
                 crate::engine::ConcreteSkill {
                     skill: crate::engine::Skill::named("decide"),
-                    flow_parents: vec![],
-                    policy: crate::engine::OccurrencePolicy {
-                        id: Some("decision".into()),
-                        human: false,
-                        repeat: Some(crate::engine::flow::RepeatPolicy {
-                            from: flow.current().policy.id.unwrap(),
-                        }),
-                    },
+                    sources: vec![],
+                    id: Some("decision".into()),
+                    human: false,
+                    repeat: Some(crate::engine::flow::RepeatPolicy {
+                        from: flow.current().id.unwrap(),
+                    }),
                 },
             ));
         flow.cursor.index = 1;
         let flow = store.start_task_flow(&task.id, flow).await.unwrap();
         let held = claim(&store, &task, &flow, 303).await;
-        let input = reserved_run(&store, &task).await;
+        let input = reserved_capture(&store, &task).await;
         store
             .sqlite
             .publish_attempt(

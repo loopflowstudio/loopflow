@@ -2325,29 +2325,29 @@ payloads remain files, but readers select and page rows before opening them.</p>
 <p>Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Explicit restart
-replaces only the exact conversation owner; it never kills a shared engine to
-restart one thread. Engine PID, client PID and conversation driver are distinct.</p>
+replace the provider generation or interrupt an existing turn. Client replacement
+leaves the engine alive; Flow retry can recover after confirmed engine exit while
+retaining native history. Neither operation authorizes killing a shared engine
+for one thread. Engine PID, client PID and conversation driver are distinct.</p>
 <p>Exec ancestry records the actual lf caller. A direct child names its parent's
 Exec; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
 The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.</p>
 <p>A Task selects one managed FlowSession and permits other attributed Flows.
-Taskless and Task-owned Flows use the same captured graph and driver. Runtime
-loop nesting creates child FlowSessions; template composition only expands the
-graph. Each agent-backed step references the exact successful AgentSession
+Taskless and Task-owned Flows use the same captured graph and driver. Loop
+passes are positions in that one FlowSession; template composition compiles into
+the graph. Each agent-backed step references the exact successful AgentSession
 history entry that fulfilled it. Mechanical results stay in FlowSession history;
-an in-process step creates neither a fake Exec nor an agent conversation.
+each step uses a real child Exec, and mechanical work creates no agent conversation.
 Failed or interrupted work remains visible, and stale results cannot advance
 the current boundary. Conversation continuation is separate from Flow retry.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done
-and landed Tasks remain valid targets. Under the current conservative attribution
-assumption, earlier usage retains its recorded owner; binding affects subsequent
-work, and uncertain mid-turn allocation remains unknown.</p>
+or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+usage retains its recorded owner; binding affects subsequent work, and uncertain
+mid-turn allocation remains unknown.</p>
 <p><code>tasks.started_at</code> is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
 also checks authored work, PRs and active claims; missing history alone cannot
@@ -2355,8 +2355,8 @@ prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
-write contracts. Run is a historical representation to import and remove, not a
-fourth execution object or a generic attempt type under another name.</p>
+write contracts and the current-state conversion boundary. Exec, AgentSession
+and FlowSession are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf debug -c

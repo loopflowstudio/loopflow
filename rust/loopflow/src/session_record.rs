@@ -1,4 +1,4 @@
-//! Authoritative, Home-local evidence for one Loopflow harness launch.
+//! Captured Session inputs and append-only provider evidence.
 
 pub mod active;
 pub(crate) mod activity;
@@ -41,7 +41,7 @@ pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
-pub(crate) struct RunSpec {
+pub(crate) struct SessionCaptureSpec {
     pub harness: String,
     pub model: Option<String>,
     pub surface: String,
@@ -50,13 +50,13 @@ pub(crate) struct RunSpec {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
-    pub flow: RunFlowMembership,
-    pub work: Option<crate::session::RunWork>,
+    pub flow: SessionFlowMembership,
+    pub work: Option<crate::session::SessionWork>,
 }
 
-/// The exact managed Task or standalone Flow occurrence a Run executes.
+/// The managed Task or standalone Flow position captured for a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RunFlowStep {
+pub struct SessionFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
     pub task_pr_id: Option<crate::work::task::TaskPrId>,
     pub invocation_id: String,
@@ -68,7 +68,7 @@ pub struct RunFlowStep {
     pub iterations: Option<Vec<Vec<u32>>>,
 }
 
-impl RunFlowStep {
+impl SessionFlowStep {
     /// The step an invocation's cursor selects; its Task is the invocation's.
     pub(crate) fn of(flow: &crate::durable::FlowSession) -> anyhow::Result<Self> {
         let step = flow
@@ -89,18 +89,17 @@ impl RunFlowStep {
     }
 }
 
-/// Recorded when the Run is captured: a Flow step, or a Run outside a Flow. Manifests written before this field existed have none;
-/// readers treat that absence as unknown, never as independent.
+/// Membership at capture time; absence in historical manifests remains unknown.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RunFlowMembership {
-    Step(RunFlowStep),
+pub enum SessionFlowMembership {
+    Step(SessionFlowStep),
     Independent,
 }
 
-/// Replayable, provider-facing inputs for one ordinary headless launch.
+/// Replayable, provider-facing inputs for one ordinary headless exec.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RunLaunchRequest {
+pub struct AgentExecRequest {
     pub system_prompt: String,
     pub task_prompt: String,
     pub agent: String,
@@ -112,7 +111,7 @@ pub struct RunLaunchRequest {
     pub chrome: bool,
 }
 
-impl RunLaunchRequest {
+impl AgentExecRequest {
     pub(crate) fn from_prepared(
         config: &crate::engine::AgentConfig,
         capabilities: &crate::engine::AgentCapabilities,
@@ -161,17 +160,17 @@ pub enum AttributionSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RunContextRef {
+pub struct SessionContextRef {
     pub path: String,
     pub content_sha256: String,
     pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunManifest {
+pub struct SessionCaptureManifest {
     pub schema_version: u32,
-    pub run_id: String,
-    pub parent_run_id: Option<String>,
+    pub artifact_key: String,
+    pub caller_artifact_key: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     pub harness: String,
@@ -182,9 +181,9 @@ pub struct RunManifest {
     pub worktree: Option<PathBuf>,
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
-    pub flow: Option<RunFlowMembership>,
-    pub launch: Option<RunLaunchRequest>,
-    pub context: Option<RunContextRef>,
+    pub flow: Option<SessionFlowMembership>,
+    pub exec: Option<AgentExecRequest>,
+    pub context: Option<SessionContextRef>,
     pub runtime_path: Option<PathBuf>,
     pub runtime_digest: Option<String>,
     pub host: String,
@@ -207,7 +206,7 @@ struct EventEnvelope {
     #[serde(with = "time::serde::rfc3339")]
     observed_at: OffsetDateTime,
     #[serde(flatten)]
-    event: RunEvent,
+    event: CaptureEvent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -252,14 +251,14 @@ struct ProviderClientStop {
 }
 
 #[derive(Serialize)]
-struct RunContextArtifact<'a> {
+struct SessionContextArtifact<'a> {
     schema_version: u32,
     context: &'a crate::trace::PreparedTurnContext,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum RunEvent {
+enum CaptureEvent {
     Activity {
         observation: activity::Observation,
     },
@@ -325,7 +324,7 @@ enum RunEvent {
 /// Provider-authored cumulative usage reduced once per independent stream.
 ///
 /// Optional counters stay unknown when no stream reported them. Finality is a
-/// count of direct provider receipts; Run settlement never upgrades it.
+/// count of direct provider receipts; Recorder settlement never upgrades it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionUsage {
     pub streams: usize,
@@ -373,7 +372,7 @@ pub struct SessionHistory {
 }
 
 /// An exact native turn, or an older provider observation with unknown native
-/// identity. References identify evidence; they confer no launch/settlement API.
+/// identity. References identify evidence; they confer no exec/settlement API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
@@ -475,27 +474,27 @@ enum RecorderMessage {
 }
 
 #[derive(Debug)]
-struct RunRecorder {
+struct SessionRecorder {
     sender: Option<SyncSender<RecorderMessage>>,
 }
 
-impl RunRecorder {
-    fn start(dir: &Path, manifest: &RunManifest) -> Self {
-        let run_id = &manifest.run_id;
+impl SessionRecorder {
+    fn start(dir: &Path, manifest: &SessionCaptureManifest) -> Self {
+        let artifact_key = &manifest.artifact_key;
         let history = if manifest.harness == "loopflow" {
             Ok(None)
         } else {
             row_store(dir).and_then(|store| {
-                let session = store.session_for_artifact(run_id)?;
+                let session = store.session_for_artifact(artifact_key)?;
                 Ok(session.map(|session| (store, session)))
             })
         };
         let manifest = manifest.clone();
         let (sender, receiver) = mpsc::sync_channel(256);
         let writer_dir = dir.to_path_buf();
-        let writer_run_id = run_id.clone();
+        let writer_artifact_key = artifact_key.clone();
         let thread = std::thread::Builder::new()
-            .name(format!("lf-run-recorder-{}", &run_id.as_str()[..8]))
+            .name(format!("lf-session-recorder-{}", &artifact_key.as_str()[..8]))
             .spawn(move || {
                 let mut warned = false;
                 let history = match history {
@@ -508,14 +507,14 @@ impl RunRecorder {
                 let observe = |source: String, at: OffsetDateTime, evidence: serde_json::Value| {
                     let Some((store, session)) = &history else { return Ok(()) };
                     store.retain_session_observation(session, &crate::session::SessionObservation {
-                        artifact_key: writer_run_id.clone(), source: source.clone(),
+                        artifact_key: writer_artifact_key.clone(), source: source.clone(),
                         observed_at: at.unix_timestamp(), task_id: session.task_id.clone(),
                         wave_id: session.wave_id.clone(),
-                        payload: serde_json::json!({"input_id": writer_run_id, "source": source, "evidence": evidence}),
+                        payload: serde_json::json!({"input_id": writer_artifact_key, "source": source, "evidence": evidence}),
                     }).map_err(std::io::Error::other)
                 };
                 if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
-                    tracing::warn!(%error, "Session launch observation unavailable");
+                    tracing::warn!(%error, "Session capture observation unavailable");
                 }
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
@@ -534,12 +533,12 @@ impl RunRecorder {
                         if !warned {
                             tracing::warn!(
                                 %error,
-                                run_id = %writer_run_id,
-                                "Run recorder lost telemetry; harness execution continues"
+                                artifact_key = %writer_artifact_key,
+                                "Session recorder lost telemetry; harness execution continues"
                             );
                             warned = true;
                         } else {
-                            tracing::debug!(%error, run_id = %writer_run_id, "Run recorder telemetry write failed");
+                            tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
                 }
@@ -551,8 +550,8 @@ impl RunRecorder {
             Err(error) => {
                 tracing::warn!(
                     %error,
-                    run_id = %run_id,
-                    "Run recorder unavailable; harness execution continues"
+                    artifact_key = %artifact_key,
+                    "Session recorder unavailable; harness execution continues"
                 );
                 Self { sender: None }
             }
@@ -561,14 +560,15 @@ impl RunRecorder {
 
     fn record(&self, message: RecorderMessage) -> std::io::Result<()> {
         let Some(sender) = &self.sender else {
-            return Err(std::io::Error::other("Run recorder is unavailable"));
+            return Err(std::io::Error::other("Session recorder is unavailable"));
         };
         sender.try_send(message).map_err(|error| match error {
-            TrySendError::Full(_) => {
-                std::io::Error::new(std::io::ErrorKind::WouldBlock, "Run recorder queue is full")
-            }
+            TrySendError::Full(_) => std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "Session recorder queue is full",
+            ),
             TrySendError::Disconnected(_) => {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Run recorder stopped")
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Session recorder stopped")
             }
         })
     }
@@ -607,7 +607,7 @@ fn recover_native_usage(
     let threads: HashMap<_, _> = events
         .iter()
         .filter_map(|event| match &event.event {
-            RunEvent::ProviderSessionObserved {
+            CaptureEvent::ProviderSessionObserved {
                 attempt_key,
                 provider_session_id,
             } => Some((attempt_key.clone(), provider_session_id.clone())),
@@ -632,7 +632,7 @@ fn recover_native_usage(
         let matching: Vec<_> = events[..recorder_len]
             .iter()
             .filter_map(|event| match &event.event {
-                RunEvent::Usage {
+                CaptureEvent::Usage {
                     provider: recorded_provider,
                     attempt_key,
                     turn_key,
@@ -713,7 +713,7 @@ fn recover_native_usage(
                         .max()
                         .map_or(0, |seq| seq + 1),
                     observed_at,
-                    event: RunEvent::Usage {
+                    event: CaptureEvent::Usage {
                         usage_stream_id: format!("native:{thread}:{turn}:{message}"),
                         provider: provider.into(),
                         model: usage.model.clone(),
@@ -828,7 +828,7 @@ fn recover_native_usage(
                     .max()
                     .map_or(0, |seq| seq + 1),
                 observed_at,
-                event: RunEvent::Usage {
+                event: CaptureEvent::Usage {
                     usage_stream_id: stream.clone(),
                     provider: "codex".into(),
                     model: None,
@@ -877,7 +877,7 @@ fn project_provider_history(
     let threads: HashMap<_, _> = envelopes
         .iter()
         .filter_map(|event| match &event.event {
-            RunEvent::ProviderSessionObserved {
+            CaptureEvent::ProviderSessionObserved {
                 attempt_key,
                 provider_session_id,
             } => Some((attempt_key.as_str(), provider_session_id.as_str())),
@@ -898,7 +898,7 @@ fn project_provider_history(
             .iter()
             .find(|event| event.kind == SessionEventKind::Completed);
         let usage = reduce_usage_events(envelopes.iter().filter(|event| match &event.event {
-            RunEvent::Usage {
+            CaptureEvent::Usage {
                 attempt_key,
                 turn_key,
                 usage_stream_id,
@@ -946,9 +946,9 @@ fn project_provider_history(
     let mut attempts = BTreeMap::<&str, Vec<&EventEnvelope>>::new();
     for event in envelopes {
         let key = match &event.event {
-            RunEvent::ProviderAttemptStarted { attempt_key, .. }
-            | RunEvent::ProviderAttemptFinished { attempt_key, .. }
-            | RunEvent::Usage { attempt_key, .. }
+            CaptureEvent::ProviderAttemptStarted { attempt_key, .. }
+            | CaptureEvent::ProviderAttemptFinished { attempt_key, .. }
+            | CaptureEvent::Usage { attempt_key, .. }
                 if !attempt_key.is_empty() =>
             {
                 attempt_key
@@ -962,16 +962,16 @@ fn project_provider_history(
         // its usage excludes exactly correlated native streams to avoid double count.
         let start = events
             .iter()
-            .find(|event| matches!(event.event, RunEvent::ProviderAttemptStarted { .. }));
+            .find(|event| matches!(event.event, CaptureEvent::ProviderAttemptStarted { .. }));
         let finished = events.iter().find_map(|event| match &event.event {
-            RunEvent::ProviderAttemptFinished { outcome, .. } => {
+            CaptureEvent::ProviderAttemptFinished { outcome, .. } => {
                 Some((event.observed_at.unix_timestamp(), outcome.clone()))
             }
             _ => None,
         });
         let usage =
             reduce_usage_events(events.iter().copied().filter(|event| match &event.event {
-                RunEvent::Usage { turn_key, .. } => !matches_native(attempt, turn_key),
+                CaptureEvent::Usage { turn_key, .. } => !matches_native(attempt, turn_key),
                 _ => false,
             }))
             .usage;
@@ -1018,9 +1018,8 @@ pub(crate) fn project_input_history(
 ) -> std::io::Result<SessionHistory> {
     let mut events = Vec::new();
     let mut terminal: Option<TerminalReceipt> = None;
-    let mut manifest: Option<RunManifest> = None;
+    let mut manifest: Option<SessionCaptureManifest> = None;
     let mut gaps = 0;
-    let mut stored = None;
     for event in history {
         if event.kind != crate::session::SessionEventKind::Observed {
             continue;
@@ -1038,8 +1037,6 @@ pub(crate) fn project_input_history(
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
-        } else if source == "runs" && input == artifact_key {
-            stored = Some(evidence);
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             match (
                 ordinal.parse::<u64>(),
@@ -1050,8 +1047,7 @@ pub(crate) fn project_input_history(
             }
         }
     }
-    // Earlier input observations may be imported after later ones. Keep the
-    // original event order for first-attempt timing and cumulative evidence.
+    // Keep event order for first-attempt timing and cumulative evidence.
     events.sort_by_key(|(ordinal, _)| *ordinal);
     let mut events: Vec<_> = events.into_iter().map(|(_, envelope)| envelope).collect();
     gaps += recover_native_usage(&mut events, history);
@@ -1059,18 +1055,6 @@ pub(crate) fn project_input_history(
     let evidence = reduce_usage_events(&events);
     gaps += evidence.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
-    let stored_text = |field: &str| {
-        stored
-            .and_then(|row| row[field].as_str())
-            .map(str::to_owned)
-    };
-    let stored_end = stored.and_then(|row| row["ended_at"].as_i64());
-    if let Some(terminal) = &terminal {
-        gaps += usize::from(
-            stored_text("outcome").is_some_and(|outcome| outcome != terminal.outcome)
-                || stored_end.is_some_and(|at| at != terminal.ended_at.unix_timestamp()),
-        );
-    }
     Ok(SessionHistory {
         session_id: session.id.clone(),
         captured: session.captured,
@@ -1079,22 +1063,11 @@ pub(crate) fn project_input_history(
         task_id: session.task_id.clone(),
         wave_id: session.wave_id.clone(),
         task_identifier: names.1,
-        work_source: stored
-            .and_then(|row| serde_json::from_value(row["work_source"].clone()).ok())
-            .or_else(|| {
-                manifest
-                    .as_ref()
-                    .and_then(|m| m.subjects.first())
-                    .map(|subject| match subject.source {
-                        AttributionSource::Declared => crate::session::WorkSource::Declared,
-                        AttributionSource::Inherited => crate::session::WorkSource::Inherited,
-                    })
-            })
-            .or(session.work_source),
+        work_source: session.work_source,
         wave_name: names.0,
         providers,
         task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
-            Some(RunFlowMembership::Step(step)) => step.task_pr_id.clone(),
+            Some(SessionFlowMembership::Step(step)) => step.task_pr_id.clone(),
             _ => None,
         }),
         repo: manifest
@@ -1104,26 +1077,15 @@ pub(crate) fn project_input_history(
         worktree: manifest
             .as_ref()
             .map(|m| m.cwd.to_string_lossy().into_owned())
-            .or_else(|| stored_text("cwd"))
             .or_else(|| current.then(|| session.cwd.to_string_lossy().into_owned())),
         skill: manifest
             .as_ref()
             .map(|m| m.skill.clone())
-            .unwrap_or_else(|| {
-                if stored.is_some() {
-                    stored_text("skill")
-                } else {
-                    current.then(|| session.skill.clone()).flatten()
-                }
-            }),
-        recorded_outcome: terminal
-            .as_ref()
-            .map(|receipt| receipt.outcome.clone())
-            .or_else(|| stored_text("outcome")),
+            .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+        recorded_outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         recorded_at: terminal
             .as_ref()
-            .map(|receipt| receipt.ended_at.unix_timestamp())
-            .or(stored_end),
+            .map(|receipt| receipt.ended_at.unix_timestamp()),
         observed_at: session.observed_at,
         first_provider_attempt_at: providers_first_start(history)
             .into_iter()
@@ -1134,24 +1096,12 @@ pub(crate) fn project_input_history(
         harness: manifest
             .as_ref()
             .map(|m| m.harness.clone())
-            .or_else(|| {
-                if stored.is_some() {
-                    stored_text("provider")
-                } else {
-                    current.then(|| session.provider.clone()).flatten()
-                }
-            })
+            .or_else(|| current.then(|| session.provider.clone()).flatten())
             .unwrap_or_else(|| "unknown".into()),
         model: manifest
             .as_ref()
             .map(|m| m.model.clone())
-            .unwrap_or_else(|| {
-                if stored.is_some() {
-                    stored_text("model")
-                } else {
-                    current.then(|| session.model.clone()).flatten()
-                }
-            }),
+            .unwrap_or_else(|| current.then(|| session.model.clone()).flatten()),
         surface: manifest
             .as_ref()
             .map(|m| m.surface.clone())
@@ -1168,75 +1118,51 @@ pub(crate) fn project_input_history(
     })
 }
 
-pub(crate) fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let root = lf_home.join("runs");
-    let prefixes = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut records = Vec::new();
-    for prefix in prefixes {
-        let prefix = prefix?;
-        if !prefix.file_type()?.is_dir() {
-            continue;
-        }
-        let entries = fs::read_dir(prefix.path())?;
-        for record in entries {
-            let record = record?;
-            if record.file_name().to_string_lossy().starts_with('.')
-                || !record.file_type()?.is_dir()
-            {
-                continue;
-            }
-            records.push(record.path());
-        }
-    }
-    Ok(records)
-}
-
 pub(crate) fn resolve_manifest(
     lf_home: &Path,
     selector: &str,
-) -> std::io::Result<(PathBuf, RunManifest)> {
+) -> std::io::Result<(PathBuf, SessionCaptureManifest)> {
     let selector = selector.trim();
     if selector.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "Run id cannot be empty",
+            "Capture selector cannot be empty",
         ));
     }
-    let mut matches = record_dirs(lf_home)?
-        .into_iter()
-        .filter(|dir| {
-            let id = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            id.starts_with(selector)
-                || id
-                    .strip_prefix("run_")
-                    .is_some_and(|id| id.starts_with(selector))
-        })
-        .collect::<Vec<_>>();
-    matches.sort();
-    match matches.as_slice() {
-        [] => Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Run {selector} was not found on this Home"),
-        )),
-        [dir] => {
-            let manifest = read_manifest(dir)?;
-            validate_manifest_path(dir, &manifest)?;
-            Ok((dir.clone(), manifest))
+    if let Some(dir) = record_dir(lf_home, selector) {
+        if dir.join("prepared").is_file() {
+            let manifest = read_manifest(&dir)?;
+            validate_manifest_path(&dir, &manifest)?;
+            return Ok((dir, manifest));
         }
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Run prefix {selector} is ambiguous"),
-        )),
     }
+    let database = database_in(lf_home).map_err(std::io::Error::other)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)
+        .map_err(std::io::Error::other)?;
+    let artifact = store
+        .resolve_history_input(selector)
+        .map_err(|error| match error {
+            StoreError::NotFound => {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "Capture not found")
+            }
+            error => std::io::Error::other(error),
+        })?;
+    let session = store.session(&artifact).map_err(std::io::Error::other)?;
+    let artifact = session
+        .filter(|session| session.id == artifact)
+        .map(|session| session.artifact_key)
+        .unwrap_or(artifact);
+    let dir = record_dir(lf_home, &artifact).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid capture key")
+    })?;
+    let manifest = read_manifest(&dir)?;
+    validate_manifest_path(&dir, &manifest)?;
+    Ok((dir, manifest))
 }
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+    crate::store::sqlite::SqliteStore::open_execs_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
     )
     .and_then(|store| store.input_provider_session(&input))
@@ -1248,16 +1174,14 @@ pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<String> {
         .file_name()
         .and_then(|id| id.to_str())
         .ok_or_else(|| std::io::Error::other("input path has no identifier"))?;
-    crate::run_record::parse_artifact_key(id).map_err(std::io::Error::other)
+    parse_artifact_key(id).map_err(std::io::Error::other)
 }
 
-/// Fresh publications supersede the imported sidecar, whose import time says
-/// nothing about native identity. JSONL observations retain their original order.
+/// Read the current conversation’s published provider identity.
 pub(crate) fn provider_session_from_history(
     history: impl IntoIterator<Item = serde_json::Value>,
 ) -> std::io::Result<Option<ProviderSessionRef>> {
     let mut published = None;
-    let mut imported = None;
     let mut events = Vec::new();
     for observation in history {
         let Some(source) = observation["source"].as_str() else {
@@ -1266,14 +1190,12 @@ pub(crate) fn provider_session_from_history(
         let evidence = &observation["evidence"];
         if source.starts_with("provider-session:") {
             published = Some(evidence.clone());
-        } else if source == "provider-session.json" {
-            imported = Some(evidence.clone());
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             let ordinal = ordinal.parse::<u64>().map_err(std::io::Error::other)?;
             events.push((ordinal, evidence.clone()));
         }
     }
-    if let Some(reference) = published.or(imported) {
+    if let Some(reference) = published {
         let reference: ProviderSessionRef =
             serde_json::from_value(reference).map_err(std::io::Error::other)?;
         reference.validate()?;
@@ -1294,22 +1216,22 @@ fn provider_session_from_events(
         if envelope.schema_version != SCHEMA_VERSION {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "unsupported Run event schema",
+                "unsupported capture event schema",
             ));
         }
         match envelope.event {
-            RunEvent::ProviderAttemptStarted {
+            CaptureEvent::ProviderAttemptStarted {
                 attempt_key,
                 account_id,
                 ..
             }
-            | RunEvent::ProviderAccountSelected {
+            | CaptureEvent::ProviderAccountSelected {
                 attempt_key,
                 account_id,
             } => {
                 accounts.insert(attempt_key, account_id);
             }
-            RunEvent::ProviderSessionObserved {
+            CaptureEvent::ProviderSessionObserved {
                 attempt_key,
                 provider_session_id,
             } => {
@@ -1362,10 +1284,10 @@ pub(crate) fn final_answer(events: Vec<serde_json::Value>) -> std::io::Result<Op
         if envelope.schema_version != SCHEMA_VERSION {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "unsupported Run event schema",
+                "unsupported capture event schema",
             ));
         }
-        let RunEvent::Conversation { event } = envelope.event else {
+        let CaptureEvent::Conversation { event } = envelope.event else {
             continue;
         };
         match *event {
@@ -1628,24 +1550,23 @@ pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
     Ok(title)
 }
 
-fn validate_manifest_path(dir: &Path, manifest: &RunManifest) -> std::io::Result<()> {
-    crate::run_record::parse_artifact_key(manifest.run_id.as_str())
-        .map_err(std::io::Error::other)?;
-    if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.run_id.as_str())
+fn validate_manifest_path(dir: &Path, manifest: &SessionCaptureManifest) -> std::io::Result<()> {
+    parse_artifact_key(manifest.artifact_key.as_str()).map_err(std::io::Error::other)?;
+    if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.artifact_key.as_str())
         || dir
             .parent()
             .and_then(Path::file_name)
             .and_then(|name| name.to_str())
             != manifest
-                .run_id
+                .artifact_key
                 .as_str()
                 .strip_prefix("run_")
-                .unwrap_or(&manifest.run_id)
+                .unwrap_or(&manifest.artifact_key)
                 .get(..2)
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "Run manifest identity does not match its record path",
+            "Session capture manifest identity does not match its record path",
         ));
     }
     Ok(())
@@ -1666,14 +1587,15 @@ struct UsageStream {
     cost_usd: Option<f64>,
 }
 
-pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
+pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<SessionCaptureManifest> {
     let bytes = fs::read(dir.join("manifest.json"))?;
-    let manifest = serde_json::from_slice::<RunManifest>(&bytes).map_err(std::io::Error::other)?;
+    let manifest =
+        serde_json::from_slice::<SessionCaptureManifest>(&bytes).map_err(std::io::Error::other)?;
     if manifest.schema_version != SCHEMA_VERSION {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!(
-                "unsupported Run manifest schema {}; expected {SCHEMA_VERSION}",
+                "unsupported Session capture manifest schema {}; expected {SCHEMA_VERSION}",
                 manifest.schema_version
             ),
         ));
@@ -1682,14 +1604,14 @@ pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<RunManifest> {
 }
 
 #[derive(Debug)]
-struct RunEvidence {
+struct CaptureEvidence {
     usage: SessionUsage,
     gaps: usize,
     first_provider_attempt_at: Option<i64>,
 }
 
 #[cfg(test)]
-fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence> {
+fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<CaptureEvidence> {
     let mut events = Vec::new();
     let mut trailing_gap = 0;
     loop {
@@ -1708,7 +1630,7 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
             serde_json::from_slice::<EventEnvelope>(&line).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("malformed complete Run event: {error}"),
+                    format!("malformed complete capture event: {error}"),
                 )
             })?,
         );
@@ -1718,7 +1640,7 @@ fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<RunEvidence>
     Ok(evidence)
 }
 
-fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) -> RunEvidence {
+fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) -> CaptureEvidence {
     let mut streams = BTreeMap::<String, UsageStream>::new();
     let mut gaps = 0;
     let mut envelope_seq = None;
@@ -1733,13 +1655,13 @@ fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) 
         envelope_seq = Some(envelope_seq.map_or(envelope.seq, |seen| seen.max(envelope.seq)));
         if first_provider_attempt_at.is_none()
             && envelope.schema_version == SCHEMA_VERSION
-            && matches!(&envelope.event, RunEvent::ProviderAttemptStarted { .. })
+            && matches!(&envelope.event, CaptureEvent::ProviderAttemptStarted { .. })
         {
             first_provider_attempt_at = Some(envelope.observed_at.unix_timestamp());
         }
         let (usage_stream_id, observation_seq, counter_kind, start_known, final_receipt, usage) =
             match &envelope.event {
-                RunEvent::Usage {
+                CaptureEvent::Usage {
                     usage_stream_id,
                     observation_seq,
                     counter_kind,
@@ -1755,7 +1677,7 @@ fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) 
                     *final_receipt,
                     usage,
                 ),
-                RunEvent::Unknown => {
+                CaptureEvent::Unknown => {
                     gaps += 1;
                     continue;
                 }
@@ -1866,7 +1788,7 @@ fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) 
         cache_write_tokens,
         cost_usd,
     };
-    RunEvidence {
+    CaptureEvidence {
         usage,
         gaps,
         first_provider_attempt_at,
@@ -1931,14 +1853,14 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CaptureHandle(Arc<Mutex<RunCapture>>);
+pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 
 impl CaptureHandle {
     /// Publish identity before a human boundary becomes visible. No provider or
-    /// terminal receipt exists until this prepared Run is launched.
+    /// terminal receipt exists until this prepared Session executes.
     pub(crate) fn prepare(
-        spec: RunSpec,
-        parent: Option<String>,
+        spec: SessionCaptureSpec,
+        caller: Option<String>,
         id: String,
     ) -> StoreResult<String> {
         #[cfg(test)]
@@ -1949,26 +1871,26 @@ impl CaptureHandle {
             });
         #[cfg(not(test))]
         let home = crate::store::lf_home_dir();
-        Self::prepare_at_with_key(&home, spec, parent, id)
+        Self::prepare_at_with_key(&home, spec, caller, id)
     }
 
     #[cfg(test)]
     pub(crate) fn prepare_at(
         home: &Path,
-        spec: RunSpec,
-        parent: Option<String>,
+        spec: SessionCaptureSpec,
+        caller: Option<String>,
     ) -> StoreResult<String> {
-        Self::prepare_at_with_key(home, spec, parent, new_artifact_key())
+        Self::prepare_at_with_key(home, spec, caller, new_artifact_key())
     }
 
     fn prepare_at_with_key(
         home: &Path,
-        spec: RunSpec,
-        parent: Option<String>,
+        spec: SessionCaptureSpec,
+        caller: Option<String>,
         id: String,
     ) -> StoreResult<String> {
         let (manifest, _) =
-            prepare_manifest(spec, id.clone(), parent, None, None).map_err(record_error)?;
+            prepare_manifest(spec, id.clone(), caller, None, None).map_err(record_error)?;
         let (_, dir) = reconcile_reserved_manifest(home, manifest, None).map_err(record_error)?;
         if dir.join("launching").try_exists().map_err(record_error)? {
             return Err(record_error(std::io::Error::other(
@@ -1978,32 +1900,32 @@ impl CaptureHandle {
         reconcile_private_file(&dir.join("prepared"), b"").map_err(record_error)?;
         sync_dir(&dir).map_err(record_error)?;
         // This is not a CaptureHandle: dropping preparation must not settle a
-        // Run whose provider has never been launched.
+        // Session whose provider has never been launched.
         Ok(id)
     }
 
     pub(crate) fn start_prepared(
         home: &Path,
         id: &str,
-        spec: RunSpec,
+        spec: SessionCaptureSpec,
         context: &crate::trace::PreparedTurnContext,
     ) -> StoreResult<Self> {
         let (dir, mut manifest) = resolve_manifest(home, id).map_err(record_error)?;
         // Atomically claim this preparation. A second launcher cannot record
-        // another provider attempt into the same Run.
+        // another provider attempt into the same capture.
         fs::rename(dir.join("prepared"), dir.join("launching")).map_err(record_error)?;
-        let bytes = serde_json::to_vec_pretty(&RunContextArtifact {
+        let bytes = serde_json::to_vec_pretty(&SessionContextArtifact {
             schema_version: SCHEMA_VERSION,
             context,
         })?;
         write_private_exclusive(&dir.join("context.json"), &bytes).map_err(record_error)?;
-        manifest.context = Some(RunContextRef {
+        manifest.context = Some(SessionContextRef {
             path: "context.json".to_string(),
             content_sha256: hex::encode(Sha256::digest(&bytes)),
             bytes: bytes.len() as u64,
         });
-        // Finalize launch provenance on the existing identity. Preparation did
-        // not freeze a prompt, runtime, or model selection before launch.
+        // Finalize exec provenance on the existing identity. Preparation did
+        // not freeze a prompt, runtime, or model selection before exec.
         manifest.harness = spec.harness;
         manifest.model = spec.model;
         manifest.surface = spec.surface;
@@ -2023,101 +1945,93 @@ impl CaptureHandle {
         fs::rename(staged, dir.join("manifest.json")).map_err(record_error)?;
         fs::remove_file(dir.join("launching")).map_err(record_error)?;
         sync_dir(&dir).map_err(record_error)?;
-        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+        Ok(Self(Arc::new(Mutex::new(SessionCapture::from_manifest(
             manifest, dir,
         )))))
     }
 
-    pub(crate) fn begin_with_launch(spec: RunSpec, launch: RunLaunchRequest) -> StoreResult<Self> {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &launch.system_prompt,
-            &launch.task_prompt,
-        );
-        Self::begin_with_id_and_parent(
+    pub(crate) fn begin_with_request(
+        spec: SessionCaptureSpec,
+        exec: AgentExecRequest,
+    ) -> StoreResult<Self> {
+        let context =
+            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
+        Self::begin_with_key_and_caller(
             spec,
-            crate::run_record::new_artifact_key(),
+            new_artifact_key(),
             None,
             true,
-            Some(launch),
+            Some(exec),
             Some(&context),
         )
     }
 
     pub(crate) fn begin_with_context(
-        spec: RunSpec,
+        spec: SessionCaptureSpec,
         context: &crate::trace::PreparedTurnContext,
-        launch: Option<RunLaunchRequest>,
+        exec: Option<AgentExecRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_id_and_parent(
-            spec,
-            crate::run_record::new_artifact_key(),
-            None,
-            true,
-            launch,
-            Some(context),
-        )
+        Self::begin_with_key_and_caller(spec, new_artifact_key(), None, true, exec, Some(context))
     }
 
     pub(crate) fn begin_reserved_with_context(
-        spec: RunSpec,
-        run_id: String,
-        launch: Option<RunLaunchRequest>,
+        spec: SessionCaptureSpec,
+        artifact_key: String,
+        exec: Option<AgentExecRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::authority_home_dir();
-        let parent = inherited_parent().and_then(|id| verified_parent(&home, id));
-        Self::begin_reserved_at(&home, spec, run_id, parent, launch, context, publish)
+        let caller = inherited_caller().and_then(|id| verified_caller(&home, id));
+        Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }
 
     fn begin_reserved_at(
         home: &Path,
-        spec: RunSpec,
-        run_id: String,
-        parent: Option<String>,
-        launch: Option<RunLaunchRequest>,
+        spec: SessionCaptureSpec,
+        artifact_key: String,
+        caller: Option<String>,
+        exec: Option<AgentExecRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
-        let (manifest, context) =
-            prepare_manifest(spec, run_id, parent, launch, Some(context)).map_err(record_error)?;
+        let (manifest, context) = prepare_manifest(spec, artifact_key, caller, exec, Some(context))
+            .map_err(record_error)?;
         let (manifest, dir) = reconcile_reserved_manifest(home, manifest, context.as_deref())
             .map_err(record_error)?;
-        // Only the reservation transaction grants launch authority. A rejected
-        // publication must not start a recorder or settle somebody else's Run.
-        publish(&manifest.run_id)?;
-        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+        // Only the reservation transaction grants exec authority. A rejected
+        // publication must not start a recorder or settle somebody else's capture.
+        publish(&manifest.artifact_key)?;
+        Ok(Self(Arc::new(Mutex::new(SessionCapture::from_manifest(
             manifest, dir,
         )))))
     }
 
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
-        spec: RunSpec,
-        launch: RunLaunchRequest,
-        parent_run_id: String,
+        spec: SessionCaptureSpec,
+        exec: AgentExecRequest,
+        caller_artifact_key: String,
     ) -> StoreResult<Self> {
-        let parent_run_id = verified_parent(lf_home, parent_run_id);
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &launch.system_prompt,
-            &launch.task_prompt,
-        );
+        let caller_artifact_key = verified_caller(lf_home, caller_artifact_key);
+        let context =
+            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::run_record::new_artifact_key(),
-            parent_run_id,
-            Some(launch),
+            new_artifact_key(),
+            caller_artifact_key,
+            Some(exec),
             Some(&context),
         )
     }
 
-    fn begin_with_id_and_parent(
-        spec: RunSpec,
-        run_id: String,
-        parent_run_id: Option<String>,
-        inherit_parent: bool,
-        launch: Option<RunLaunchRequest>,
+    fn begin_with_key_and_caller(
+        spec: SessionCaptureSpec,
+        artifact_key: String,
+        caller_artifact_key: Option<String>,
+        inherit_caller: bool,
+        exec: Option<AgentExecRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         #[cfg(test)]
@@ -2128,106 +2042,112 @@ impl CaptureHandle {
             });
         #[cfg(not(test))]
         let home = crate::store::lf_home_dir();
-        let parent_run_id = if inherit_parent {
-            inherited_parent()
+        let caller_artifact_key = if inherit_caller {
+            inherited_caller()
         } else {
-            parent_run_id.and_then(|candidate| verified_parent(&home, candidate))
+            caller_artifact_key.and_then(|candidate| verified_caller(&home, candidate))
         };
-        Self::begin_at_with_id(&home, spec, run_id, parent_run_id, launch, context)
+        Self::begin_at_with_id(
+            &home,
+            spec,
+            artifact_key,
+            caller_artifact_key,
+            exec,
+            context,
+        )
     }
 
     #[cfg(test)]
-    pub(crate) fn begin_at(lf_home: &Path, spec: RunSpec) -> StoreResult<Self> {
+    pub(crate) fn begin_at(lf_home: &Path, spec: SessionCaptureSpec) -> StoreResult<Self> {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::run_record::new_artifact_key(),
-            inherited_parent(),
+            new_artifact_key(),
+            inherited_caller(),
             None,
             None,
         )
     }
 
     #[cfg(test)]
-    fn begin_at_with_launch(
+    fn begin_at_with_request(
         lf_home: &Path,
-        spec: RunSpec,
-        launch: RunLaunchRequest,
+        spec: SessionCaptureSpec,
+        exec: AgentExecRequest,
     ) -> StoreResult<Self> {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &launch.system_prompt,
-            &launch.task_prompt,
-        );
+        let context =
+            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::run_record::new_artifact_key(),
-            inherited_parent(),
-            Some(launch),
+            new_artifact_key(),
+            inherited_caller(),
+            Some(exec),
             Some(&context),
         )
     }
 
     fn begin_at_with_id(
         lf_home: &Path,
-        spec: RunSpec,
-        run_id: String,
-        parent_run_id: Option<String>,
-        launch: Option<RunLaunchRequest>,
+        spec: SessionCaptureSpec,
+        artifact_key: String,
+        caller_artifact_key: Option<String>,
+        exec: Option<AgentExecRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         let work = spec.work.clone();
         let (manifest, context_bytes) =
-            prepare_manifest(spec, run_id, parent_run_id, launch, context).map_err(record_error)?;
-        let dir = record_dir(lf_home, &manifest.run_id).expect("artifact key is a UUID");
-        let reserved = RunCapture::record_row(&manifest, &dir, work)?;
+            prepare_manifest(spec, artifact_key, caller_artifact_key, exec, context)
+                .map_err(record_error)?;
+        let dir = record_dir(lf_home, &manifest.artifact_key).expect("artifact key is a UUID");
+        let reserved = SessionCapture::record_row(&manifest, &dir, work)?;
         publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
         if let Some(session) = reserved {
             row_store(&dir)?.publish_capture(&session.id, session.captured)?;
         }
-        Ok(Self(Arc::new(Mutex::new(RunCapture::from_manifest(
+        Ok(Self(Arc::new(Mutex::new(SessionCapture::from_manifest(
             manifest, dir,
         )))))
     }
 
-    pub(crate) fn run_id(&self) -> String {
+    pub(crate) fn artifact_key(&self) -> String {
         self.0
             .lock()
-            .expect("Run capture mutex poisoned")
+            .expect("Session capture mutex poisoned")
             .manifest
-            .run_id
+            .artifact_key
             .clone()
     }
 
     pub(crate) fn artifact_dir(&self) -> PathBuf {
         self.0
             .lock()
-            .expect("Run capture mutex poisoned")
+            .expect("Session capture mutex poisoned")
             .dir
             .clone()
     }
 
     /// Claim an admitted conversation and retain the exact provider provenance
-    /// used by its tools. A later driver transfer never rewrites this launch.
+    /// used by its tools. A later driver transfer never rewrites this exec.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
         let Some(exec_id) = crate::journal::current_exec_id() else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
-                    "agent launch requires an admitted Exec; command observation failed".into(),
+                    "agent Exec requires an admitted Exec; command observation failed".into(),
                 ));
             }
             // Library callers outside an actual lf process have no Exec to name.
             return Ok(());
         };
-        let mut capture = self.0.lock().expect("Run capture mutex poisoned");
+        let mut capture = self.0.lock().expect("Session capture mutex poisoned");
         if capture.driver.is_some() {
             return Ok(());
         }
         let store = row_store(&capture.dir)?;
-        let Some(session) = store.session_for_artifact(&capture.manifest.run_id)? else {
+        let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
-                    "agent launch requires an admitted conversation".into(),
+                    "agent Exec requires an admitted conversation".into(),
                 ));
             }
             return Ok(());
@@ -2274,7 +2194,7 @@ impl CaptureHandle {
     }
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<String>> {
-        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
         let Some((session, _)) = &capture.driver else {
             return Ok(None);
         };
@@ -2282,7 +2202,7 @@ impl CaptureHandle {
     }
 
     pub(crate) fn record_provider_process(&self, pid: u32) -> StoreResult<()> {
-        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
         if let Some((session, driver)) = &capture.driver {
             if let Some(started) = crate::journal::process_started_at(pid).map_err(record_error)? {
                 row_store(&capture.dir)?
@@ -2295,22 +2215,25 @@ impl CaptureHandle {
     pub(crate) fn flow_turn_selection(
         &self,
     ) -> StoreResult<Option<crate::durable::FlowTurnSelection>> {
-        let capture = self.0.lock().expect("Run capture mutex poisoned");
-        row_store(&capture.dir)?.flow_turn_selection(&capture.manifest.run_id)
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        row_store(&capture.dir)?.flow_turn_selection(&capture.manifest.artifact_key)
     }
 
     pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
         self.0
             .lock()
-            .expect("Run capture mutex poisoned")
+            .expect("Session capture mutex poisoned")
             .driver
             .clone()
     }
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
-        let capture = self.0.lock().expect("Run capture mutex poisoned");
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
         let mut environment = BTreeMap::from([
-            (RUN_ID_ENV.to_string(), capture.manifest.run_id.to_string()),
+            (
+                RUN_ID_ENV.to_string(),
+                capture.manifest.artifact_key.to_string(),
+            ),
             (RUN_DIR_ENV.to_string(), capture.dir.display().to_string()),
         ]);
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
@@ -2327,12 +2250,12 @@ impl CaptureHandle {
     }
 
     pub(crate) fn mark_spawn_requested(&self) {
-        self.with_capture(RunCapture::start_attempt);
+        self.with_capture(SessionCapture::start_attempt);
     }
 
     pub(crate) fn mark_handoff(&self, surface: &str) {
         self.with_capture(|capture| {
-            capture.append_event(RunEvent::Handoff {
+            capture.append_event(CaptureEvent::Handoff {
                 surface: surface.to_string(),
             })
         });
@@ -2352,7 +2275,7 @@ impl CaptureHandle {
 
     pub(crate) fn record_input(&self, op: &str, text: &str) {
         self.with_capture(|capture| {
-            capture.append_event(RunEvent::UserInput {
+            capture.append_event(CaptureEvent::UserInput {
                 op: op.to_string(),
                 text: text.to_string(),
             })
@@ -2376,7 +2299,7 @@ impl CaptureHandle {
         self.with_capture(|capture| {
             let account_changed = !capture.account_observed || capture.account_id != account_id;
             if account_changed {
-                capture.append_event(RunEvent::ProviderAccountSelected {
+                capture.append_event(CaptureEvent::ProviderAccountSelected {
                     attempt_key: capture.attempt_key(),
                     account_id: account_id.clone(),
                 })?;
@@ -2390,7 +2313,7 @@ impl CaptureHandle {
                 return Ok(());
             }
             write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
-            capture.append_event(RunEvent::ProviderSessionObserved {
+            capture.append_event(CaptureEvent::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
                 provider_session_id: session_id.clone(),
             })?;
@@ -2400,20 +2323,20 @@ impl CaptureHandle {
     }
 
     pub(crate) fn final_answer(&self) -> StoreResult<Option<FinalAnswer>> {
-        let capture = self.0.lock().expect("Run capture mutex poisoned");
-        row_store(&capture.dir)?.input_final_answer(&capture.manifest.run_id)
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        row_store(&capture.dir)?.input_final_answer(&capture.manifest.artifact_key)
     }
 
     pub(crate) fn finish(&self, outcome: &str) -> StoreResult<()> {
         self.0
             .lock()
-            .expect("Run capture mutex poisoned")
+            .expect("Session capture mutex poisoned")
             .finish(outcome)
             .map_err(record_error)
     }
 
-    fn with_capture(&self, operation: impl FnOnce(&mut RunCapture) -> std::io::Result<()>) {
-        let mut capture = self.0.lock().expect("Run capture mutex poisoned");
+    fn with_capture(&self, operation: impl FnOnce(&mut SessionCapture) -> std::io::Result<()>) {
+        let mut capture = self.0.lock().expect("Session capture mutex poisoned");
         if let Err(error) = operation(&mut capture) {
             capture.warn_telemetry(error);
         }
@@ -2426,7 +2349,7 @@ impl Drop for CaptureHandle {
             return;
         }
         let Ok(mut capture) = self.0.lock() else {
-            tracing::warn!("Run capture was poisoned before terminal settlement");
+            tracing::warn!("Session capture was poisoned before terminal settlement");
             return;
         };
         if capture.settled_outcome.is_some() {
@@ -2435,17 +2358,17 @@ impl Drop for CaptureHandle {
         if let Err(error) = capture.finish("failed") {
             tracing::warn!(
                 %error,
-                run_id = %capture.manifest.run_id,
-                "failed to settle dropped Run capture"
+                artifact_key = %capture.manifest.artifact_key,
+                "failed to settle dropped Session capture"
             );
         }
     }
 }
 
 #[derive(Debug)]
-struct RunCapture {
+struct SessionCapture {
     driver: Option<(String, crate::exec::SessionDriver)>,
-    manifest: RunManifest,
+    manifest: SessionCaptureManifest,
     dir: PathBuf,
     provider: String,
     model: Option<String>,
@@ -2458,23 +2381,23 @@ struct RunCapture {
     usage_stream_id: String,
     event_seq: u64,
     usage_seq: u64,
-    recorder: RunRecorder,
+    recorder: SessionRecorder,
     telemetry_warned: bool,
     settled_outcome: Option<String>,
     activity: activity::Observer,
 }
 
-impl RunCapture {
+impl SessionCapture {
     /// Independent agent launches, including helpers, admit their conversation
     /// before provider work. Flow reservations have their own fenced publisher.
     fn record_row(
-        manifest: &RunManifest,
+        manifest: &SessionCaptureManifest,
         dir: &Path,
-        work: Option<crate::session::RunWork>,
+        work: Option<crate::session::SessionWork>,
     ) -> StoreResult<Option<crate::session::AgentSession>> {
         let invocation_id = match &manifest.flow {
-            Some(RunFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
-            Some(RunFlowMembership::Independent) | None => None,
+            Some(SessionFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
+            Some(SessionFlowMembership::Independent) | None => None,
         };
         // Mechanical commands have an Exec and, in a Flow, operation history.
         // Capturing their diagnostics does not create an agent conversation.
@@ -2490,9 +2413,9 @@ impl RunCapture {
         let session = store.create_session(
             crate::session::AgentSession {
                 captured: None,
-                caller_artifact_key: manifest.parent_run_id.clone(),
+                caller_artifact_key: manifest.caller_artifact_key.clone(),
                 id: format!("session_{}", Uuid::new_v4().simple()),
-                artifact_key: manifest.run_id.clone(),
+                artifact_key: manifest.artifact_key.clone(),
                 input_published: false,
                 cwd: manifest.cwd.clone(),
                 skill: manifest.skill.clone(),
@@ -2508,10 +2431,9 @@ impl RunCapture {
                 kind: crate::session::SessionKind::Conversation,
                 interactive: manifest.surface != "headless",
                 repo: None,
-                title: manifest
-                    .skill
-                    .clone()
-                    .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
+                title: manifest.skill.clone().unwrap_or_else(|| {
+                    crate::engine::naming::word_pair(manifest.artifact_key.as_str())
+                }),
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
                 ready_summary: None,
@@ -2524,16 +2446,16 @@ impl RunCapture {
         Ok(Some(session))
     }
 
-    fn from_manifest(manifest: RunManifest, dir: PathBuf) -> Self {
-        let recorder = RunRecorder::start(&dir, &manifest);
+    fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
+        let recorder = SessionRecorder::start(&dir, &manifest);
         Self {
             driver: None,
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
             account_id: manifest
-                .launch
+                .exec
                 .as_ref()
-                .and_then(|launch| launch.account_id.clone()),
+                .and_then(|exec| exec.account_id.clone()),
             account_observed: false,
             provider_session_id: None,
             manifest,
@@ -2560,7 +2482,7 @@ impl RunCapture {
             return Ok(());
         }
         self.attempt_started = true;
-        self.append_event(RunEvent::ProviderAttemptStarted {
+        self.append_event(CaptureEvent::ProviderAttemptStarted {
             provider: self.provider.clone(),
             model: self.model.clone(),
             account_id: self.account_id.clone(),
@@ -2575,7 +2497,7 @@ impl RunCapture {
         account_id: Option<crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         let finish_error = if self.attempt_started {
-            self.append_event(RunEvent::ProviderAttemptFinished {
+            self.append_event(CaptureEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
                 outcome: "failed".to_string(),
             })
@@ -2604,7 +2526,7 @@ impl RunCapture {
     }
 
     fn record_raw(&mut self, stream: &str, line: &str) -> std::io::Result<()> {
-        self.append_event(RunEvent::ProviderOutput {
+        self.append_event(CaptureEvent::ProviderOutput {
             stream: stream.to_string(),
             line: line.to_string(),
         })
@@ -2612,8 +2534,8 @@ impl RunCapture {
 
     fn record_stream_event(&mut self, event: &StreamEvent) -> std::io::Result<()> {
         match event {
-            StreamEvent::Text(text) => self.append_event(RunEvent::Text { text: text.clone() }),
-            StreamEvent::ToolUse { name, summary } => self.append_event(RunEvent::ToolUse {
+            StreamEvent::Text(text) => self.append_event(CaptureEvent::Text { text: text.clone() }),
+            StreamEvent::ToolUse { name, summary } => self.append_event(CaptureEvent::ToolUse {
                 name: name.clone(),
                 summary: summary.clone(),
             }),
@@ -2644,7 +2566,7 @@ impl RunCapture {
                         true,
                     )?;
                 }
-                self.append_event(RunEvent::Result {
+                self.append_event(CaptureEvent::Result {
                     outcome: match subtype {
                         ResultSubtype::Success => "completed",
                         ResultSubtype::Error => "failed",
@@ -2662,7 +2584,7 @@ impl RunCapture {
                 self.turn_key = turn_id.clone();
                 self.usage_stream_id = Uuid::new_v4().to_string();
                 self.usage_seq = 0;
-                self.append_event(RunEvent::Conversation {
+                self.append_event(CaptureEvent::Conversation {
                     event: Box::new(ConversationEvent::TurnStarted { turn_id }),
                 })
             }
@@ -2674,7 +2596,7 @@ impl RunCapture {
                 self.turn_key = turn_id;
                 self.append_usage(usage, final_receipt)
             }
-            event => self.append_event(RunEvent::Conversation {
+            event => self.append_event(CaptureEvent::Conversation {
                 event: Box::new(event),
             }),
         }
@@ -2685,7 +2607,7 @@ impl RunCapture {
             return Ok(());
         }
         self.usage_seq += 1;
-        self.append_event(RunEvent::Usage {
+        self.append_event(CaptureEvent::Usage {
             usage_stream_id: self.usage_stream_id.clone(),
             provider: self.provider.clone(),
             model: self.model.clone(),
@@ -2703,7 +2625,7 @@ impl RunCapture {
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
         if !matches!(outcome, "completed" | "failed" | "interrupted") {
             return Err(std::io::Error::other(format!(
-                "invalid Run outcome: {outcome}"
+                "invalid recorder outcome: {outcome}"
             )));
         }
         if let Some(settled) = &self.settled_outcome {
@@ -2712,7 +2634,7 @@ impl RunCapture {
             }
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                format!("Run already settled as {settled}; refusing {outcome}"),
+                format!("Recorder already settled as {settled}; refusing {outcome}"),
             ));
         }
         let terminal = TerminalReceipt {
@@ -2727,14 +2649,14 @@ impl RunCapture {
         }
         self.settled_outcome = Some(outcome.to_string());
         if self.attempt_started {
-            if let Err(error) = self.append_event(RunEvent::ProviderAttemptFinished {
+            if let Err(error) = self.append_event(CaptureEvent::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
                 outcome: outcome.to_string(),
             }) {
                 tracing::warn!(
                     %error,
-                    run_id = %self.manifest.run_id,
-                    "final Run lifecycle event unavailable"
+                    artifact_key = %self.manifest.artifact_key,
+                    "final recorder lifecycle event unavailable"
                 );
             }
         }
@@ -2750,8 +2672,8 @@ impl RunCapture {
         Ok(())
     }
 
-    fn append_event(&mut self, event: RunEvent) -> std::io::Result<()> {
-        if !matches!(&event, RunEvent::Activity { .. }) {
+    fn append_event(&mut self, event: CaptureEvent) -> std::io::Result<()> {
+        if !matches!(&event, CaptureEvent::Activity { .. }) {
             self.activity.note_event(OffsetDateTime::now_utc());
         }
         let envelope = EventEnvelope {
@@ -2766,19 +2688,19 @@ impl RunCapture {
 
     fn warn_telemetry(&mut self, error: std::io::Error) {
         if self.telemetry_warned {
-            tracing::debug!(%error, run_id = %self.manifest.run_id, "Run telemetry write failed");
+            tracing::debug!(%error, artifact_key = %self.manifest.artifact_key, "Session telemetry write failed");
             return;
         }
         self.telemetry_warned = true;
         tracing::warn!(
             %error,
-            run_id = %self.manifest.run_id,
-            "Run telemetry write failed; harness execution continues"
+            artifact_key = %self.manifest.artifact_key,
+            "Session telemetry write failed; harness execution continues"
         );
     }
 }
 
-/// The store that holds the row of the Run recorded at `dir`.
+/// The store that holds the conversation for the capture recorded at `dir`.
 /// An absent socket alone says nothing about an engine. Require its recorded
 /// process to have exited; a surviving endpoint wins over launcher death.
 pub(crate) fn conversation_engine_exited(
@@ -2813,66 +2735,77 @@ fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
 }
 
 fn row_database(dir: &Path) -> StoreResult<PathBuf> {
-    #[cfg(test)]
-    let path = std::env::var_os("LF_DB_PATH")
-        .map(PathBuf::from)
-        .or_else(|| Some(dir.ancestors().nth(3)?.join("loopflow.db")))
-        .ok_or_else(|| record_error(std::io::Error::other("Run record has no Home")))?;
-    #[cfg(not(test))]
-    let path = {
-        let _ = dir;
-        crate::store::database_path_from_env().map_err(record_error)?
-    };
-    Ok(path)
+    let home = dir
+        .ancestors()
+        .nth(3)
+        .ok_or_else(|| record_error(std::io::Error::other("Session capture has no Home")))?;
+    database_in(home)
 }
 
-pub(crate) fn inherited_parent() -> Option<String> {
-    let run_id = std::env::var(RUN_ID_ENV).ok()?;
+fn database_in(home: &Path) -> StoreResult<PathBuf> {
+    #[cfg(test)]
+    {
+        Ok(std::env::var_os("LF_DB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("loopflow.db")))
+    }
+    #[cfg(not(test))]
+    {
+        let _ = home;
+        crate::store::database_path_from_env().map_err(record_error)
+    }
+}
+
+pub(crate) fn inherited_caller() -> Option<String> {
+    let artifact_key = std::env::var(RUN_ID_ENV).ok()?;
     let run_dir = PathBuf::from(std::env::var_os(RUN_DIR_ENV)?);
     let manifest = fs::read(run_dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<RunManifest>(&manifest).ok()?;
-    (manifest.run_id.as_str() == run_id).then_some(manifest.run_id)
+    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
+    (manifest.artifact_key.as_str() == artifact_key).then_some(manifest.artifact_key)
 }
 
-fn verified_parent(lf_home: &Path, run_id: String) -> Option<String> {
-    let dir = record_dir(lf_home, &run_id)?;
+fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
+    let dir = record_dir(lf_home, &artifact_key)?;
     let manifest = fs::read(dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<RunManifest>(&manifest).ok()?;
-    (manifest.run_id == run_id).then_some(run_id)
+    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
+    (manifest.artifact_key == artifact_key).then_some(artifact_key)
 }
 
-pub(crate) fn record_dir(lf_home: &Path, run_id: &str) -> Option<PathBuf> {
-    parse_artifact_key(run_id).ok()?;
-    let prefix = run_id.strip_prefix("run_").unwrap_or(run_id).get(..2)?;
-    Some(lf_home.join("runs").join(prefix).join(run_id))
+pub(crate) fn record_dir(lf_home: &Path, artifact_key: &str) -> Option<PathBuf> {
+    parse_artifact_key(artifact_key).ok()?;
+    let prefix = artifact_key
+        .strip_prefix("run_")
+        .unwrap_or(artifact_key)
+        .get(..2)?;
+    Some(lf_home.join("runs").join(prefix).join(artifact_key))
 }
 
 fn prepare_manifest(
-    spec: RunSpec,
-    run_id: String,
-    parent_run_id: Option<String>,
-    launch: Option<RunLaunchRequest>,
+    spec: SessionCaptureSpec,
+    artifact_key: String,
+    caller_artifact_key: Option<String>,
+    exec: Option<AgentExecRequest>,
     context: Option<&crate::trace::PreparedTurnContext>,
-) -> std::io::Result<(RunManifest, Option<Vec<u8>>)> {
+) -> std::io::Result<(SessionCaptureManifest, Option<Vec<u8>>)> {
     let (runtime_path, runtime_digest) = runtime_identity();
     let context_bytes = context
         .map(|context| {
-            serde_json::to_vec_pretty(&RunContextArtifact {
+            serde_json::to_vec_pretty(&SessionContextArtifact {
                 schema_version: SCHEMA_VERSION,
                 context,
             })
             .map_err(std::io::Error::other)
         })
         .transpose()?;
-    let context_ref = context_bytes.as_ref().map(|bytes| RunContextRef {
+    let context_ref = context_bytes.as_ref().map(|bytes| SessionContextRef {
         path: "context.json".to_string(),
         content_sha256: hex::encode(Sha256::digest(bytes)),
         bytes: bytes.len() as u64,
     });
-    let manifest = RunManifest {
+    let manifest = SessionCaptureManifest {
         schema_version: SCHEMA_VERSION,
-        run_id,
-        parent_run_id,
+        artifact_key,
+        caller_artifact_key,
         created_at: OffsetDateTime::now_utc(),
         harness: spec.harness,
         model: spec.model,
@@ -2883,7 +2816,7 @@ fn prepare_manifest(
         skill: spec.skill,
         subjects: spec.subjects,
         flow: Some(spec.flow),
-        launch,
+        exec,
         context: context_ref,
         runtime_path,
         runtime_digest,
@@ -2894,19 +2827,19 @@ fn prepare_manifest(
 }
 
 /// Resume artifact publication only. The caller must still claim the SQL
-/// reservation before launching; readable artifacts confer no launch authority.
+/// reservation before launching; readable artifacts confer no exec authority.
 fn reconcile_reserved_manifest(
     home: &Path,
-    mut manifest: RunManifest,
+    mut manifest: SessionCaptureManifest,
     context: Option<&[u8]>,
-) -> std::io::Result<(RunManifest, PathBuf)> {
-    let published =
-        record_dir(home, &manifest.run_id).expect("Run ids always contain a UUID prefix");
-    let parent = published
+) -> std::io::Result<(SessionCaptureManifest, PathBuf)> {
+    let published = record_dir(home, &manifest.artifact_key)
+        .expect("Artifact keys always contain a UUID prefix");
+    let directory = published
         .parent()
-        .expect("Run record has a prefix directory");
-    create_private_dir(parent)?;
-    let staging = parent.join(format!(".{}.staging", manifest.run_id));
+        .expect("Session capture has a prefix directory");
+    create_private_dir(directory)?;
+    let staging = directory.join(format!(".{}.staging", manifest.artifact_key));
     let dir = if published.try_exists()? {
         &published
     } else {
@@ -2917,20 +2850,20 @@ fn reconcile_reserved_manifest(
     }
     if dir.join("terminal.json").try_exists()? {
         return Err(std::io::Error::other(format!(
-            "reserved Run {} already has terminal evidence; retained unchanged",
-            manifest.run_id
+            "reserved Session capture {} already has terminal evidence; retained unchanged",
+            manifest.artifact_key
         )));
     }
     let manifest_path = dir.join("manifest.json");
     if manifest_path.try_exists()? {
         let existing = read_manifest(dir)?;
         // Creation time belongs to the first publication attempt. All other
-        // immutable inputs, including exact context digest and parent, must match.
+        // immutable inputs, including exact context digest and caller, must match.
         manifest.created_at = existing.created_at;
         if serde_json::to_value(&manifest)? != serde_json::to_value(&existing)? {
             return Err(std::io::Error::other(format!(
-                "reserved Run {} has different immutable launch inputs at {}",
-                manifest.run_id,
+                "reserved Session capture {} has different immutable launch inputs at {}",
+                manifest.artifact_key,
                 dir.display()
             )));
         }
@@ -2943,7 +2876,7 @@ fn reconcile_reserved_manifest(
     sync_dir(dir)?;
     if dir == &staging {
         fs::rename(&staging, &published)?;
-        sync_dir(parent)?;
+        sync_dir(directory)?;
     }
     Ok((manifest, published))
 }
@@ -2956,7 +2889,7 @@ fn reconcile_private_file(path: &Path, expected: &[u8]) -> std::io::Result<()> {
                 Ok(())
             } else {
                 Err(std::io::Error::other(format!(
-                    "reserved Run artifact differs at {}; retained unchanged",
+                    "reserved Session capture artifact differs at {}; retained unchanged",
                     path.display()
                 )))
             }
@@ -2967,17 +2900,17 @@ fn reconcile_private_file(path: &Path, expected: &[u8]) -> std::io::Result<()> {
 
 fn publish_manifest(
     lf_home: &Path,
-    manifest: &RunManifest,
+    manifest: &SessionCaptureManifest,
     context: Option<&[u8]>,
 ) -> std::io::Result<PathBuf> {
-    let run_id = manifest.run_id.as_str();
-    let published =
-        record_dir(lf_home, &manifest.run_id).expect("Run ids always contain a UUID prefix");
-    let parent = published
+    let artifact_key = manifest.artifact_key.as_str();
+    let published = record_dir(lf_home, &manifest.artifact_key)
+        .expect("Artifact keys always contain a UUID prefix");
+    let directory = published
         .parent()
-        .expect("Run record always has a prefix directory");
-    create_private_dir(parent)?;
-    let staging = parent.join(format!(".{run_id}.staging"));
+        .expect("Session capture always has a prefix directory");
+    create_private_dir(directory)?;
+    let staging = directory.join(format!(".{artifact_key}.staging"));
     create_private_dir_exclusive(&staging)?;
     if let Some(context) = context {
         write_private_exclusive(&staging.join("context.json"), context)?;
@@ -2988,7 +2921,7 @@ fn publish_manifest(
     )?;
     sync_dir(&staging)?;
     fs::rename(&staging, &published)?;
-    sync_dir(parent)?;
+    sync_dir(directory)?;
     Ok(published)
 }
 
@@ -3007,7 +2940,7 @@ fn write_terminal(dir: &Path, receipt: &TerminalReceipt) -> std::io::Result<()> 
                 Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     format!(
-                        "Run already settled as {}; refusing {}",
+                        "Recorder already settled as {}; refusing {}",
                         existing.outcome, receipt.outcome
                     ),
                 ))
@@ -3117,8 +3050,8 @@ mod tests {
 
     use super::{
         read_provider_clients, read_provider_session, remove_provider_client,
-        write_provider_client, CaptureHandle, RunLaunchRequest, RunManifest, RunSpec,
-        SubjectAttribution, TerminalReceipt,
+        write_provider_client, AgentExecRequest, CaptureHandle, SessionCaptureManifest,
+        SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
@@ -3173,7 +3106,7 @@ mod tests {
                 let output = Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
-                        "run_record::tests::terminal_attachment_probe",
+                        "session_record::tests::terminal_attachment_probe",
                         "--nocapture",
                     ])
                     .env("LF_TERMINAL_ID", "shell-one")
@@ -3193,7 +3126,10 @@ mod tests {
             }
         }
         let output = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "run_record::tests::terminal_attachment_probe"])
+            .args([
+                "--exact",
+                "session_record::tests::terminal_attachment_probe",
+            ])
             .env("LF_TERMINAL_ID", "shell-one")
             .env("LF_TERMINAL_TTY", &tty)
             .env("LF_TEST_TERMINAL_ATTACHMENT", "")
@@ -3203,8 +3139,8 @@ mod tests {
         assert!(output.status.success());
     }
 
-    fn spec(cwd: &std::path::Path) -> RunSpec {
-        RunSpec {
+    fn spec(cwd: &std::path::Path) -> SessionCaptureSpec {
+        SessionCaptureSpec {
             harness: "proof".to_string(),
             model: Some("model".to_string()),
             surface: "headless".to_string(),
@@ -3213,13 +3149,16 @@ mod tests {
             worktree: Some(cwd.to_path_buf()),
             skill: Some("implement".to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
+            flow: crate::session_record::SessionFlowMembership::Independent,
             work: None,
         }
     }
 
     #[test]
     fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
         let (dir, mut manifest) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
@@ -3247,7 +3186,7 @@ mod tests {
                 let mut envelope: super::EventEnvelope = serde_json::from_str(line).unwrap();
                 if matches!(
                     envelope.event,
-                    super::RunEvent::ProviderAttemptStarted { .. }
+                    super::CaptureEvent::ProviderAttemptStarted { .. }
                 ) {
                     attempt += 1;
                     envelope.observed_at =
@@ -3276,56 +3215,43 @@ mod tests {
 
     #[test]
     fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
-        for historical in [false, true] {
-            let home = tempfile::tempdir().unwrap();
-            let original = crate::work::task::TaskPrId::new();
-            let mut step = super::RunFlowStep {
-                task_id: Some(crate::work::task::TaskId::new()),
-                task_pr_id: Some(original.clone()),
-                invocation_id: "invocation".into(),
-                flow: "feature".into(),
-                step: "review".into(),
-                node: Some("1".into()),
-                iterations: Some(Vec::new()),
-            };
-            let mut prepared = spec(home.path());
-            prepared.flow = super::RunFlowMembership::Step(step.clone());
-            let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
-            let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-            if historical {
-                let mut manifest: serde_json::Value =
-                    serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-                manifest["flow"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("task_pr_id");
-                fs::write(
-                    dir.join("manifest.json"),
-                    serde_json::to_vec(&manifest).unwrap(),
-                )
-                .unwrap();
-            }
-            step.task_pr_id = Some(crate::work::task::TaskPrId::new());
-            let mut launch = spec(home.path());
-            launch.flow = super::RunFlowMembership::Step(step);
-            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-            let capture =
-                CaptureHandle::start_prepared(home.path(), &id, launch, &context).unwrap();
-            capture.finish("completed").unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let original = crate::work::task::TaskPrId::new();
+        let mut step = super::SessionFlowStep {
+            task_id: Some(crate::work::task::TaskId::new()),
+            task_pr_id: Some(original.clone()),
+            invocation_id: "invocation".into(),
+            flow: "feature".into(),
+            step: "review".into(),
+            node: Some("1".into()),
+            iterations: Some(Vec::new()),
+        };
+        let mut prepared = spec(home.path());
+        prepared.flow = super::SessionFlowMembership::Step(step.clone());
+        let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        step.task_pr_id = Some(crate::work::task::TaskPrId::new());
+        let mut exec = spec(home.path());
+        exec.flow = super::SessionFlowMembership::Step(step);
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+        let capture = CaptureHandle::start_prepared(home.path(), &id, exec, &context).unwrap();
+        capture.finish("completed").unwrap();
 
-            let manifest = super::read_manifest(&dir).unwrap();
-            let Some(super::RunFlowMembership::Step(step)) = manifest.flow else {
-                panic!("prepared membership retained");
-            };
-            assert_eq!(step.task_pr_id, (!historical).then_some(original));
-        }
+        let manifest = super::read_manifest(&dir).unwrap();
+        let Some(super::SessionFlowMembership::Step(step)) = manifest.flow else {
+            panic!("prepared membership retained");
+        };
+        assert_eq!(step.task_pr_id, Some(original));
     }
 
     #[test]
     fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let home = tempfile::tempdir().unwrap();
-        let launch = RunLaunchRequest::from_prepared(
+        let exec = AgentExecRequest::from_prepared(
             &AgentConfig {
                 task_prompt: "repair the failed operation".into(),
                 ..Default::default()
@@ -3333,10 +3259,10 @@ mod tests {
             &AgentCapabilities::default(),
         );
         let capture =
-            CaptureHandle::begin_at_with_launch(home.path(), spec(home.path()), launch).unwrap();
+            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), exec).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
         let session = store
-            .session_for_artifact(&capture.run_id())
+            .session_for_artifact(&capture.artifact_key())
             .unwrap()
             .unwrap();
         let run = session.clone();
@@ -3347,14 +3273,14 @@ mod tests {
         assert_eq!(
             super::read_manifest(&capture.artifact_dir())
                 .unwrap()
-                .launch
+                .exec
                 .unwrap()
                 .task_prompt,
             "repair the failed operation"
         );
         capture.finish("failed").unwrap();
         let after = store
-            .session_for_artifact(&capture.run_id())
+            .session_for_artifact(&capture.artifact_key())
             .unwrap()
             .unwrap();
 
@@ -3362,7 +3288,7 @@ mod tests {
         assert_eq!(
             super::row_store(&capture.artifact_dir())
                 .unwrap()
-                .input_history(capture.run_id().as_str())
+                .input_history(capture.artifact_key().as_str())
                 .unwrap()
                 .recorded_outcome
                 .as_deref(),
@@ -3372,7 +3298,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_publication_recovers_artifacts_without_repeating_launch_authority() {
+    fn reserved_publication_recovers_artifacts_without_repeating_exec_authority() {
         for boundary in [
             "before_artifacts",
             "context_staged",
@@ -3380,7 +3306,7 @@ mod tests {
             "artifacts_published",
         ] {
             let home = tempfile::tempdir().unwrap();
-            let id = crate::run_record::new_artifact_key();
+            let id = crate::session_record::new_artifact_key();
             let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
             let (manifest, bytes) =
                 super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
@@ -3431,14 +3357,14 @@ mod tests {
                 |_| Ok(()),
             )
             .unwrap();
-            assert_eq!(capture.run_id(), id);
+            assert_eq!(capture.artifact_key(), id);
             assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
             assert_eq!(
                 std::fs::read(dir.join("context.json")).unwrap(),
                 bytes.unwrap()
             );
             // SQL has granted authority once, but no provider has started.
-            // An absent provider receipt does not grant a second launch.
+            // An absent provider receipt does not grant a second exec.
             assert!(CaptureHandle::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
@@ -3469,7 +3395,7 @@ mod tests {
     #[test]
     fn reserved_publication_retains_conflicting_inputs() {
         let home = tempfile::tempdir().unwrap();
-        let id = crate::run_record::new_artifact_key();
+        let id = crate::session_record::new_artifact_key();
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
         let (manifest, bytes) =
             super::prepare_manifest(spec(home.path()), id.clone(), None, None, Some(&context))
@@ -3516,20 +3442,23 @@ mod tests {
 
     #[test]
     fn prepared_session_run_is_resolvable_and_consumed_once() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
-        let parent = crate::run_record::new_artifact_key();
-        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(parent.clone()))
+        let caller = crate::session_record::new_artifact_key();
+        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(caller.clone()))
             .unwrap();
         let (dir, prepared) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-        assert_eq!(prepared.run_id, id);
-        assert_eq!(prepared.parent_run_id.as_ref(), Some(&parent));
+        assert_eq!(prepared.artifact_key, id);
+        assert_eq!(prepared.caller_artifact_key.as_ref(), Some(&caller));
         // Recover a crash after the manifest was published but before the prepared marker.
         fs::remove_file(dir.join("prepared")).unwrap();
         assert_eq!(
             CaptureHandle::prepare_at_with_key(
                 home.path(),
                 spec(home.path()),
-                Some(parent.clone()),
+                Some(caller.clone()),
                 id.clone()
             )
             .unwrap(),
@@ -3543,7 +3472,7 @@ mod tests {
             CaptureHandle::prepare_at_with_key(
                 home.path(),
                 spec(home.path()),
-                Some(parent.clone()),
+                Some(caller.clone()),
                 id.clone()
             )
             .unwrap(),
@@ -3555,11 +3484,11 @@ mod tests {
         let capture =
             CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
         let launched = super::read_manifest(&dir).unwrap();
-        assert_eq!(capture.run_id(), id);
+        assert_eq!(capture.artifact_key(), id);
         assert!(CaptureHandle::prepare_at_with_key(
             home.path(),
             spec(home.path()),
-            Some(parent.clone()),
+            Some(caller.clone()),
             id.clone()
         )
         .is_err());
@@ -3568,7 +3497,7 @@ mod tests {
             "recovery cannot rearm an already claimed launch"
         );
         assert_eq!(launched.created_at, prepared.created_at);
-        assert_eq!(launched.parent_run_id, Some(parent));
+        assert_eq!(launched.caller_artifact_key, Some(caller));
         let context_ref = launched.context.as_ref().unwrap();
         let context_bytes = fs::read(dir.join(&context_ref.path)).unwrap();
         assert_eq!(context_ref.bytes, context_bytes.len() as u64);
@@ -3589,11 +3518,11 @@ mod tests {
             .outcome,
             "completed"
         );
-        assert_eq!(super::record_dirs(home.path()).unwrap().len(), 1);
+        assert!(super::record_dir(home.path(), &id).unwrap().is_dir());
     }
 
     #[test]
-    fn manifest_round_trips_the_exact_prepared_launch_without_ambient_authority() {
+    fn manifest_round_trips_the_exact_prepared_exec_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
@@ -3610,14 +3539,20 @@ mod tests {
             ..AgentConfig::default()
         };
         let expected =
-            RunLaunchRequest::from_prepared(&config, &AgentCapabilities { chrome: true });
+            AgentExecRequest::from_prepared(&config, &AgentCapabilities { chrome: true });
         let capture =
-            CaptureHandle::begin_at_with_launch(home.path(), spec(home.path()), expected.clone())
+            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
 
         let bytes = fs::read(capture.artifact_dir().join("manifest.json")).unwrap();
-        let manifest: RunManifest = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(manifest.launch, Some(expected));
+        let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(saved["artifact_key"], capture.artifact_key());
+        assert!(saved.get("caller_artifact_key").is_some());
+        assert!(saved.get("exec").is_some());
+        assert!(saved.get("run_id").is_none());
+        assert!(saved.get("launch").is_none());
+        let manifest: SessionCaptureManifest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(manifest.exec, Some(expected));
         let context_ref = manifest.context.expect("manifest references exact context");
         let context = fs::read(capture.artifact_dir().join(&context_ref.path)).unwrap();
         assert_eq!(context_ref.bytes, context.len() as u64);
@@ -3652,18 +3587,21 @@ mod tests {
 
     #[test]
     fn record_keeps_direct_usage_and_one_immutable_terminal_without_an_owner_claim() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
-        let capture =
-            CaptureHandle::begin_at(home.path(), spec(home.path())).expect("publish Run manifest");
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+            .expect("publish Session capture manifest");
         capture.record_input("initial", "do the work");
         let dir = capture.artifact_dir();
-        let run_id = capture.run_id().to_string();
+        let artifact_key = capture.artifact_key().to_string();
 
         assert!(dir.join("manifest.json").is_file());
         assert_eq!(
             dir.parent().and_then(|path| path.file_name()),
             Some(std::ffi::OsStr::new(
-                &run_id.strip_prefix("run_").unwrap_or(&run_id)[..2]
+                &artifact_key.strip_prefix("run_").unwrap_or(&artifact_key)[..2]
             ))
         );
         assert!(!dir.join("inbox").exists());
@@ -3720,6 +3658,9 @@ mod tests {
 
     #[test]
     fn final_answer_reader_returns_the_conclusion_without_commentary() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         capture.record_conversation(ConversationEvent::ItemCompleted {
@@ -3821,6 +3762,9 @@ mod tests {
 
     #[test]
     fn provider_account_observation_precedes_session_and_preserves_attempts() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
@@ -3847,7 +3791,7 @@ mod tests {
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
             "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
-            [capture.run_id().as_str()],
+            [capture.artifact_key().as_str()],
         ).unwrap();
         let recovered = read_provider_session(&dir).unwrap().unwrap();
         assert_eq!(recovered.provider_session_id, "second-session");
@@ -3890,7 +3834,7 @@ mod tests {
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
             "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
-            [capture.run_id().as_str()],
+            [capture.artifact_key().as_str()],
         ).unwrap();
         assert_eq!(read_provider_session(&dir).unwrap(), Some(ambient));
     }
@@ -3927,8 +3871,8 @@ mod tests {
 
         let first = CaptureHandle::begin_at(home.path(), first).unwrap();
         let second = CaptureHandle::begin_at(home.path(), second).unwrap();
-        let first_id = first.run_id();
-        let second_id = second.run_id();
+        let first_id = first.artifact_key();
+        let second_id = second.artifact_key();
 
         assert_ne!(first_id, second_id);
         for capture in [&first, &second] {
@@ -3942,8 +3886,8 @@ mod tests {
     #[test]
     fn telemetry_failure_does_not_gate_terminal_settlement() {
         let home = tempfile::tempdir().unwrap();
-        let capture =
-            CaptureHandle::begin_at(home.path(), spec(home.path())).expect("publish Run manifest");
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+            .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
         fs::create_dir(dir.join("events.jsonl")).unwrap();
 
@@ -3966,8 +3910,8 @@ mod tests {
     #[test]
     fn dropping_the_last_capture_settles_unexpected_control_flow_as_failed() {
         let home = tempfile::tempdir().unwrap();
-        let capture =
-            CaptureHandle::begin_at(home.path(), spec(home.path())).expect("publish Run manifest");
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+            .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
 
         drop(capture);
@@ -3980,8 +3924,8 @@ mod tests {
     #[test]
     fn retry_usage_keeps_provider_cumulative_values_in_distinct_streams() {
         let home = tempfile::tempdir().unwrap();
-        let capture =
-            CaptureHandle::begin_at(home.path(), spec(home.path())).expect("publish Run manifest");
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+            .expect("publish Session capture manifest");
         capture.record_input("initial", "do the work");
         let dir = capture.artifact_dir();
 
@@ -4045,8 +3989,8 @@ mod tests {
     #[test]
     fn usage_keeps_omissions_and_resets_sequence_for_each_provider_turn() {
         let home = tempfile::tempdir().unwrap();
-        let capture =
-            CaptureHandle::begin_at(home.path(), spec(home.path())).expect("publish Run manifest");
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
+            .expect("publish Session capture manifest");
         let dir = capture.artifact_dir();
 
         capture.record_stream_event(&StreamEvent::Usage {
@@ -4116,7 +4060,7 @@ mod tests {
 
         let run = super::row_store(&capture.artifact_dir())
             .unwrap()
-            .input_history(capture.run_id().as_str())
+            .input_history(capture.artifact_key().as_str())
             .unwrap();
         assert_eq!(run.recorded_outcome.as_deref(), Some("completed"));
         assert_eq!(run.usage.streams, 2);
@@ -4145,7 +4089,9 @@ mod tests {
             fs::File::open(dir.join("events.jsonl")).unwrap(),
         ))
         .unwrap_err();
-        assert!(error.to_string().contains("malformed complete Run event"));
+        assert!(error
+            .to_string()
+            .contains("malformed complete capture event"));
     }
 
     #[test]
@@ -4173,7 +4119,7 @@ mod tests {
             schema_version: 1,
             seq: 0,
             observed_at: time::OffsetDateTime::from_unix_timestamp(10).unwrap(),
-            event: super::RunEvent::ProviderAttemptStarted {
+            event: super::CaptureEvent::ProviderAttemptStarted {
                 provider: "codex".into(),
                 model: None,
                 account_id: None,
@@ -4207,6 +4153,6 @@ mod tests {
         let error = super::read_manifest(&dir).unwrap_err();
         assert!(error
             .to_string()
-            .contains("unsupported Run manifest schema 999"));
+            .contains("unsupported Session capture manifest schema 999"));
     }
 }

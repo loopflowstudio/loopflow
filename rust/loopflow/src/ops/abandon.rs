@@ -1,11 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::engine::git::{
-    current_branch, delete_local_branch, delete_remote_branch, is_clean, worktree_remove,
-};
-use crate::engine::worktrees::{list_worktrees, main_repo_root};
-
+use crate::engine::git::current_branch;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 
@@ -15,69 +11,126 @@ pub struct AbandonOptions {
     pub force: bool,
 }
 
+/// Close one PR and delete its checkout and branches; retain its owning Task.
 pub fn abandon_branch(
     repo: &Path,
     options: &AbandonOptions,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    if options.branch.is_none() && crate::ops::task::abandon_task_pr(repo, options.force, progress)?
+    let branch = options.branch.clone().map(Ok).unwrap_or_else(|| {
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".into()))
+    })?;
+    let deletion = super::wt::prepare_delete(repo, &branch, options.force)?;
+    super::task::notice_retained_task(&deletion.repo, &deletion.branch, progress)?;
+    if !options.force
+        && !progress.confirm(&format!(
+            "Close PR and delete checkout and branches for {branch:?}?"
+        ))
     {
-        return Ok(());
+        return Err(OpsError::Message("aborted".into()));
     }
-    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let branch = match options.branch.as_deref() {
-        Some(branch) => branch.to_string(),
-        None => {
-            current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?
-        }
-    };
-
-    let worktree_path = find_worktree_path(&main_repo, &branch)?
-        .ok_or_else(|| OpsError::Message(format!("no worktree found for '{}'", branch)))?;
-
-    if !is_clean(&worktree_path)? {
-        if !options.force {
-            return Err(OpsError::Message(
-                "uncommitted changes; use --force".to_string(),
-            ));
-        }
-        progress.error("Abandoning worktree with uncommitted changes");
-    }
-
-    if !options.force {
-        let confirmed = progress.confirm(&format!(
-            "Abandon branch '{}' (close PR, delete remote, remove worktree)?",
-            branch
-        ));
-        if !confirmed {
-            return Err(OpsError::Message("aborted".to_string()));
-        }
-    }
-
-    progress.status("Closing PR...");
-    let _ = Command::new("gh")
-        .arg("pr")
-        .arg("close")
-        .arg(&branch)
-        .current_dir(&main_repo)
-        .status();
-
-    progress.status("Deleting remote branch...");
-    let _ = delete_remote_branch(&main_repo, "origin", &branch);
-
-    progress.status("Removing worktree...");
-    let _ = worktree_remove(&main_repo, &worktree_path);
-
-    progress.status("Deleting local branch...");
-    let _ = delete_local_branch(&main_repo, &branch);
-
-    Ok(())
+    super::task::block_on_task(abandon_prepared(deletion, progress))
 }
 
-fn find_worktree_path(main_repo: &Path, branch: &str) -> OpsResult<Option<std::path::PathBuf>> {
-    let worktrees = list_worktrees(main_repo)?;
-    Ok(worktrees
+pub(crate) async fn abandon_prepared(
+    deletion: super::wt::BranchDeletion,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    close_pr(&deletion.repo, &deletion.branch)?;
+    super::task::record_abandoned_pr(&deletion.repo, &deletion.branch).await?;
+    super::wt::apply_delete(deletion, progress)
+}
+
+pub(crate) fn branch_prs(repo: &Path, branch: &str) -> OpsResult<Vec<(u64, String)>> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "all",
+            "--json",
+            "number,state,headRepository",
+            "--limit",
+            "1000",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::Message(format!(
+            "cannot read PRs for {branch}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    #[derive(serde::Deserialize)]
+    struct PullRequest {
+        number: u64,
+        state: String,
+        #[serde(rename = "headRepository")]
+        head_repository: Option<Repository>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Repository {
+        #[serde(rename = "nameWithOwner")]
+        name_with_owner: String,
+    }
+    let owner = crate::repository::RepoId::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let prs: Vec<PullRequest> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Message(format!("invalid GitHub PR response: {error}")))?;
+    if prs.len() == 1000 {
+        return Err(OpsError::Message(
+            "PR history is incomplete; deletion was not attempted".into(),
+        ));
+    }
+    if prs
+        .iter()
+        .any(|pr| pr.state == "OPEN" && pr.head_repository.is_none())
+    {
+        return Err(OpsError::Message(
+            "open PR has unavailable head repository; deletion was not attempted".into(),
+        ));
+    }
+    Ok(prs
         .into_iter()
-        .find(|wt| wt.branch.as_deref() == Some(branch))
-        .map(|wt| wt.path))
+        .filter(|pr| {
+            pr.head_repository
+                .as_ref()
+                .is_some_and(|head| head.name_with_owner.eq_ignore_ascii_case(owner.as_str()))
+        })
+        .map(|pr| (pr.number, pr.state))
+        .collect())
+}
+
+pub(crate) fn close_pr(repo: &Path, branch: &str) -> OpsResult<()> {
+    let prs = branch_prs(repo, branch)?;
+    if !prs.iter().any(|(_, state)| state == "OPEN")
+        && prs.iter().any(|(_, state)| state == "MERGED")
+    {
+        return Err(OpsError::Message(format!("{branch} has a merged PR; use wt delete to remove its checkout while preserving the merge outcome")));
+    }
+    for (number, state) in prs {
+        match state.as_str() {
+            "OPEN" => {
+                let output = Command::new("gh")
+                    .args(["pr", "close", &number.to_string()])
+                    .current_dir(repo)
+                    .output()?;
+                if !output.status.success() {
+                    return Err(OpsError::Message(format!(
+                        "failed to close PR #{number}: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+            }
+            "CLOSED" | "MERGED" => {}
+            _ => {
+                return Err(OpsError::Message(format!(
+                    "unknown PR #{number} state {state:?}"
+                )))
+            }
+        }
+    }
+    Ok(())
 }

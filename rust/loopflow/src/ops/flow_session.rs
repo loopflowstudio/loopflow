@@ -1,19 +1,18 @@
-//! Human review of a saved Flow. The review is a Session whose Runs name the
-//! Flow's invocation and the Flow's Work, Task included; the invocation row
-//! waits on it through `pending_session_id`.
+//! Human review of a saved Flow. The review Session retains the Flow and Work
+//! attribution; the Flow waits on it through `pending_session_id`.
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::durable::FlowSession;
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
 use crate::ops::flow_run::{self, ActiveStep};
 use crate::ops::human_session;
-use crate::run_record::{RunFlowMembership, RunFlowStep};
 use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+use crate::session_record::{SessionFlowMembership, SessionFlowStep};
 use crate::store::SharedStore;
 
 fn current_skill(flow: &FlowSession) -> Result<&ConcreteSkill> {
     match flow.current_step() {
-        Some(ConcreteStep::Skill(skill)) if skill.policy.human => Ok(skill),
+        Some(ConcreteStep::Skill(skill)) if skill.human => Ok(skill),
         _ => bail!("saved Flow position is not a human skill"),
     }
 }
@@ -31,13 +30,16 @@ pub(crate) fn pinned_skill(session_id: &str, requested: &str) -> Result<Skill> {
     Ok(skill.clone())
 }
 
-pub(crate) async fn membership(store: &SharedStore, session_id: &str) -> Result<RunFlowMembership> {
-    Ok(RunFlowMembership::Step(RunFlowStep::of(
+pub(crate) async fn membership(
+    store: &SharedStore,
+    session_id: &str,
+) -> Result<SessionFlowMembership> {
+    Ok(SessionFlowMembership::Step(SessionFlowStep::of(
         &store.waiting_review(session_id).await?,
     )?))
 }
 
-/// Store the review the Flow waits at, with its first Run prepared. Returns
+/// Store the review the Flow waits at, with its first input prepared. Returns
 /// the feedback once the review is complete.
 pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<Option<String>> {
     let session = match &flow.pending_session_id {
@@ -56,7 +58,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
                 captured: None,
                 caller_artifact_key: None,
                 id,
-                artifact_key: crate::run_record::new_artifact_key(),
+                artifact_key: crate::session_record::new_artifact_key(),
                 input_published: false,
                 cwd: flow.cwd.clone(),
                 skill: Some(skill.clone()),
@@ -88,7 +90,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
         human_session::publish_prepared_input(
             store,
             &session,
-            RunFlowMembership::Step(RunFlowStep::of(flow)?),
+            SessionFlowMembership::Step(SessionFlowStep::of(flow)?),
         )?
     };
     Ok(session.completed_at.and(session.ready_summary))
@@ -104,8 +106,8 @@ pub(crate) async fn complete(store: &SharedStore, session: &AgentSession) -> Res
     store
         .complete_session(&session.id, session.captured)
         .await?;
-    let launch = flow_run::launch_driver(flow.id()).await;
-    if let Err(error) = human_session::stop_run(&session.artifact_key) {
+    let launch = flow_run::exec_driver(flow.id()).await;
+    if let Err(error) = human_session::stop_session_client(&session.artifact_key) {
         tracing::warn!(run_id = %session.artifact_key, %error, "review completed but provider cleanup failed");
     }
     launch.with_context(|| {
@@ -128,20 +130,24 @@ fn review_message(flow: &FlowSession, session_id: &str) -> String {
     message
 }
 
-/// The review's launch: the Flow's Work, its pinned Skill and step.
-pub(crate) async fn launch(
+/// The review's Exec: the Flow's Work, its pinned Skill and step.
+pub(crate) async fn prepare_exec(
     store: &SharedStore,
     command: &mut tokio::process::Command,
     session_id: &str,
 ) -> Result<()> {
     let flow = store.waiting_review(session_id).await?;
-    let step = ActiveStep {
-        invocation: flow.id().to_owned(),
-        version: flow.version,
-    };
     command
         .arg("--tui")
-        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(&step)?);
+        .env(flow_run::FLOW_STEP_ENV, ActiveStep::of(&flow).env_value()?)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            flow.invocation
+                .accounts
+                .clone()
+                .unwrap_or_default()
+                .env_value()?,
+        );
     if let Some(model) = &flow.model {
         command.args(["--model", model]);
     }
@@ -152,6 +158,7 @@ pub(crate) async fn launch(
     };
     command.args([
         "skill",
+        "--",
         &current_skill(&flow)?.skill.name,
         &review_message(&flow, session_id),
     ]);
@@ -166,7 +173,7 @@ mod tests {
     use crate::durable::FlowSession;
     use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor};
     use crate::engine::invocation::QueuedInvocation;
-    use crate::engine::{ExecutionCursor, NestedCursor, OccurrencePolicy, Skill};
+    use crate::engine::{ExecutionCursor, NestedCursor, Skill};
     use crate::store::{open_ephemeral_store, StorageConfig};
 
     #[test]
@@ -192,17 +199,15 @@ mod tests {
                 ConcretePath {
                     steps: vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: demo,
-                        policy: OccurrencePolicy {
-                            id: Some("demo".into()),
-                            human: true,
-                            repeat: None,
-                        },
-                        flow_parents: Vec::new(),
+                        id: Some("demo".into()),
+                        human: true,
+                        repeat: None,
+                        sources: Vec::new(),
                     })],
                     description: "saved review".into(),
                 },
             )]),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
         })];
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = std::sync::Arc::new(
@@ -212,7 +217,6 @@ mod tests {
             );
             let flow = store
                 .create_flow(FlowSession {
-                    parent_id: None,
                     invocation: QueuedInvocation::new("review", steps).unwrap(),
                     cursor: ExecutionCursor {
                         child: Some(Box::new(NestedCursor::Xor {

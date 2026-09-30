@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::id::ExecId;
 use crate::session::{SessionEvent, SessionEventKind};
+use crate::session_record::{FinalAnswer, ProviderSessionRef};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -12,16 +13,60 @@ impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::run_record::ProviderSessionRef>> {
+    ) -> StoreResult<Option<ProviderSessionRef>> {
         let Some(session) = self.session_for_artifact(input)? else {
             return Ok(None);
         };
-        crate::run_record::provider_session_from_history(
+        crate::session_record::provider_session_from_history(
             self.summary_for_input(&session.id, input)?
                 .into_iter()
                 .map(|event| event.payload),
         )
         .map_err(|error| StoreError::InvalidData(error.to_string()))
+    }
+
+    /// Only an exact completion consumed by this Flow node acknowledges direction.
+    /// Missing evidence replays input; retries and other nodes cannot consume it.
+    pub(crate) fn completed_step_steer_id(
+        &self,
+        flow: &crate::durable::FlowSession,
+    ) -> StoreResult<i64> {
+        let node = flow
+            .invocation
+            .node_id(&flow.cursor)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let inputs: Vec<String> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut query = conn.prepare(
+                "SELECT DISTINCT capture.receipt_key FROM flow_events consumed
+                 JOIN session_events done ON done.seq=consumed.session_event
+                 JOIN session_events start ON start.session_id=done.session_id
+                    AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
+                    AND start.kind='started'
+                 JOIN session_events capture ON capture.seq=start.captured_event AND capture.kind='captured'
+                 WHERE consumed.flow_id=?1 AND consumed.node=?2 AND consumed.kind='consumed'
+                    AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'",
+            )?;
+            let rows = query.query_map(params![flow.id(), node], |row| row.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut through = 0;
+        for input in inputs {
+            for event in self.input_events(&input)? {
+                if event["type"] != "user_input" {
+                    continue;
+                }
+                let op = event["op"].as_str().unwrap_or_default();
+                let id = if op == "steer_seed_through" {
+                    event["text"].as_str().and_then(|id| id.parse::<i64>().ok())
+                } else {
+                    op.strip_prefix("steer_transport_accepted:")
+                        .and_then(|id| id.parse().ok())
+                };
+                through = through.max(id.unwrap_or(0));
+            }
+        }
+        Ok(through)
     }
 
     /// Original input order survives importing earlier observations after later ones.
@@ -38,10 +83,7 @@ impl SqliteStore {
             .collect()
     }
 
-    pub(crate) fn input_final_answer(
-        &self,
-        input: &str,
-    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+    pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<FinalAnswer>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
@@ -65,9 +107,9 @@ impl SqliteStore {
                     })?
                     .to_owned(),
             };
-            return Ok(Some(crate::run_record::FinalAnswer { text, exact: true }));
+            return Ok(Some(FinalAnswer { text, exact: true }));
         }
-        crate::run_record::final_answer(self.input_events(input)?)
+        crate::session_record::final_answer(self.input_events(input)?)
             .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
@@ -331,7 +373,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let retain = |source: &str, evidence: serde_json::Value| {
             store
@@ -422,7 +465,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         assert_eq!(
             store
@@ -432,7 +476,7 @@ mod tests {
             None
         );
         let pr = crate::work::task::TaskPrId::new();
-        let manifest = json!({"schema_version":1,"run_id":input,
+        let manifest = json!({"schema_version":1,"artifact_key":input,
             "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
             "cwd":"/fixture","subjects":[],"host":"fixture",
             "flow":{"kind":"step","task_pr_id":pr,"invocation_id":"retained",
@@ -484,7 +528,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let text = "retained transcript ".repeat(4096);
         let events = [
@@ -670,7 +715,7 @@ mod tests {
         assert_eq!(history.providers.len(), 1);
         let provider = &history.providers[0];
         assert!(
-            matches!(&provider.reference, crate::run_record::ProviderHistoryReference::NativeTurn {
+            matches!(&provider.reference, crate::session_record::ProviderHistoryReference::NativeTurn {
             turn, start_seq: None, completion_seq: Some(_), .. } if turn == "recent")
         );
         assert!(provider.exec_id.is_none());
@@ -728,7 +773,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let first_input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let first = crate::id::ExecId::new();
         let second = crate::id::ExecId::new();
@@ -763,7 +809,7 @@ mod tests {
             )
             .unwrap();
         let mut replacement = session.clone();
-        replacement.artifact_key = crate::run_record::new_artifact_key();
+        replacement.artifact_key = crate::session_record::new_artifact_key();
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
@@ -937,7 +983,7 @@ mod tests {
     fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         store.test_session("conversation", &input);
         let counts = |value| {
             json!({"inputTokens":value,"outputTokens":0,

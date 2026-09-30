@@ -24,10 +24,8 @@ Reserve conversations with `create_session`, retain replacement inputs with
 existing Flow settlement operations consume successful selected history.
 An actual command records its Exec outcome independently of agent completion.
 
-Historical SQL rows remain import input until preservation and dependent triggers
-are converted. Current commands do not write those rows. The transitional public
-CLI/wire projections remain as described in the cutover status; removing the Rust
-CRUD API does not establish external consumer migration or complete table removal.
+The cutover retains current Work, account routing and resumable conversations.
+Retired history stores and intermediate branch schemas have no runtime readers.
 
 ## One owner per fact
 
@@ -56,10 +54,9 @@ retains exact current tables, source paths and subprocess edges in one place.
 ## Conversation and process history
 
 Exec records one actual lf process, including agent-issued nested commands.
-Several provider turns or Flow steps may execute in that process. Their results
-must not overwrite each other or become extra synthetic Execs. Command completion
-belongs to the outer process; provider completion belongs to AgentSession history.
-A provider may succeed before a later command operation fails.
+Each executed Flow step has its own child lf Exec. Multiple provider turns may
+belong to that Exec; their results remain distinct in AgentSession history.
+A provider may succeed before its command fails later.
 
 AgentSession identity, name and feedback survive driver replacement. Its current
 driver is a nullable Exec reference with a generation fence. The native engine
@@ -114,33 +111,31 @@ their recorded attribution independently of current assignment or driver.
 Bind assigns an unbound conversation once, including to a done or landed Task.
 Same-target assignment is idempotent; reassignment and clearing are unavailable.
 The exact target is explicit and the transaction rejects competing assignment,
-driver replacement or incompatible Flow membership. The current prospective
-attribution assumption and its limits are in the
+driver replacement or incompatible Flow membership. Prospective usage attribution
+and its limits are in the
 [contract](../architecture-reference.md#attribution-binding-and-started).
 
 Actual work reservation, including first bind, sets Task Started once. Merely
 recording an inspection Exec does not. Later launch, retry, chapter transfer or
-import cannot move or erase an existing timestamp.
+conversion cannot move or erase an existing timestamp.
 
-## Read and import
+## Reads and cutover
 
 Summary queries filter identity, ancestry, command, skill, title, mode and state
 in SQL before loading payloads. Detail reads load only the selected capture or
 transcript. Missing payloads remain visible rows with explicit missing evidence.
 Passive readers acquire no driver or Flow claim and never launch or import.
 
-One-time import preserves interactive conversations, completed keyed Asks, Task
-reviews, pending taskless reviews, headless work and command journal history.
-Keep names, feedback, captures, native identities, repeated outcomes, old-ID
-mappings and unknown membership. A historical provider launch does not establish
-that a separate lf process existed. Do not fabricate an Exec for each old Run.
+The three migration groups create Exec rows, adopt Linear Project statuses, and
+cut over Session ownership directly from the released schema. Current Task
+captures and review feedback survive; old command ledgers and finished
+conversation archives do not. Native recovery reads the current conversation's
+provider history when its selected turn needs reconciliation.
 
-Import is idempotent and resumable after interruption. Conflicting inputs remain
-unresolved with source bytes retained. Once converted, ordinary list, lookup,
-rename and completion depend on the new owners; they neither scan old manifests
-for identity nor recreate sidecars. Completed keyed Ask retry returns its stored
-answer without launching a provider. Deletion of old owners follows preservation
-proof, rather than erasing evidence to simplify the schema.
+For this machine, resumable filesystem conversations are converted offline after
+old writers stop and before promotion. The binary has no old-layout discovery or
+import command. Rehearse on a database backup and copied captures; never point a
+branch binary at the installed Home.
 
 ## Planning and external transitions
 
@@ -157,9 +152,8 @@ transaction for related state, atomic publication for immutable input, an OS loc
 for local exclusion, an exact PR head for merge, and stable provider identity for
 recovering a lost response. Record uncertainty at each seam.
 
-Released migration bytes remain immutable. Forward migrations and offline import
-preserve historical facts; removing a product object does not permit losing its
-evidence. Candidate promotion validates an isolated copy before activation.
+Released migration bytes remain immutable. Candidate promotion validates an
+isolated copy and preserves current operating state before activation.
 See [Homes and processes](homes.md#promote-a-new-artifact) for installation authority.
 
 [Execution](execution.md) describes admission and recovery;

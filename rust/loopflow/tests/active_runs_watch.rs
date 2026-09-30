@@ -92,10 +92,10 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     let dir = home.path().join("runs/00").join(id);
     fs::create_dir_all(dir.join("provider-clients")).unwrap();
     let manifest = serde_json::json!({
-        "schema_version": 1, "run_id": id, "parent_run_id": null,
+        "schema_version": 1, "artifact_key": id, "caller_artifact_key": null,
         "created_at": "2020-01-01T00:00:00Z", "harness": "cat", "model": null,
         "surface": "tui", "cwd": home.path(), "repo": null, "worktree": null,
-        "skill": null, "subjects": [], "launch": null, "context": null,
+        "skill": null, "subjects": [], "exec": null, "context": null,
         "runtime_path": null, "runtime_digest": null, "host": "fixture", "boot_id": null,
     });
     fs::write(
@@ -111,21 +111,18 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         "started_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
     });
     fs::write(&receipt, serde_json::to_vec(&native).unwrap()).unwrap();
-    fs::write(
-        dir.join("provider-session.json"),
-        serde_json::to_vec(&serde_json::json!({
-            "schema_version":1,"provider_session_id":"fixture-thread","account_id":null
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let imported = command(home.path(), &["session", "import", "--json"])
+    let initialized = command(home.path(), &["session", "list", "--json"])
         .output()
         .unwrap();
-    assert!(imported.status.success(), "{:?}", imported);
-    let report: serde_json::Value = serde_json::from_slice(&imported.stdout).unwrap();
-    assert_eq!(report["failed"], serde_json::json!([]), "{report}");
-    assert_eq!(report["interactive"], 1);
+    assert!(initialized.status.success(), "{initialized:?}");
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published) VALUES(?1,'Watch','generated',1577836800,'cat','fixture-thread',?2,1)", rusqlite::params![id,home.path().to_str().unwrap()]).unwrap();
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?1,1577836800,?2)", rusqlite::params![id,serde_json::json!({"artifact_key":id,"cwd":home.path(),"provider":"cat"}).to_string()]).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
+        rusqlite::params![id, db.last_insert_rowid()],
+    )
+    .unwrap();
     fs::create_dir_all(home.path().join("runtime")).unwrap();
     let registry_lock =
         fs::File::create(home.path().join("runtime/opencode-servers.json.lock")).unwrap();

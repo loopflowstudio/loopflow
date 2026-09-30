@@ -27,7 +27,7 @@ impl FlowOutput {
 
     pub fn for_step(step: &ConcreteStep) -> Option<Self> {
         match step {
-            ConcreteStep::Skill(skill) if !skill.policy.human && skill.policy.repeat.is_some() => {
+            ConcreteStep::Skill(skill) if !skill.human && skill.repeat.is_some() => {
                 Some(Self::Decision)
             }
             ConcreteStep::Xor(branch) => {

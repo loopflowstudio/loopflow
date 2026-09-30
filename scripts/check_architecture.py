@@ -40,7 +40,7 @@ SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
 DRAFT_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
-FLOW_OP = re.compile(r"^\s*-\s*op:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
+FLOW_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
 SCAN_ROOTS = (
@@ -189,7 +189,7 @@ def _discover_internal_flow_commands(root: Path, internal: set[str]) -> Counter[
     if not flows.is_dir():
         return Counter()
     for path in sorted((*flows.glob("*.yaml"), *flows.glob("*.yml"))):
-        for name in FLOW_OP.findall(path.read_text()):
+        for name in FLOW_COMMAND.findall(path.read_text()):
             command = f"lf {name}"
             if command in internal:
                 commands.add(command)

@@ -30,7 +30,7 @@ impl WorkControlReceipt {
 /// Inject steer comments newer than `*cursor` into the live provider turn. A
 /// comment the provider takes (`Sent`) advances the cursor; one it can't take
 /// right now (`NotSteerable` — no active turn, or a driver without live input)
-/// stays for the next skill boundary, whose seed re-reads every steer. Steering
+/// stays for the next skill boundary, whose seed reads unconsumed steers. Steering
 /// is best-effort live and durable at the boundary, so this never fails the run.
 pub(crate) async fn inject_live_steers(
     store: &SharedStore,
@@ -46,14 +46,33 @@ pub(crate) async fn inject_live_steers(
             return delivered;
         }
     };
-    for steer in &steers {
+    for mut steer in steers {
         if steer.id <= *cursor {
             continue;
+        }
+        // Token count cannot exceed byte count, so small inputs need no lookup.
+        if steer.text.len() > crate::engine::context_budget::GOAL_TOKENS {
+            let result = async {
+                let task = store
+                    .get_task(task_id)
+                    .await?
+                    .ok_or(crate::store::StoreError::NotFound)?;
+                crate::engine::context_budget::bound_message(&steer.text, &task.worktree)
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+            }
+            .await;
+            match result {
+                Ok(text) => steer.text = text,
+                Err(error) => {
+                    tracing::warn!(%error, "failed to preserve oversized live direction; deferring delivery");
+                    break;
+                }
+            }
         }
         match harness.send_current(&steer.text).await {
             crate::harness::SendCurrentOutcome::Sent { .. } => {
                 *cursor = steer.id;
-                delivered.push(steer.clone());
+                delivered.push(steer);
             }
             crate::harness::SendCurrentOutcome::NotSteerable => break,
             crate::harness::SendCurrentOutcome::Failed { error }

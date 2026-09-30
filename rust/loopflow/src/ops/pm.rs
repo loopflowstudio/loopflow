@@ -1069,6 +1069,7 @@ pub(crate) async fn task_comment_async(
     wave: Option<&str>,
     issue: &str,
     message: Option<&str>,
+    steer: bool,
 ) -> OpsResult<TaskComments> {
     if message.is_some_and(|text| text.trim().is_empty()) {
         return Err(OpsError::Message("Task comment cannot be empty".into()));
@@ -1088,8 +1089,13 @@ pub(crate) async fn task_comment_async(
     }
     let posted = match message {
         Some(message) => Some(
-            super::linear_observe::publish_issue_comment(&repository.client, &item.id, message)
-                .await?,
+            super::linear_observe::publish_issue_comment(
+                &repository.client,
+                &item.id,
+                message,
+                steer,
+            )
+            .await?,
         ),
         None => None,
     };
@@ -1657,10 +1663,12 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 .as_ref()
                 .and_then(|publication| publication.github.as_ref())
             {
-                eprintln!("Retained PR: {}", github.url);
+                eprintln!("Retained PR history: {}", github.url);
             }
         }
-        eprintln!("Retained authored checkout: {}", task.worktree.display());
+        if task.worktree.exists() {
+            eprintln!("Retained checkout: {}", task.worktree.display());
+        }
     }
     Ok(identifier)
 }
@@ -1819,7 +1827,7 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     block_on_pm(pm_resolve_task_async(repo, issue))
 }
 
-async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     let ResolvedTask {
         wave,
         mut item,
@@ -3019,6 +3027,87 @@ fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
 
 fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
+}
+
+/// Read every linked Initiative, including archived predecessor Projects.
+pub(crate) async fn chapter_sweep_candidates(
+    repo: &Path,
+) -> OpsResult<Vec<(String, String, PmItem)>> {
+    let store = pm_store().await?;
+    let mut candidates = Vec::new();
+    for name in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &name).await?;
+        let locator = crate::work::wave::WaveLocator::discover(repo, &name)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
+        let chapter = super::chapter::current_project(&store, &wave).await?;
+        for project in ctx
+            .client
+            .list_projects_including_archived(&ctx.initiative, true)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
+            if project.id == chapter.id {
+                continue;
+            }
+            for item in ctx
+                .client
+                .list_items_including_archived(&project.id, true)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+            {
+                if item.completed
+                    || matches!(
+                        item.state.as_deref(),
+                        Some("completed" | "canceled" | "duplicate")
+                    )
+                {
+                    continue;
+                }
+                if item.state.is_none() || item.team_id != ctx.team_id {
+                    return Err(OpsError::Message(format!(
+                        "{} has unresolved state or ownership; sweep was not applied",
+                        item.identifier
+                    )));
+                }
+                candidates.push((name.clone(), project.name.clone(), item));
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+pub(crate) async fn require_outside_current_chapter(
+    repo: &Path,
+    issue: &str,
+) -> OpsResult<PmResolvedTask> {
+    let resolved = pm_resolve_task_async(repo, issue).await?;
+    let store = pm_store().await?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let wave = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
+    let chapter = super::chapter::current_project(&store, &wave).await?;
+    if resolved.item.project_id.as_deref() == Some(chapter.id.as_str())
+        || resolved.item.completed
+        || matches!(
+            resolved.item.state.as_deref(),
+            Some("completed" | "canceled" | "duplicate")
+        )
+    {
+        return Err(OpsError::Message(
+            "issue moved to the current chapter or is already terminal".into(),
+        ));
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]

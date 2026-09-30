@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
-use crate::engine::{ConcreteStep, OccurrencePolicy};
+use crate::engine::ConcreteStep;
 use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
@@ -143,12 +143,10 @@ pub(crate) fn test_flow_invocation(
             };
             crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
                 skill: crate::engine::Skill::named(&name),
-                policy: crate::engine::OccurrencePolicy {
-                    id: target.then(|| node_id.map(str::to_string)).flatten(),
-                    human: target && human,
-                    repeat: None,
-                },
-                flow_parents: Vec::new(),
+                id: target.then(|| node_id.map(str::to_string)).flatten(),
+                human: target && human,
+                repeat: None,
+                sources: Vec::new(),
             })
         })
         .collect();
@@ -219,7 +217,6 @@ pub struct FlowTurnSelection {
     pub claim: Option<TaskWorkerClaim>,
     pub session_id: String,
     pub after: i64,
-    pub caller_token: Option<String>,
 }
 
 /// One Flow invocation as its row holds it: the captured graph, the cursor,
@@ -228,8 +225,6 @@ pub struct FlowTurnSelection {
 /// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowSession {
-    /// Runtime loop parent; template composition does not create a parent.
-    pub parent_id: Option<String>,
     pub invocation: QueuedInvocation,
     pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,
@@ -265,29 +260,29 @@ impl FlowSession {
     }
 
     pub fn current_checked(&self) -> Option<StepRef> {
-        let (step, kind, policy) = match self.current_step()? {
+        let (step, kind, id, human, repeat) = match self.current_step()? {
             ConcreteStep::Skill(skill) => (
                 skill.skill.name.clone(),
                 StepKind::Skill,
-                skill.policy.clone(),
+                skill.id.clone(),
+                skill.human,
+                skill.repeat.clone(),
             ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Op,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
+            ConcreteStep::Command(command) => {
+                (command.item.display_name(), StepKind::Op, None, false, None)
+            }
+            ConcreteStep::Xor(branch) => {
+                (branch.router.name.clone(), StepKind::Xor, None, false, None)
+            }
         };
         Some(StepRef {
             invocation_id: self.invocation.id.clone(),
             flow: self.invocation.flow.clone(),
             step,
             kind,
-            policy,
+            id,
+            human,
+            repeat,
             index: u32::try_from(self.cursor.index).ok()?,
             total: u32::try_from(self.invocation.steps.len()).ok()?,
             iteration: self.cursor.iteration,
@@ -300,13 +295,13 @@ impl FlowSession {
     }
 
     pub fn is_human(&self) -> bool {
-        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.policy.human)
+        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.human)
     }
 
     pub fn is_decision(&self) -> bool {
         match self.current_step() {
             Some(ConcreteStep::Xor(_)) => true,
-            Some(ConcreteStep::Skill(skill)) => skill.policy.repeat.is_some(),
+            Some(ConcreteStep::Skill(skill)) => skill.repeat.is_some(),
             _ => false,
         }
     }
@@ -316,7 +311,7 @@ impl FlowSession {
         let leaf = self.cursor.leaf();
         match self.current_step() {
             Some(ConcreteStep::Skill(skill)) => {
-                skill.policy.repeat.is_some() && leaf.progress.verdict.is_some()
+                skill.repeat.is_some() && leaf.progress.verdict.is_some()
             }
             Some(ConcreteStep::Xor(_)) => leaf.route.is_some(),
             _ => false,
@@ -327,7 +322,7 @@ impl FlowSession {
     pub fn step_name(&self) -> Option<String> {
         Some(match self.current_step()? {
             ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
+            ConcreteStep::Command(op) => format!("op: {}", op.item.display_name()),
             ConcreteStep::Xor(branch) => branch.router.name.clone(),
         })
     }
@@ -346,11 +341,11 @@ impl FlowSession {
     }
 
     /// The Work the Flow was launched with, as its Runs declare it.
-    pub fn declared_work(&self) -> Option<crate::session::RunWork> {
+    pub fn declared_work(&self) -> Option<crate::session::SessionWork> {
         if self.task_id.is_none() && self.wave_id.is_none() {
             return None;
         }
-        Some(crate::session::RunWork {
+        Some(crate::session::SessionWork {
             task_id: self.task_id.clone(),
             wave_id: self.wave_id.clone(),
             source: crate::session::WorkSource::Declared,
@@ -462,7 +457,6 @@ pub struct AbandonReceipt {
 /// Query values for retained FlowSession discovery; none carries driver authority.
 #[derive(Debug, Clone, Default)]
 pub struct FlowFilter {
-    pub parent_id: Option<String>,
     pub repo: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
@@ -474,7 +468,6 @@ pub struct FlowFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowInventoryEntry {
-    pub parent_id: Option<String>,
     #[serde(flatten)]
     pub summary: crate::session::FlowSummary,
     pub repo: Option<String>,

@@ -8,7 +8,7 @@ from pathlib import Path
 PROOFS = {
     "task_adopts_linear_checkout_and_preserves_saved_progress": "task_adoption_tests",
     "flow_step_executable_falls_back_without_losing_its_store": "flow_tests",
-    "declared_agent_can_start_another_tasks_flow": "session_cutover_tests",
+    "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
     "task_resume_revokes_auto_merge_before_returning_to_human_review": "pr_tests",
     "direct_open_preserves_another_installations_development_store": "task_initialization_tests",
     "incompatible_branch_data_recommends_only_a_verified_retained_pair": (
@@ -88,7 +88,6 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
         version=$(sed -n "s/^version = \"\([^\"]*\)\"/\1/p" Cargo.toml | head -1)
         python3 scripts/canonicalize_migrations.py "$version" --materialize-for-tests
-        nice -n 10 cargo test -p loopflow --lib planning_integration -- --nocapture
         nice -n 10 cargo test -p loopflow --lib \
             migration_preserves_planning_identity_and_removes_snapshot_storage
         nice -n 10 cargo test -p loopflow TARGETS --no-run

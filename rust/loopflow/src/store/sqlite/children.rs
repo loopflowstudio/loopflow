@@ -233,11 +233,11 @@ impl SqliteStore {
         validate_task_project(&transaction, task)?;
         if let Some(pr) = skipped_pr {
             if transaction.execute(
-                "DELETE FROM task_prs
+                "UPDATE task_prs SET abandoned_at=?3, updated_at=?3
                  WHERE id=?1 AND task_id=?2
                    AND publication_requested_at IS NULL
                    AND merge_commit IS NULL AND abandoned_at IS NULL",
-                params![pr.id.as_str(), pr.task_id.as_str()],
+                params![pr.id.as_str(), pr.task_id.as_str(), now_unix()],
             )? == 0
             {
                 return Err(StoreError::NotFound);
@@ -245,6 +245,7 @@ impl SqliteStore {
         }
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         complete_task_work_in(&transaction, task)?;
+        // Cleanup settles the selected Flow after both driver and step exit.
         transaction.commit()?;
         Ok(())
     }
@@ -462,7 +463,7 @@ impl SqliteStore {
     /// Move a stacked Task PR to its parent's current tip, or clear the parent
     /// after that work reaches the default branch. This deliberately moves the
     /// otherwise-immutable `base_commit` through a dedicated transition.
-    pub fn rebase_task_pr(
+    pub fn sync_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,

@@ -159,7 +159,7 @@ pub(crate) struct LiveSessionProcesses {
 /// without loading the Exec event ledger or provider output.
 pub(crate) fn live_exec_providers(
     snapshot: &ProcessSnapshot,
-    clients: &[(String, crate::run_record::ProviderClientRef)],
+    clients: &[(String, crate::session_record::ProviderClientRef)],
 ) -> LiveSessionProcesses {
     let mut native = Vec::new();
     let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();
@@ -473,7 +473,7 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
     if !path.exists() {
         return Ok(ActivityData { execs: Vec::new() });
     }
-    let store = SqliteStore::open_run_ledger_read_only(path)
+    let store = SqliteStore::open_execs_read_only(path)
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
     Ok(store.read_run_ledger_snapshot(|store| {
         let mut execs = Vec::new();
@@ -488,7 +488,7 @@ fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<
                     label: command_label(exec.command.as_deref()),
                     repo: exec.repo,
                     worktree: exec.cwd,
-                    wave: exec.wave,
+                    wave: None,
                     started_at: exec.started_at,
                 });
             }
@@ -1214,24 +1214,11 @@ mod tests {
             "INSERT INTO execs(id,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
             rusqlite::params![exec, trace, r#"["lf","implement"]"#],
         ).unwrap();
-        // A stray journal event cannot manufacture an actual process record.
-        conn.execute(
-            "INSERT INTO run_events(run_id,process_id,seq,ts,node,event,command)
-            VALUES(?1,?2,0,9000,'run','started','unowned')",
-            rusqlite::params![trace, missing],
-        )
-        .unwrap();
         let recorded = store.exec(&exec).unwrap().unwrap();
         assert_eq!(recorded.via_agent, None);
         assert_eq!(recorded.completed_at, None);
         assert_eq!(recorded.exit_code, None);
         assert!(store.exec(&missing).unwrap().is_none());
-        conn.execute(
-            "INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
-            VALUES(?1,?2,0,9000,'skill','started','other-work')",
-            rusqlite::params![trace, exec],
-        )
-        .unwrap();
         conn.execute(
             "UPDATE execs SET completed_at=9000,outcome='failed',exit_code=42 WHERE id=?1",
             [&exec],

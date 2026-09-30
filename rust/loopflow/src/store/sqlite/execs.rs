@@ -13,10 +13,8 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 const EXEC_SELECT: &str = "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
-    e.caller_provider_generation,e.caller_flow_turn,e.command,e.repo,e.cwd,
-    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,
-    (SELECT wave FROM run_events WHERE process_id=e.id AND node='run' AND wave IS NOT NULL
-     ORDER BY seq LIMIT 1) FROM execs e";
+    e.caller_provider_generation,e.command,e.repo,e.cwd,
+    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error FROM execs e";
 
 fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
     Ok(Exec {
@@ -26,16 +24,15 @@ fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
         via_agent: row.get(3)?,
         caller_session_id: row.get(4)?,
         caller_provider_generation: row.get(5)?,
-        caller_flow_turn: row.get(6)?,
-        command: row.get(7)?,
-        repo: row.get(8)?,
-        cwd: row.get(9)?,
-        started_at: row.get(10)?,
-        completed_at: row.get(11)?,
-        outcome: row.get(12)?,
-        exit_code: row.get(13)?,
-        signal: row.get(14)?,
-        wave: row.get(15)?,
+        command: row.get(6)?,
+        repo: row.get(7)?,
+        cwd: row.get(8)?,
+        started_at: row.get(9)?,
+        completed_at: row.get(10)?,
+        outcome: row.get(11)?,
+        exit_code: row.get(12)?,
+        signal: row.get(13)?,
+        error: row.get(14)?,
     })
 }
 
@@ -158,6 +155,17 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
 }
 
 impl SqliteStore {
+    pub fn execs_since(&self, since: i64) -> StoreResult<Vec<Exec>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{EXEC_SELECT} WHERE e.started_at>=?1 ORDER BY e.started_at,e.id"
+        ))?;
+        let records = query
+            .query_map([since], read_exec)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(records)
+    }
+
     /// Resolve retained identity without loading plans, captures or launch eligibility.
     pub(crate) fn resolve_task_id(
         &self,
@@ -599,7 +607,7 @@ mod discovery_tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let old = insert_exec(&store, 1, 1);
         let live = insert_exec(&store, 2, 2);
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -668,7 +676,7 @@ mod discovery_tests {
             )
             .unwrap();
             conn.execute("UPDATE execs SET parent_exec_id=?2,via_agent=1,caller_session_id='retained-caller',
-                caller_provider_generation=7,caller_flow_turn='original-token',outcome='succeeded',
+                caller_provider_generation=7,outcome='succeeded',
                 completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct]).unwrap();
             conn.execute(
                 "UPDATE execs SET outcome='interrupted',completed_at=7,exit_code=130
@@ -676,12 +684,6 @@ mod discovery_tests {
                 [&interrupted],
             )
             .unwrap();
-            conn.execute("INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
-                SELECT trace_id,id,0,started_at,'run','started','command-context' FROM execs WHERE id=?1",
-                [&direct]).unwrap();
-            conn.execute("INSERT INTO run_events(run_id,process_id,seq,ts,node,event,wave)
-                SELECT trace_id,id,1,started_at,'skill','started','different-work' FROM execs WHERE id=?1",
-                [&direct]).unwrap();
         }
         let page = store
             .execs(&ExecFilter::default(), None, NonZeroU32::new(10).unwrap())
@@ -705,14 +707,12 @@ mod discovery_tests {
         assert_eq!(failed.parent_exec_id.as_ref(), Some(&parent));
         assert_eq!(failed.via_agent, Some(false));
         assert_eq!(failed.exit_code, Some(42));
-        assert_eq!(failed.wave.as_deref(), Some("command-context"));
         let success = &page.entries[1];
         assert_eq!(
             success.caller_session_id.as_deref(),
             Some("retained-caller")
         );
         assert_eq!(success.caller_provider_generation, Some(7));
-        assert_eq!(success.caller_flow_turn.as_deref(), Some("original-token"));
         assert_eq!(success.via_agent, Some(true));
         assert_eq!(page.entries[0].signal, None);
         for (outcome, expected) in [

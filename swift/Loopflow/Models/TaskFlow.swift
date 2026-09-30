@@ -36,7 +36,7 @@ public struct FlowNode: Decodable, Sendable, Hashable {
     public let human: Bool
     public let returnsTo: UInt32?
     /// Composed Flows this occurrence came from, outermost first.
-    public let parents: [String]
+    public let sources: [String]
     public let paths: [FlowGraphPath]
 
     /// Includes this node and every descendant, without interpreting an ID as a path.
@@ -45,7 +45,7 @@ public struct FlowNode: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case key, id, label, kind, human, parents, paths
+        case key, id, label, kind, human, sources, paths
         case returnsTo = "returns_to"
     }
 }

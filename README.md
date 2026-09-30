@@ -21,7 +21,7 @@ lf install schedule         # check at login and weekly (macOS)
 lf install schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf rebase` inside a repository to update its checkout.
+Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -48,6 +48,27 @@ npx skills add loopflowstudio/loopflow --skill loopflow -g -y
 
 The harness acts as a User over the same `lf` API. See
 [The Agent API](docs/agent-api.md).
+
+## Find a command or workflow
+
+```bash
+lf list                    # commands, skills, and flows
+lf help debug              # inspect a definition without launching it
+lf run feature             # select a flow, otherwise a skill
+lf skill release-run       # explicitly select the skill
+lf land --help             # explain the uniquely owned pr land command
+lf pr-review               # build an HTML walkthrough of the important code in this PR
+```
+
+Commands take precedence over definitions. Omit owners when the command is
+unique; ambiguous names show the canonical choices. Help and list stay local.
+A same-named flow takes precedence in untyped execution; invalid flows report
+an error. Use `lf skill NAME` to select the skill explicitly.
+External skills honor the same frontmatter as local skills, on first fetch and
+when read from cache. Malformed definitions report their parse error.
+
+Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
+See [Authoring](docs/authoring.md) for composition and review boundaries.
 
 ## Keep work moving
 
@@ -183,7 +204,7 @@ each `.md` URL, use the curated
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
 lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf rebase                                    # refresh main and integrate it into this worktree
+lf sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
 lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/

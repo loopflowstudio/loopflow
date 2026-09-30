@@ -384,7 +384,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
     )
     .unwrap();
     for measured in [None, Some(0), Some(40)] {
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         let session = format!("session-{measured:?}");
         store.test_session(&session, &input);
         let driver = store

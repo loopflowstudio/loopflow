@@ -7,11 +7,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::{FlowSession, WorkStatus};
-use loopflow::engine::flow::Op;
+use loopflow::engine::flow::Command as FlowCommand;
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
-    arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_ops,
+    arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_command,
     present_pr_review, CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
 use loopflow::work::task::{
@@ -100,9 +100,9 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 "Current work.",
             ];
             if headless {
-                execute_flow_ops(
+                execute_flow_command(
                     repo.path(),
-                    &Op {
+                    &FlowCommand {
                         command: "pr".to_string(),
                         args: args.iter().map(|arg| (*arg).to_string()).collect(),
                     },
@@ -1161,8 +1161,9 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completed PR chain");
-    assert_eq!(prs.len(), 1, "the empty successor is removed atomically");
+    assert_eq!(prs.len(), 2, "retain branch identity for cleanup retries");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
+    assert_eq!(prs[1].phase(), PrPhase::Abandoned);
     assert!(!repo.path().join("scratch/review.md").exists());
 }
 
@@ -1251,7 +1252,6 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let position = FlowSession {
-        parent_id: None,
         invocation: QueuedInvocation::load(repo.path(), "task-design").expect("Task design Flow"),
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,
@@ -1379,7 +1379,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
             push: true,
             create_draft_pr: false,
             task: "commit".to_string(),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
             message: Some("new Task head".to_string()),
             agent: None,
         },

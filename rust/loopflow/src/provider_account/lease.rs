@@ -144,6 +144,23 @@ impl AccountSelection {
         }
     }
 
+    pub(crate) fn from_flags_or_env(
+        preferred: &[String],
+        restricted: &[String],
+    ) -> Result<Self, ProviderAccountError> {
+        if preferred.is_empty() && restricted.is_empty() {
+            Self::from_env()
+        } else {
+            Self::from_flags(preferred, restricted)
+        }
+    }
+
+    pub(crate) fn activate(&self) -> Result<AccountSelectionGuard, ProviderAccountError> {
+        let previous = std::env::var_os(ACCOUNT_SELECTION_ENV);
+        std::env::set_var(ACCOUNT_SELECTION_ENV, self.env_value()?);
+        Ok(AccountSelectionGuard(previous))
+    }
+
     pub fn is_default(&self) -> bool {
         matches!(self.0, SelectionMode::Default)
     }
@@ -191,6 +208,18 @@ impl AccountSelection {
                 .map(|resolved| (resolved.provider, resolved.account_id))
                 .collect()
         })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AccountSelectionGuard(Option<std::ffi::OsString>);
+
+impl Drop for AccountSelectionGuard {
+    fn drop(&mut self) {
+        match &self.0 {
+            Some(value) => std::env::set_var(ACCOUNT_SELECTION_ENV, value),
+            None => std::env::remove_var(ACCOUNT_SELECTION_ENV),
+        }
     }
 }
 
@@ -520,18 +549,21 @@ impl BrokerState {
         if let Some(access_token) = self.prepared.credentials.get(&key) {
             return Ok(access_token.clone());
         }
-        let account = self
+        let accounts = self
             .prepared
             .store
             .list_provider_accounts(Some(provider.as_str()))
-            .await?
-            .into_iter()
+            .await?;
+        let account = accounts
+            .iter()
             .find(|account| account.account_id == *account_id)
             .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
                 provider,
                 accounts: format!("'{account_id}'"),
             })?;
-        match crate::provider_account::prepare_account_access_token(provider, &account).await {
+        match crate::provider_account::prepare_account_access_token(provider, account, &accounts)
+            .await
+        {
             Ok(access_token) => {
                 self.prepared.credentials.insert(key, access_token.clone());
                 Ok(access_token)
@@ -855,7 +887,7 @@ impl BrokerState {
     }
 }
 
-pub struct AccountLeaseBroker {
+pub(crate) struct AccountLeaseBroker {
     secret: String,
     local_socket: PathBuf,
     remote_socket: PathBuf,
@@ -876,19 +908,6 @@ impl std::fmt::Debug for AccountLeaseBroker {
 }
 
 impl AccountLeaseBroker {
-    pub async fn start_root(
-        selection: &AccountSelection,
-    ) -> Result<Option<Self>, ProviderAccountError> {
-        prepare_root_lease(selection)
-            .await?
-            .map(Self::start)
-            .transpose()
-    }
-
-    pub fn local_env_value(&self) -> Result<String, ProviderAccountError> {
-        self.local_handle().encode()
-    }
-
     pub(crate) fn start(prepared: PreparedAccountLease) -> Result<Self, ProviderAccountError> {
         let directory = tempfile::Builder::new()
             .prefix("lf-account-lease-")
@@ -973,8 +992,9 @@ impl AccountLeaseBroker {
         })
     }
 
-    /// Handle a local child inherits: points at the broker's own socket.
-    pub(crate) fn local_handle(&self) -> AccountLeaseHandle {
+    // Fixtures reach the broker directly instead of forwarding its socket over SSH.
+    #[cfg(test)]
+    fn local_handle(&self) -> AccountLeaseHandle {
         AccountLeaseHandle {
             socket: self.local_socket.clone(),
             secret: self.secret.clone(),
@@ -1238,7 +1258,6 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::fs;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1429,12 +1448,7 @@ mod tests {
         preferred.home = None;
         let mut fallback = account(Provider::Claude, "fallback", "fallback@example.com");
         fallback.home = Some(temp.path().join("claude-fallback"));
-        fs::create_dir_all(fallback.home.as_ref().unwrap()).unwrap();
-        fs::write(
-            fallback.home.as_ref().unwrap().join(".credentials.json"),
-            r#"{"claudeAiOauth":{"accessToken":"fallback-secret","expiresAt":4102444800000}}"#,
-        )
-        .unwrap();
+        crate::provider_account::identity::tests::write_claude_identity(&mut fallback);
         store.upsert_provider_account(&preferred).await.unwrap();
         store.upsert_provider_account(&fallback).await.unwrap();
         store
@@ -1516,9 +1530,11 @@ mod tests {
         );
         let mut local = account(Provider::Claude, "local", "local@example.com");
         local.home = Some(target_home.join("accounts/claude/local"));
+        crate::provider_account::identity::tests::write_claude_identity(&mut local);
         target_store.upsert_provider_account(&local).await.unwrap();
         let mut shared = account(Provider::Claude, "shared", "shared@example.com");
         shared.home = Some(target_home.join("accounts/claude/shared"));
+        crate::provider_account::identity::tests::write_claude_identity(&mut shared);
         target_store.upsert_provider_account(&shared).await.unwrap();
         let mut missing = account(Provider::Claude, "missing", "missing@example.com");
         missing.home = Some(target_home.join("accounts/claude/missing"));
@@ -1593,7 +1609,7 @@ mod tests {
             restricted: false,
         })
         .unwrap();
-        std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_env_value().unwrap());
+        std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_handle().encode().unwrap());
 
         let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
@@ -1675,7 +1691,7 @@ mod tests {
         .unwrap();
         std::env::set_var(
             ACCOUNT_LEASE_ENV,
-            restricted_broker.local_env_value().unwrap(),
+            restricted_broker.local_handle().encode().unwrap(),
         );
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let error = crate::provider_account::resolve_provider_account(Provider::Claude, None)

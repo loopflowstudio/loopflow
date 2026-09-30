@@ -63,6 +63,11 @@ flow — with commits between them:
 - gate
 ```
 
+Bare names and `flow: NAME` prefer an authored flow, then a skill. Adding a
+same-named flow changes those references. Use `step: NAME` to select the skill
+explicitly; this also lets a flow call its own same-named skill without a cycle.
+An invalid flow reports its error instead of falling back to the skill.
+
 Skills that need another Work's perspective launch it directly with
 `lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
 `lf ask "<request>"`; the caller blocks while a durable AgentSession works in the
@@ -86,13 +91,17 @@ feedback to its next step. Provider exit or readiness alone leaves it waiting.
 Human steps have no navigation verdict or backward edge. Put a deciding step
 after the review when its feedback should choose between continuing and more work.
 
-Mechanical git/PR operations ride along as `op:` steps:
+Mechanical git/PR operations ride along as `cmd:` steps:
 
 ```yaml
 - implement
 - gate
-- op: pr land
+- cmd: pr land
 ```
+
+`cmd:` invokes a builtin command with its arguments. Named skills and flows
+remain separate targets; `lf run NAME` selects only those definitions. Use
+`cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
 
 ### Working notes and feedback
 
@@ -184,9 +193,9 @@ deciding step stable ids:
       from: implement
 ```
 
-One pass runs implement, compress, refresh (rebase → realign), and loop-decide.
+One pass runs implement, compress, refresh (sync → realign), and loop-decide.
 The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
-[decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
+[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
 with direction; Advance publishes, then reaches the human demo. Complete returns the demo's
 feedback and revised design to the second loop-decide. Its own explicit edge
 also targets implement: the outer loop repeats implementation, refresh,

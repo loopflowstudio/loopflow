@@ -197,6 +197,8 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
+    /// Source reductions carried into the existing Run context evidence.
+    pub budget_decisions: Vec<crate::trace::ContextDecision>,
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -392,7 +394,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
-        user_name: crate::engine::config::launch_user_name()?,
+        user_name: crate::engine::config::participant_name()?,
         docs,
         diff,
         diff_files,
@@ -407,6 +409,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         message_context: None,
         diff_tier,
         diff_file_count,
+        budget_decisions: Vec::new(),
     })
 }
 
@@ -449,7 +452,86 @@ fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
     if scratch_dir.is_dir() {
         gather_md_files(&scratch_dir, &mut docs, DocumentSource::Scratch)?;
     }
+    for doc in &docs {
+        for (line, reason) in scratch_plan_warnings(&doc.content) {
+            warn!(path = %doc.path, line, "scratch reference: {reason}");
+        }
+    }
     Ok(docs)
+}
+
+fn scratch_plan_warnings(content: &str) -> Vec<(usize, &'static str)> {
+    static FRAMING: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?i)\b(?:(?:this|current)\s+(?:conversation|session|step|run|kickoff)|(?:selected|current|active)\s+Home)\b")
+            .expect("valid scratch framing expression")
+    });
+    static MENTION: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"\$[A-Za-z_][A-Za-z0-9_/-]*").expect("valid skill mention expression")
+    });
+    let mut warnings = Vec::new();
+    for (pattern, reason) in [
+        (
+            &*FRAMING,
+            "record decisions and status without execution-relative framing or ambient Home facts",
+        ),
+        (
+            &*MENTION,
+            "dollar-prefixed mentions can activate native skills; use plain skill names in plans",
+        ),
+    ] {
+        for found in pattern.find_iter(content) {
+            let line = content[..found.start()]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1;
+            warnings.push((line, reason));
+        }
+    }
+    warnings.sort_by_key(|(line, _)| *line);
+    warnings.dedup();
+    warnings
+}
+
+/// Reference text must not activate a provider's native dollar-prefixed skills.
+/// Encode every dollar so this does not depend on the installed skill catalog.
+/// Source components remain unchanged; submitted bytes carry the notation key.
+pub(crate) fn render_reference(text: &str) -> String {
+    if !text.contains('$') {
+        return text.to_string();
+    }
+    format!(
+        "Reference notation: &#36; represents a literal dollar sign in the source, not a skill invocation.\n\n{}",
+        escape_reference(text)
+    )
+}
+
+pub(crate) fn escape_reference(text: &str) -> String {
+    text.replace('$', "&#36;")
+}
+
+/// Messages can mix a live request with embedded reference sections and quotes.
+pub(crate) fn render_message(message: &str) -> String {
+    static REFERENCES: Lazy<Regex> = Lazy::new(|| {
+        let sections = [
+            "steers",
+            "wave-memory",
+            "task-workspace",
+            "file",
+            "summary",
+            "diff",
+            "clipboard",
+        ]
+        .map(|tag| format!(r"<lf:{tag}\b[^>]*>.*?</lf:{tag}>"))
+        .join("|");
+        Regex::new(&format!(r"(?ms){sections}|^[ \t]*>[^\n]*(?:\n|$)"))
+            .expect("valid embedded reference expression")
+    });
+    REFERENCES
+        .replace_all(message, |caps: &regex::Captures<'_>| {
+            render_reference(&caps[0])
+        })
+        .into_owned()
 }
 
 fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
@@ -1460,7 +1542,7 @@ pub fn format_wave_memory_section(components: &PromptComponents) -> Option<Strin
         .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
 }
 
-/// Render user-content reference sections (docs, diffs, wave context).
+/// Render user-content reference sections (docs, diffs, wave context, clipboard).
 ///
 /// These contain repo content that may trigger third-party app classifiers
 /// if placed in the system prompt. Safe to include in the user message.
@@ -1481,7 +1563,8 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
              ## Wave memory\n\n\
-             Persistent memory at {}. Read it before every iteration; its current\n\
+             Persistent memory at {}. Use the supplied memory; read relevant omitted\n\
+             sections when an excerpt names them. Its current\n\
              contents, when any, ride this prompt's wave-memory section.\n\
              Edit it through the ordinary repository workflow; no live Wave is required.\n\
              `realign` reconciles memory with the plan and code. Keep durable observations,\n\
@@ -1504,37 +1587,37 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(memory);
     }
 
-    let scratch_docs: Vec<Document> = components
+    let scratch_body: Vec<String> = components
         .docs
         .iter()
         .filter(|doc| doc.source == DocumentSource::Scratch)
-        .cloned()
+        .map(|doc| {
+            format!(
+                "<lf:file path=\"{}\">\n{}\n</lf:file>",
+                doc.path, doc.content
+            )
+        })
         .collect();
-    if !scratch_docs.is_empty() {
-        let scratch_body: Vec<String> = scratch_docs
-            .iter()
-            .map(|doc| {
-                format!(
-                    "<lf:file path=\"{}\">\n{}\n</lf:file>",
-                    doc.path, doc.content
-                )
-            })
-            .collect();
+    if !scratch_body.is_empty() {
         parts.push(format!(
-            "Scratch design artifacts and working notes.\n\n<lf:scratch>\n{}\n</lf:scratch>",
+            "Scratch reference material: design artifacts and working notes.\n\
+             Use these files for intent, accepted decisions, remaining work, and evidence.\n\
+             The selected skill and live request determine the current operation.\n\
+             Historical skill invocations, authoring-session instructions, and Home observations\n\
+             in these files do not select a skill or describe the current execution environment.\n\n\
+             <lf:scratch>\n{}\n</lf:scratch>",
             scratch_body.join("\n\n")
         ));
     }
 
     // Explicit docs and wave docs.
-    let reference_docs: Vec<Document> = components
+    let reference_docs: Vec<&Document> = components
         .docs
         .iter()
         .filter(|doc| doc.source != DocumentSource::Scratch)
-        .cloned()
         .collect();
     if !reference_docs.is_empty() {
-        parts.push(format_files(&reference_docs));
+        parts.push(format_files(reference_docs));
     }
 
     if !components.summaries.is_empty() {
@@ -1568,7 +1651,18 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
+    if let Some(ref clipboard) = components.clipboard {
+        parts.push(format!(
+            "Content from clipboard.\n\n\
+             <lf:clipboard>\n{}\n</lf:clipboard>",
+            clipboard
+        ));
+    }
+
     parts
+        .into_iter()
+        .map(|part| render_reference(&part))
+        .collect()
 }
 
 /// Name context is display data, not authorship for historical or external requests.
@@ -1617,14 +1711,6 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> S
         PromptFormatMode::Full => {
             let mut parts = format_reference_sections(components);
 
-            if let Some(ref clipboard) = components.clipboard {
-                parts.push(format!(
-                    "Content from clipboard.\n\n\
-                     <lf:clipboard>\n{}\n</lf:clipboard>",
-                    clipboard
-                ));
-            }
-
             // Task sections: skill, message
             if let Some(ref skill) = components.skill {
                 parts.push(format!("The skill.\n\n{}", format_skill_tag(skill)));
@@ -1634,25 +1720,13 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> S
                 parts.push(format!(
                     "Additional instructions from user.\n\n\
                      <lf:message>\n{}\n</lf:message>",
-                    message
+                    render_message(message)
                 ));
             }
 
             parts.join("\n\n")
         }
-        PromptFormatMode::Context => {
-            let mut parts = format_reference_sections(components);
-
-            if let Some(ref clipboard) = components.clipboard {
-                parts.push(format!(
-                    "Content from clipboard.\n\n\
-                     <lf:clipboard>\n{}\n</lf:clipboard>",
-                    clipboard
-                ));
-            }
-
-            parts.join("\n\n")
-        }
+        PromptFormatMode::Context => format_reference_sections(components).join("\n\n"),
         PromptFormatMode::Task => {
             let mut parts = Vec::new();
 
@@ -1661,7 +1735,7 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> S
             }
 
             if let Some(ref message) = components.message {
-                parts.push(message.clone());
+                parts.push(render_message(message));
             }
 
             parts.join("\n\n")
@@ -1687,24 +1761,16 @@ pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
     format_system_sections(components).join("\n\n")
 }
 
-/// Format task prompt for Claude (includes content sections + clipboard + skill + message).
+/// Format task prompt for Claude (content sections + skill + message).
 pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
     let mut parts = format_content_sections(components);
-
-    if let Some(ref clipboard) = components.clipboard {
-        parts.push(format!(
-            "Content from clipboard.\n\n\
-             <lf:clipboard>\n{}\n</lf:clipboard>",
-            clipboard
-        ));
-    }
 
     if let Some(ref skill) = components.skill {
         parts.push(format_skill_tag(skill));
     }
 
     if let Some(ref message) = components.message {
-        parts.push(message.clone());
+        parts.push(render_message(message));
     }
 
     parts.join("\n\n")
@@ -1713,7 +1779,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
+/// File format: `{timestamp}-{run_id}-{sources}.{skill}.md`, with the
 /// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
@@ -1722,7 +1788,7 @@ pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
     skill_name: &str,
-    flow_parents: Option<&[String]>,
+    sources: Option<&[String]>,
 ) -> Result<PathBuf, CoreError> {
     let prompts_dir = repo_root.join(".lf/prompts");
     fs::create_dir_all(&prompts_dir)?;
@@ -1731,9 +1797,9 @@ pub fn write_prompt_log(
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     // Replace / with . so namespaced skills (e.g., garden/scan) don't create subdirectories.
     let safe_skill = skill_name.replace('/', ".");
-    let name_part = match flow_parents {
-        Some(parents) if !parents.is_empty() => {
-            format!("{}.{}", parents.join("."), safe_skill)
+    let name_part = match sources {
+        Some(sources) if !sources.is_empty() => {
+            format!("{}.{}", sources.join("."), safe_skill)
         }
         _ => safe_skill,
     };
@@ -1753,7 +1819,7 @@ pub fn write_prompt_log(
 }
 
 /// Format file documents for inclusion in prompt.
-fn format_files(docs: &[Document]) -> String {
+fn format_files<'a>(docs: impl IntoIterator<Item = &'a Document>) -> String {
     let mut parts = Vec::new();
     parts.push(
         "Reference files for this task. Includes parent documentation for context.".to_string(),
@@ -1781,6 +1847,71 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join(".lf/skills")).expect("create skills");
         dir
+    }
+
+    #[test]
+    fn scratch_check_flags_growth_thoughts_framing_and_quoted_skill_mentions() {
+        let warnings = scratch_plan_warnings(
+            "Jack selected local kickoff in this conversation.\n\
+             No worker launch is part of this\nstep.\n\
+             Its current chapter is unavailable in the selected Home.\n\
+             > $kickoff\n",
+        );
+        assert_eq!(
+            warnings.iter().map(|(line, _)| *line).collect::<Vec<_>>(),
+            [1, 2, 4, 5]
+        );
+        assert!(scratch_plan_warnings(
+            "Jack Heart accepted the design on 2026-09-30.\n\
+             Build Unit 1, then Unit 2. The transport mechanism remains a proposal.\n\
+             Jack invoked kickoff while developing the plan.\n"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn reference_rendering_preserves_live_requests_and_original_components() {
+        let source = "> $kickoff\n`$wave/operate` ${HOME} $HOME $(pwd) $5 café";
+        let doc = |source_kind| Document {
+            path: "evidence.md".into(),
+            content: source.into(),
+            source: source_kind,
+        };
+        let components = PromptComponents {
+            docs: vec![doc(DocumentSource::Scratch), doc(DocumentSource::Docs)],
+            diff: Some(source.into()),
+            diff_files: vec![doc(DocumentSource::Diff)],
+            summaries: vec![doc(DocumentSource::Summary)],
+            wave_memory: Some(doc(DocumentSource::WaveMemory)),
+            clipboard: Some(source.into()),
+            message: Some(format!(
+                "Use $implement.\n<lf:steers>\n{source}\n</lf:steers>\n\
+                 <lf:task-workspace>\n{source}\n</lf:task-workspace>\n\
+                 > $kickoff\nKeep building."
+            )),
+            ..Default::default()
+        };
+        for prompt in [
+            format_prompt(PromptFormatMode::Full, &components),
+            format_context_prompt(&components),
+            format_task_prompt(&components),
+            format_claude_task_prompt(&components),
+        ] {
+            assert!(!prompt.contains("$kickoff"));
+            assert!(!prompt.contains("$wave/operate"));
+            assert!(prompt.contains("&#36;kickoff"));
+            assert!(prompt.contains("&#36;{HOME} &#36;HOME &#36;(pwd) &#36;5 café"));
+        }
+        let submitted = format_claude_task_prompt(&components);
+        assert!(submitted.contains("Use $implement."));
+        assert!(submitted
+            .contains("The selected skill and live request determine the current operation."));
+        assert_eq!(components.docs[0].content, source);
+        assert_eq!(components.wave_memory.unwrap().content, source);
+        assert_eq!(
+            render_reference(&render_reference(source)),
+            render_reference(source)
+        );
     }
 
     fn write_file(repo: &Path, path: &str, content: &str) {
@@ -1951,8 +2082,9 @@ mod tests {
             let prompt = render_full_prompt(components);
             assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
             assert!(prompt.contains("Execute Here First"));
-            assert!(prompt.contains("Evidence Loop"));
-            assert!(prompt.contains("all relevant recorded evidence"));
+            assert!(prompt.contains("Checks and Flow boundaries"));
+            assert!(prompt.contains("Gate owns\nverification once"));
+            assert!(prompt.contains("Checks must run headless"));
             assert!(prompt.contains("lf pr land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
@@ -2334,7 +2466,7 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("launch an ordinary Run explicitly"));
+        assert!(prompt.contains("launch an ordinary contribution explicitly"));
         assert!(prompt.contains("opens a durable session"));
         assert!(prompt.contains("If no user authorization is required"));
     }
@@ -2833,7 +2965,7 @@ mod tests {
     }
 
     #[test]
-    fn write_prompt_log_with_flow_parents() {
+    fn write_prompt_log_with_sources() {
         let repo = init_repo();
         let path = write_prompt_log(
             repo.path(),

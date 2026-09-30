@@ -110,17 +110,15 @@ lf wt prune              # remove those worktrees and their branches
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
-
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf rebase
+lf sync
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+Refreshes the local default branch, preserving its unpublished commits and edits,
+then merges it into the feature branch. Stacked Tasks merge their live parent
+until it lands, then merge the default branch using their recorded fork.
 
 ## Status says `ready`, but the Task is waiting
 

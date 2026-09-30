@@ -1,9 +1,10 @@
 mod support;
 
 use loopflow::ops::{
-    continue_rebase_for_resolution, plan_rebase, rebase_with_recovery, recover_rebase,
-    NullProgress, OpsError, RebaseClass, RebaseOptions, RebaseRecovery, RebaseStrategy,
+    continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
+    OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
+use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 use support::EnvGuard;
@@ -38,10 +39,10 @@ fn create_conflicting_repo() -> TestRepo {
     repo
 }
 
-fn start_conflicting_recovery(repo: &TestRepo) -> RebaseRecovery {
-    let error = rebase_with_recovery(
+fn start_conflicting_recovery(repo: &TestRepo) -> SyncRecovery {
+    let error = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
@@ -50,7 +51,7 @@ fn start_conflicting_recovery(repo: &TestRepo) -> RebaseRecovery {
     )
     .expect_err("fixture must conflict");
     match error {
-        OpsError::RebaseConflict {
+        OpsError::SyncConflict {
             recovery: Some(recovery),
             ..
         } => *recovery,
@@ -59,7 +60,7 @@ fn start_conflicting_recovery(repo: &TestRepo) -> RebaseRecovery {
 }
 
 #[test]
-fn rebase_onto_main_succeeds() {
+fn sync_onto_main_succeeds() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -74,20 +75,20 @@ fn rebase_onto_main_succeeds() {
     repo.push();
 
     repo.checkout("feature");
-    rebase_with_recovery(
+    sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
         },
         &NullProgress,
     )
-    .expect("rebase");
+    .expect("sync");
 }
 
 #[test]
-fn rebase_publishes_new_existing_and_deleted_remote_branches() {
+fn sync_publishes_new_existing_and_deleted_remote_branches() {
     let _env = EnvGuard::new(&[]);
     for remote_state in ["new", "existing", "deleted"] {
         let repo = TestRepo::new();
@@ -116,9 +117,9 @@ fn rebase_publishes_new_existing_and_deleted_remote_branches() {
         repo.push();
         repo.checkout("feature");
 
-        let result = rebase_with_recovery(
+        let result = sync_with_recovery(
             repo.path(),
-            &RebaseOptions {
+            &SyncOptions {
                 onto: "origin/main".to_string(),
                 push: true,
                 fork_base: None,
@@ -142,7 +143,7 @@ fn rebase_publishes_new_existing_and_deleted_remote_branches() {
 }
 
 #[test]
-fn rebase_preserves_unseen_remote_work() {
+fn sync_preserves_unseen_remote_work() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -165,9 +166,9 @@ fn rebase_preserves_unseen_remote_work() {
     repo.stage_all();
     repo.commit("local follow-up");
 
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: true,
             fork_base: None,
@@ -191,7 +192,7 @@ fn rebase_preserves_unseen_remote_work() {
 
 #[cfg(unix)]
 #[test]
-fn rebase_preserves_branch_recreated_during_push() {
+fn sync_preserves_branch_recreated_during_push() {
     let _env = EnvGuard::new(&[]);
     use std::os::unix::fs::PermissionsExt;
 
@@ -217,9 +218,9 @@ fn rebase_preserves_branch_recreated_during_push() {
     )
     .unwrap();
 
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: true,
             fork_base: None,
@@ -242,12 +243,12 @@ fn rebase_preserves_branch_recreated_during_push() {
 }
 
 #[test]
-fn rebase_conflict_returns_error() {
+fn sync_conflict_returns_error() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
@@ -256,12 +257,12 @@ fn rebase_conflict_returns_error() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::RebaseConflict { ref onto, .. }) if onto == "origin/main"),
-        "expected rebase conflict, got {result:?}"
+        matches!(result, Err(OpsError::SyncConflict { ref onto, .. }) if onto == "origin/main"),
+        "expected sync conflict, got {result:?}"
     );
     assert_eq!(
         loopflow::engine::git::intervention_state(repo.path()).unwrap(),
-        Some("rebase"),
+        Some("merge"),
         "the owned conflict must remain available to the recovery child"
     );
 }
@@ -272,18 +273,18 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
     let repo = create_conflicting_repo();
     let original_head = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
-    recover_rebase(recovery, |_context| {
+    recover_sync(recovery, |_context| {
         repo.create_file("conflict.txt", "reviewed resolution\n");
-        let result = loopflow::engine::git::continue_rebase(repo.path())?;
+        let result = loopflow::engine::git::continue_merge(repo.path(), None)?;
         assert!(result.success, "the reviewed resolution must complete");
         Ok(())
     })
     .expect("record first reviewed resolution");
 
     git(repo.path(), &["reset", "--hard", &original_head]);
-    rebase_with_recovery(
+    sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
@@ -303,20 +304,20 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
 }
 
 #[test]
-fn preexisting_rebase_is_refused_without_abort_or_head_movement() {
+fn preexisting_sync_is_refused_without_abort_or_head_movement() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let output = Command::new("git")
-        .args(["rebase", "origin/main"])
+        .args(["merge", "origin/main"])
         .current_dir(repo.path())
         .output()
         .unwrap();
     assert!(!output.status.success(), "fixture must stop on a conflict");
     let conflicted_head = git(repo.path(), &["rev-parse", "HEAD"]);
 
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
@@ -331,7 +332,7 @@ fn preexisting_rebase_is_refused_without_abort_or_head_movement() {
     assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), conflicted_head);
     assert_eq!(
         loopflow::engine::git::intervention_state(repo.path()).unwrap(),
-        Some("rebase")
+        Some("merge")
     );
 }
 
@@ -341,15 +342,15 @@ fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_rebase(recovery, |_context| Ok(()));
+    let result = recover_sync(recovery, |_context| Ok(()));
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("still reports an active rebase")),
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("still reports an active merge")),
         "expected a postcondition failure, got {result:?}"
     );
     assert_eq!(
         loopflow::engine::git::intervention_state(repo.path()).unwrap(),
-        Some("rebase")
+        Some("merge")
     );
 }
 
@@ -359,8 +360,8 @@ fn recovery_abort_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_rebase(recovery, |_context| {
-        git(repo.path(), &["rebase", "--abort"]);
+    let result = recover_sync(recovery, |_context| {
+        git(repo.path(), &["merge", "--abort"]);
         Ok(())
     });
 
@@ -376,8 +377,8 @@ fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_rebase(recovery, |_context| {
-        git(repo.path(), &["rebase", "--abort"]);
+    let result = recover_sync(recovery, |_context| {
+        git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "main"]);
         Ok(())
     });
@@ -394,8 +395,8 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_rebase(recovery, |_context| {
-        git(repo.path(), &["rebase", "--abort"]);
+    let result = recover_sync(recovery, |_context| {
+        git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "--detach"]);
         Ok(())
     });
@@ -412,12 +413,12 @@ fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_rebase(recovery, |_context| {
+    let result = recover_sync(recovery, |_context| {
         repo.create_file("conflict.txt", "resolved\n");
         git(repo.path(), &["add", "conflict.txt"]);
         git(
             repo.path(),
-            &["-c", "core.editor=true", "rebase", "--continue"],
+            &["-c", "core.editor=true", "commit", "--no-edit"],
         );
         repo.create_file("conflict.txt", "dirty after resolution\n");
         Ok(())
@@ -430,23 +431,23 @@ fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
 }
 
 #[test]
-fn stale_owned_rebase_can_be_explicitly_continued() {
+fn stale_owned_sync_can_be_explicitly_continued() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
         },
         &NullProgress,
     );
-    assert!(matches!(result, Err(OpsError::RebaseConflict { .. })));
+    assert!(matches!(result, Err(OpsError::SyncConflict { .. })));
     drop(result);
 
     repo.create_file("conflict.txt", "main and feature\n");
-    continue_rebase_for_resolution(repo.path(), false).expect("adopt and continue stale rebase");
+    continue_sync_for_resolution(repo.path(), false).expect("adopt and continue stale sync");
 
     assert_eq!(
         loopflow::engine::git::intervention_state(repo.path()).unwrap(),
@@ -459,7 +460,7 @@ fn stale_owned_rebase_can_be_explicitly_continued() {
 }
 
 #[test]
-fn linked_worktrees_own_rebases_independently() {
+fn linked_worktrees_own_syncs_independently() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("conflict.txt", "base\n");
@@ -481,18 +482,18 @@ fn linked_worktrees_own_rebases_independently() {
     repo.push();
     repo.checkout("feature-one");
 
-    let first = rebase_with_recovery(
+    let first = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
         },
         &NullProgress,
     );
-    let second_result = rebase_with_recovery(
+    let second_result = sync_with_recovery(
         &second,
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
@@ -500,15 +501,12 @@ fn linked_worktrees_own_rebases_independently() {
         &NullProgress,
     );
 
-    assert!(matches!(first, Err(OpsError::RebaseConflict { .. })));
-    assert!(matches!(
-        second_result,
-        Err(OpsError::RebaseConflict { .. })
-    ));
+    assert!(matches!(first, Err(OpsError::SyncConflict { .. })));
+    assert!(matches!(second_result, Err(OpsError::SyncConflict { .. })));
 }
 
 #[test]
-fn rebase_after_squash_merge_replays_only_unique_work() {
+fn sync_after_squash_merge_leaves_only_unique_diff() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("parent");
@@ -530,16 +528,16 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
     repo.push();
 
     repo.checkout("feature");
-    rebase_with_recovery(
+    sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: None,
         },
         &NullProgress,
     )
-    .expect("rebase after squash merge");
+    .expect("sync after squash merge");
 
     assert!(repo.path().join("feature.txt").exists());
     assert_eq!(
@@ -549,7 +547,7 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
 }
 
 #[test]
-fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
+fn existing_root_child_syncs_parent_from_its_original_fork() {
     let repo = TestRepo::new();
     let original_fork = repo.head_sha();
     repo.create_branch("child");
@@ -565,9 +563,9 @@ fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
     let parent_head = repo.head_sha();
     repo.checkout("child");
 
-    let verification = rebase_with_recovery(
+    let verification = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/parent".into(),
             push: false,
             fork_base: Some(original_fork),
@@ -595,7 +593,7 @@ fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
 }
 
 #[test]
-fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
+fn stacked_child_merges_main_after_parent_squash() {
     let _env = EnvGuard::new(&[]);
     // A child stacked on a parent whose two commits both edit the same file:
     // once squash-merged, `git cherry` cannot match the combined patch, so the
@@ -621,16 +619,16 @@ fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
     repo.push();
 
     repo.checkout("child");
-    rebase_with_recovery(
+    sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: Some(parent_tip),
         },
         &NullProgress,
     )
-    .expect("stacked child collapses onto main");
+    .expect("stacked child merges main");
 
     assert!(repo.path().join("child.txt").exists());
     assert_eq!(
@@ -646,10 +644,10 @@ fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
 }
 
 #[test]
-fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
+fn stacked_sync_refuses_when_base_is_not_an_ancestor() {
     let _env = EnvGuard::new(&[]);
     // A fork base that is not an ancestor of HEAD means the child's own history
-    // was rewritten; replaying would rewrite history blindly, so refuse.
+    // was rewritten; that base cannot compare the child and target trees.
     let repo = TestRepo::new();
     repo.create_branch("sibling");
     repo.create_file("sibling.txt", "sibling");
@@ -663,9 +661,9 @@ fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
     repo.stage_all();
     repo.commit("child work");
 
-    let result = rebase_with_recovery(
+    let result = sync_with_recovery(
         repo.path(),
-        &RebaseOptions {
+        &SyncOptions {
             onto: "origin/main".to_string(),
             push: false,
             fork_base: Some(unrelated.clone()),
@@ -674,7 +672,7 @@ fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::UnsafeRebaseBase { ref base, .. }) if *base == unrelated),
+        matches!(result, Err(OpsError::UnsafeSyncBase { ref base, .. }) if *base == unrelated),
         "expected an unsafe-base refusal, got {result:?}"
     );
 }
@@ -688,10 +686,10 @@ fn dotted_branch_names_do_not_imply_a_parent() {
     repo.stage_all();
     repo.commit("feature work");
 
-    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
+    let plan = plan_sync(repo.path(), None, None).expect("plan sync");
     assert_eq!(plan.base_ref, "origin/main");
-    assert_eq!(plan.class, RebaseClass::CleanAuthored);
-    assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
+    assert_eq!(plan.class, SyncClass::CleanAuthored);
+    assert_eq!(plan.strategy, SyncStrategy::MergeTarget);
 }
 
 #[test]
@@ -704,7 +702,7 @@ fn explicit_onto_is_the_only_alternate_base() {
     repo.commit("alternate work");
     repo.create_branch("feature");
 
-    let plan = plan_rebase(repo.path(), Some("alternate"), None).expect("plan rebase");
+    let plan = plan_sync(repo.path(), Some("alternate"), None).expect("plan sync");
     assert_eq!(plan.base_ref, "alternate");
 }
 
@@ -715,9 +713,9 @@ fn dirty_scratch_only_branch_resets_to_base() {
     repo.create_branch("feature");
     repo.create_file("scratch/design.md", "notes");
 
-    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
-    assert_eq!(plan.class, RebaseClass::ScratchOnly);
-    assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
+    let plan = plan_sync(repo.path(), None, None).expect("plan sync");
+    assert_eq!(plan.class, SyncClass::ScratchOnly);
+    assert_eq!(plan.strategy, SyncStrategy::ResetToBase);
     assert_eq!(plan.unique_commits, 0);
 }
 
@@ -732,8 +730,8 @@ fn modified_scratch_file_keeps_its_leading_path_character() {
     repo.create_branch("feature");
     repo.create_file("scratch/notes.md", "evolved\n");
 
-    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
-    assert_eq!(plan.class, RebaseClass::ScratchOnly);
+    let plan = plan_sync(repo.path(), None, None).expect("plan sync");
+    assert_eq!(plan.class, SyncClass::ScratchOnly);
     assert!(plan
         .changed_files
         .iter()
@@ -749,7 +747,430 @@ fn wave_changes_are_protected() {
     repo.stage_all();
     repo.commit("update wave memory");
 
-    let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
-    assert_eq!(plan.class, RebaseClass::Protected);
-    assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
+    let plan = plan_sync(repo.path(), None, None).expect("plan sync");
+    assert_eq!(plan.class, SyncClass::Protected);
+    assert_eq!(plan.strategy, SyncStrategy::MergeTarget);
+}
+
+#[test]
+fn long_branch_resolves_one_merge_and_keeps_the_resolution() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    for number in 1..190 {
+        repo.create_file("conflict.txt", &format!("feature revision {number}\n"));
+        repo.stage_all();
+        repo.commit(&format!("revision {number}"));
+    }
+    let original = repo.head_sha();
+    let recovery = start_conflicting_recovery(&repo);
+    recover_sync(recovery, |_| {
+        assert_eq!(
+            repo.head_sha(),
+            original,
+            "merge never detaches or replays HEAD"
+        );
+        repo.create_file("conflict.txt", "reviewed final resolution\n");
+        assert!(loopflow::engine::git::continue_merge(repo.path(), None)?.success);
+        Ok(())
+    })
+    .unwrap();
+    let resolved = repo.head_sha();
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD^1"]), original);
+    assert_eq!(
+        git(repo.path(), &["rev-list", "--count", "origin/main..HEAD"]),
+        "191"
+    );
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(repo.head_sha(), resolved);
+    repo.checkout("main");
+    repo.create_file("later.txt", "independent upstream update\n");
+    repo.stage_all();
+    repo.commit("advance main");
+    repo.push();
+    repo.checkout("feature");
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("conflict.txt")).unwrap(),
+        "reviewed final resolution\n"
+    );
+}
+
+#[test]
+fn stacked_scratch_stays_with_child_across_parent_updates() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("parent");
+    repo.create_file("scratch/design.md", "parent design\n");
+    repo.stage_all();
+    repo.commit("Parent notes");
+    let mut fork = repo.head_sha();
+    repo.create_branch("child");
+    git(repo.path(), &["rm", "-r", "scratch"]);
+    repo.commit("Clear inherited scratch");
+    let first_child_commit = repo.head_sha();
+
+    for revision in 1..=3 {
+        repo.checkout("parent");
+        repo.create_file(
+            "scratch/design.md",
+            &format!("parent revision {revision}\n"),
+        );
+        if revision == 2 {
+            git(repo.path(), &["mv", "scratch/new.md", "scratch/renamed.md"]);
+        } else {
+            repo.create_file("scratch/new.md", &format!("parent addition {revision}\n"));
+        }
+        repo.stage_all();
+        repo.commit("Parent updates notes");
+        let target = repo.head_sha();
+        repo.checkout("child");
+        if revision > 1 {
+            repo.create_file("scratch/local.md", "uncommitted child notes\n");
+            repo.create_file("scratch/draft.md", "untracked child notes\n");
+        }
+        sync_with_recovery(
+            repo.path(),
+            &SyncOptions {
+                onto: "parent".into(),
+                push: false,
+                fork_base: Some(fork),
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert!(!repo.path().join("scratch/design.md").exists());
+        assert!(!repo.path().join("scratch/renamed.md").exists());
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD^2"]), target);
+        assert!(
+            loopflow::engine::git::is_ancestor(repo.path(), &first_child_commit, "HEAD").unwrap()
+        );
+        if revision == 1 {
+            assert!(!repo.path().join("scratch").exists());
+            repo.create_file("scratch/new.md", "child's own notes\n");
+            repo.create_file("scratch/local.md", "committed child notes\n");
+            repo.stage_all();
+            repo.commit("Child notes");
+        } else {
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("scratch/new.md")).unwrap(),
+                "child's own notes\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("scratch/local.md")).unwrap(),
+                "uncommitted child notes\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("scratch/draft.md")).unwrap(),
+                "untracked child notes\n"
+            );
+            repo.create_file("scratch/local.md", "committed child notes\n");
+            std::fs::remove_file(repo.path().join("scratch/draft.md")).unwrap();
+        }
+        fork = target;
+    }
+    assert_eq!(
+        git(repo.path(), &["show", "parent:scratch/design.md"]),
+        "parent revision 3"
+    );
+}
+
+#[test]
+fn child_edits_survive_live_parent_sync_then_squash_landing() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("parent");
+    repo.create_file("shared.txt", "parent first\n");
+    repo.stage_all();
+    repo.commit("parent first");
+    repo.create_file("shared.txt", "parent final\n");
+    repo.create_file("scratch/design.md", "parent design\n");
+    repo.stage_all();
+    repo.commit("parent final");
+    let fork = repo.head_sha();
+    repo.create_branch("child");
+    git(repo.path(), &["rm", "-r", "scratch"]);
+    repo.commit("Clear inherited scratch");
+    repo.create_file("shared.txt", "child edits the parent line\n");
+    repo.stage_all();
+    repo.commit("child edits");
+    let child = repo.head_sha();
+    repo.checkout("parent");
+    repo.create_file("parent-later.txt", "later parent work\n");
+    repo.create_file("scratch/design.md", "updated parent design\n");
+    repo.stage_all();
+    repo.commit("parent advances");
+    let parent = repo.head_sha();
+    repo.checkout("child");
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "parent".into(),
+            push: false,
+            fork_base: Some(fork),
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD^1"]), child);
+    repo.checkout("main");
+    git(repo.path(), &["merge", "--squash", "parent"]);
+    git(repo.path(), &["commit", "-m", "squash parent"]);
+    repo.create_file("main-later.txt", "later main work\n");
+    repo.stage_all();
+    repo.commit("main advances");
+    repo.push();
+    let main = repo.head_sha();
+    repo.checkout("child");
+    let before = repo.head_sha();
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".into(),
+            push: false,
+            fork_base: Some(parent),
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert_eq!(
+        git(repo.path(), &["show", "-s", "--format=%P", "HEAD"]),
+        format!("{before} {main}")
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("shared.txt")).unwrap(),
+        "child edits the parent line\n"
+    );
+    assert_eq!(
+        git(repo.path(), &["diff", "--name-only", "origin/main...HEAD"]),
+        "scratch/design.md\nshared.txt"
+    );
+    assert!(!repo.path().join("scratch").exists());
+}
+
+#[test]
+fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
+    let _env = EnvGuard::new(&[]);
+    for abort in [true, false] {
+        let repo = TestRepo::new();
+        repo.create_branch("parent");
+        repo.create_file("shared.txt", "parent\n");
+        repo.stage_all();
+        repo.commit("parent");
+        let fork = repo.head_sha();
+        repo.create_branch("child");
+        repo.create_file("shared.txt", "child\n");
+        repo.stage_all();
+        repo.commit("child");
+        let child = repo.head_sha();
+        repo.checkout("main");
+        git(repo.path(), &["merge", "--squash", "parent"]);
+        git(repo.path(), &["commit", "-m", "squash parent"]);
+        repo.create_file("shared.txt", "later upstream edit\n");
+        repo.stage_all();
+        repo.commit("upstream changes parent line");
+        repo.push();
+        let target = repo.head_sha();
+        repo.checkout("child");
+        let result = sync_with_recovery(
+            repo.path(),
+            &SyncOptions {
+                onto: "origin/main".into(),
+                push: false,
+                fork_base: Some(fork),
+            },
+            &NullProgress,
+        );
+        assert!(matches!(result, Err(OpsError::SyncConflict { .. })));
+        drop(result);
+        assert_eq!(git(repo.path(), &["rev-parse", "MERGE_HEAD"]), target);
+        if abort {
+            loopflow::ops::abort_sync_for_resolution(repo.path(), false).unwrap();
+            assert_eq!(repo.head_sha(), child);
+            assert_eq!(
+                std::fs::read_to_string(repo.path().join("shared.txt")).unwrap(),
+                "child\n"
+            );
+        } else {
+            // Simulate owner death before the temporary comparison target was replaced.
+            let directory = loopflow::engine::git::absolute_git_dir(repo.path()).unwrap();
+            std::fs::write(directory.join("MERGE_HEAD"), format!("{child}\n")).unwrap();
+            repo.create_file("shared.txt", "reviewed combined content\n");
+            continue_sync_for_resolution(repo.path(), false).unwrap();
+            assert_eq!(
+                git(repo.path(), &["show", "-s", "--format=%P", "HEAD"]),
+                format!("{child} {target}")
+            );
+        }
+    }
+}
+
+#[test]
+fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "saved work\n");
+    repo.stage_all();
+    repo.commit("saved work");
+    let original = repo.head_sha();
+    repo.checkout("main");
+    repo.create_file("main.txt", "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream");
+    repo.push();
+    let target = repo.head_sha();
+    repo.checkout("feature");
+    let command: loopflow::engine::flow::Command =
+        serde_json::from_str(r#"{"command":"rebase","args":["origin/main"]}"#).unwrap();
+    loopflow::ops::execute_flow_command(repo.path(), &command, &NullProgress).unwrap();
+    assert_eq!(
+        git(repo.path(), &["show", "-s", "--format=%P", "HEAD"]),
+        format!("{original} {target}")
+    );
+    assert_eq!(
+        git(repo.path(), &["rev-parse", "origin/feature"]),
+        repo.head_sha()
+    );
+    assert_eq!(
+        serde_json::to_value(command).unwrap(),
+        serde_json::json!({"command":"sync", "args":["origin/main"]})
+    );
+}
+
+#[test]
+fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let child_dir = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(
+        &[
+            (
+                "codex",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "claude",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "opencode",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+        ],
+        home.path(),
+    );
+    repo.create_branch("parent");
+    repo.create_file("shared.txt", "parent\n");
+    repo.stage_all();
+    repo.commit("Parent work");
+    repo.push_new_branch("parent");
+    let fork = repo.head_sha();
+    let parent = support::register_task(home.path(), repo.path(), "parent", &fork);
+    let child_path = child_dir.path().join("child");
+    git(
+        repo.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "child",
+            child_path.to_str().unwrap(),
+        ],
+    );
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
+    std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
+    git(&child_path, &["commit", "-am", "Child work"]);
+    let child_head = git(&child_path, &["rev-parse", "HEAD"]);
+
+    repo.checkout("main");
+    repo.create_file("shared.txt", "conflicting main\n");
+    repo.stage_all();
+    repo.commit("Main moves independently");
+    repo.push();
+    let main_head = repo.head_sha();
+    let command = serde_json::from_str(r#"{"command":"rebase","args":[]}"#).unwrap();
+    let sync =
+        || loopflow::ops::execute_flow_command(&child_path, &command, &NullProgress).unwrap();
+    assert_eq!(
+        plan_sync(&child_path, Some("origin/parent"), Some(fork.clone()))
+            .unwrap()
+            .strategy,
+        SyncStrategy::Noop
+    );
+    sync();
+    assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), child_head);
+    assert_eq!(
+        git(&child_path, &["ls-remote", "--heads", "origin", "child"]),
+        ""
+    );
+    assert_eq!(
+        loopflow::engine::git::intervention_state(&child_path).unwrap(),
+        None
+    );
+
+    repo.checkout("parent");
+    repo.create_file("parent-update.txt", "later parent work\n");
+    repo.stage_all();
+    repo.commit("Parent advances");
+    repo.push();
+    let parent_head = repo.head_sha();
+    sync();
+    assert_eq!(
+        git(&child_path, &["show", "-s", "--format=%P", "HEAD"]),
+        format!("{child_head} {parent_head}")
+    );
+    assert!(!loopflow::engine::git::is_ancestor(&child_path, &main_head, "HEAD").unwrap());
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("shared.txt")).unwrap(),
+        "child\n"
+    );
+    let merged_head = git(&child_path, &["rev-parse", "HEAD"]);
+    sync();
+    assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), merged_head);
+    let saved = runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.base_commit, parent_head);
+    assert_eq!(saved.parent_pr_id, Some(parent.pr.id));
 }

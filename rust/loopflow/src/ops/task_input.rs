@@ -19,7 +19,26 @@ pub(crate) struct TaskSeed {
 }
 
 pub(crate) async fn prepare(store: &SharedStore, task: &Task, wave: &str) -> Result<TaskSeed> {
-    let steers = store.task_steers(&task.id).await?;
+    let consumed = match crate::ops::flow_run::token()? {
+        Some(token) => {
+            let flow = store
+                .flow(&token.invocation)
+                .await?
+                .ok_or_else(|| anyhow!("Flow {} is missing", token.invocation))?;
+            anyhow::ensure!(
+                flow.version == token.version && flow.task_id.as_ref() == Some(&task.id),
+                "Task input belongs to a stale or different Flow"
+            );
+            store.sqlite.completed_step_steer_id(&flow)?
+        }
+        None => 0,
+    };
+    let steers: Vec<_> = store
+        .task_steers(&task.id)
+        .await?
+        .into_iter()
+        .filter(|steer| steer.id > consumed)
+        .collect();
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
@@ -40,7 +59,7 @@ pub(crate) async fn prepare(store: &SharedStore, task: &Task, wave: &str) -> Res
     Ok(TaskSeed {
         task: task.clone(),
         message,
-        steer: steers.last().map_or(0, |steer| steer.id),
+        steer: steers.last().map_or(consumed, |steer| steer.id),
         interrupt,
     })
 }
@@ -76,6 +95,10 @@ impl TaskInput {
         })))
     }
 
+    pub(crate) async fn record_seed(&self, capture: &crate::session_record::CaptureHandle) {
+        capture.record_input("steer_seed_through", &self.0.lock().await.steer.to_string());
+    }
+
     pub(crate) fn refresh(&self) -> CommentRefresh {
         let input = self.clone();
         CommentRefresh(tokio::spawn(async move {
@@ -97,7 +120,7 @@ impl TaskInput {
     pub(crate) async fn poll(
         &self,
         harness: &mut dyn Harness,
-        capture: Option<&crate::run_record::CaptureHandle>,
+        capture: Option<&crate::session_record::CaptureHandle>,
     ) -> Result<()> {
         let mut controls = self.0.lock().await;
         let Controls {

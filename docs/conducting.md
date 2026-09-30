@@ -82,7 +82,7 @@ can leave a Flow parked at review.
 `lf runs` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
 [cutover status](architecture-reference.md#cutover-status) and the
-[CLI reference](lf.md#reading-this-home). Replay uses the captured prompt,
+[CLI reference](lf-reference.md#monitor-history-and-live-activity). Replay uses the captured prompt,
 provider/model, account and permission boundary. It creates new work and requires
 writable admission; it does not alter the original conversation's evidence.
 

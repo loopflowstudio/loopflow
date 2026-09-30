@@ -14,7 +14,9 @@ pub enum StoreError {
 
 #[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("flow not found: {0}")]
+    #[error("skill or flow not found: {0}. Run `lf list` to discover definitions")]
+    TargetNotFound(String),
+    #[error("flow not found: {0}. For a skill, use `lf skill {0}`")]
     FlowNotFound(String),
     #[error("goal not found: {0}")]
     GoalNotFound(String),

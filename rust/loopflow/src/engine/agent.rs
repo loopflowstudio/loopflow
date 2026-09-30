@@ -24,7 +24,7 @@ use crate::provider_account::{
     ProviderAccountRoute, RateLimitSignal,
 };
 use crate::provider_auth::Provider;
-use crate::run_record::CaptureHandle;
+use crate::session_record::CaptureHandle;
 use crate::store::ProviderAccountId;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -98,13 +98,13 @@ pub fn wait_for_interrupt_cleanup() {
     }
 }
 
-/// Result from launching a runner.
+/// Provider result observed by the driving Exec.
 #[derive(Debug, Clone, Default)]
-pub struct LaunchResult {
+pub struct AgentExecResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
-    /// Opaque provider continuation token observed during this launch.
+    /// Opaque provider continuation token observed during this Exec.
     pub provider_session_id: Option<String>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
@@ -185,13 +185,12 @@ pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> any
     Ok(())
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
     crate::durable::RUN_ID_ENV,
-    crate::run_record::RUN_DIR_ENV,
-    "LF_PARENT_RUN_ID",
+    crate::session_record::RUN_DIR_ENV,
 ];
 
 #[derive(Clone, Default)]
@@ -1207,11 +1206,11 @@ pub fn build_agent_command(
 }
 
 /// Launch an agent subprocess and wait for it to exit.
-pub fn launch_agent(
+pub fn exec_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
-) -> Result<LaunchResult, CoreError> {
+) -> Result<AgentExecResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
     pin_provider_account_id_blocking(&mut launch)?;
@@ -1250,11 +1249,11 @@ pub fn launch_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let result = _launch_with_transient_retries(
+    let result = _exec_with_transient_retries(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _launch_agent_once(attempt, &process, capabilities, retry),
+        |attempt, retry| _exec_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
     );
     if let Some(capture) = implicit_capture {
@@ -1273,19 +1272,19 @@ pub fn launch_agent(
 #[derive(Debug)]
 enum AgentAttempt {
     Finished {
-        result: LaunchResult,
+        result: AgentExecResult,
         can_failover: bool,
     },
     AccountUnavailable(CoreError),
 }
 
-fn _launch_with_transient_retries(
+fn _exec_with_transient_retries(
     launch: &AgentConfig,
     process: &ProcessConfig,
     retry_delays: &[Duration],
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
     mut wait: impl FnMut(Duration),
-) -> Result<LaunchResult, CoreError> {
+) -> Result<AgentExecResult, CoreError> {
     let mut attempt_config = launch.clone();
     let mut attempt = 1;
     let mut account_failure = None;
@@ -1381,7 +1380,7 @@ fn _launch_with_transient_retries(
     }
 }
 
-fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<AgentFailure> {
+fn _classify_agent_failure(harness: &str, result: &AgentExecResult) -> Option<AgentFailure> {
     if result.exit_code == 0 {
         return None;
     }
@@ -1406,7 +1405,7 @@ pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
     .then_some(())
 }
 
-fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
+fn _find_provider_error<T>(result: &AgentExecResult, classify: fn(&str) -> Option<T>) -> Option<T> {
     for line in result.stdout.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -1497,7 +1496,7 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _account_limit_signal(harness: &str, result: &LaunchResult) -> Option<RateLimitSignal> {
+fn _account_limit_signal(harness: &str, result: &AgentExecResult) -> Option<RateLimitSignal> {
     let mut signal = result
         .stdout
         .lines()
@@ -1537,7 +1536,7 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
     .then_some(())
 }
 
-fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
+fn _provider_resume_token(result: &AgentExecResult) -> Option<String> {
     result.provider_session_id.clone().or_else(|| {
         result.stdout.lines().find_map(|line| {
             let value: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -1571,7 +1570,7 @@ fn _begin_implicit_capture(
         .ok_or_else(|| {
             CoreError::ExecutionFailed("agent launch has no working directory".into())
         })?;
-    let spec = crate::run_record::RunSpec {
+    let spec = crate::session_record::SessionCaptureSpec {
         harness: harness.to_string(),
         model,
         surface: if process.auto { "headless" } else { "tui" }.to_string(),
@@ -1580,13 +1579,13 @@ fn _begin_implicit_capture(
         worktree: Some(cwd),
         skill: None,
         subjects: Vec::new(),
-        flow: crate::run_record::RunFlowMembership::Independent,
+        flow: crate::session_record::SessionFlowMembership::Independent,
         work: None,
     };
     let capture = if process.auto {
-        CaptureHandle::begin_with_launch(
+        CaptureHandle::begin_with_request(
             spec,
-            crate::run_record::RunLaunchRequest::from_prepared(launch, capabilities),
+            crate::session_record::AgentExecRequest::from_prepared(launch, capabilities),
         )
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1602,12 +1601,12 @@ fn _begin_implicit_capture(
         })
         .map_err(|error| {
             CoreError::ExecutionFailed(format!(
-                "failed to publish Run manifest before agent launch: {error}"
+                "failed to publish Session capture manifest before agent launch: {error}"
             ))
         })
 }
 
-fn _launch_harness_once(
+fn _exec_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     model: Option<String>,
@@ -1618,7 +1617,7 @@ fn _launch_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _launch_harness_once(&launch, &process, model, retry))
+            .spawn(move || _exec_harness_once(&launch, &process, model, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
@@ -1659,7 +1658,7 @@ fn _launch_harness_once(
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_launch(cwd, &config.env)
+        crate::ops::git_operation::prepare_agent_exec(cwd, &config.env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     config
@@ -1705,12 +1704,15 @@ fn _launch_harness_once(
                 .send_input(&prompt)
                 .await
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            if let (Some(input), Some(capture)) = (&process.task_input, capture) {
+                input.record_seed(capture).await;
+            }
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
             let mut input_tick = tokio::time::interval(Duration::from_millis(250));
             input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let mut activity_tick = tokio::time::interval(crate::run_record::activity::SAMPLE_INTERVAL);
+            let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
             activity_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             while exit_code.is_none() {
                 tokio::select! {
@@ -1784,7 +1786,7 @@ fn _launch_harness_once(
             {
                 println!();
             }
-            Ok(LaunchResult {
+            Ok(AgentExecResult {
                 exit_code: exit_code.expect("event loop stops with an exit code"),
                 stdout,
                 stderr,
@@ -1816,7 +1818,7 @@ fn _launch_harness_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         } else {
             route
-                .record_launch_blocking(result.provider_session_id.clone(), None)
+                .record_exec_blocking(result.provider_session_id.clone(), None)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1824,7 +1826,7 @@ fn _launch_harness_once(
     result
 }
 
-fn _launch_agent_once(
+fn _exec_agent_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
@@ -1836,7 +1838,7 @@ fn _launch_agent_once(
         || (harness == "claude" && launch.flow_selection.is_some()))
         && process.auto
     {
-        return _launch_harness_once(launch, process, model, retry);
+        return _exec_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
@@ -1847,7 +1849,7 @@ fn _launch_agent_once(
     let args = &cmd_args[1..];
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
-        "launch_agent prepared command"
+        "exec_agent prepared command"
     );
     tracing::debug!(program, args = ?args, "spawning agent command");
 
@@ -1876,7 +1878,7 @@ fn _launch_agent_once(
     let mut scoped_env = launch.env.clone();
     let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_launch(cwd, &scoped_env)
+        crate::ops::git_operation::prepare_agent_exec(cwd, &scoped_env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     for name in EXECUTION_IDENTITY_ENV {
@@ -1962,13 +1964,13 @@ fn _launch_agent_once(
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        launch_streaming(&mut cmd, process.stream_format, process.timeout, capture)
+        exec_streaming(&mut cmd, process.stream_format, process.timeout, capture)
     } else if process.auto {
         // Batch mode: capture all output
-        launch_batch(&mut cmd, process.timeout, capture)
+        exec_batch(&mut cmd, process.timeout, capture)
     } else {
         // Interactive mode: inherit stdio
-        launch_interactive(&mut cmd, process.timeout, capture)
+        exec_interactive(&mut cmd, process.timeout, capture)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -1992,7 +1994,7 @@ fn _launch_agent_once(
             let resume_token = _provider_resume_token(result);
             let signal = _account_limit_signal(&harness, result);
             let limited = signal.as_ref().is_some_and(|signal| signal.limited);
-            if let Err(error) = route.record_launch_blocking(resume_token, signal) {
+            if let Err(error) = route.record_exec_blocking(resume_token, signal) {
                 tracing::warn!(%error, "failed to record provider account launch");
                 if limited {
                     can_failover = false;
@@ -2021,11 +2023,11 @@ fn spawn_agent_child(
     Ok(child)
 }
 
-fn launch_batch(
+fn exec_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
-) -> Result<LaunchResult, CoreError> {
+) -> Result<AgentExecResult, CoreError> {
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -2091,7 +2093,7 @@ fn launch_batch(
         )));
     }
 
-    Ok(LaunchResult {
+    Ok(AgentExecResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
@@ -2100,11 +2102,11 @@ fn launch_batch(
     })
 }
 
-fn launch_interactive(
+fn exec_interactive(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
-) -> Result<LaunchResult, CoreError> {
+) -> Result<AgentExecResult, CoreError> {
     let start = Instant::now();
     let mut child = spawn_agent_child(cmd, capture)?;
     let _pid_guard = ChildPidGuard::new(child.id());
@@ -2123,7 +2125,7 @@ fn launch_interactive(
             format_timeout(timeout)
         )));
     }
-    Ok(LaunchResult {
+    Ok(AgentExecResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
@@ -2132,12 +2134,12 @@ fn launch_interactive(
     })
 }
 
-fn launch_streaming(
+fn exec_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
-) -> Result<LaunchResult, CoreError> {
+) -> Result<AgentExecResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -2279,7 +2281,7 @@ fn launch_streaming(
         )));
     }
 
-    Ok(LaunchResult {
+    Ok(AgentExecResult {
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
@@ -2356,12 +2358,12 @@ pub fn check_cli_available(cli: &str) -> bool {
 
 /// Agent runner trait for dependency injection in tests.
 pub trait Runner: Send + Sync {
-    fn launch(
+    fn exec(
         &self,
         launch: &AgentConfig,
         process: &ProcessConfig,
         capabilities: &AgentCapabilities,
-    ) -> Result<LaunchResult, CoreError>;
+    ) -> Result<AgentExecResult, CoreError>;
 }
 
 /// Default agent runner that spawns actual processes.
@@ -2369,13 +2371,13 @@ pub trait Runner: Send + Sync {
 pub struct DefaultRunner;
 
 impl Runner for DefaultRunner {
-    fn launch(
+    fn exec(
         &self,
         launch: &AgentConfig,
         process: &ProcessConfig,
         capabilities: &AgentCapabilities,
-    ) -> Result<LaunchResult, CoreError> {
-        launch_agent(launch, process, capabilities)
+    ) -> Result<AgentExecResult, CoreError> {
+        exec_agent(launch, process, capabilities)
     }
 }
 
@@ -3208,15 +3210,15 @@ trust_level = "trusted"
         assert!(cmd.contains(&unknown_model.to_string()));
     }
 
-    fn managed_attempt(result: LaunchResult) -> AgentAttempt {
+    fn managed_attempt(result: AgentExecResult) -> AgentAttempt {
         AgentAttempt::Finished {
             result,
             can_failover: true,
         }
     }
 
-    fn failed_result(message: &str) -> LaunchResult {
-        LaunchResult {
+    fn failed_result(message: &str) -> AgentExecResult {
+        AgentExecResult {
             exit_code: 1,
             stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
             ..Default::default()
@@ -3232,7 +3234,7 @@ trust_level = "trusted"
         };
         let process = auto_process();
         let mut results = vec![
-            LaunchResult {
+            AgentExecResult {
                 exit_code: 1,
                 stdout: concat!(
                     "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n",
@@ -3243,7 +3245,7 @@ trust_level = "trusted"
                 provider_session_id: None,
                 failure: None,
             },
-            LaunchResult {
+            AgentExecResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3252,7 +3254,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let mut waits = Vec::new();
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3284,7 +3286,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let process = auto_process();
-        let failure = LaunchResult {
+        let failure = AgentExecResult {
             exit_code: 1,
             stdout: concat!(
                 "{\"type\":\"system\",\"session_id\":\"session-123\"}\n",
@@ -3304,7 +3306,7 @@ trust_level = "trusted"
         ));
         let mut results = vec![
             failure,
-            LaunchResult {
+            AgentExecResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3313,7 +3315,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let mut waits = Vec::new();
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &process,
             &[Duration::from_secs(30)],
@@ -3352,7 +3354,7 @@ trust_level = "trusted"
         );
         let mut results = vec![
             failure,
-            LaunchResult {
+            AgentExecResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3360,7 +3362,7 @@ trust_level = "trusted"
         .into_iter();
         let mut attempts = Vec::new();
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &auto_process(),
             &[Duration::from_secs(30)],
@@ -3393,7 +3395,7 @@ trust_level = "trusted"
         let process = auto_process();
         let mut attempts = 0;
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3425,7 +3427,7 @@ trust_level = "trusted"
             agent: Some("codex".to_string()),
             ..default_launch()
         };
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
@@ -3454,7 +3456,7 @@ trust_level = "trusted"
         let process = auto_process();
         let mut attempts = 0;
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3480,7 +3482,7 @@ trust_level = "trusted"
         let mut attempts = 0;
         let mut waits = 0;
 
-        let result = _launch_with_transient_retries(
+        let result = _exec_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO, Duration::ZERO],

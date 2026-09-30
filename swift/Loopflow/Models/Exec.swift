@@ -8,7 +8,6 @@ public struct Exec: Codable, Sendable, Equatable, Identifiable {
     public let viaAgent: Bool?
     public let callerSessionID: String?
     public let callerProviderGeneration: Int64?
-    public let callerFlowTurn: String?
     public let command: String?
     public let repo: String?
     public let cwd: String?
@@ -17,16 +16,15 @@ public struct Exec: Codable, Sendable, Equatable, Identifiable {
     public let outcome: String?
     public let exitCode: Int32?
     public let signal: String?
-    public let wave: String?
+    public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, command, repo, cwd, outcome, signal, wave
+        case id, command, repo, cwd, outcome, signal, error
         case traceID = "trace_id"
         case parentExecID = "parent_exec_id"
         case viaAgent = "via_agent"
         case callerSessionID = "caller_session_id"
         case callerProviderGeneration = "caller_provider_generation"
-        case callerFlowTurn = "caller_flow_turn"
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case exitCode = "exit_code"

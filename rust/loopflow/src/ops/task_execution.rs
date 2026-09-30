@@ -6,6 +6,7 @@ use crate::durable::{FlowSession, TaskId};
 use crate::engine::invocation::StepRef;
 use crate::journal::{task_worker_owner_evidence, ProcessIdentityEvidence};
 use crate::ops::task_flow::{PinnedTaskFlow, TaskFlowRecord};
+use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreError, StoreResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,18 +78,16 @@ pub(crate) async fn task_execution_and_flow(
             .and_then(|flow| flow.current_attempt.as_ref())
         {
             let captured = attempt.captured;
-            match crate::run_record::activity::read(&crate::store::lf_home_dir(), &attempt.run_id)
-                .await
-            {
-                crate::run_record::activity::Activity::Stalled => {
+            match activity::read(&crate::store::lf_home_dir(), &attempt.run_id).await {
+                Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
                 }
-                crate::run_record::activity::Activity::Unknown => {
+                Activity::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
                     snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before recovery.");
                 }
-                crate::run_record::activity::Activity::Running => {}
+                Activity::Running => {}
             }
         }
     }
@@ -214,7 +213,6 @@ mod tests {
     #[test]
     fn worker_liveness_is_separate_from_durable_ready_work() {
         let mut position = FlowSession {
-            parent_id: None,
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             cursor: crate::engine::ExecutionCursor {
                 index: 0,
@@ -258,7 +256,7 @@ mod tests {
         });
         position.current_attempt = Some(FlowAttempt {
             captured: 1,
-            run_id: crate::run_record::new_artifact_key(),
+            run_id: crate::session_record::new_artifact_key(),
             published: true,
             outcome: None,
         });

@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
 use crate::journal::{ExecProcessReceipt, EXEC_PROCESS_ROOT};
 use crate::lf::commands::top::{sample_processes, OsProcess, ProcessSnapshot};
-use crate::run_record::ProviderClientRef;
+use crate::session_record::ProviderClientRef;
 
 use super::events::{Changes, Subscription};
 use super::{ActiveSessionsSnapshot, DiscoveryState};
@@ -495,7 +495,7 @@ impl ActiveSessionReader {
                         .parent()
                         .and_then(Path::parent)
                         .context("native receipt has no input directory")?;
-                    match crate::run_record::input_id_from_dir(dir) {
+                    match crate::session_record::input_id_from_dir(dir) {
                         Ok(input) => clients.push((input, client.clone())),
                         Err(error) => gaps.push(format!("{}: {error}", dir.display())),
                     }

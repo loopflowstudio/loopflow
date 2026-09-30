@@ -111,18 +111,6 @@
       "p95": 5.0,
       "maximum": null
     },
-    "preland_phase.swift-build": {
-      "unit": "seconds",
-      "p50": null,
-      "p95": 60.0,
-      "maximum": null
-    },
-    "preland_phase.swift-surface": {
-      "unit": "seconds",
-      "p50": null,
-      "p95": 60.0,
-      "maximum": null
-    },
     "preland_phase.ui-host": {
       "unit": "seconds",
       "p50": null,

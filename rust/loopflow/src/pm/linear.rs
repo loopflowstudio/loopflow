@@ -79,9 +79,9 @@ const LIST_INITIATIVES_QUERY: &str = r#"query ListInitiatives($after: String, $f
   }
 }"#;
 
-const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!) {
+const LIST_INITIATIVE_PROJECTS_QUERY: &str = r#"query ListInitiativeProjects($initiativeId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
   initiative(id: $initiativeId) {
-    projects(after: $after, first: $first, includeSubInitiatives: false) {
+    projects(after: $after, first: $first, includeSubInitiatives: false, includeArchived: $includeArchived) {
       nodes {
         id
         name
@@ -179,9 +179,9 @@ const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: S
   }
 }"#;
 
-const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!) {
+const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $after: String, $first: Int!, $includeArchived: Boolean!) {
   project(id: $projectId) {
-    issues(first: $first, after: $after) {
+    issues(first: $first, after: $after, includeArchived: $includeArchived) {
       nodes {
         id
         identifier
@@ -844,33 +844,6 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let response: WorkflowStatesData = self.graphql(
-            r#"query CanceledWorkflowStates($teamId: ID!) {
-                workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                    nodes { id position }
-                }
-            }"#,
-            json!({ "teamId": team_id }),
-        ).await?;
-        let state = response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .ok_or_else(|| {
-                PmError::Message(format!("no canceled issue state for team {team_id}"))
-            })?;
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state.id }),
-            )
-            .await?;
-        Ok(())
-    }
-
     pub async fn create_project(
         &self,
         initiative_id: &str,
@@ -1034,6 +1007,15 @@ impl LinearClient {
     }
 
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
+        self.list_projects_including_archived(initiative_id, false)
+            .await
+    }
+
+    pub(crate) async fn list_projects_including_archived(
+        &self,
+        initiative_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<PmProject>> {
         let mut after = None;
         let mut projects = Vec::new();
         loop {
@@ -1044,6 +1026,7 @@ impl LinearClient {
                         "initiativeId": initiative_id,
                         "after": after,
                         "first": LIST_PROJECTS_PAGE_SIZE,
+                        "includeArchived": include_archived,
                     }),
                 )
                 .await?;
@@ -1062,7 +1045,15 @@ impl LinearClient {
     }
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
-        self.list_issue_nodes(project_id)
+        self.list_items_including_archived(project_id, false).await
+    }
+
+    pub(crate) async fn list_items_including_archived(
+        &self,
+        project_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<PmItem>> {
+        self.list_issue_nodes(project_id, include_archived)
             .await?
             .into_iter()
             .enumerate()
@@ -1070,7 +1061,11 @@ impl LinearClient {
             .collect()
     }
 
-    async fn list_issue_nodes(&self, project_id: &str) -> PmResult<Vec<IssueNode>> {
+    async fn list_issue_nodes(
+        &self,
+        project_id: &str,
+        include_archived: bool,
+    ) -> PmResult<Vec<IssueNode>> {
         let mut after = None;
         let mut issues = Vec::new();
 
@@ -1082,6 +1077,7 @@ impl LinearClient {
                         "projectId": project_id,
                         "after": after,
                         "first": LIST_ITEMS_PAGE_SIZE,
+                        "includeArchived": include_archived,
                     }),
                 )
                 .await?;
@@ -1379,6 +1375,60 @@ impl LinearClient {
         Ok(())
     }
 
+    /// Preserve the issue and its history while recording a canceled outcome.
+    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
+        let (item, _) = self
+            .issue_ownership(item_id)
+            .await?
+            .ok_or_else(|| PmError::Message(format!("Linear issue {item_id} is unavailable")))?;
+        match item.state.as_deref() {
+            Some("canceled") => return Ok(()),
+            Some("completed" | "duplicate") => {
+                return Err(PmError::Message(format!(
+                    "{} is already terminal; cancellation would replace its outcome",
+                    item.identifier
+                )));
+            }
+            None => {
+                return Err(PmError::Message(format!(
+                    "{} has no observed workflow state",
+                    item.identifier
+                )))
+            }
+            Some(_) => {}
+        }
+        let response: WorkflowStatesData = self
+            .graphql(
+                r#"query CanceledWorkflowStates($teamId: ID!) {
+              workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+                nodes { id position }
+              }
+            }"#,
+                json!({ "teamId": item.team_id }),
+            )
+            .await?;
+        let state = response
+            .workflow_states
+            .nodes
+            .into_iter()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
+            .ok_or_else(|| PmError::Message("no canceled Linear workflow state found".into()))?;
+        let result: PmResult<Value> = self
+            .graphql(
+                SET_ITEM_STATE_MUTATION,
+                json!({ "id": item.id, "stateId": state.id }),
+            )
+            .await;
+        // Read back even after an uncertain mutation response. HTTP success alone
+        // is not evidence that Linear accepted the state transition.
+        match self.issue_ownership(&item.id).await {
+            Ok(Some((confirmed, _))) if confirmed.state.as_deref() == Some("canceled") => Ok(()),
+            confirmation => Err(PmError::Message(format!("cancellation of {} is unconfirmed (mutation: {}; readback: {}); retry task abandon", item.identifier,
+                result.err().map_or_else(|| "acknowledged".into(), |error| error.to_string()),
+                confirmation.err().map_or_else(|| "issue is not canceled".into(), |error| error.to_string())))),
+        }
+    }
+
     /// Reopen a completed issue by moving it back to the team's default active
     /// (`unstarted`) workflow state. Mirrors [`complete_item`]; the repair path
     /// uses it when a Task was prematurely completed while its gates were open.
@@ -1474,6 +1524,60 @@ impl LinearClient {
             )
             .await?;
         Ok(())
+    }
+
+    pub(crate) async fn item_attachment_urls(&self, item_id: &str) -> PmResult<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Data {
+            issue: Option<Issue>,
+        }
+        #[derive(Deserialize)]
+        struct Issue {
+            attachments: Attachments,
+        }
+        #[derive(Deserialize)]
+        struct Attachments {
+            nodes: Vec<Attachment>,
+            #[serde(rename = "pageInfo")]
+            page_info: PageInfo,
+        }
+        #[derive(Deserialize)]
+        struct Attachment {
+            url: String,
+        }
+        let mut after = None;
+        let mut urls = Vec::new();
+        loop {
+            let response: Data = self
+                .graphql(
+                    r#"query IssueAttachments($id: String!, $after: String) {
+                issue(id: $id) { attachments(first: 100, after: $after) {
+                    nodes { url } pageInfo { hasNextPage endCursor }
+                } }
+            }"#,
+                    json!({ "id": item_id, "after": after }),
+                )
+                .await?;
+            let page = response
+                .issue
+                .ok_or_else(|| {
+                    PmError::Message(format!("issue {item_id} attachments are unavailable"))
+                })?
+                .attachments;
+            urls.extend(page.nodes.into_iter().map(|node| node.url));
+            if !page.page_info.has_next_page {
+                return Ok(urls);
+            }
+            let cursor = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("attachment pagination omitted its continuation".into())
+            })?;
+            if after.as_ref() == Some(&cursor) {
+                return Err(PmError::Message(
+                    "attachment pagination did not advance".into(),
+                ));
+            }
+            after = Some(cursor);
+        }
     }
 
     /// Link an external URL to an issue as a first-class attachment. Returns the

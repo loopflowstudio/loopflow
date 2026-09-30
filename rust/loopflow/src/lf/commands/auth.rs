@@ -8,6 +8,7 @@ use std::future::Future;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(all(target_os = "macos", not(test)))]
 use std::process::Command;
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::Stdio;
@@ -18,7 +19,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::lf::AuthCommand;
@@ -31,13 +31,14 @@ use crate::provider_account::{
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    provider_account_auth_status, start_provider_account_auth, AuthCompletion, AuthError,
-    AuthFlowResponse, AuthStatus, Provider, ProviderAuthService,
+    start_provider_account_auth, AuthCompletion, AuthError, AuthFlowResponse, Provider,
+    ProviderAuthService,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
     RoutingState, SharedStore, StoreError,
 };
+use crate::subscription::SubscriptionUsage;
 
 const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on the browser login to finish; give
@@ -49,13 +50,6 @@ static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
 #[cfg(test)]
 static TEST_ACCESS_PROFILE_FAILURES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ClaudeAuthStatusOutput {
-    logged_in: bool,
-    email: Option<String>,
-}
-
 #[derive(Debug)]
 struct AccountLifecycleUpdate<'a> {
     login_email: Option<&'a str>,
@@ -75,10 +69,10 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
     match cmd {
         AuthCommand::Status {
             provider,
-            verify,
+            cached,
             details,
             json,
-        } => auth_status::run(provider.as_deref(), *verify, *details, *json).await,
+        } => auth_status::run(provider.as_deref(), !*cached, *details, *json).await,
         AuthCommand::Disconnect { provider, email } => match email {
             Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,
@@ -101,6 +95,22 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
                 Some(email) => connect_account(provider, email, chrome_profile.as_deref()).await,
                 None => connect(provider, chrome_profile.as_deref()).await,
             }
+        }
+        AuthCommand::RedeemReset {
+            provider,
+            email,
+            idempotency_key,
+            credit_id,
+            json,
+        } => {
+            redeem_reset(
+                provider,
+                email,
+                idempotency_key.as_deref(),
+                credit_id.as_deref(),
+                *json,
+            )
+            .await
         }
         AuthCommand::Route { cmd } => super::profile::run_route_async(cmd).await,
         AuthCommand::Set {
@@ -283,6 +293,113 @@ async fn remember_browser_profile(
     Ok(())
 }
 
+async fn redeem_reset(
+    provider: &str,
+    email: &str,
+    key: Option<&str>,
+    credit_id: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        parse_managed_provider(provider)? == Provider::Codex,
+        "banked resets are available only for Codex"
+    );
+    anyhow::ensure!(
+        key.is_none_or(|value| !value.trim().is_empty()),
+        "idempotency key must not be empty"
+    );
+    anyhow::ensure!(
+        credit_id.is_none_or(|value| !value.trim().is_empty()),
+        "credit ID must not be empty"
+    );
+    let store = open_account_store().await?;
+    let accounts = store.list_provider_accounts(Some("codex")).await?;
+    let account = match match_account(&accounts.iter().collect::<Vec<_>>(), email) {
+        AccountMatch::One(account) => account,
+        AccountMatch::Ambiguous(_) => anyhow::bail!("ambiguous login prefix; use a full email"),
+        AccountMatch::None => anyhow::bail!("no managed Codex login matches {email}"),
+    };
+    let home = account
+        .home
+        .as_deref()
+        .context("account has no managed credential home")?;
+    let _lock = acquire_managed_login_lock(home, Provider::Codex, &account.account_id)?;
+    let key = key
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // Print before the request so a lost reply can be retried without another spend.
+    eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
+        .await
+        .with_context(|| {
+            format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
+        })?;
+    if json {
+        let snapshot = |usage: &SubscriptionUsage| {
+            serde_json::json!({
+                "windows": usage.windows, "reset_credits": usage.reset_credits,
+            })
+        };
+        let report = serde_json::json!({
+            "provider": "codex", "account_id": account.account_id, "login": account_login(account),
+            "idempotency_key": key, "outcome": redemption.outcome,
+            "before": snapshot(&redemption.before),
+            "after": redemption.after.as_ref().ok().map(snapshot),
+            "refresh_error": redemption.after.as_ref().err().map(ToString::to_string),
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "{}: {} (attempt {key})",
+            account_login(account),
+            redemption.outcome
+        );
+        println!("Before:");
+        print_reset_usage(&redemption.before);
+        println!("After:");
+        match &redemption.after {
+            Ok(usage) => print_reset_usage(usage),
+            Err(error) => println!("  unknown; {error}"),
+        }
+    }
+    for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
+        store
+            .upsert_provider_account_limits("codex", &account.account_id, &usage.windows, "poll")
+            .await
+            .with_context(|| {
+                format!(
+                    "reset outcome {}; failed to save usage; attempt {key}",
+                    redemption.outcome
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn print_reset_usage(usage: &SubscriptionUsage) {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    for window in &usage.windows {
+        if window.resets_at.is_some_and(|reset| reset <= now) {
+            println!("  {}: usage unknown; reset passed", window.window);
+        } else {
+            println!(
+                "  {}: {}% used, {}% left",
+                window.window,
+                window.used_percent,
+                100u8.saturating_sub(window.used_percent)
+            );
+        }
+    }
+    println!(
+        "  banked resets: {}",
+        usage
+            .reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count.to_string())
+            .unwrap_or_else(|| "unknown".into())
+    );
+}
+
 async fn connect_account(
     raw_provider: &str,
     raw_email: &str,
@@ -311,6 +428,14 @@ async fn connect_account(
             )
         }
     };
+    if account.login_email.is_none() {
+        return Err(anyhow!(
+            "account '{}' needs an expected email first: lf auth set {} {} --login-email <email>",
+            account.account_id,
+            provider,
+            account.account_id
+        ));
+    }
     let (candidates, remember) =
         browser_profiles(&store, provider, Some(&account), raw_chrome_profile).await?;
     let mut failures = Vec::new();
@@ -424,31 +549,16 @@ async fn connect_managed_account(
         Provider::Codex => {}
         _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     }
-    let login = match provider_account_auth_status(provider, auth_home.clone()).await? {
-        AuthStatus::Active { login } => login,
-        other => {
-            return Err(anyhow!(
-                "{} account '{}' finished login with status {}",
-                provider.display_name(),
-                account_id,
-                other.as_str()
-            ))
-        }
-    };
-    verify_provider_login(
-        provider,
-        account_id,
-        account.login_email.as_ref(),
-        login.as_deref(),
-    )?;
-    let login = login.expect("provider login verification requires an email");
+    let _identity_lock =
+        crate::provider_account::identity::acquire_identity_install_lock(&account_home)?;
+    let (identity, plan) = verify_managed_identity(store, provider, account, &auth_home).await?;
     let account_home = ensure_account_home(provider, account_id)?;
     match provider {
         Provider::Claude => install_claude_login(login_home.path(), &account_home)?,
         Provider::Codex => install_codex_login(login_home.path(), &account_home)?,
         _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     }
-    register_managed_account(store, provider, account_id, account_home, Some(login)).await?;
+    register_managed_account(store, provider, account_id, account_home, identity, plan).await?;
     println!(
         "Connected {} login '{}' through profile '{}'",
         provider.display_name(),
@@ -590,38 +700,6 @@ fn exhausted_access_profiles_error(
 #[error("{0}")]
 struct LoginMismatch(String);
 
-fn verify_provider_login(
-    provider: Provider,
-    account_id: &ProviderAccountId,
-    expected_login: Option<&EmailAddress>,
-    reported_login: Option<&str>,
-) -> Result<()> {
-    let account = expected_login
-        .map(EmailAddress::as_str)
-        .unwrap_or_else(|| account_id.as_str());
-    let reported_login = reported_login.ok_or_else(|| {
-        anyhow!(
-            "{} did not report a login email; account '{}' is unchanged.",
-            provider.display_name(),
-            account
-        )
-    })?;
-    let Some(expected_login) = expected_login else {
-        return Ok(());
-    };
-    if reported_login.eq_ignore_ascii_case(expected_login.as_str()) {
-        return Ok(());
-    }
-    Err(LoginMismatch(format!(
-        "{} reports {}; expected {}. Refused: the login was discarded and '{}' is unchanged.",
-        provider.display_name(),
-        reported_login,
-        expected_login,
-        account
-    ))
-    .into())
-}
-
 fn install_codex_login(login_home: &Path, account_home: &Path) -> Result<()> {
     let source = login_home.join("auth.json");
     if !source.is_file() {
@@ -639,35 +717,65 @@ fn install_claude_login(login_home: &Path, account_home: &Path) -> Result<()> {
         .context("install verified Claude credential")
 }
 
+async fn verify_managed_identity(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    home: &Path,
+) -> Result<(
+    crate::provider_account::identity::AccountIdentity,
+    Option<String>,
+)> {
+    let (identity, plan) = match provider {
+        Provider::Codex => crate::provider_auth::verify_codex_identity(home).await?,
+        Provider::Claude => (crate::subscription::claude_identity(home).await?, None),
+        _ => return Err(anyhow!("unsupported managed provider")),
+    };
+    // A different browser login can try the next saved profile; other failures stop connect.
+    if let Some(expected) = &account.login_email {
+        if !identity.email.eq_ignore_ascii_case(expected.as_str()) {
+            return Err(LoginMismatch(format!(
+                "{} reports {}; expected {}. Refused: the login was discarded and '{}' is unchanged.",
+                provider.display_name(), identity.email, expected, expected
+            )).into());
+        }
+    }
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?;
+    let mut intended = account.clone();
+    intended.observed_subject = None;
+    crate::provider_account::identity::validate_observed_identity(&intended, &identity, &accounts)
+        .await?;
+    Ok((identity, plan))
+}
+
 async fn register_managed_account(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
     account_home: PathBuf,
-    login: Option<String>,
+    identity: crate::provider_account::identity::AccountIdentity,
+    plan: Option<String>,
 ) -> Result<()> {
-    let accounts = store
-        .list_provider_accounts(Some(provider.as_str()))
-        .await?;
-    let existing = accounts
-        .iter()
-        .find(|account| account.account_id == *account_id);
-    let login_email = login
-        .map(|value| EmailAddress::parse(&value))
-        .transpose()
-        .map_err(anyhow::Error::msg)?;
-    let mut account = existing.cloned().unwrap_or_else(|| {
-        new_account(
-            provider,
-            account_id.clone(),
-            account_home.clone(),
-            login_email.clone(),
-        )
-    });
+    let login_email = EmailAddress::parse(&identity.email).map_err(anyhow::Error::msg)?;
+    let mut account = store
+        .get_provider_account(provider.as_str(), account_id)
+        .await?
+        .unwrap_or_else(|| {
+            new_account(
+                provider,
+                account_id.clone(),
+                account_home.clone(),
+                Some(login_email.clone()),
+            )
+        });
+    account.observed_email = Some(identity.email);
+    account.observed_subject = Some(identity.subject);
+    account.observed_credential_digest = identity.credential_digest;
+    account.observed_plan = plan;
     account.home = Some(account_home);
-    if let Some(login_email) = login_email {
-        account.login_email = Some(login_email);
-    }
+    account.login_email = Some(login_email);
     account.credential_state = CredentialState::Connected;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
@@ -705,55 +813,18 @@ async fn import_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         Provider::Codex => "auth.json",
         _ => unreachable!("parse_managed_provider admits Claude and Codex only"),
     };
-    let (login, staged_home) = if account_home.join(credentials_file).is_file() {
-        let login = match provider_account_auth_status(provider, account_home.clone()).await? {
-            AuthStatus::Active { login: Some(login) } => login,
-            AuthStatus::Active { login: None } => {
-                return Err(anyhow!(
-                    "{} did not report a login email; '{}' is unchanged",
-                    provider.display_name(),
-                    account_id
-                ))
-            }
-            other => {
-                return Err(anyhow!(
-                    "{} account '{}' has status {}",
-                    provider.display_name(),
-                    account_id,
-                    other.as_str()
-                ))
-            }
-        };
-        (login, None)
+    let staged_home = if account_home.join(credentials_file).is_file() {
+        None
     } else {
         if provider != Provider::Claude {
-            return Err(anyhow!(
-                "no stored {} login at {}; importing the ambient login is supported for Claude only",
-                provider.display_name(),
-                account_home.display()
-            ));
+            return Err(anyhow!("no stored {} login at {}; importing the ambient login is supported for Claude only", provider.display_name(), account_home.display()));
         }
-        let ambient = read_ambient_claude_status()?;
-        if !ambient.logged_in {
-            return Err(anyhow!("the ambient Claude CLI is not logged in"));
-        }
-        let login = ambient.email.ok_or_else(|| {
-            anyhow!(
-                "Claude did not report a login email; '{}' is unchanged",
-                account_id
-            )
-        })?;
-        let parent = account_home
-            .parent()
-            .ok_or_else(|| anyhow!("account home has no parent directory"))?;
-        fs::create_dir_all(parent).context("create provider accounts directory")?;
         let staged_home = tempfile::Builder::new()
             .prefix(".import-")
             .tempdir_in(parent)
             .context("create private provider import home")?;
         import_ambient_claude_profile_credentials(staged_home.path())?;
-        require_managed_access_token(provider, &account_id, staged_home.path()).await?;
-        (login, Some(staged_home))
+        Some(staged_home)
     };
 
     let credential_home = staged_home
@@ -761,12 +832,21 @@ async fn import_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         .map(|home| home.path())
         .unwrap_or(account_home.as_path());
     require_managed_access_token(provider, &account_id, credential_home).await?;
-    verify_provider_login(provider, &account_id, Some(&expected_login), Some(&login))?;
+    let _identity_lock =
+        crate::provider_account::identity::acquire_identity_install_lock(&account_home)?;
+    let intended = new_account(
+        provider,
+        account_id.clone(),
+        account_home.clone(),
+        Some(expected_login.clone()),
+    );
+    let (identity, plan) =
+        verify_managed_identity(&store, provider, &intended, credential_home).await?;
     let account_home = ensure_account_home(provider, &account_id)?;
     if let Some(staged_home) = staged_home {
         install_claude_login(staged_home.path(), &account_home)?;
     }
-    register_managed_account(&store, provider, &account_id, account_home, Some(login)).await?;
+    register_managed_account(&store, provider, &account_id, account_home, identity, plan).await?;
     println!(
         "Imported {} login '{}'",
         provider.display_name(),
@@ -791,20 +871,6 @@ async fn require_managed_access_token(
         provider.display_name(),
         account_id
     ))
-}
-
-fn read_ambient_claude_status() -> Result<ClaudeAuthStatusOutput> {
-    let output = Command::new("claude")
-        .args(["auth", "status"])
-        .env_remove("CLAUDE_CONFIG_DIR")
-        .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
-        .env_remove("ANTHROPIC_API_KEY")
-        .output()
-        .context("read ambient Claude login")?;
-    if !output.status.success() {
-        return Err(anyhow!("the ambient Claude CLI is not logged in"));
-    }
-    serde_json::from_slice(&output.stdout).context("parse ambient Claude login status")
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
@@ -984,6 +1050,23 @@ async fn set_account_lifecycle(
     let store = open_account_store().await?;
     let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     if let Some(login_email) = login_email {
+        if let Some(home) = &account.home {
+            let observed = match provider {
+                Provider::Codex if home.join("auth.json").exists() => {
+                    Some(crate::provider_auth::codex_identity_from_home(home)
+                        .ok_or_else(|| anyhow!("cannot read credential identity; reconnect before changing the login email"))?.email)
+                }
+                Provider::Claude if home.join(".credentials.json").exists() => {
+                    Some(crate::subscription::claude_identity(home).await?.email)
+                }
+                _ => None,
+            };
+            if let Some(observed) = observed {
+                if !observed.eq_ignore_ascii_case(login_email.as_str()) {
+                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf auth connect {provider} {login_email}"));
+                }
+            }
+        }
         account.login_email = Some(login_email);
     }
     if let Some(routing_state) = routing_state {
@@ -1253,6 +1336,10 @@ mod tests {
             account_id: ProviderAccountId::parse("primary").unwrap(),
             home: None,
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
             plan: Some("max".to_string()),
@@ -1289,6 +1376,10 @@ mod tests {
             account_id: ProviderAccountId::parse("personal").unwrap(),
             home: None,
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
             plan: Some("plus".to_string()),
@@ -1418,8 +1509,8 @@ mod account_first_tests {
     use serde_json::json;
 
     use super::{
-        connect_account, exhausted_access_profiles_error, verify_provider_login,
-        TEST_ACCESS_PROFILE_FAILURES, TEST_OPENED_CHROME_PROFILES,
+        connect_account, exhausted_access_profiles_error, TEST_ACCESS_PROFILE_FAILURES,
+        TEST_OPENED_CHROME_PROFILES,
     };
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
     use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
@@ -1440,6 +1531,8 @@ mod account_first_tests {
         "PATH",
         ACCOUNT_LEASE_ENV,
         "LF_TEST_CODEX_AUTH_JSON",
+        "LF_TEST_CODEX_EMAIL",
+        "LF_TEST_CODEX_RELEASE",
         "LF_TEST_CODEX_COUNT",
         "LF_TEST_CODEX_HOMES",
         "LF_TEST_CODEX_FAIL_FIRST",
@@ -1476,15 +1569,34 @@ mod account_first_tests {
         fs::write(
             &codex,
             r#"#!/bin/sh
+case "$*" in
+  *app-server*) ;;
+  *) exit 90;; # Native login would open a second browser.
+esac
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r request
+case "$request" in
+  *account/read*)
+    printf '{"id":2,"result":{"account":{"email":"%s"}}}\n' "$LF_TEST_CODEX_EMAIL"
+    exit 0;;
+  *account/login/start*) ;;
+  *) exit 91;;
+esac
 count=0
 if [ -f "$LF_TEST_CODEX_COUNT" ]; then count=$(cat "$LF_TEST_CODEX_COUNT"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$LF_TEST_CODEX_COUNT"
 printf '%s\n' "$CODEX_HOME" >> "$LF_TEST_CODEX_HOMES"
 if [ "$LF_TEST_CODEX_FAIL_FIRST" = "1" ] && [ "$count" = "1" ]; then exit 1; fi
-printf '%s\n' 'https://auth.openai.com/oauth/authorize?client_id=test'
+echo '{"id":2,"result":{"type":"chatgpt","loginId":"fixture-login","authUrl":"https://auth.openai.com/oauth/authorize?client_id=test"}}'
+if [ -n "$LF_TEST_CODEX_RELEASE" ]; then
+  while [ ! -f "$LF_TEST_CODEX_RELEASE" ]; do sleep 0.05; done
+fi
 mkdir -p "$CODEX_HOME"
 cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
+echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","success":true}}'
 "#,
         )
         .unwrap();
@@ -1496,7 +1608,9 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             permissions.set_mode(0o755);
             fs::set_permissions(&codex, permissions).unwrap();
         }
-        let claims = URL_SAFE_NO_PAD.encode(format!(r#"{{"email":"{reported_login}"}}"#));
+        let claims = URL_SAFE_NO_PAD.encode(format!(
+            r#"{{"email":"{reported_login}","sub":"user-{reported_login}"}}"#
+        ));
         let auth_json = temp.join("codex-auth.json");
         fs::write(
             &auth_json,
@@ -1521,6 +1635,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_TEST_CODEX_AUTH_JSON", auth_json);
+        std::env::set_var("LF_TEST_CODEX_EMAIL", reported_login);
         std::env::set_var("LF_TEST_CODEX_COUNT", temp.join("codex-count"));
         std::env::set_var("LF_TEST_CODEX_HOMES", temp.join("codex-homes"));
         std::env::set_var(
@@ -1675,6 +1790,10 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             account_id: parse_account_id("primary").unwrap(),
             home: account_home.map(Path::to_path_buf),
             login_email: Some(EmailAddress::parse(login).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
             credential_state: if account_home.is_some() {
                 CredentialState::Connected
             } else {
@@ -1957,7 +2076,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         let error = connect_account("codex", "operator@", None)
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("URL"));
+        assert!(error.to_string().contains("disconnected"));
         assert!(TEST_OPENED_CHROME_PROFILES.lock().unwrap().is_empty());
         assert_eq!(
             fs::read_to_string(temp.path().join("codex-count")).unwrap(),
@@ -2077,15 +2196,86 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         );
     }
 
-    #[test]
-    fn provider_identity_is_required() {
-        let account_id = parse_account_id("primary").unwrap();
-
-        let error = verify_provider_login(Provider::Claude, &account_id, None, None).unwrap_err();
-
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn reconnect_preserves_live_credential_while_browser_login_is_pending() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(CONNECT_ENV);
+        configure_connect_test(temp.path(), "operator@example.com", false);
+        write_chrome_profiles(
+            temp.path(),
+            &[("Profile 3", "Primary", "operator@example.com")],
+        );
+        let home =
+            account_home_path(Provider::Codex, &parse_account_id("primary").unwrap()).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let original = fs::read(temp.path().join("codex-auth.json")).unwrap();
+        fs::write(home.join("auth.json"), &original).unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            temp.path().join("loopflow.db"),
+        ))
+        .await
+        .unwrap();
+        let account = account(Some(&home), "operator@example.com");
+        store.upsert_provider_account(&account).await.unwrap();
+        let release = temp.path().join("release-login");
+        std::env::set_var("LF_TEST_CODEX_RELEASE", &release);
+        let connect = connect_account("codex", "operator@", Some("Primary"));
+        tokio::pin!(connect);
+        // Keep driving the real async login while checking the live home from outside it.
+        tokio::select! {
+            result = &mut connect => panic!("login completed before browser approval: {result:?}"),
+            _ = async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while !temp.path().join("codex-homes").exists() { tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+                }).await.unwrap();
+            } => {}
+        }
+        assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
         assert_eq!(
-            error.to_string(),
-            "Claude did not report a login email; account 'primary' is unchanged."
+            store
+                .get_provider_account("codex", &account.account_id)
+                .await
+                .unwrap(),
+            Some(account.clone())
+        );
+        fs::write(&release, "approved").unwrap();
+        connect.await.unwrap();
+        let installed = store
+            .get_provider_account("codex", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installed.observed_email.as_deref(),
+            Some("operator@example.com")
+        );
+        assert_eq!(
+            installed.observed_subject.as_deref(),
+            Some("user-operator@example.com")
+        );
+        assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+
+        // Even staged credential bytes cannot substitute for this attempt's success.
+        let provider = temp.path().join("bin/codex");
+        let script = fs::read_to_string(&provider).unwrap();
+        fs::write(
+            &provider,
+            script.replace("\"success\":true", "\"success\":false"),
+        )
+        .unwrap();
+        let error = connect_account("codex", "operator@", Some("Primary"))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Codex login failed"));
+        assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+        assert_eq!(
+            store
+                .get_provider_account("codex", &account.account_id)
+                .await
+                .unwrap(),
+            Some(installed)
         );
     }
 
@@ -2096,6 +2286,10 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             account_id: parse_account_id("primary").unwrap(),
             home: None,
             login_email: Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
             credential_state: CredentialState::Missing,
             routing_state: RoutingState::Automatic,
             plan: None,

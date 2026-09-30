@@ -13,7 +13,7 @@
           "kind": "skill",
           "human": false,
           "returns_to": null,
-          "parents": [
+          "sources": [
             "feature",
             "pursue"
           ],

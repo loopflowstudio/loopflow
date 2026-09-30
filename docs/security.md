@@ -32,6 +32,12 @@ A Git worktree separates changes but is not a security sandbox. Claude and
 Codex worktree sessions also receive write access to the main repository's Git
 metadata so normal Git operations work.
 
+Task workers retain failed commands as tool output. A failed command blocks
+handoff only when its output contains a permission, filesystem, network refusal,
+or missing executable diagnostic. A nonzero exit, missing search path, or quoted
+denial string in source output does not establish a blocked capability. The
+blocker names the matching diagnostic so the failure can be corrected.
+
 The same boundary covers subprocesses, repository hooks, MCP servers, plugins,
 skills, browser tools, and commands an agent launches. Run repository
 instructions and extensions as code from sources you trust.

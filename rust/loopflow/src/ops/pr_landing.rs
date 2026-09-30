@@ -10,13 +10,16 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::current_branch;
 use crate::engine::load_skill;
 use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
+};
+use crate::session_record::{
+    AgentExecRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
 };
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
@@ -133,7 +136,7 @@ impl LandingDriver for GithubLandingDriver {
         incident: &CiIncident,
         previous: &str,
     ) -> OpsResult<String> {
-        launch_ci_fix(landing, incident, previous)
+        exec_ci_fix(landing, incident, previous)
     }
 }
 
@@ -168,7 +171,7 @@ fn classify_github_observation(
         _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
             Ok(LandingObservation::Degraded {
                 reason: format!(
-                    "pull request #{} needs integration ({}); rebase and resume landing",
+                    "pull request #{} needs integration ({}); sync and resume landing",
                     pr.number,
                     pr.merge_state
                         .as_deref()
@@ -198,7 +201,7 @@ fn classify_github_observation(
     }
 }
 
-fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> OpsResult<String> {
+fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> OpsResult<String> {
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
@@ -234,7 +237,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         .unwrap_or_default();
     let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact watched landing incident below. Start with `lf rebase`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; the landing supervisor only observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact watched landing incident below. Start with `lf sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; the landing supervisor only observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -263,8 +266,8 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         chrome: config.chrome,
     };
     let (harness, model) = crate::engine::parse_agent(launch.agent());
-    let capture = crate::run_record::CaptureHandle::begin_with_launch(
-        crate::run_record::RunSpec {
+    let capture = CaptureHandle::begin_with_request(
+        SessionCaptureSpec {
             harness,
             model,
             surface: "headless".to_string(),
@@ -273,14 +276,17 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
-            work: landing.task_id.clone().map(|task| crate::session::RunWork {
-                task_id: Some(task),
-                wave_id: None,
-                source: crate::session::WorkSource::Declared,
-            }),
+            flow: SessionFlowMembership::Independent,
+            work: landing
+                .task_id
+                .clone()
+                .map(|task| crate::session::SessionWork {
+                    task_id: Some(task),
+                    wave_id: None,
+                    source: crate::session::WorkSource::Declared,
+                }),
         },
-        crate::run_record::RunLaunchRequest::from_prepared(&launch, &capabilities),
+        AgentExecRequest::from_prepared(&launch, &capabilities),
     )
     .map_err(|error| OpsError::Message(error.to_string()))?;
     capture.record_input("initial", &launch.task_prompt);
@@ -290,7 +296,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let result = launch_agent(&launch, &process, &capabilities);
+    let result = exec_agent(&launch, &process, &capabilities);
     let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
         "completed"
     } else {
@@ -307,7 +313,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         .unwrap_or_else(|| {
             format!(
                 "No repair conclusion recorded; inspect lf runs {} --events",
-                capture.run_id()
+                capture.artifact_key()
             )
         });
     let result = result.map_err(|error| {
@@ -658,6 +664,7 @@ pub(crate) async fn supervise_pr_landing(
                     None,
                 )
                 .await?;
+                cleanup_landed_pr(&store, &landing).await?;
                 return Ok(landing);
             }
             LandingObservation::Closed { head_sha } => {
@@ -820,6 +827,36 @@ async fn landing_store() -> OpsResult<SharedStore> {
         .map_err(|error| OpsError::Message(format!("open landing store: {error}")))
 }
 
+async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResult<()> {
+    if let Some(task_id) = &landing.task_id {
+        let task = store
+            .get_task(task_id)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("landing Task {task_id} disappeared")))?;
+        if crate::ops::task::task_work_status(store, &task).await?
+            == crate::durable::WorkStatus::Done
+        {
+            return crate::ops::task::cleanup_completed_task(store, &task).await;
+        }
+        eprintln!("Task {} remains open; retained its checkout for the saved Flow and next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        return Ok(());
+    }
+    let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;
+    if std::fs::canonicalize(&repo)? == std::fs::canonicalize(&landing.worktree)? {
+        eprintln!("PR merged; retained the primary checkout and branch.");
+        return Ok(());
+    }
+    let deletion =
+        crate::ops::wt::prepare_landed_delete(&repo, &landing.branch, &landing.observed_head_sha)?;
+    crate::ops::wt::apply_delete(deletion, &crate::ops::NullProgress).map_err(|error| {
+        OpsError::Message(format!(
+            "PR merged, but cleanup failed: {error}; retry `lf wt delete {}`",
+            landing.branch,
+        ))
+    })
+}
+
 async fn create_landing(
     store: &SharedStore,
     repo: &Path,
@@ -904,6 +941,7 @@ async fn watch_armed(repo: &Path, options: &LandOptions, pr: PrInfo) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if landing.state.is_terminal() {
         return if landing.state == PrLandingState::Merged {
+            cleanup_landed_pr(&store, &landing).await?;
             Ok(landing)
         } else {
             Err(OpsError::Message(
@@ -1101,7 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_landing_waits_for_integration_instead_of_requiring_rebase() {
+    fn queued_landing_waits_for_integration_instead_of_requiring_sync() {
         let (landing, mut pr) = github_landing_fixture();
         for merge_state in ["behind", "dirty", "clean"] {
             pr.merge_state = Some(merge_state.to_string());
@@ -1359,7 +1397,7 @@ mod tests {
     #[test]
     fn landing_waiter_reads_completed_repair_output_once() {
         use crate::chat::types::{ConversationEvent, ConversationItem};
-        use crate::run_record::{CaptureHandle, RunSpec};
+        use crate::session_record::{CaptureHandle, SessionCaptureSpec};
 
         let _ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -1377,7 +1415,7 @@ mod tests {
         ] {
             let capture = CaptureHandle::begin_at(
                 home.path(),
-                RunSpec {
+                SessionCaptureSpec {
                     harness: "codex".into(),
                     model: None,
                     surface: "headless".into(),
@@ -1386,7 +1424,7 @@ mod tests {
                     worktree: Some(worktree),
                     skill: Some(skill.into()),
                     subjects: Vec::new(),
-                    flow: crate::run_record::RunFlowMembership::Independent,
+                    flow: crate::session_record::SessionFlowMembership::Independent,
                     work: None,
                 },
             )

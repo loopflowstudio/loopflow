@@ -14,7 +14,6 @@ pub struct Exec {
     pub via_agent: Option<bool>,
     pub caller_session_id: Option<String>,
     pub caller_provider_generation: Option<i64>,
-    pub caller_flow_turn: Option<String>,
     pub command: Option<String>,
     pub repo: Option<String>,
     pub cwd: Option<String>,
@@ -23,8 +22,7 @@ pub struct Exec {
     pub outcome: Option<String>,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
-    /// Recorded command context from its trace, not work assigned to its caller later.
-    pub wave: Option<String>,
+    pub error: Option<String>,
 }
 
 /// Command discovery filters. Work means recorded work, never today's caller binding.
@@ -60,7 +58,7 @@ pub enum ExecWorkFilter {
 }
 
 /// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
-/// A cursor is not a cross-request snapshot: late imports or changed outcomes may
+/// A cursor is not a cross-request snapshot: late observations or changed outcomes may
 /// change membership. Refresh from the first page to observe those changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecCursor {
@@ -88,8 +86,6 @@ pub struct AgentCaller {
     pub session_id: String,
     pub provider_generation: i64,
     pub origin_exec_id: ExecId,
-    /// Native launch correlation retained by tool descendants across retries.
-    pub flow_turn: Option<String>,
 }
 
 /// Separate fences: reconnecting a driver does not replace its live provider.
@@ -107,7 +103,6 @@ impl SessionDriver {
             session_id,
             provider_generation: self.provider_generation,
             origin_exec_id: self.provider_exec_id.clone(),
-            flow_turn: None,
         }
     }
 }

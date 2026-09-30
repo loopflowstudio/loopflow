@@ -42,7 +42,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "tar czf" in commands
     assert "package-smoke/lf --version" in commands
     assert "package-smoke/lf --help" in commands
-    assert "package-smoke/lf catalog" in commands
+    assert "package-smoke/lf list" in commands
     assert 'test "$(package-smoke/lf --version)" = "lf ${expected}"' in commands
 
     forbidden = [
@@ -198,7 +198,7 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
         {"flow": "release-run", "schedule": "0 0 10 * * *"},
     ]
     assert yaml.safe_load((ROOT / ".lf/flows/release-run.yaml").read_text()) == [
-        {"op": "release run patch"}
+        {"cmd": "release run patch"}
     ]
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())

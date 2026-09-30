@@ -4,7 +4,7 @@ use clap::Parser;
 
 use loopflow::durable::{FlowPage, FlowSession};
 use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 
 #[test]
@@ -58,13 +58,14 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         .unwrap();
     let flow = store
         .create_flow(FlowSession {
-            parent_id: None,
             invocation: QueuedInvocation::new(
                 "no-template",
                 vec![ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named("saved-skill"),
-                    flow_parents: vec![],
-                    policy: OccurrencePolicy::default(),
+                    sources: vec![],
+                    id: None,
+                    human: false,
+                    repeat: None,
                 })],
             )
             .unwrap(),
@@ -173,15 +174,11 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
     assert!(cli.wave.is_none());
     match cli.command {
         Some(loopflow::lf::Commands::Flow {
-            inventory,
-            json,
-            args,
-            ..
+            cmd: loopflow::lf::FlowCommand::List { inventory, json },
         }) => {
             assert_eq!(inventory.for_task.as_deref(), Some("PROOF-1"));
             assert_eq!(inventory.managed, Some(false));
             assert!(json);
-            assert!(args.is_empty());
         }
         _ => panic!("expected Flow discovery"),
     }

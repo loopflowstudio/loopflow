@@ -4,7 +4,7 @@ use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
 use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
-use crate::run_record::SessionTitleSource;
+use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
@@ -140,32 +140,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        SessionCommand::Import { dry_run, json } => {
-            let store = open_shared_store().await?;
-            let report = crate::ops::session_import::import(&store, *dry_run).await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-                return Ok(());
-            }
-            println!(
-                "{} {} interactive, {} Ask, {} Flow review and {} Task review Sessions; {} other Flow captures; {} already stored.",
-                if *dry_run { "Would store" } else { "Stored" },
-                report.interactive,
-                report.ask,
-                report.flow_review,
-                report.task_review,
-                report.flow,
-                report.unchanged
-            );
-            for failure in &report.failed {
-                println!(
-                    "Not imported: {} — {}",
-                    failure.path.display(),
-                    failure.reason
-                );
-            }
-            Ok(())
-        }
         SessionCommand::Ready { summary } => {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;
@@ -197,7 +171,9 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_ask(&store, run_id).await
         }
-        SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
+        SessionCommand::StopRun { run_id } => {
+            crate::ops::human_session::stop_session_client(run_id)
+        }
     }
 }
 

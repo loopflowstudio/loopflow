@@ -30,10 +30,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.flow_detail(&selector)).await
     }
 
-    /// Restore an old captured Flow without selecting or executing it.
-    pub(crate) async fn import_flow(&self, flow: FlowSession, dry_run: bool) -> StoreResult<bool> {
-        run_sqlite(&self.sqlite, move |store| store.import_flow(&flow, dry_run)).await
-    }
     pub async fn create_flow(&self, flow: FlowSession) -> StoreResult<FlowSession> {
         run_sqlite(&self.sqlite, move |store| store.create_flow(&flow)).await
     }
@@ -134,6 +130,20 @@ impl Store {
         let claim = claim.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.release_flow(&id, version, claim.as_ref())
+        })
+        .await
+    }
+
+    pub(crate) async fn reset_flow_input(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowSession> {
+        let id = id.to_string();
+        let claim = claim.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reset_flow_input(&id, version, claim.as_ref())
         })
         .await
     }

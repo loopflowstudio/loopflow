@@ -14,7 +14,7 @@ use loopflow::machine_install::{
 use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
-use loopflow::work::task::TaskEventKind;
+use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -29,6 +29,88 @@ fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
     }
     command.current_dir(repo).args(args);
     command
+}
+
+#[test]
+fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    repo.create_branch("parent");
+    repo.create_file("scratch/design.md", "parent design");
+    repo.create_file("scratch/review/notes.md", "parent review");
+    repo.stage_all();
+    repo.commit("Parent notes");
+    let parent_head = repo.head_sha();
+    let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
+    let child =
+        support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
+
+    let checkout = || {
+        loopflow::ops::task::task_checkout(
+            repo.path(),
+            "INF-124",
+            loopflow::ops::task::TaskCheckoutOptions::default(),
+        )
+        .unwrap()
+    };
+    checkout();
+    assert!(!child.worktree.join("scratch").exists());
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD^").unwrap(),
+        parent_head
+    );
+    let subject = Command::new("git")
+        .current_dir(&child.worktree)
+        .args(["log", "-1", "--format=%s"])
+        .output()
+        .unwrap();
+    assert!(subject.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&subject.stdout).trim(),
+        "Clear inherited scratch"
+    );
+    let child_head = loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap();
+    fs::create_dir(child.worktree.join("scratch")).unwrap();
+    fs::write(child.worktree.join("scratch/design.md"), "child design").unwrap();
+    checkout();
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap(),
+        child_head
+    );
+    assert_eq!(
+        fs::read_to_string(child.worktree.join("scratch/design.md")).unwrap(),
+        "child design"
+    );
+    assert_eq!(repo.head_sha(), parent_head);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
+        "parent design"
+    );
+    assert!(repo.path().join("scratch/review/notes.md").exists());
 }
 
 #[test]
@@ -373,7 +455,6 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let position = loopflow::durable::FlowSession {
-        parent_id: None,
         task_id: Some(task.task.id.clone()),
         wave_id: Some(task.task.wave_id.clone()),
         cwd: task.task.worktree.clone(),
@@ -552,7 +633,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(repo.head_sha(), head, "no restart checkpoint was committed");
     let step = position.current();
-    let node = step.policy.id.as_ref().unwrap();
+    let node = step.id.as_ref().unwrap();
     let boundary = format!(
         "{}:{}:{}:{}:{}",
         task.task.id, position.invocation.id, step.flow, node, position.cursor.iteration
@@ -725,11 +806,10 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             .iter()
             .position(|step| {
                 matches!(step, loopflow::engine::ConcreteStep::Skill(skill)
-                    if skill.policy.id.as_deref() == Some("decide"))
+                    if skill.id.as_deref() == Some("decide"))
             })
             .expect("pursue has an implementation decision boundary");
         let position = FlowSession {
-            parent_id: None,
             invocation,
             cursor: loopflow::engine::ExecutionCursor {
                 index: decision_index,

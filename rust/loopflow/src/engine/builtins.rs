@@ -359,7 +359,7 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- op: pr land -c"));
+            .contains("- cmd: pr land -c"));
 
         for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());
@@ -399,13 +399,12 @@ mod tests {
         let kickoff = get_builtin_skill("kickoff").expect("implementation plan");
         for requirement in [
             "User-visible outcome",
-            "End-to-end proof",
+            "Acceptance check at gate",
             "Source of truth",
             "Affected surfaces and consumers",
             "Absent and error states",
             "Operational boundary",
             "Exclusions",
-            "implementation receipts",
         ] {
             assert!(kickoff.contains(requirement));
         }
@@ -514,7 +513,7 @@ mod tests {
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "qa", "research", "rebase-conflicts"] {
+        for name in ["implement", "gate", "qa", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");

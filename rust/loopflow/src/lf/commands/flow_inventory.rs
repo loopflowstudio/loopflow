@@ -13,9 +13,6 @@ pub struct FlowInventoryArgs {
     /// List or show saved FlowSessions instead of reusable templates
     #[arg(long)]
     pub sessions: bool,
-    /// Direct runtime children of this FlowSession
-    #[arg(long)]
-    pub parent: Option<String>,
     /// Include every repository and flows with unknown repository evidence
     #[arg(long)]
     pub all: bool,
@@ -46,7 +43,6 @@ pub struct FlowInventoryArgs {
 impl FlowInventoryArgs {
     pub fn is_empty(&self) -> bool {
         !self.sessions
-            && self.parent.is_none()
             && !self.all
             && self.limit.is_none()
             && self.after.is_none()
@@ -68,7 +64,6 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
             CanonicalRepo::current()?.map(|repo| repo.to_string())
         };
         let filter = FlowFilter {
-            parent_id: args.parent.clone(),
             task_id: args
                 .for_task
                 .as_deref()

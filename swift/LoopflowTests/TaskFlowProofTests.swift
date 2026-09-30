@@ -54,6 +54,7 @@ struct TaskFlowTests {
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
         #expect(catalog.map(\.name) == ["feature", "broken"])
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
+        #expect(catalog[0].graph?.steps[0].sources == ["feature"])
     }
 
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
@@ -130,7 +131,7 @@ struct TaskFlowTests {
 }
 
 #if canImport(GhosttyKit)
-@Suite("Task Flow native proof", .serialized)
+@Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
     @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")

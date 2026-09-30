@@ -63,7 +63,7 @@ pub async fn snapshot(
 fn project(
     ownership: &SessionProcessOwnership,
     processes: &crate::lf::commands::top::ProcessSnapshot,
-    clients: &[(String, crate::run_record::ProviderClientRef)],
+    clients: &[(String, crate::session_record::ProviderClientRef)],
     snapshot: &mut ActiveSessionsSnapshot,
 ) {
     let live = live_exec_providers(processes, clients);
@@ -255,9 +255,9 @@ mod tests {
             .await
             .unwrap(),
         );
-        let capture = crate::run_record::CaptureHandle::begin_at(
+        let capture = crate::session_record::CaptureHandle::begin_at(
             home.path(),
-            crate::run_record::RunSpec {
+            crate::session_record::SessionCaptureSpec {
                 harness: "cat".into(),
                 model: None,
                 surface: "tui".into(),
@@ -266,14 +266,14 @@ mod tests {
                 worktree: None,
                 skill: None,
                 subjects: Vec::new(),
-                flow: crate::run_record::RunFlowMembership::Independent,
+                flow: crate::session_record::SessionFlowMembership::Independent,
                 work: None,
             },
         )
         .unwrap();
-        let id = capture.run_id();
+        let id = capture.artifact_key();
         let session_id = store.sqlite.session_for_artifact(&id).unwrap().unwrap().id;
-        let (dir, _) = crate::run_record::resolve_manifest(home.path(), id.as_str()).unwrap();
+        let (dir, _) = crate::session_record::resolve_manifest(home.path(), id.as_str()).unwrap();
         let client = OwnedClient(
             std::process::Command::new("/bin/cat")
                 .stdin(std::process::Stdio::piped())
@@ -281,7 +281,7 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
-        crate::run_record::write_provider_client(&dir, client.0.id()).unwrap();
+        crate::session_record::write_provider_client(&dir, client.0.id()).unwrap();
         assert!(!home.path().join("run-bindings").exists());
         let snapshot = super::snapshot(home.path(), &store, None).await;
         assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
@@ -294,7 +294,7 @@ mod tests {
             [session_id.as_str()]
         );
         let mut replacement = store.sqlite.session_for_artifact(&id).unwrap().unwrap();
-        replacement.artifact_key = crate::run_record::new_artifact_key();
+        replacement.artifact_key = crate::session_record::new_artifact_key();
         replacement.provider = Some("different-provider".into());
         store
             .sqlite
@@ -329,8 +329,9 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         use crate::durable::WorkRef;
-        use crate::run_record::{
-            read_manifest, write_provider_client, CaptureHandle, RunSpec, SubjectAttribution,
+        use crate::session_record::{
+            read_manifest, write_provider_client, CaptureHandle, SessionCaptureSpec,
+            SubjectAttribution,
         };
         use crate::store::{open_store, StorageConfig};
         use crate::work::task::TaskId;
@@ -366,7 +367,7 @@ mod tests {
         for subject in [&task, &other_task] {
             let capture = CaptureHandle::begin_at(
                 home.path(),
-                RunSpec {
+                SessionCaptureSpec {
                     harness: "cat".into(),
                     model: None,
                     surface: "tui".into(),
@@ -375,8 +376,8 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: vec![SubjectAttribution::declared(format!("task:{subject}"))],
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                    work: Some(crate::session::RunWork {
+                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    work: Some(crate::session::SessionWork {
                         task_id: Some(subject.clone()),
                         wave_id: None,
                         source: crate::session::WorkSource::Declared,
@@ -407,7 +408,7 @@ mod tests {
         store.sqlite.assert_no_historical_runs();
         let inputs = captures
             .iter()
-            .map(|capture| capture.run_id())
+            .map(|capture| capture.artifact_key())
             .collect::<Vec<_>>();
         let before = store
             .sqlite
@@ -424,7 +425,7 @@ mod tests {
         assert!(started
             .iter()
             .any(|(id, at)| id == untouched.as_str() && at.is_none()));
-        let snapshot = crate::run_record::active::snapshot(
+        let snapshot = crate::session_record::active::snapshot(
             home.path(),
             &store,
             Some(WorkRef::Task(task.clone())),
@@ -436,7 +437,7 @@ mod tests {
             snapshot.sessions[0].id,
             store
                 .sqlite
-                .session_for_artifact(&captures[0].run_id())
+                .session_for_artifact(&captures[0].artifact_key())
                 .unwrap()
                 .unwrap()
                 .id
@@ -446,16 +447,16 @@ mod tests {
             snapshot.sessions[0].processes[0].state,
             ActivityState::Waiting
         );
-        let snapshot = crate::run_record::active::snapshot(home.path(), &store, None).await;
+        let snapshot = crate::session_record::active::snapshot(home.path(), &store, None).await;
         assert_eq!(snapshot.sessions.len(), 2);
         drop(clients);
         // Captures and client receipts remain unfinished, but neither process lives.
-        let snapshot = crate::run_record::active::snapshot(home.path(), &store, None).await;
+        let snapshot = crate::session_record::active::snapshot(home.path(), &store, None).await;
         assert!(snapshot.sessions.is_empty());
         assert!(snapshot.gaps.is_empty());
         std::fs::create_dir_all(home.path().join("run-bindings")).unwrap();
         std::fs::write(home.path().join("run-bindings/broken.json"), b"{").unwrap();
-        let unavailable = crate::run_record::active::snapshot(home.path(), &store, None).await;
+        let unavailable = crate::session_record::active::snapshot(home.path(), &store, None).await;
         assert!(unavailable.sessions.is_empty());
         assert!(
             unavailable.gaps.is_empty(),
@@ -649,8 +650,8 @@ mod tests {
         second.driver_trace_id = None;
         processes.receipts.clear();
         processes.processes.remove(0);
-        let old = crate::run_record::new_artifact_key();
-        let sibling = crate::run_record::new_artifact_key();
+        let old = crate::session_record::new_artifact_key();
+        let sibling = crate::session_record::new_artifact_key();
         let ownership = SessionProcessOwnership {
             sessions: vec![first, second],
             inputs: BTreeMap::from([
@@ -661,7 +662,7 @@ mod tests {
         let clients = [(old, 70), (sibling, 71)].map(|(input, pid)| {
             (
                 input,
-                crate::run_record::ProviderClientRef {
+                crate::session_record::ProviderClientRef {
                     schema_version: 1,
                     pid,
                     terminal_id: None,

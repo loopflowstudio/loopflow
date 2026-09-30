@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
 use crate::durable::WorkRef;
-use crate::run_record::active::{ActiveSessionReader, ActiveSessionsSnapshot, DiscoveryState};
+use crate::session_record::active::{ActiveSessionReader, ActiveSessionsSnapshot, DiscoveryState};
 use crate::store::SharedStore;
 
 const PERIOD: Duration = Duration::from_secs(2);
@@ -205,7 +205,7 @@ pub(super) fn run(
 #[cfg(test)]
 mod tests {
     use super::{frame, MAX_FRAME};
-    use crate::run_record::active::{ActiveSessionsSnapshot, DiscoveryState};
+    use crate::session_record::active::{ActiveSessionsSnapshot, DiscoveryState};
 
     #[test]
     fn oversized_frame_reports_unavailable_instead_of_truncating_to_empty() {

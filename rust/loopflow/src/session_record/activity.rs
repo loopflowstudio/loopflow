@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use super::{record_dir, EventEnvelope, RunEvent, SCHEMA_VERSION};
+use super::{record_dir, CaptureEvent, EventEnvelope, SCHEMA_VERSION};
 
 pub(crate) const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SAMPLE_GAP: i64 = 45;
@@ -88,7 +88,7 @@ impl super::CaptureHandle {
                 capture
                     .activity
                     .observe(OffsetDateTime::now_utc(), body_pid, processes);
-            capture.append_event(RunEvent::Activity { observation })
+            capture.append_event(CaptureEvent::Activity { observation })
         });
     }
 }
@@ -109,7 +109,7 @@ pub(crate) async fn read(home: &Path, run: &str) -> Activity {
     };
     let now = OffsetDateTime::now_utc();
     match envelope.event {
-        RunEvent::Activity { observation } => {
+        CaptureEvent::Activity { observation } => {
             let current = sample(observation.body_pid).await;
             project(&observation, envelope.observed_at, now, current.as_deref())
         }
@@ -166,7 +166,7 @@ fn latest_event(path: &Path) -> std::io::Result<EventEnvelope> {
         .ok_or_else(|| std::io::Error::other("no complete activity observation"))?;
     let event: EventEnvelope = serde_json::from_slice(line)?;
     if event.schema_version != SCHEMA_VERSION {
-        return Err(std::io::Error::other("unknown Run event schema"));
+        return Err(std::io::Error::other("unknown capture event schema"));
     }
     Ok(event)
 }

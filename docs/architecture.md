@@ -218,9 +218,10 @@ payloads remain files, but readers select and page rows before opening them.
 Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Explicit restart
-replaces only the exact conversation owner; it never kills a shared engine to
-restart one thread. Engine PID, client PID and conversation driver are distinct.
+replace the provider generation or interrupt an existing turn. Client replacement
+leaves the engine alive; Flow retry can recover after confirmed engine exit while
+retaining native history. Neither operation authorizes killing a shared engine
+for one thread. Engine PID, client PID and conversation driver are distinct.
 
 Exec ancestry records the actual lf caller. A direct child names its parent's
 Exec; an agent-issued child also records `via_agent` and AgentSession provenance.
@@ -229,21 +230,20 @@ A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.
 
 A Task selects one managed FlowSession and permits other attributed Flows.
-Taskless and Task-owned Flows use the same captured graph and driver. Runtime
-loop nesting creates child FlowSessions; template composition only expands the
-graph. Each agent-backed step references the exact successful AgentSession
+Taskless and Task-owned Flows use the same captured graph and driver. Loop
+passes are positions in that one FlowSession; template composition compiles into
+the graph. Each agent-backed step references the exact successful AgentSession
 history entry that fulfilled it. Mechanical results stay in FlowSession history;
-an in-process step creates neither a fake Exec nor an agent conversation.
+each step uses a real child Exec, and mechanical work creates no agent conversation.
 Failed or interrupted work remains visible, and stale results cannot advance
 the current boundary. Conversation continuation is separate from Flow retry.
 
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done
-and landed Tasks remain valid targets. Under the current conservative attribution
-assumption, earlier usage retains its recorded owner; binding affects subsequent
-work, and uncertain mid-turn allocation remains unknown.
+or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+usage retains its recorded owner; binding affects subsequent work, and uncertain
+mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
@@ -253,8 +253,8 @@ explicit target name and stable Project identities. A partially rotated reposito
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts. Run is a historical representation to import and remove, not a
-fourth execution object or a generic attempt type under another name.
+write contracts and the current-state conversion boundary. Exec, AgentSession
+and FlowSession are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
 

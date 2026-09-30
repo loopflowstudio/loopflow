@@ -138,7 +138,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     let no_tools = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
     for args in [
-        vec!["catalog"],
+        vec!["list"],
         vec!["flow", "show", "code"],
         vec!["flow", "validate", "code"],
         vec!["auth", "status"],
@@ -153,7 +153,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
             .output()
             .unwrap();
         let stdout = success(output);
-        if args == ["catalog"] {
+        if args == ["list"] {
             assert!(stdout.contains("debug"));
             assert!(stdout.contains("unbreak"));
         }
@@ -171,11 +171,11 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["rebase", "--plan"])
+    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf rebase from a Git repository"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
@@ -187,7 +187,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         .unwrap();
     assert_eq!(
         commands, 2,
-        "the failed rebase and Home read each own an Exec"
+        "the failed sync and Home read each own an Exec"
     );
     let output = command(
         home.path(),
@@ -207,7 +207,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
     let outside = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let other = TestRepo::new();
-    let linked = repo.create_named_worktree("catalog");
+    let linked = repo.create_named_worktree("list");
     let nested = repo.path().join("nested");
     fs::create_dir_all(&nested).unwrap();
     for root in [repo.path(), linked.as_path()] {
@@ -247,7 +247,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
             "cwd: {}",
             cwd.display()
         );
-        let catalog = success(command(home.path(), cwd, &["catalog"]).output().unwrap());
+        let catalog = success(command(home.path(), cwd, &["list"]).output().unwrap());
         assert_eq!(catalog.contains("checkout-marker"), local_catalog);
     }
     assert!(!outside.path().join(".lf").exists());
@@ -262,7 +262,7 @@ fn broken_git_metadata_is_not_treated_as_an_ordinary_folder() {
         "gitdir: /nonexistent/loopflow-test-repository",
     )
     .unwrap();
-    let output = command(home.path(), cwd.path(), &["catalog"])
+    let output = command(home.path(), cwd.path(), &["list"])
         .output()
         .unwrap();
     assert!(!output.status.success());

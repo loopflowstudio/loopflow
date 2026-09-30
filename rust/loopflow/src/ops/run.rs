@@ -299,7 +299,7 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct TaskWorkerLaunch {
+pub(crate) struct TaskWorkerExec {
     pub task_id: TaskId,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
@@ -307,15 +307,8 @@ pub(crate) struct TaskWorkerLaunch {
     pub environment: Vec<(String, String)>,
 }
 
-pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
-    let environment = request.environment.clone();
-    start_work_session(&request, environment).await
-}
-
-async fn start_work_session(
-    request: &TaskWorkerLaunch,
-    mut environment: Vec<(String, String)>,
-) -> OpsResult<()> {
+pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
+    let mut environment = request.environment;
     let execution = current_home_execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)
@@ -364,7 +357,7 @@ async fn start_work_session(
     }
     environment.push((
         crate::engine::config::USER_NAME_ENV.to_string(),
-        crate::engine::config::launch_user_name()
+        crate::engine::config::participant_name()
             .map_err(run_error)?
             .unwrap_or_default(),
     ));
@@ -588,9 +581,9 @@ mod tests {
             assert_eq!(binding.work, work);
             let previous_db = std::env::var_os("LF_DB_PATH");
             std::env::set_var("LF_DB_PATH", directory.path().join("registry.db"));
-            let capture = crate::run_record::CaptureHandle::begin_at(
+            let capture = crate::session_record::CaptureHandle::begin_at(
                 directory.path(),
-                crate::run_record::RunSpec {
+                crate::session_record::SessionCaptureSpec {
                     harness: "codex".into(),
                     model: None,
                     surface: "headless".into(),
@@ -598,11 +591,11 @@ mod tests {
                     repo: None,
                     worktree: None,
                     skill: None,
-                    subjects: vec![crate::run_record::SubjectAttribution::declared(format!(
-                        "task:{selector}"
-                    ))],
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                    work: Some(crate::session::RunWork {
+                    subjects: vec![crate::session_record::SubjectAttribution::declared(
+                        format!("task:{selector}"),
+                    )],
+                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    work: Some(crate::session::SessionWork {
                         task_id: Some(task.id.clone()),
                         wave_id: Some(wave.id().clone()),
                         source: crate::session::WorkSource::Declared,
@@ -612,7 +605,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 store
-                    .session_for_artifact(&capture.run_id())
+                    .session_for_artifact(&capture.artifact_key())
                     .await
                     .unwrap()
                     .unwrap()
@@ -632,22 +625,22 @@ mod tests {
             std::env::set_var("LF_CONTROL_HOME", directory.path());
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
-            std::env::set_var("LF_RUN_ID", capture.run_id().as_str());
+            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
             std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
-            crate::run_record::write_provider_session(
+            crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
                 "saved-session",
                 None,
             )
             .unwrap();
-            let history = crate::run_record::read_provider_session(&capture.artifact_dir())
+            let history = crate::session_record::read_provider_session(&capture.artifact_dir())
                 .unwrap()
                 .unwrap();
             let resumed = crate::lf::commands::util::resume_session(
                 "codex",
                 None,
                 repo.path(),
-                &capture.run_id(),
+                &capture.artifact_key(),
                 &capture.artifact_dir(),
                 &history,
             );
@@ -663,12 +656,12 @@ mod tests {
                 .to_string()
                 .contains("was deleted"));
             assert!(
-                crate::run_record::read_provider_clients(&capture.artifact_dir())
+                crate::session_record::read_provider_clients(&capture.artifact_dir())
                     .unwrap()
                     .is_empty()
             );
             assert!(
-                crate::run_record::read_provider_session(&capture.artifact_dir())
+                crate::session_record::read_provider_session(&capture.artifact_dir())
                     .unwrap()
                     .is_some()
             );
@@ -715,7 +708,7 @@ mod tests {
             crate::session::AgentSession {
                 captured: None,
                 id: uuid::Uuid::new_v4().to_string(),
-                artifact_key: crate::run_record::new_artifact_key(),
+                artifact_key: crate::session_record::new_artifact_key(),
                 caller_artifact_key: caller,
                 input_published: true,
                 cwd: directory.path().to_path_buf(),

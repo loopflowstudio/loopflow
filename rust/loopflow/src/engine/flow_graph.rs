@@ -31,8 +31,8 @@ pub struct FlowNode {
     pub human: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
-    /// Composed Flows this occurrence was expanded from, outermost first.
-    pub parents: Vec<String>,
+    /// Composed Flows this occurrence was compiled from, outermost first.
+    pub sources: Vec<String>,
     /// XOR alternatives, sorted by name; empty for other kinds.
     pub paths: Vec<FlowGraphPath>,
 }
@@ -65,25 +65,25 @@ pub struct FlowReturn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
-    /// `None` when the definition cannot be loaded or expanded.
+    /// `None` when the definition cannot be loaded or compiled.
     pub graph: Option<FlowGraph>,
     /// Why the definition is unusable; set exactly when `graph` is `None`.
     pub unavailable: Option<String>,
 }
 
-/// Every Flow available in `repo`, each expanded through the shared loader.
+/// Every Flow available in `repo`, each compiled through the shared loader.
 pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
     crate::engine::available_flow_names(repo)
         .into_iter()
         .map(|name| {
-            let expanded = crate::engine::load_flow(&name, repo)
+            let compiled = crate::engine::load_flow(&name, repo)
                 .map_err(|error| error.to_string())
                 .and_then(|flow| {
-                    crate::engine::expand_flow(&flow, repo)
+                    crate::engine::compile_flow(&flow, repo)
                         .map(|steps| FlowGraph::new(&flow.name, &steps))
                         .map_err(|error| error.to_string())
                 });
-            match expanded {
+            match compiled {
                 Ok(graph) => FlowCatalogEntry {
                     name,
                     graph: Some(graph),
@@ -133,21 +133,21 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
             ConcreteStep::Skill(skill) => FlowNode {
                 returns_to: return_target(steps, index).map(|target| result[target].key),
                 key,
-                id: skill.policy.id.clone(),
+                id: skill.id.clone(),
                 label: skill.skill.name.clone(),
                 kind: FlowNodeKind::Skill,
-                human: skill.policy.human,
-                parents: skill.flow_parents.clone(),
+                human: skill.human,
+                sources: skill.sources.clone(),
                 paths: Vec::new(),
             },
-            ConcreteStep::Op(op) => FlowNode {
+            ConcreteStep::Command(op) => FlowNode {
                 key,
                 id: None,
                 label: op.item.display_name(),
                 kind: FlowNodeKind::Op,
                 human: false,
                 returns_to: None,
-                parents: op.flow_parents.clone(),
+                sources: op.sources.clone(),
                 paths: Vec::new(),
             },
             ConcreteStep::Xor(branch) => {
@@ -171,7 +171,7 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
                     kind: FlowNodeKind::Xor,
                     human: false,
                     returns_to: None,
-                    parents: branch.flow_parents.clone(),
+                    sources: branch.sources.clone(),
                     paths,
                 }
             }
@@ -186,9 +186,9 @@ fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = &steps[index] else {
         return None;
     };
-    let from = skill.policy.repeat.as_ref()?.from.as_str();
+    let from = skill.repeat.as_ref()?.from.as_str();
     steps[..index].iter().position(|target| {
-        matches!(target, ConcreteStep::Skill(target) if target.policy.id.as_deref() == Some(from))
+        matches!(target, ConcreteStep::Skill(target) if target.id.as_deref() == Some(from))
     })
 }
 
@@ -204,7 +204,7 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
             let ConcreteStep::Skill(skill) = step else {
                 return None;
             };
-            let id = skill.policy.id.as_ref()?;
+            let id = skill.id.as_ref()?;
             Some(cursor.progress.repeats.get(id).copied().unwrap_or(0))
         })
         .collect();
@@ -329,23 +329,20 @@ mod tests {
 
     use crate::engine::execution::{ExecutionCursor, NestedCursor};
     use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, RepeatPolicy,
-        Skill,
+        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
     };
     use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowNodeKind};
-    use crate::engine::{expand_flow, load_flow};
+    use crate::engine::{compile_flow, load_flow};
 
     fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
-            policy: OccurrencePolicy {
-                id: id.map(str::to_string),
-                human,
-                repeat: from.map(|from| RepeatPolicy {
-                    from: from.to_string(),
-                }),
-            },
-            flow_parents: Vec::new(),
+            id: id.map(str::to_string),
+            human,
+            repeat: from.map(|from| RepeatPolicy {
+                from: from.to_string(),
+            }),
+            sources: Vec::new(),
         })
     }
 
@@ -354,8 +351,8 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
             ("code", &["implement", "compress"], &[], 0),
-            ("queue", &["compress", "rebase", "realign", "gate"], &[], 0),
-            ("refresh", &["rebase", "realign"], &[], 0),
+            ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
+            ("refresh", &["sync", "realign"], &[], 0),
             ("task-design", &["kickoff", "review-design"], &[1], 0),
             ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
             (
@@ -363,7 +360,7 @@ mod tests {
                 &[
                     "implement",
                     "compress",
-                    "rebase",
+                    "sync",
                     "realign",
                     "loop-decide",
                     "pr-publish",
@@ -380,7 +377,7 @@ mod tests {
         ];
         for (name, labels, humans, returns) in cases {
             let flow = load_flow(name, repo.path()).unwrap();
-            let graph = FlowGraph::new(*name, &expand_flow(&flow, repo.path()).unwrap());
+            let graph = FlowGraph::new(*name, &compile_flow(&flow, repo.path()).unwrap());
             assert_eq!(
                 graph
                     .steps
@@ -416,9 +413,9 @@ mod tests {
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("refresh", repo.path()).unwrap();
-        let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
-        assert_eq!(labels, ["rebase", "realign"]);
+        assert_eq!(labels, ["sync", "realign"]);
         assert_eq!(graph.steps[0].kind, FlowNodeKind::Op);
         assert_eq!(graph.steps[1].kind, FlowNodeKind::Skill);
     }
@@ -427,7 +424,7 @@ mod tests {
     fn feature_draws_both_returns_to_implement_with_forward_delivery() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("feature", repo.path()).unwrap();
-        let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -436,14 +433,14 @@ mod tests {
                 "review-design",
                 "implement",
                 "compress",
-                "rebase",
+                "sync",
                 "realign",
                 "loop-decide",
                 "pr-publish",
                 "demo",
                 "loop-decide",
                 "compress",
-                "rebase",
+                "sync",
                 "realign",
                 "gate",
                 "pr land -c"
@@ -464,7 +461,7 @@ mod tests {
         );
         assert!(graph.steps[1].human && graph.steps[8].human);
         assert_eq!(graph.steps[14].kind, FlowNodeKind::Op);
-        assert_eq!(graph.steps[5].parents, ["feature", "pursue", "refresh"]);
+        assert_eq!(graph.steps[5].sources, ["feature", "pursue", "refresh"]);
     }
 
     #[test]
@@ -534,7 +531,7 @@ mod tests {
                     },
                 ),
             ]),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
         };
         let steps = vec![
             skill("kickoff", None, false, None),
@@ -601,7 +598,7 @@ mod tests {
                         )
                     })
                     .collect(),
-                flow_parents: Vec::new(),
+                sources: Vec::new(),
             })
         }
         fn begin() -> ConcreteStep {

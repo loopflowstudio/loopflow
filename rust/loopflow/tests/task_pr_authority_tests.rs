@@ -238,7 +238,7 @@ fn land_refuses_when_registry_inaccessible_before_any_push() {
 
 /// Stacking resolution (`task_stack`) shares the authority gate. An
 /// inaccessible registry must refuse rather than return `None` and let a
-/// stacked rebase silently collapse to generic.
+/// stacked sync silently collapse to generic.
 #[cfg(unix)]
 #[test]
 fn task_stack_refuses_when_registry_inaccessible() {

@@ -145,3 +145,44 @@ Compression shares one typed-help lookup for escaped and ordinary names, removes
 worktree-list's obsolete catch-all pattern, and makes catalog rendering byte-stable.
 Proof: all 10 `cli_discovery` tests, repeated catalog rendering, formatting,
 all-target Clippy (four jobs), and diff checks passed. Remaining scope is unchanged.
+
+### Slice review · 2026-09-30
+
+Reviewed baseline `a6b1bc3df` through `a2a06bd45`, including catalog verdicts,
+parser/dispatch, definition rendering, callers and documentation. **Pass for
+this cleanup slice; gap for whole-Task readiness.** No bounded production defect
+was found. The shared typed-help reader replaces `SkillCommand::Show` and its
+dispatch; ignored `full`/`no_sync` fields and ten extra aliases are removed.
+Current caller searches found only negative tests for the removed options;
+historical chapter records and baseline catalog evidence remain unchanged.
+Definition execution still uses its existing external-subcommand path. No
+storage writer, recovery identity, fallback reader or execution authority moved.
+
+Fresh executed proof: `cargo test -p loopflow --test cli_discovery
+typed_help_inspects_reserved_definitions_without_launching` passed (1 test),
+exercising the compiled CLI in disposable directories with no provider on PATH
+and no Home state created. `uv run pytest
+python/tests/test_loopflow_skill_alignment.py` passed (4 tests). This establishes
+inspection and documentation alignment, not a live provider result. Reuse the
+recorded unchanged-code discovery, cached-status, parser, reorder, formatting
+and Clippy passes above; no broader suite was rerun.
+
+Checked every baseline command/argument identity against the verdict JSON:
+142 commands including root plus 535 arguments, with no missing identities.
+Retained extraction counts agree: 141 → 140 commands below root, 440 → 437
+flags, 95 → 94 positionals, 10 → 0 extra aliases. The compressed slice from
+`ad023a72c` to `a2a06bd45` measures **+40 / −41** production Rust and builtin
+instruction lines, excluding test modules/integration tests, catalog tooling,
+generated files, docs, style and scratch. The earlier +35/−33 is the
+pre-compression measurement.
+
+Convergence: `ad023a72c` is Jack's required catalog checkpoint, not a failed
+implementation pass; `5205c8388` replaces skill inspection and removes inputs;
+`a2a06bd45` compresses that replacement. There are not two consecutive
+implementation passes replacing nothing. Next: move Task PR/worktree/commit/
+rebase owners with typed Flow, Desktop, scripts, skills and tests in the same
+cut; prove delivery on an ordinary branch without Task registration. Integrate
+LOO-298 before monitor identity work. Overviews, local Wave/unlinked work
+discovery, child readiness, remaining catalog verdicts, real first-result
+walkthrough and Jack's demo remain required. Full Done when claims do not hold,
+so this review does not publish, land, complete the Task or choose Flow navigation.

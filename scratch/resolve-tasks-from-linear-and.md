@@ -17,6 +17,121 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Decision protocol and agent PATH defect — 2026-09-30
+
+Jack Heart's steer `8b3c44a1-7a68-4e4d-8c11-88f5dc60f303` adds a required
+runtime regression: an earlier decoy `lf` on agent PATH must not override the
+selected official or explicitly locked executable. Loopflow-managed PATH
+directories must expose that selected executable as `lf`; installation must not
+leave an unrelated bare `lf` in `~/.lf/bin`. Workers must diagnose a PATH/runtime
+mismatch. Carry this through the existing recursive-lock implementation and
+Codex/Claude/OpenCode shell proofs, without another runtime-selection owner.
+
+This decision occurrence independently reproduced the stale command path:
+`command -v lf` returned `/Users/jack/.lf/bin/lf`, and the required
+`lf flow blocked` returned `step or flow not found: flow`. The installed
+`/Users/jack/.local/bin/lf flow blocked` then returned `no current Flow decision`.
+The supplied environment names the retained development Home but contains no
+Flow/claim/caller authority variables; `LF_BIN` and `LF_CONTROL_BIN` still name
+the stale bare path. No authority was reconstructed or transferred. No blocked
+Ask or navigation decision was successfully recorded by these commands.
+
+The assessment is Blocked: the intended migration repair was not implemented,
+and after disk recovery the required harness repeats the known missing-table
+failure. The retained preflight sections below supply before/after evidence.
+The controlling caller must restore this exact occurrence's decision protocol
+and resolve the stalled repair approach before reassessment. This note is
+evidence, not navigation authority. The separate relationship Ask remains
+unchanged; no duplicate Ask, publication, promotion or Task completion occurred.
+
+### Slice review — migration preflight, 2026-09-30
+
+**Blocked; no publication.** Reviewed the complete current-slice diff from
+`a7db5b03c` through `a1ac71943` and the incoming working note, against Jack Heart's
+directive and acceptance cases 1–15. This range changes only this document.
+The preserving migration integration has not been implemented.
+
+- **Resource blocker cleared:** fresh `uv run python scripts/resource_envelope.py`
+  passed at 39.6 GiB free, above the 32 GiB reserve. The earlier 31.9 GiB refusal
+  remains historical evidence; it is no longer the current stop.
+- **Required proof failed:** `uv run python scripts/test_task_installation.py`
+  exited 1; its release build exited 101 at `rust/loopflow/build.rs:95` with
+  `build canonical schema at 0.12.25.001_release: no such table: pm_snapshots`.
+  No promotion or worker test ran. Log:
+  `.lf/tmp/loo334-review-installation-20260930.log`. The harness removed container
+  `cc04c2143944a6f0221f626f4780e1901a09429d117f7fba6ab9d4bd5e6b94aa`;
+  a separate bounded all-container query confirmed it absent.
+- **Source findings retained:** normalization drops the snapshot input still used
+  by chapter conversion; moving chapter conversion first loses the archive input
+  read by `pm_project_evidence`. Development prefix/schema validation and canonical
+  adoption both need preserving integration. No applied SQL/checksum changed.
+  Session location still calls `resolve_manifest`; chapter rotation still omits
+  the completion/archive adapter; normal-promotion proof still ends before review
+  completion and the second worker. These require implementation, not fresh policy.
+
+**Measurement:** `a7db5b03c` → reviewed working tree: **+0 / −0 non-test
+production lines**, excluding docs/scratch, tests, scripts, generated files and
+inherited parent changes. No consumer or predecessor path is replaced in this
+pass. The preceding implementation (`a9d7ec2fd` → `a7db5b03c`) replaced chapter's
+planning reader (+63/−114 production Rust lines, previously measured); therefore
+this is not two consecutive implementation passes replacing nothing.
+
+Next implement and prove the preserving migration integration from released
+history and both populated branch draft frontiers, including unchanged evidence
+and transactional rollback. Then rerun the harness through normal promotion,
+exact review completion and two workers with selected-runtime digest assertions.
+Retain divergent-copy, obsolete-executable and PTY cases, Session-owner discovery,
+archive retry/history and all cases 1–15. The existing relationship Ask is unchanged.
+This review changes no executable code, installed data, PR, Task or Flow state.
+The required-proof stop returns to loop-decide; it supplies no navigation verdict.
+
+### This slice — migration preservation preflight, 2026-09-30 (blocked)
+
+Preserved the incoming stacked-migration review in `a1ac71943` through the
+installed mechanical `lf commit`. No production or migration edits follow that
+checkpoint. The ambient `lf commit` first resolved as a skill and failed before
+committing; `/Users/jack/.local/bin/lf commit` performed the checkpoint.
+
+**Required verification cannot start:** `uv run python scripts/resource_envelope.py`
+exited 1 with **31.9 GiB free against the 32.0 GiB emergency reserve**.
+`uv run python scripts/resource_envelope.py --recover` also exited 1 at 31.9 GiB;
+its uv cleanup reclaimed zero bytes because the cache lock was held. The prescribed
+standalone `UV_LOCK_TIMEOUT=0 uv cache prune` then exited 2 with the same busy-cache
+error. No force override, active-build deletion, shared-service restart or installed
+data mutation was attempted. TESTING.md prohibits verification below this reserve,
+so neither Rust proofs nor `uv run python scripts/test_task_installation.py` ran
+in this pass. Docker availability was not retested; the prior SQL failure remains
+the last installation-harness result.
+
+**Source observations for the repair:** both draft manifest readers strip
+`name`, `id` and `depends_on` headers before computing SQL checksums. Ordering
+metadata and applied SQL identity therefore have different contracts, but adding
+an ordering edge alone still cannot resolve this conflict. The development
+migrator validates both the exact receipt prefix and its reconstructed product
+schema; canonical adoption consumes matching draft bodies in order. Any repair
+must cover both paths, including their shared rollback transaction, rather than
+loosening only one prefix check. The pre-stack LOO-334 and LOO-298 frontiers both
+end at canonical `0.12.24.001_release`; their subsequent draft histories differ.
+
+The next bounded discriminator remains a populated migration proof from each
+original branch history and from released history. Preserve the original SQL,
+receipt IDs/checksums and timestamps. A possible integration must provide the
+snapshot and archival inputs before their old readers execute, remove transient
+inputs afterward, and explicitly account for already-applied readers on either
+frontier. This is an implementation hypothesis, not executed SQL or authorization
+for arbitrary draft reordering, replay or schema-based history substitution.
+Retain Task/Project IDs, custom Flow, Started, Session/Flow/Exec history, confirmed
+archives and observation ages; reject changed evidence and roll back all ledgers
+and data after an injected failure. Then run the required installation harness.
+
+**Measurement:** `a1ac71943` to this working tree adds **0 / removes 0** non-test
+production lines; only this working-design entry changes. No runtime consumer or
+migration path is replaced. The preceding implementation replaced chapter's
+planning reader; this blocked preflight supplies no new behavioral pass. All
+acceptance cases 1–15, the two-worker normal-promotion proof, Session discovery,
+chapter archival integration and existing policy questions remain unchanged.
+No publication, Task disposition, Flow navigation or host promotion occurred.
+
 ### Slice review — stacked migration and consumer integration, 2026-09-30
 
 **Blocked; no publication.** Reviewed the complete reconciliation/compression

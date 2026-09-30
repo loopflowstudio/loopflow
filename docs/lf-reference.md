@@ -378,6 +378,70 @@ record; it preserves authored files and retained history. Deleting unfinished
 work does not record success. If an operation partially succeeds, its error
 identifies the retained state and the command to retry.
 
+### Cancel work and sweep old chapters
+
+```bash
+lf task abandon DES-123              # cancel Linear and the Task, close PRs, delete branches
+lf task abandon jack/old-feature     # resolve retained Task identity by branch
+lf task abandon                     # Task in this checkout
+lf task sweep --json                # preview open issues outside current chapters
+lf task sweep --apply               # cancel eligible issues; print exclusions and failures
+lf pr abandon jack/old-feature      # close this PR and delete its checkout; retain Task outcome
+lf wt delete jack/old-feature       # delete checkout and local/remote branches; retain PR/Task
+```
+
+Cancellation retains issue, Task, PR and Run history. It refuses completed work
+and live or unresolved worker ownership. Interrupt the Task and wait for its
+worker to exit first. Pending cancellation prevents new worker claims; retry the
+cancellation after a provider failure. A dirty checkout requires explicit `--force`. Retry the
+same issue ID or full branch after a partial failure, including when the checkout
+or remote branch is already absent. Lower commands state that the Task remains
+open; they never equate a closed PR with an abandoned Task.
+
+Sweep reads every linked Wave's Initiative, including archived Projects, and
+compares issue membership with that Wave's current chapter. Current-chapter and
+terminal issues are excluded. Worker claims, open PRs, unreconciled merges,
+dirty checkouts and unavailable evidence are reported without canceling those
+Tasks. Apply rechecks ownership and chapter membership, uses Task abandonment,
+and reports each outcome. A partial cancellation exits with an error and its
+retry command. A preview is not evidence of applied cleanup.
+
+### Lifecycle action inventory
+
+`task pr ISSUE ACTION` selects the Task's checkout and passes the action and
+flags to the existing PR command. `task rebase ISSUE` does the same for rebase.
+Neither needs a prior `cd`. These use the selected installation for managed
+operations; a source checkout cannot transfer private Task identity implicitly.
+
+| Need | Task action | Composition and owned records |
+|---|---|---|
+| File | `task create` | Linear issue; local planning snapshot |
+| Allocate or recover checkout | `task checkout ISSUE` | Store Task/PR identity + local checkout/branch |
+| Start or resume | `task run ISSUE` | Checkout + saved Flow + worker |
+| Pause | `task interrupt ISSUE` | Interrupt current provider turn; retain saved cursor |
+| Replace workflow | `task restart ISSUE --flow FLOW` | Checkpoint + stop worker + replace Flow + start |
+| Hand off direction | `task comment ISSUE --steer TEXT` | Linear direction + durable steer; does not launch work |
+| Split dependent work | `task create --run --stack-on ISSUE` | New issue, Task, checkout and PR based on parent |
+| Sync with main/parent | `task rebase ISSUE` | Existing integration operation in Task checkout |
+| Publish | `task pr ISSUE publish` | Commit/push + GitHub ready PR + Task PR linkage |
+| Open review | `task pr ISSUE open` | Push + draft PR + browser; ready PR stays ready |
+| Submit | `task pr ISSUE submit` | Prepare + user merge request; no automatic merge |
+| Arm | `task pr ISSUE arm` | Prepare + head-specific auto-merge request |
+| Land | `task pr ISSUE land` | Arm + watch/repair + record authoritative merge; keep Task open |
+| Land and complete | `task pr ISSUE land -c` | Land + store Done + Linear completed |
+| Record success | `task complete ISSUE --summary TEXT` | Complete planning work or a Task with settled delivery |
+| Continue serial delivery | `task pr ISSUE next [SLUG]` | Retain prior PR + rotate to next branch, carry follow-up |
+| Cancel | `task abandon ISSUE` | Linear canceled + store abandoned + PR abandonment + checkout deletion |
+| Delete issue | `task delete ISSUE` | Linear trash + local deletion evidence; retain authored checkout and history |
+| Recover interrupted execution | `task run ISSUE --reason TEXT` | Retry saved boundary after correcting the blocker |
+| Delete checkout | `wt delete BRANCH` | Remote branch + local checkout/branch; retain PR and Task outcomes |
+
+`pr abandon BRANCH` owns closing GitHub and settling its Task PR record, then
+uses the same checkout deletion as `wt delete`. `wt remove` and `wt rm` are
+removed. Prune remains a separate selection policy for eligible clean checkouts.
+Recovery above restores placement or saved execution; it does not reopen an
+abandoned outcome or undelete a Linear issue.
+
 ### Read and edit another Task's files
 
 ```bash
@@ -405,7 +469,7 @@ lf task worktree create parser --plan
 lf task worktree switch parser
 lf task worktree list
 lf task worktree prune --dry-run
-lf task worktree remove parser
+lf wt delete parser
 ```
 
 Create a worktree for ordinary local work, or use `task checkout ISSUE` for a

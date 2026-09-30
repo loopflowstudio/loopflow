@@ -1,3 +1,6 @@
+mod lifecycle;
+pub(crate) use lifecycle::{notice_retained_task, record_abandoned_pr};
+pub use lifecycle::{task_abandon, task_operation, task_repository, task_sweep};
 mod file_save;
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
@@ -238,7 +241,9 @@ fn task_error(message: impl std::fmt::Display) -> OpsError {
     OpsError::Message(message.to_string())
 }
 
-fn block_on_task<T>(future: impl std::future::Future<Output = OpsResult<T>>) -> OpsResult<T> {
+pub(super) fn block_on_task<T>(
+    future: impl std::future::Future<Output = OpsResult<T>>,
+) -> OpsResult<T> {
     tokio::runtime::Runtime::new()
         .map_err(|error| task_error(format!("failed to build task runtime: {error}")))?
         .block_on(future)
@@ -2414,70 +2419,6 @@ fn invalidate_stale_merge_request(
     }
     publication.merge = None;
     Ok(())
-}
-
-pub(crate) fn abandon_task_pr(
-    repo: &Path,
-    force: bool,
-    progress: &impl crate::ops::progress::Progress,
-) -> OpsResult<bool> {
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
-            return Ok(false);
-        };
-        let _mutation = lock_task_pr_mutation(repo)?;
-        let mut pr = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "Task {} has no active PR to abandon",
-                    task.plan.identifier
-                ))
-            })?;
-        let branch =
-            current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
-        if branch != pr.branch {
-            return Err(task_error(format!(
-                "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
-                task.plan.identifier, pr.branch, branch
-            )));
-        }
-        let dirty = !is_clean(repo)?;
-        if dirty && !force {
-            return Err(task_error("uncommitted changes; use --force"));
-        }
-        if dirty {
-            progress.status("Discarding uncommitted Task PR changes...");
-            for args in [
-                ["reset", "--hard", "HEAD"].as_slice(),
-                ["clean", "-fd"].as_slice(),
-            ] {
-                let output = Command::new("git").args(args).current_dir(repo).output()?;
-                if !output.status.success() {
-                    return Err(task_error(format!(
-                        "failed to discard Task PR changes with `git {}`: {}",
-                        args.join(" "),
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )));
-                }
-            }
-        }
-        progress.status("Closing Task PR...");
-        let _ = Command::new("gh")
-            .args(["pr", "close", &branch])
-            .current_dir(repo)
-            .status();
-        let now = time::OffsetDateTime::now_utc();
-        pr.abandoned_at = Some(now);
-        pr.updated_at = now;
-        store
-            .settle_task_pr(&pr, None)
-            .await
-            .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
-        Ok(true)
-    })
 }
 
 async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {

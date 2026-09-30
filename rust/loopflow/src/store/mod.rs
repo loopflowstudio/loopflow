@@ -3568,4 +3568,101 @@ mod tests {
         assert_ne!(raw_access, "gho_plaintext");
         assert!(encrypted);
     }
+    #[tokio::test]
+    async fn task_abandonment_fences_claims_and_removes_waiting_flow_without_erasing_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("store.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let position = store
+            .set_flow_position(
+                &task.id,
+                FlowPosition {
+                    task_id: task.id.clone(),
+                    invocation: crate::durable::test_flow_invocation(
+                        "code",
+                        0,
+                        "implement",
+                        None,
+                        false,
+                    ),
+                    session_run_id: None,
+                    ready_summary: None,
+                    cursor: Default::default(),
+                    version: 0,
+                    worker_generation: 0,
+                    claim: None,
+                    failure: None,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        let TaskWorkerClaimOutcome::Claimed(claim) = store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("claimed worker")
+        };
+        let work = WorkRef::Task(task.id.clone());
+        assert!(store.begin_task_abandon(&task.id).await.is_err());
+        assert!(store.abandon(&work, "canceled").await.is_err());
+        assert_eq!(
+            store.flow_position(&task.id).await.unwrap().unwrap().claim,
+            Some(claim.clone())
+        );
+        store.release_task_worker(&task.id, &claim).await.unwrap();
+        store.begin_task_abandon(&task.id).await.unwrap();
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
+
+        store.abandon(&work, "canceled").await.unwrap();
+        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert!(store
+            .get_task_by_issue(&task.plan.identifier)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
+    }
 }

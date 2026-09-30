@@ -111,7 +111,7 @@ lf wt prune              # remove those worktrees and their branches
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 Feature-worktree integration fetches and pins `origin/<default>` without
 moving the default-branch checkout:

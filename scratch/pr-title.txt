@@ -1,0 +1,1 @@
+Align Task cancellation, PR abandonment and worktree deletion

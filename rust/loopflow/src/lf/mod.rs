@@ -985,11 +985,39 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Run a PR action in the Task's checkout, passing its flags through unchanged
+    Pr {
+        issue: String,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Integrate the Task with its base using the ordinary rebase operation
+    Rebase {
+        issue: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Complete planning work, or a placed Task whose pull requests are settled
     Complete {
         issue: String,
         #[arg(long)]
         summary: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    Abandon {
+        /// Issue ID or branch; defaults to the Task in this checkout
+        issue: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview open issues outside current chapters; apply safe cancellations explicitly
+    Sweep {
+        #[arg(long)]
+        apply: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1044,6 +1072,30 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl TaskCommand {
+    pub fn selector(&self) -> Option<&str> {
+        match self {
+            Self::Worker { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
+            Self::Checkout { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Changes { issue, .. }
+            | Self::Diff { issue, .. }
+            | Self::File { issue, .. }
+            | Self::Save { issue, .. }
+            | Self::Pr { issue, .. }
+            | Self::Rebase { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Delete { issue }
+            | Self::Edit { issue, .. }
+            | Self::Comment { issue, .. }
+            | Self::Interrupt { issue, .. }
+            | Self::Wait { issue, .. }
+            | Self::Restart { issue, .. } => Some(issue),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -1542,9 +1594,8 @@ pub enum WtCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove a worktree
-    #[command(alias = "rm")]
-    Remove {
+    /// Delete a worktree and its local and remote branch; retain PR and Task outcomes
+    Delete {
         /// Worktree name to remove
         name: String,
         #[arg(short = 'f', long = "force")]
@@ -1556,6 +1607,50 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn task_lifecycle_commands_keep_lower_flags_and_remove_worktree_aliases() {
+        let parsed = Cli::try_parse_from([
+            "lf",
+            "task",
+            "pr",
+            "LOO-355",
+            "publish",
+            "--title",
+            "A title",
+            "--body",
+            "Two paragraphs",
+        ])
+        .unwrap();
+        let Some(Commands::Task {
+            cmd: TaskCommand::Pr { issue, args },
+        }) = parsed.command
+        else {
+            panic!("Task PR action")
+        };
+        assert_eq!(issue, "LOO-355");
+        let lower = Cli::try_parse_from(
+            std::iter::once("lf".into())
+                .chain(std::iter::once("pr".into()))
+                .chain(args),
+        )
+        .unwrap();
+        assert!(
+            matches!(lower.command, Some(Commands::Pr { cmd: Some(PrCommand::Publish { title: Some(title), body: Some(body), .. }) }) if title == "A title" && body == "Two paragraphs")
+        );
+        for args in [
+            vec!["lf", "task", "abandon"],
+            vec!["lf", "task", "abandon", "LOO-355"],
+            vec!["lf", "task", "sweep", "--apply", "--json"],
+            vec!["lf", "task", "rebase", "LOO-355", "--plan"],
+            vec!["lf", "wt", "delete", "feature"],
+        ] {
+            Cli::try_parse_from(args).unwrap();
+        }
+        for removed in ["remove", "rm"] {
+            assert!(Cli::try_parse_from(["lf", "wt", removed, "feature"]).is_err());
+        }
+    }
 
     #[test]
     fn consolidated_commands_parse_without_old_namespaces() {

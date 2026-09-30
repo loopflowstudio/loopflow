@@ -16,6 +16,32 @@ use crate::work::task::{Task, TaskEventKind};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if flow_position_in(&tx, task_id)?.is_some_and(|position| position.claim.is_some()) {
+            return Err(StoreError::InvalidAuthority(
+                "Task acquired a worker; cancellation was not attempted".into(),
+            ));
+        }
+        match work_status_in(&tx, &WorkRef::Task(task_id.clone()))? {
+            WorkStatus::Done => {
+                return Err(StoreError::InvalidAuthority(
+                    "completed Task cannot be abandoned".into(),
+                ))
+            }
+            WorkStatus::Abandoned => return Ok(()),
+            WorkStatus::Ready => {}
+        }
+        tx.execute(
+            "UPDATE tasks SET abandon_requested_at=COALESCE(abandon_requested_at,?2),
+             abandon_reason=COALESCE(abandon_reason,'explicit Task abandonment') WHERE id=?1",
+            params![task_id.as_str(), now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_flow_verdict(
         &self,
         task_id: &TaskId,
@@ -449,6 +475,13 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
         let (table, id) = work_table(work);
+        if let WorkRef::Task(task_id) = work {
+            if flow_position_in(&tx, task_id)?.is_some_and(|position| position.claim.is_some()) {
+                return Err(StoreError::InvalidAuthority(
+                    "Task has a worker claim; settle execution before abandonment".into(),
+                ));
+            }
+        }
         if tx.execute(
             &format!(
                 "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
@@ -462,6 +495,16 @@ impl SqliteStore {
                 work.kind(),
                 work.id()
             )));
+        }
+        if let WorkRef::Task(task_id) = work {
+            tx.execute(
+                "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=NULL WHERE id=?1",
+                [task_id.as_str()],
+            )?;
+            tx.execute(
+                "DELETE FROM task_flow_positions WHERE task_id=?1",
+                [task_id.as_str()],
+            )?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -877,6 +920,18 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
 
 fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     require_ready_work(conn, work)?;
+    if let WorkRef::Task(task) = work {
+        let abandoning: bool = conn.query_row(
+            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )?;
+        if abandoning {
+            return Err(StoreError::InvalidAuthority(
+                "Task cancellation is pending; retry task abandon".into(),
+            ));
+        }
+    }
     require_current_task_chapter(conn, work)
 }
 

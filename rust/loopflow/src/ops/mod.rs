@@ -31,6 +31,7 @@ pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
+pub mod wt;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};

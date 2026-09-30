@@ -76,11 +76,11 @@ lf roadmap --json                   # current plans across Waves
 ## Publish and finish
 
 ```bash
-lf task pr publish                  # push and create/update a ready PR
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # prepare, request auto-merge, and return
-lf task pr land                     # prepare, watch, repair CI, and finish merged
-lf task pr land -c                  # also complete the owning Task
+lf task pr EXP-12 publish                  # push and create/update a ready PR
+lf task pr EXP-12 submit                   # prepare for a reviewer's merge click
+lf task pr EXP-12 arm                      # prepare, request auto-merge, and return
+lf task pr EXP-12 land                     # prepare, watch, repair CI, and finish merged
+lf task pr EXP-12 land -c                  # also complete the owning Task
 lf repo release run patch           # verify, prepare notes, tag, and publish a release
 ```
 
@@ -125,8 +125,8 @@ explicitly. See [Authoring](authoring.md) to define either.
 lf task checkout EXP-12              # prepare a Task's worktree without starting it
 lf task worktree create csv-export   # create a worktree without a tracked Task
 lf task commit -m "Add CSV export"  # save local changes
-lf task rebase --plan                # inspect the integration strategy
-lf task pr checks --watch            # follow the PR's checks
+lf task rebase EXP-12 --plan                # inspect the integration strategy
+lf task pr EXP-12 checks --watch            # follow the PR's checks
 ```
 
 These controls operate on the same work as the higher-level workflows.
@@ -154,7 +154,7 @@ lf list                             # commands, skills, and flows
 lf help --all                       # full command tree
 ```
 
-Omit unambiguous owners: `lf land` resolves to `lf task pr land`. Multiple
+Omit unambiguous owners: `lf land` resolves to `lf task pr EXP-12 land`. Multiple
 matches list the canonical choices and execute nothing. Exact commands win;
 installed skills do not change command resolution. Use `lf run land` to
 select an authored definition instead.

@@ -246,7 +246,7 @@ fn cached_status_honors_the_shared_resolution_rules() {
     let _ = uuid;
 }
 
-/// W2-240: an explicit `--wave` naming an unknown wave is rejected with the
+/// W2-240: an explicit selector naming an unknown wave is rejected with the
 /// same classified error from every consumer — never silently accepted (the
 /// memory bug), never misdirected to a sync command (the PM bug), never given
 /// a generic "not found" (the status bug). The error names the wave and the
@@ -276,43 +276,15 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         );
     };
 
-    // No ambient: each consumer rejects the unknown explicit on its own.
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["wave", "status", "--wave", "definitely-unknown"],
-            None,
-        ),
-        "status (no ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["wave", "status", "definitely-unknown"],
-            None,
-        ),
-        "cached status (no ambient)",
-    );
-
-    // Valid ambient does not rescue an unknown explicit: explicit wins.
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["wave", "status", "--wave", "definitely-unknown"],
-            Some(uuid),
-        ),
-        "status (with ambient)",
-    );
-    assert_rejected(
-        lf(
-            &home,
-            &repo,
-            &["wave", "status", "definitely-unknown"],
-            Some(uuid),
-        ),
-        "cached status (with ambient)",
-    );
+    for ambient in [None, Some(uuid)] {
+        assert_rejected(
+            lf(
+                &home,
+                &repo,
+                &["wave", "status", "definitely-unknown"],
+                ambient,
+            ),
+            "Wave status",
+        );
+    }
 }

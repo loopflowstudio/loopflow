@@ -1,6 +1,6 @@
 # Complete CLI catalog · LOO-338
 
-Jack Heart requested this catalog before implementation on 2026-09-30. Baseline: `a6b1bc3df`. The compiled Clap tree is authoritative; historical docs supplied design evidence only. All baseline rows have a concept verdict; open demo/integration choices are explicit. Later destination decisions below supersede earlier behavior-preserving rename assumptions. The target is not a claim of implementation.
+Jack Heart requested this catalog before implementation on 2026-09-30. Baseline: `a6b1bc3df`. The compiled Clap tree is authoritative; historical docs supplied design evidence only. All baseline rows have a concept verdict; integration gaps are explicit. Jack Heart’s latest steer removes the demo wait and delegates monitoring choices. Later destination decisions below supersede earlier behavior-preserving rename assumptions. The target is not a claim of implementation.
 
 ## Counts and reproduction
 
@@ -14,7 +14,7 @@ Jack Heart requested this catalog before implementation on 2026-09-30. Baseline:
 
 Caller citations distinguish executable/agent references, documented public use, and tests. A source reference is not proof of live use. Option rows cite their declaration and the owning command's callers; that does not assert those callers pass every optional flag. No repository match does not prove no external user exists. Retain a public option only when it changes a distinct real behavior; delete proven no-ops and duplicate aliases. Dynamic external definitions are not enumerable commands: root/skill/flow fallthrough and the bare default are accounted for below.
 
-Keep means retain the real operation at its owner; it does not waive the required overviews, first-result path, truthful JSON/errors or child readiness. R01–R10 in [fresh research](cli-research-20260930.md) add these cross-cutting acceptance requirements. Real product choices remain explicitly at demo; current behavior is retained until Jack decides.
+Keep means retain the real operation at its owner; it does not waive the required overviews, first-result path, truthful JSON/errors or child readiness. R01–R10 in [fresh research](cli-research-20260930.md) add these cross-cutting acceptance requirements. The integrated monitoring decisions below supersede earlier open demo choices. Remaining ownership contradictions stay explicit in the working design.
 
 ## Destination audit · 2026-09-30
 
@@ -276,8 +276,8 @@ remain required. The catalog and final CLI do **not** yet match.
 
 Jack Heart's latest steer delegates the former demo choices. The local model
 integration is LOO-298 `25548d567`, followed by this branch's cull. Main's removed
-service rows stay removed. The working design records the failed post-rebase
-Task-base update; model integration is not a publishable-main claim.
+service rows stay removed. The first Task-base update failed; the subsequent main rebase completed locally
+at f0a2a57c6 and resolved lineage. Full catalog agreement remains unfinished.
 
 - **Merge history inventories.** `monitor list` is the single Exec inventory,
   preserving paging, parent, caller, work, search and outcome filters. Delete

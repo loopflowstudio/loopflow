@@ -48,3 +48,7 @@
   state. LOO-298 local integration exposed non-equivalence of ordinary attributed
   Flow capture and managed Task continuation, plus a refused PR-base update.
   Exact evidence and remaining obligations are in the working design.
+
+- 2026-09-30: the subsequent `lf rebase --manual main` completed and reconciled
+  Task-base lineage at f0a2a57c6. The earlier refusal is resolved, not a current
+  blocker. Managed Task Flow versus independent attributed Flow remains distinct.

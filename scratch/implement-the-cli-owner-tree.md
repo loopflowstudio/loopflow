@@ -56,9 +56,9 @@ No competing model migration belongs here.
 
 Main `3dc89bc9a` is integrated. The independent cull is checkpointed at
 `c553fd1be`. The actual LOO-298 model at `25548d567` is now integrated locally
-through `lf rebase --manual`; Git finished at `9896c8f14`. Loopflow's post-rebase
-Task-base update failed before any push (exact evidence below). Do not publish
-or describe this dependency integration as delivery-ready.
+through `lf rebase --manual`; Git finished at `9896c8f14`. Loopflow's initial post-rebase
+Task-base update failed before any push (exact evidence below); a subsequent
+main rebase resolved that lineage refusal. The catalog is still incomplete.
 
 The working cut uses those actual Exec/Session owners for Monitor and removes
 the parallel Exec/Runs parser roots. It consolidates launch modes and direct
@@ -1038,3 +1038,37 @@ No installed-store access, live provider login/result, remote Home launch or
 hosted publication was performed. Final readiness/discovery and managed-Flow
 catalog agreements remain unfinished. The rebase lineage refusal is preserved
 above; subsequent reconciliation must use Loopflow's operation.
+
+### Main lineage reconciled · 2026-09-30
+
+Checkpoint `11d388131` preserved the tested cut. `lf rebase --manual main`
+updated main to `4a696c074` and replayed 219 model/CLI commits; all continuations
+used lf. Final `lf rebase --continue` succeeded at `f0a2a57c6`, reporting that
+the branch remains local. This supersedes the earlier PR-base refusal; no PR
+mutation or push was needed. Main's #1361 scratch-aware CI policy is retained.
+
+Conflict review retained deleted service modules and removed stale service tests,
+kept current Exec/Session chapter semantics and main's log exclusions, and restored
+the current Wave-resolution fixture after an old Special struct resurfaced.
+`git diff 11d388131 HEAD -- rust/loopflow/src` is empty: production bytes match
+the verified cut. Rebase itself does not establish a hosted check or permission
+to dispose of managed Task Flow state. Remaining catalog disagreements listed
+above remain implementation obligations, with the existing bound-flow proof
+as the counterexample to deleting Task continuation by spelling alone.
+
+Post-rebase proof: Wave registry completeness and unknown explicit Wave selection
+passed (one each); the first completeness filter matched zero tests and supplied
+no evidence. The real completeness check then exposed its old root Cron lookup;
+it now follows Wave Cron. The unknown-Wave fixture still used the removed root
+flag, so duplicate cases now exercise the canonical positional selector. Three
+other fixture query filters accidentally changed to --as were restored to --wave.
+No production selector rule changed. Architecture coverage, final all-target
+Clippy, formatting and diff checks passed. Session capture inspection before
+provider startup and exact taskless provider-final retrieval passed one public
+CLI test each, with synthetic provider output. Generated docs were refreshed.
+
+Next: reconcile managed Task continuation with the accepted catalog before
+C096/C098/C111 deletion; complete remaining Wave/planning and finite-delivery
+cuts against their owners; prove destination readiness and first local result.
+Current source and compiled inventory agree on the implemented surface, but the
+full verdict target does not. Do not infer Task completion or shipment.

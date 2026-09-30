@@ -34,28 +34,6 @@ enum WaveForm {
     Positional,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Special {
-    /// `NoContext` → proceed globally (list all waves, sync all waves) — exit
-    /// 0 or downstream error, not a resolution error. Roadmap and `pm status`
-    /// behave this way.
-    global_default: bool,
-    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
-    /// drops silently instead of erroring.
-    silent_drop: bool,
-    /// Pipes this text to stdin (for commands whose `trailing_var_arg` would
-    /// swallow `--wave` if text were on the command line).
-    stdin: Option<&'static str>,
-}
-
-impl Special {
-    const NONE: Self = Self {
-        global_default: false,
-        silent_drop: false,
-        stdin: None,
-    };
-}
-
 struct Cmd {
     id: &'static str,
     /// Subcommand path for the completeness guard (e.g. `["wave", "sync"]`).
@@ -121,10 +99,7 @@ const COMMANDS: &[Cmd] = &[
         base_args: &["roadmap", "--json"],
         wave_form: WaveForm::Flag,
         kind: Kind::Read,
-        special: Special {
-            global_default: true,
-            ..Special::NONE
-        },
+        global_default: true,
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
@@ -597,10 +572,16 @@ fn registry_is_complete() {
     // 4. Every cron leaf must be classified exactly once. Required-wave cron
     //    commands do not appear in the optional-wave discovery above.
     let cron = root
+        .find_subcommand("wave")
+        .expect("wave command must exist")
         .find_subcommand("cron")
         .expect("cron command must exist");
     for subcommand in cron.get_subcommands() {
-        let path = vec!["cron".to_string(), subcommand.get_name().to_string()];
+        let path = vec![
+            "wave".to_string(),
+            "cron".to_string(),
+            subcommand.get_name().to_string(),
+        ];
         let classifications = usize::from(registry_paths.contains(&path))
             + usize::from(filter_paths.contains(&path))
             + usize::from(explicit_paths.contains(&path));

@@ -274,9 +274,9 @@ filesystem cleanup after the locator commits. It does not move historical Wave
 journals or Home-local execution history. Source and target PM Teams must match; use
 `lf repo reteam` for a provider ownership change.
 
-Observation follows the same rule. `lf wave status`, `lf runs`, and `lf usage` read
+Observation follows the same rule. `lf wave status`, `lf mon list`, and `lf usage` read
 this Home; prefix them with `lf ssh <home-id>` to read another one. Homes do not
-silently replicate or aggregate Run records.
+silently replicate or aggregate execution records.
 
 See [Get Started → Go Remote](getting-started.md#go-remote) and
 [Security → Account authority over SSH](security.md#understand-account-authority-over-ssh).

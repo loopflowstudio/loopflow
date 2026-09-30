@@ -120,6 +120,15 @@ fixture-server BrokenPipe diagnostic; the protocol/identity assertions passed.
 consistency and diff checks passed. Website docs were synced. This is not a final
 gate or configured provider/Desktop acceptance.
 
+Checkpoint publication is blocked after local code commit `58ea71c2b`.
+`lf pr publish` refused: Task LOO-298 records base `00cf9dffe840`, behind the
+merged branch fork `4a696c074073`, and requests `lf rebase`. The accepted merge-only
+direction remains authoritative. `lf rebase --adopt` only controls an existing
+raw rebase; it does not adopt a completed merge. No rebase, direct store edit or
+promotion was performed. This is fresh evidence for the remaining publication
+incident disposition; #1359 alone did not close this path. The supervising
+session needs a supported way to record the merged base before publication.
+
 ## Before a release migrates ~/.lf
 
 Jack reports this machine is the only client. The pinned development Home is

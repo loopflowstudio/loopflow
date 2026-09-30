@@ -171,7 +171,7 @@ fn repository_team_matrix() {
     );
     let infrastructure = Wave::new(
         WaveId::new(),
-        "survival/infrastructure".to_string(),
+        "infrastructure".to_string(),
         repo_locator.repo().to_string(),
     )
     .with_parent(survival.id().clone());

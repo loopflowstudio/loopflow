@@ -25,13 +25,12 @@ Concrete review findings fixed after the initial test pass:
 - Explicit docs and changed-file selections could repeat a Wave file. Deduplicate
   the gathered documents by path while preserving the first source and ordering.
 
-The checkout integration test now exercises direct Wave binding through an
-isolated registry and checks the goal and memory each appear once. The nested
-collector test also explicitly selects its already-included goal. Both final
-regressions are **authored, not executed** after the resource stop. The golden's
-Wave fragment was ported from LOO-329; final golden verification is still owed.
+The checkout integration test exercises direct Wave binding through an isolated
+registry and checks the goal and memory each appear once. The nested collector
+also explicitly selects its already-included goal. Final verification passed on
+2026-09-30 after disk capacity recovered.
 
-## Evidence and blocker
+## Earlier resource blocker
 
 - Initial resource preflight passed with 35.9 GiB free above the 32 GiB reserve.
 - `cargo test -p loopflow --test context_tests --lib wave_` passed: 38 unit tests
@@ -50,36 +49,20 @@ Wave fragment was ported from LOO-329; final golden verification is still owed.
   Stop dependent parent/schema work until final reader proof can run. No branch
   binary accessed the installed Home. No live PM, cron, PR or Task mutation ran.
 
-## Resume
+## Completed verification · 2026-09-30
 
-Compression inspected the full read-slice diff and its gathering, rendering,
-native-seed and checkout-resolution callers on 2026-09-30. No further code
-edits were made: recovery again failed, now at **30.0 GiB free / 32 GiB reserve**,
-and a subsequent direct `UV_LOCK_TIMEOUT=0 uv cache prune` failed on the busy
-cache lock. Active and recent builds were retained. No product tests or Clippy
-ran, and no checkpoint was made.
+Resource recovery passed with 44.1 GiB free against the 32 GiB reserve. The uv
+cache remained busy; recovery retained active and recent builds. The later disk
+sample was 42 GiB free. No forced cleanup was used.
 
-One reduction remains worth applying once verification can run:
-`gather_documents` now deduplicates all sources, making the later
-`gather_context` diff-file deduplication redundant. Put the optional file gather
-inside `if spec.include_files` so one final deduplication serves both paths.
-Preserve first-source ordering and the explicit-doc file limit.
+Removed the redundant diff-file deduplication and the duplicate early-return
+path in `gather_documents`; its single final deduplication preserves first-source
+ordering and the explicit-doc limit.
 
-After the resource envelope permits verification, run with inherited `LF_*` and
-`LOOPFLOW_*` variables removed and disposable Homes for CLI executions:
-
-```bash
-cargo test -p loopflow --test context_tests
-cargo test -p loopflow --lib engine::prompt::tests
-cargo test -p loopflow --lib engine::flow::tests::render_goal
-cargo test -p loopflow --lib lf::commands::run::tests::skill_exec_seed
-cargo test -p loopflow --lib lf::commands::run::tests::attributed_context
-cargo test -p loopflow --lib ops::run::tests::direct_wave_binding
-cargo test -p loopflow --test golden_prompt
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-```
-
-Then continue parent discovery, the release split and the complete Task-bound
-prompt/rename proof in the restored design. This pass does not satisfy those
-requirements or the interactive demo. No full gate was run in implement.
+All seven recorded resume commands passed with inherited LF_/LOOPFLOW_ authority
+removed and a disposable Home: 16 context tests, 74 prompt tests, two goal-render
+tests, eight native-seed tests, one attributed-context test, one direct-Wave-binding
+test and one golden test. Log: `.lf/tmp/subwaves/final-read-tests.log`.
+These resolve the previously unexecuted read-slice regressions. Parent/schema
+verification belongs to the [working design](define-durable-subwave-identity-and.md).
+No full gate, configured provider demo or installed-Home operation ran here.

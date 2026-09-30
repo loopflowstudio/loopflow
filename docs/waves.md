@@ -18,6 +18,31 @@ Flow execution; each Home retains command and conversation history.
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
 Session for a conversation, or invoke `wave/operate` for a bounded planning pass.
 
+## Nested Waves
+
+```text
+wave/infrastructure/GOAL.md
+wave/infrastructure/MEMORY.md
+wave/infrastructure/release/GOAL.md
+wave/infrastructure/release/MEMORY.md
+```
+
+Address Release as `infrastructure/release`. It has its own objective, plan,
+Tasks and schedules. Its prompt reads Infrastructure's top-level Markdown,
+then Release's, from the executing checkout; sibling Waves stay out.
+
+Registration records the Wave UUID in `GOAL.md` frontmatter as `id:`. Commit
+that field with the Wave files and retain it when moving a directory. Discovery
+reconciles its one-segment name and directory parent. Renaming Infrastructure
+changes Release's address without changing its ID, Project or Task links.
+A fresh Home uses the same authored IDs. Copying an ID into two Wave directories
+is a conflict, not a second Wave.
+
+The release prototype declares its schedule in
+`wave/infrastructure/release/GOAL.md`. Connecting its Linear Initiative, moving
+release plans and Tasks, and syncing the installed schedule are separate
+post-landing operations.
+
 ## Operate manually
 
 ```bash

@@ -155,7 +155,7 @@ pub async fn resolve_work_selection(
             .map_err(run_error)?
             .pop()
             .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
+        let context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
@@ -169,13 +169,13 @@ pub async fn resolve_work_selection(
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
             subjects: vec![
-                format!("wave:{}", wave.name()),
+                format!("wave:{}", wave.slug()),
                 format!("project:{}", project.plan.slug),
                 format!("task:{}", task.plan.identifier),
             ],
             work,
             wave_id: task.wave_id,
-            wave_name: wave.name().to_string(),
+            wave_name: wave.slug().to_string(),
             cwd,
             context,
             agent: task.agent,
@@ -199,13 +199,13 @@ pub async fn resolve_work_selection(
         } else {
             PathBuf::from(wave.repo())
         };
-        let context = render_wave_context(&cwd, wave.name(), &metric_context);
+        let context = render_wave_context(&cwd, wave.slug(), &metric_context);
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
-            subjects: vec![format!("wave:{}", wave.name())],
+            subjects: vec![format!("wave:{}", wave.slug())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
-            wave_name: wave.name().to_string(),
+            wave_name: wave.slug().to_string(),
             cwd,
             context,
             agent: None,
@@ -276,8 +276,8 @@ fn require_wave_match(actual: &Wave, requested: &Wave, subject: &str) -> OpsResu
     }
     Err(run_error(format!(
         "{subject} belongs to Wave {}, not {}",
-        actual.name(),
-        requested.name()
+        actual.slug(),
+        requested.slug()
     )))
 }
 
@@ -444,6 +444,111 @@ mod tests {
         };
         store.create_task(&task, &pr).await.unwrap();
         task
+    }
+
+    #[tokio::test]
+    async fn release_task_prompt_follows_parent_rename_and_reparenting() {
+        let (_home, store) = test_store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        for (name, memory) in [
+            ("infrastructure", "Parent memory"),
+            ("infrastructure/release", "Release memory"),
+            ("product", "Product memory"),
+            ("infrastructure/auth", "Excluded auth memory"),
+        ] {
+            let dir = repo.path().join("wave").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("GOAL.md"),
+                format!("## Objective\n\n{name} objective\n"),
+            )
+            .unwrap();
+            std::fs::write(dir.join("MEMORY.md"), memory).unwrap();
+        }
+        let release =
+            crate::work::wave::ensure_wave_row(&store, repo.path(), "infrastructure/release")
+                .await
+                .unwrap();
+        assert_eq!(release.name(), "release");
+        assert_eq!(release.slug(), "infrastructure/release");
+        let parent = store
+            .get_wave(release.parent_wave_id().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let plan = project(&release, "release-plan", "release-project");
+        store.create_project(&plan).await.unwrap();
+        let task = task(&store, &release, &plan, repo.path().to_path_buf()).await;
+        let child_row = serde_json::to_value(&release).unwrap();
+        for address in ["infrastructure/release", "infra/release", "product/release"] {
+            if address == "infra/release" {
+                std::fs::rename(
+                    repo.path().join("wave/infrastructure"),
+                    repo.path().join("wave/infra"),
+                )
+                .unwrap();
+            } else if address == "product/release" {
+                std::fs::rename(
+                    repo.path().join("wave/infra/release"),
+                    repo.path().join("wave/product/release"),
+                )
+                .unwrap();
+            }
+            let discovered = crate::work::wave::ensure_wave_row(&store, repo.path(), address)
+                .await
+                .unwrap();
+            assert_eq!(discovered.id(), release.id());
+            if address == "infra/release" {
+                assert_eq!(
+                    serde_json::to_value(&discovered).unwrap(),
+                    child_row,
+                    "renaming a parent leaves the child row unchanged"
+                );
+                assert_eq!(
+                    store.get_wave(parent.id()).await.unwrap().unwrap().name(),
+                    "infra"
+                );
+            }
+            let binding = resolve_work_binding(&store, repo.path(), "task:LOO-267")
+                .await
+                .unwrap();
+            assert_eq!(binding.wave_name, address);
+            assert_eq!(
+                store.get_task(&task.id).await.unwrap().unwrap().wave_id,
+                *release.id()
+            );
+            let components = crate::engine::gather_context(&crate::engine::GatherContextOpts {
+                repo_root: binding.cwd,
+                wave: Some(binding.wave_name),
+                include_diff: false,
+                include_diff_files: false,
+                ..Default::default()
+            })
+            .unwrap();
+            let prompt =
+                crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+            let ancestor = if address.starts_with("product/") {
+                "Product memory"
+            } else {
+                "Parent memory"
+            };
+            assert_eq!(prompt.matches("Release memory").count(), 1);
+            assert_eq!(prompt.matches(ancestor).count(), 1);
+            assert!(prompt.find(ancestor).unwrap() < prompt.find("Release memory").unwrap());
+            assert!(!prompt.contains("Excluded auth memory"));
+            assert!(!prompt.contains(if ancestor == "Parent memory" {
+                "Product memory"
+            } else {
+                "Parent memory"
+            }));
+        }
+        // A new Home reconstructs the same identity from the authored files.
+        let (_fresh_home, fresh) = test_store().await;
+        let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
+            .await
+            .unwrap();
+        assert_eq!(recovered.id(), release.id());
+        assert_eq!(recovered.slug(), "product/release");
     }
 
     #[tokio::test]
@@ -670,12 +775,11 @@ mod tests {
     #[tokio::test]
     async fn task_run_drill_selects_rows_by_any_name_of_the_task() {
         let (directory, store) = test_store().await;
-        let wave = Wave::new(
-            WaveId::new(),
-            "runtime".into(),
-            directory.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let wave =
+            crate::work::wave::ensure_wave_row(&store, repo.path(), "infrastructure/release")
+                .await
+                .unwrap();
         let mut project = project(&wave, "desktop", "project-desktop");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
@@ -748,7 +852,7 @@ mod tests {
             let rows = store
                 .sqlite
                 .conversation_history(
-                    Some(wave.name()),
+                    Some(wave.slug()),
                     Some(project.id.as_str()),
                     Some(selector),
                     None,

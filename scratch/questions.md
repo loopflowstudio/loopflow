@@ -66,5 +66,6 @@ entries above remain parent context. LOO-354 follows the restored
 [accepted subwave design](define-durable-subwave-identity-and.md) and
 [its assumptions](subwave-questions.md): no design review, interactive demo
 before delivery, merge parent changes rather than rebase. This implementation
-pass has no push/landing instruction. Final read-slice verification is blocked
-by TESTING.md's 32 GiB emergency reserve after approved cleanup failed.
+pass has no push/landing instruction. The earlier resource blocker is resolved. Final reader checks passed after
+recovery reported 44.1 GiB free; directory-parent implementation and its focused
+proof are recorded in the LOO-354 design.

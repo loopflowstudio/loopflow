@@ -675,7 +675,7 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
     use crate::work::wave::context::WaveResolveError;
     match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
-        Ok(wave) => Ok(Some(wave.name().to_string())),
+        Ok(wave) => Ok(Some(wave.slug().to_string())),
         Err(WaveResolveError::NoContext) => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -923,7 +923,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 Some(&repo_root),
                 wave.as_deref(),
             )
-            .map(|wave| wave.name().to_string())
+            .map(|wave| wave.slug().to_string())
             .map_err(|err| match err {
                 crate::work::wave::context::WaveResolveError::NoContext => {
                     anyhow!("cannot determine wave; pass --wave <name>")

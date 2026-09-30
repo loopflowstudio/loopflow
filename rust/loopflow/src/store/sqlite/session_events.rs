@@ -236,7 +236,7 @@ impl SqliteStore {
                  ELSE 1 END)
              AND ((e.kind='observed' AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json')) OR (
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
-                     IN (SELECT id FROM waves WHERE id=?5 OR name=?5))
+                     IN (SELECT id FROM wave_addresses WHERE id=?5 OR slug=?5))
                  AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
                      IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
                          WHERE p.id=?6 OR p.project_slug=?6 OR p.external_project_id=?6))

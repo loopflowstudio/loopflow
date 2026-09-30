@@ -23,5 +23,15 @@ The original LOO-329 notes remain at
   Resolve that implementation question within the accepted id/name/parent model
   when building step 2; no new identity sidecar or metadata ledger is selected.
 
-Verification is resource-blocked; see [read-slice evidence](subwave-read-slice.md).
-No new user decision is needed to resume after capacity recovers.
+The 2026-09-30 implementation resumed above the emergency reserve (44.1 GiB).
+All seven final reader commands passed; [read-slice evidence](subwave-read-slice.md)
+retains the earlier resource failures.
+
+Implementation choice: persist the existing Wave UUID as `id:` in GOAL.md
+frontmatter when registering authored Waves. Neither leaf-name matching nor a
+path-derived UUID can distinguish a move from a new Wave. This uses the existing
+authored file, not an identity sidecar or rename ledger. Discovery adopts the
+registered UUID at the current address when the file has no id, then carries it
+through directory moves and fresh clones. SQLite owns name and parent; the full
+address is derived for reads. Conflicting copies remain unresolved rather than
+silently taking another Wave's identity.

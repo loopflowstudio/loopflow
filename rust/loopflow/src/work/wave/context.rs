@@ -21,7 +21,7 @@ pub fn resolve_ambient_wave_name() -> Option<String> {
     let repo = crate::repo::find_repo_root().ok();
     resolve_managed_wave_sync(repo.as_deref(), None)
         .ok()
-        .map(|wave| wave.name().to_string())
+        .map(|wave| wave.slug().to_string())
 }
 
 /// The Exec attribution decision for the current process: the wave name to
@@ -49,7 +49,7 @@ pub struct ExecAttribution {
 pub fn exec_attribution(repo: Option<&Path>) -> ExecAttribution {
     match resolve_managed_wave_sync(repo, None) {
         Ok(wave) => ExecAttribution {
-            wave: Some(wave.name().to_string()),
+            wave: Some(wave.slug().to_string()),
             failure: None,
         },
         Err(WaveResolveError::NoContext) => ExecAttribution {
@@ -180,7 +180,7 @@ pub async fn resolve_managed_wave(
                 return Ok(wave);
             }
             if let Some(repo) = repo {
-                let locator = WaveLocator::discover(repo, wave.name())
+                let locator = WaveLocator::discover(repo, wave.slug())
                     .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
                 let scoped = store
                     .get_wave_at(&locator)
@@ -219,7 +219,7 @@ pub async fn resolve_managed_wave(
             return Ok(wave);
         }
         if let Some(repo) = repo {
-            let locator = WaveLocator::discover(repo, wave.name())
+            let locator = WaveLocator::discover(repo, wave.slug())
                 .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
             let scoped = store
                 .get_wave_at(&locator)

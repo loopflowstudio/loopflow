@@ -14,20 +14,64 @@ LOO-298's other scratch files describe the parent work, not this Task's scope.
 
 ## Remaining work
 
-1. Finish read-slice verification after the disk reserve recovers. The initial
-   integrated proof passed; final review repairs and the golden are not yet
-   verified. Exact evidence and resume commands: [read slice](subwave-read-slice.md).
-2. Record directory parentage and one-segment names; derive addresses through
-   parent IDs. Reconcile directory moves without changing child identity on
-   parent rename. Current `ensure_wave_row` still stores a full slug with no
-   parent. Existing SQL readers and relocation also assume that representation;
-   change those consumers together, not just discovery.
-3. Author release's `GOAL.md` and schedule ownership. Prove a release Task prompt
-   and parent rename in a disposable Home. The installed Linear Initiative,
-   release plan/Task moves and schedule cutover remain post-landing operations
-   through installed `lf`, as agreed below.
-4. Complete focused checks, then let the supervising Flow own broader gate,
-   publication and the interactive demo. No demo readiness is claimed yet.
+1. The supervising Flow owns compression, integration, broader gate, publication
+   and Jack's interactive demo. Stay on the code Flow until LOO-298 lands;
+   synchronize by merge, never rebase. No push or landing ran in this pass.
+2. After landing, use installed `lf` to create Release's Linear Initiative and
+   plan, move release-focused Tasks/KRs and sync the live schedule. The authored
+   schedule now belongs to release; no provider or launchd cutover occurred here.
+3. Configured provider/Desktop acceptance remains the demo's work. The disposable
+   store proofs below establish local Rust behavior, not installed acceptance.
+
+## Implementation and proof · 2026-09-30
+
+The final reader commands passed (103 tests across seven commands), resolving the
+previous resource stop. [Read-slice evidence](subwave-read-slice.md) retains the
+failed preflights and the successful resume.
+
+Wave rows now hold a one-segment name and directory parent. The `wave_addresses`
+SQL view derives paths; Wave snapshots, prompt binding, planning, metrics,
+Session/history selectors, CI labels and relocation consume that address. The
+forward `wave_directory_parents` draft preserves Wave/Project references, derives
+parents from the old full-path names and supplies absent ancestors. Old promotion
+links do not override directory parentage; `promoted_at` remains historical evidence.
+Released migrations and LOO-298's three drafts are unchanged.
+
+Discovery carries the Wave UUID in existing GOAL.md frontmatter, adopting the
+registered UUID when no `id:` is present. This resolves the previously unspecified
+move evidence without a sidecar or rename ledger. Parent rename updates only the
+parent row; reparenting changes the child's parent, preserving its ID and Task
+links. Same leaf names under different parents are independent. Conflicting
+copied IDs, cycles and cross-repository directory parents are rejected.
+
+The authored release GOAL now owns the 10:00 release-run schedule. Infrastructure
+retains telemetry and its objective. Cron installation creates the complete nested
+log directory before launchd could open it.
+
+Concrete review findings fixed: redundant reader deduplication; SQL selectors
+still treating a leaf as a full address; relocation rewriting descendant rows
+on a parent rename; missing destination-parent discovery; nested cron log creation;
+and schema verification omitting SQL views. The obsolete relocation fixture for
+an unparented full-path Wave was removed because registration now requires segment
+names and records directory ancestry. The minimal identity-reader proof retains
+its lack of execution tables and uses the current address view.
+
+Focused proofs use disposable stores and synthetic provider/launchctl effects:
+parent rename leaves the child row unchanged; directory reparenting and a fresh
+Home preserve the authored ID; a bound release Task gathers ancestor then child
+memory exactly once, excluding auth/Product siblings; migration retains Project
+links; nested Task-history selectors and relocation preserve identity; scheduled
+launch carries the nested Wave through the real CLI argument parser.
+Logs: `.lf/tmp/subwaves/final-parent-verification.log` and
+`.lf/tmp/subwaves/schema-review-verification.log` (final review checks).
+
+The final parent run passed 48 selected tests: populated migration (1), Wave
+module (34), binding/history (7), stored ancestry (1), nested scheduled run (1),
+and repository relocation (4). The final schema-review run passed the migration
+and minimal-reader checks after adding view verification. All-target Clippy,
+formatting, diff checks, migration-history validation (56 shipped migrations
+unchanged) and architecture checks passed. Website doc copies were regenerated.
+These are focused implementation checks; no affected-suite or full gate ran.
 
 ## The dream
 
@@ -149,16 +193,14 @@ leaves release's row alone.
 
 ## Watch for
 
-- **Parent discovery.** The kickoff audit found the parent field empty
-  everywhere. Step 2 must populate it and reconcile moved directories.
-- **Cron logs.** The log path uses the Wave name as written, so
-  `infrastructure/release` adds a directory. `add_cron` creates only
-  `.lf/logs`; `spawn_cron_target` creates the full parent path. Verify the
-  scheduled launch path. Read from `ops/cron.rs`, not run.
+- **Parent discovery.** Directory reconciliation now populates parent IDs and
+  follows authored UUIDs through moves. Duplicate IDs remain explicit conflicts.
+- **Cron logs.** Nested addresses add a directory. Installation and scheduled
+  spawning both create the full parent path; the scheduled fixture covers it.
 - **Memory conflicts.** Two Tasks curating one 18,400-token file will meet at
   rebase. Subwaves make that rarer.
-- **The written contract.** LOO-298's architecture reference describes Wave
-  names as whole paths. Step 2 changes those lines first.
+- **The written contract.** The architecture reference now distinguishes stored
+  one-segment names from derived addresses.
 
 ## Not doing
 
@@ -183,6 +225,6 @@ Review also removed duplicate goal-body injection and preserved the invoking
 checkout for direct same-repository Wave selection. Explicit documentation or
 changed-file selection of an already included Wave file renders it once.
 
-The last three review repairs have authored regression coverage but no completed
-run after the resource stop. [Read slice evidence](subwave-read-slice.md) separates
-the earlier pass from final-tree proof still owed.
+The final reader regressions and golden passed after capacity recovered.
+[Read-slice evidence](subwave-read-slice.md) retains both the earlier failure
+and the successful resume.

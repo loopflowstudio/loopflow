@@ -2203,13 +2203,13 @@ async fn pm_sync_async(
                 && wave.promoted_at().is_none()
                 && !origin
                     .join("wave")
-                    .join(wave.name())
+                    .join(wave.slug())
                     .join("GOAL.md")
                     .is_file()
             {
                 diagnostics.push(format!(
                     "prepared child wave/{} has no GOAL.md; resume or abandon its promotion",
-                    wave.name()
+                    wave.slug()
                 ));
             }
         }
@@ -2881,12 +2881,11 @@ async fn canonical_wave_title_path_with_store(
         if current_repo != main {
             return Err(OpsError::Message(format!(
                 "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
-                current.name(),
+                current.slug(),
                 current.repo()
             )));
         }
-        let leaf = current.name().rsplit('/').next().unwrap_or(current.name());
-        segments.push(title_case(leaf));
+        segments.push(title_case(current.name()));
         let Some(parent_id) = current.parent_wave_id().cloned() else {
             break;
         };

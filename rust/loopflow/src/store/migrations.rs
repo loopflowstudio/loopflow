@@ -5515,6 +5515,82 @@ mod tests {
     }
 
     #[test]
+    fn wave_directory_migration_preserves_ids_and_derives_parent_addresses() {
+        let conn = open();
+        apply_before_current_draft(&conn, "wave_directory_parents");
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES
+            ('parent','infrastructure','/repo',1),
+            ('child','infrastructure/release','/repo',2),
+            ('other','product/release','/repo',3);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at,updated_at)
+            VALUES ('release-plan','child','linear-release',1,1);",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("wave_directory_parents"))
+            .unwrap();
+        let child: (String, String, String, i64) = conn
+            .query_row(
+                "SELECT name,parent_wave_id,slug,created_at FROM wave_addresses WHERE id='child'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            child,
+            (
+                "release".into(),
+                "parent".into(),
+                "infrastructure/release".into(),
+                2
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT wave_id FROM projects WHERE id='release-plan'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "child"
+        );
+        conn.execute("UPDATE waves SET name='infra' WHERE id='parent'", [])
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT slug FROM wave_addresses WHERE id='child'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "infra/release"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT slug FROM wave_addresses WHERE id='other'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "product/release"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+        let schema = product_schema(&conn).unwrap();
+        conn.execute_batch("DROP VIEW wave_addresses").unwrap();
+        assert_ne!(
+            schema,
+            product_schema(&conn).unwrap(),
+            "schema verification must detect a missing address view"
+        );
+    }
+
+    #[test]
     fn wave_promotion_occurrence_does_not_backfill_existing_ancestry() {
         let conn = open();
         apply_before_draft(&conn, "wave_promotion_occurrence");

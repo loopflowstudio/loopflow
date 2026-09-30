@@ -21,7 +21,7 @@ pub(super) struct ForeignKeyDefinition {
     pub(super) match_clause: String,
 }
 
-/// Every product table, index, and trigger with defining SQL and
+/// Every product table, view, index, and trigger with defining SQL and
 /// explicit foreign-key metadata. `schema_migrations` is bookkeeping rather
 /// than product schema, so no migration declares it.
 pub(crate) fn product_schema(
@@ -30,7 +30,7 @@ pub(crate) fn product_schema(
     let mut statement = conn.prepare(
         "SELECT type, name, tbl_name, COALESCE(sql, '')
          FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger')
+         WHERE type IN ('table', 'view', 'index', 'trigger')
            AND name NOT LIKE 'sqlite_%'
            AND name NOT IN ('schema_migrations', 'development_migrations')
          ORDER BY type, name",

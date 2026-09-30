@@ -346,7 +346,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-    dedup_documents(&mut diff_files);
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
@@ -414,17 +413,14 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         docs.extend(explicit_docs);
     }
 
-    if !spec.include_files {
-        dedup_documents(&mut docs);
-        return Ok(docs);
+    if spec.include_files {
+        let files = if spec.files.is_empty() {
+            gather_changed_file_paths(&spec.repo_root)?
+        } else {
+            spec.files.clone()
+        };
+        docs.extend(gather_files(&spec.repo_root, &files)?);
     }
-
-    let files = if spec.files.is_empty() {
-        gather_changed_file_paths(&spec.repo_root)?
-    } else {
-        spec.files.clone()
-    };
-    docs.extend(gather_files(&spec.repo_root, &files)?);
     dedup_documents(&mut docs);
 
     Ok(docs)

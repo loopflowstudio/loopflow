@@ -110,7 +110,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         .map(|id| {
             store
                 .get_wave(id)?
-                .map(|wave| wave.name().to_owned())
+                .map(|wave| wave.slug().to_owned())
                 .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
         })
         .transpose()?;
@@ -340,7 +340,7 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::prepare(&store, &task, wave.name()).await?;
+        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }

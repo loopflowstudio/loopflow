@@ -1421,7 +1421,7 @@ fn run() -> anyhow::Result<()> {
             .map(loopflow::work::wave::context::resolve_explicit_wave)
             .transpose()?;
         if let Some(wave) = &explicit_wave {
-            cli.wave = Some(wave.name().to_string());
+            cli.wave = Some(wave.slug().to_string());
         }
         // One resolved wave identity drives prompt context, registry attribution,
         // journaling, and every child process.
@@ -1525,7 +1525,7 @@ fn dispatch(
             if wave.id() != &binding.wave_id {
                 anyhow::bail!(
                     "--wave {} does not own --as {}:{}",
-                    wave.name(),
+                    wave.slug(),
                     binding.work.kind(),
                     binding.work.id(),
                 );

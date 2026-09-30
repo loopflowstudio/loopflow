@@ -593,6 +593,21 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.find_waves_by_slug(&slug)).await
     }
 
+    pub(crate) async fn reconcile_wave_directory(
+        &self,
+        id: &WaveId,
+        name: &str,
+        parent: Option<&WaveId>,
+    ) -> StoreResult<()> {
+        let id = id.clone();
+        let name = name.to_string();
+        let parent = parent.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reconcile_wave_directory(&id, &name, parent.as_ref())
+        })
+        .await
+    }
+
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
         run_sqlite(&self.sqlite, move |store| store.create_wave(&wave)).await
@@ -3101,9 +3116,7 @@ mod tests {
         run_store_basic_suite(&store).await;
     }
 
-    // A chord is a wave whose children point back at it via `parent_wave_id`.
-    // `list_child_waves` returns those children (ordered, repos stitched); a
-    // leaf wave returns none. This is the ancestry the WaveAgentTree needs.
+    // Directory children share their parent's repository.
     #[tokio::test]
     async fn sqlite_wave_ancestry_and_children() {
         let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
@@ -3113,8 +3126,8 @@ mod tests {
         let parent = make_wave("/chord");
         store.create_wave(&parent).await.expect("create parent");
 
-        let child_a = make_wave("/repo-a").with_parent(parent.id().clone());
-        let child_b = make_wave("/repo-b").with_parent(parent.id().clone());
+        let child_a = make_wave("/chord").with_parent(parent.id().clone());
+        let child_b = make_wave("/chord").with_parent(parent.id().clone());
         store.create_wave(&child_a).await.expect("create child a");
         store.create_wave(&child_b).await.expect("create child b");
 
@@ -3126,15 +3139,14 @@ mod tests {
             .expect("child exists");
         assert_eq!(reloaded.parent_wave_id(), Some(parent.id()));
 
-        // Chord contents = children where parent_wave_id = id, one per repo.
+        // Each child retains the shared directory parent.
         let children = store
             .list_child_waves(parent.id())
             .await
             .expect("list children");
         assert_eq!(children.len(), 2);
         let repos: Vec<&str> = children.iter().map(|w| w.repo()).collect();
-        assert!(repos.contains(&"/repo-a"));
-        assert!(repos.contains(&"/repo-b"));
+        assert_eq!(repos, ["/chord", "/chord"]);
 
         // A leaf wave has no children.
         assert!(store

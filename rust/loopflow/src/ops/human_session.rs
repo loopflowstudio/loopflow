@@ -1859,7 +1859,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
         return Ok(None);
     };
     let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.name().to_string(),
+        Some(wave) => wave.slug().to_string(),
         None => format!("Wave {wave_id} (unavailable)"),
     };
     Ok(Some(match &session.task_id {

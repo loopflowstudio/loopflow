@@ -120,6 +120,12 @@ finish line; the design must end in an observable condition.
 
 ## Output
 
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
+
 Update the existing plan at `scratch/<slug>.md`. Organize it around the problem,
 demo, chosen approach, risk findings, alternatives and decisions, scope, and
 Done when proof. Use the contract above for relevant boundaries; preserve a

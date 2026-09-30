@@ -113,6 +113,15 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    and the receiving skill's standalone export. Prove the old audience no longer
    pays for the procedure and the intended consumer can still execute it.
 
+## Persisted plans
+
+Plan-writing skills must produce step-neutral artifacts: named, dated decisions,
+explicit acceptance or draft status, remaining work, and proof. Keep session/step
+instructions and ambient Home facts out of plans. Historical skill invocations
+use plain names without dollar prefixes; verbatim transcripts remain separate
+reference evidence. Audit a plan as input to a different skill in a fresh Run:
+the plan cannot select that reader's skill or claim its execution environment.
+
 ## Skill contract
 
 Place repo-local skills under `.lf/skills/`. Use frontmatter for machine

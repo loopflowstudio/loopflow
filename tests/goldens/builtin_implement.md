@@ -240,6 +240,12 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 
 ## When the design is wrong
 
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
+
 If the design doc is unclear, make the simplest reversible choice and record it
 in `scratch/questions.md`.
 

@@ -276,16 +276,6 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
 
 pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
     let tree = command_tree();
-    if let [owner, escape, name] = path {
-        if escape == "--" && matches!(owner.as_str(), "run" | "skill" | "flow") {
-            let kind = match owner.as_str() {
-                "skill" => Some(DefinitionKind::Skill),
-                "flow" => Some(DefinitionKind::Flow),
-                _ => None,
-            };
-            return definition_help(&tree, repo, name, kind);
-        }
-    }
     if path.is_empty() {
         if all {
             let mut output = String::from("Usage: lf <command> | run <name> [message]\n\n");
@@ -310,18 +300,25 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
-    if path.len() == 2 && matches!(path[0].as_str(), "run" | "skill" | "flow") {
-        let owner = tree
-            .find_subcommand(&path[0])
+    let definition = match path {
+        [owner, name] => Some((owner, name, false)),
+        [owner, delimiter, name] if delimiter == "--" => Some((owner, name, true)),
+        _ => None,
+    };
+    if let Some((owner, name, escaped)) =
+        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "run" | "skill" | "flow"))
+    {
+        let command = tree
+            .find_subcommand(owner)
             .expect("definition collection exists");
-        // Declared collection verbs own their names, except after `run`.
-        if path[0] == "run" || resolve_child(owner, &path[1], &path[..1])?.is_none() {
-            let kind = match path[0].as_str() {
+        // Collection verbs win unless explicitly escaped; `run` always selects a definition.
+        if escaped || owner == "run" || resolve_child(command, name, &path[..1])?.is_none() {
+            let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
                 "flow" => Some(DefinitionKind::Flow),
                 _ => None,
             };
-            return definition_help(&tree, repo, &path[1], kind);
+            return definition_help(&tree, repo, name, kind);
         }
     }
     if path.len() == 1 && resolve_child(&tree, &path[0], &[])?.is_none() {

@@ -1497,7 +1497,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
+        WtCommand::List { format, sync } => wt_list(format.as_deref(), *sync),
         WtCommand::Remove { name, force } => wt_remove(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }

@@ -16,10 +16,6 @@ Caller citations distinguish executable/agent references, documented public use,
 
 Keep means retain the real operation at its owner; it does not waive the required overviews, first-result path, truthful JSON/errors or child readiness. R01–R10 in [fresh research](cli-research-20260930.md) add these cross-cutting acceptance requirements. Real product choices remain explicitly at demo; current behavior is retained until Jack decides.
 
-
-
-
-
 ## Commands
 
 P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.

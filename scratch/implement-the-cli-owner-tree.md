@@ -140,3 +140,8 @@ than weakening source isolation. No new domain owner, state store or alias
 registry was introduced. Catalog verdicts remain
 requirements for following slices, including the separate retired-op deletion;
 no assertion of a completed reorganization, overview, provider journey or demo.
+
+Compression shares one typed-help lookup for escaped and ordinary names, removes
+worktree-list's obsolete catch-all pattern, and makes catalog rendering byte-stable.
+Proof: all 10 `cli_discovery` tests, repeated catalog rendering, formatting,
+all-target Clippy (four jobs), and diff checks passed. Remaining scope is unchanged.

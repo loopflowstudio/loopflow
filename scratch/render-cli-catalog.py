@@ -28,7 +28,7 @@ def main() -> None:
         notes.setdefault(text, f'N{len(notes):03}')
         return notes[text]
 
-    out = [old.split('## Commands')[0], '## Commands', '',
+    out = [old.split('## Commands', 1)[0].rstrip(), '', '## Commands', '',
            'P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.', '',
            '| Row | Canonical path | Target owner | Purpose | Callers / source | Overlap | Verdict → target |',
            '|---|---|---|---|---|---|---|']

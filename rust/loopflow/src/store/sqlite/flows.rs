@@ -673,41 +673,6 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
     current_flow_in(tx, &id)
 }
 
-/// Persist the next position in the same Flow and consume its selected result.
-fn checkpoint_in(
-    tx: &Transaction<'_>,
-    saved: FlowSession,
-    next: &ExecutionCursor,
-    claim: Option<&TaskWorkerClaim>,
-    progress: Option<&str>,
-) -> StoreResult<FlowSession> {
-    if let Some(summary) = progress.filter(|summary| !summary.trim().is_empty()) {
-        report_to_task_in(
-            tx,
-            saved.id(),
-            &TaskEventKind::Progress {
-                summary: summary.into(),
-            },
-        )?;
-    }
-    let moved = position_of(&saved.cursor) != position_of(next);
-    let parks = FlowSession {
-        cursor: next.clone(),
-        ..saved.clone()
-    }
-    .is_human();
-    write_cursor_in(
-        tx,
-        (saved.id(), saved.version),
-        next,
-        saved.failure.as_ref(),
-        moved,
-        claim,
-        parks,
-    )?;
-    current_flow_in(tx, saved.id())
-}
-
 fn stale_task_worker(task_id: &TaskId) -> StoreError {
     StoreError::InvalidAuthority(format!("Task worker for {task_id} is stale"))
 }
@@ -1438,7 +1403,7 @@ impl SqliteStore {
     ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let saved = current_flow_in(&tx, id)?;
+        let mut saved = current_flow_in(&tx, id)?;
         if saved.version != version || saved.claim.as_ref() != claim {
             return Err(stale(id));
         }
@@ -1486,7 +1451,26 @@ impl SqliteStore {
         if moved {
             consume_selected_in(&tx, &saved)?;
         }
-        let saved = checkpoint_in(&tx, saved, &next, claim, progress)?;
+        if let Some(summary) = progress.filter(|summary| !summary.trim().is_empty()) {
+            report_to_task_in(
+                &tx,
+                id,
+                &TaskEventKind::Progress {
+                    summary: summary.into(),
+                },
+            )?;
+        }
+        saved.cursor = next;
+        write_cursor_in(
+            &tx,
+            (id, version),
+            &saved.cursor,
+            saved.failure.as_ref(),
+            moved,
+            claim,
+            saved.is_human(),
+        )?;
+        let saved = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(saved)
     }
@@ -2709,7 +2693,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let root = launched(
+        let initial = launched(
             &store,
             vec![
                 step("work", None),
@@ -2718,40 +2702,40 @@ mod tests {
             ],
             1,
         );
-        let child = successful_boundary(&store, &root, Some(FlowDecision::Iterate));
-        assert_eq!(child.id(), root.id());
-        assert_eq!((child.cursor.index, child.cursor.iteration), (0, 1));
-        assert_eq!((child.task_id.clone(), child.wave_id.clone()), (None, None));
+        let first = successful_boundary(&store, &initial, Some(FlowDecision::Iterate));
+        assert_eq!(first.id(), initial.id());
+        assert_eq!((first.cursor.index, first.cursor.iteration), (0, 1));
+        assert_eq!((first.task_id.clone(), first.wave_id.clone()), (None, None));
         assert!(store
-            .reserve_attempt(root.id(), root.version, None, None)
+            .reserve_attempt(initial.id(), initial.version, None, None)
             .is_err());
         assert!(store
-            .checkpoint_flow(root.id(), root.version, &child.cursor, None, None)
+            .checkpoint_flow(initial.id(), initial.version, &first.cursor, None, None)
             .is_err());
-        let failed = attempt(&store, child.id(), None, "proof");
+        let failed = attempt(&store, first.id(), None, "proof");
         let failed_actor = store.test_flow_turn(&failed.artifact_key);
         store.test_finish_flow_turn(&failed_actor, "failed");
-        let blocked = store.recover_flow(child.id(), None).unwrap();
+        let blocked = store.recover_flow(first.id(), None).unwrap();
         assert!(blocked.failure.is_some());
         drop(store);
 
         // Restarting the driver preserves the same Flow and pass.
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        assert_eq!(store.flow(root.id()).unwrap().unwrap().id(), child.id());
-        let retry = store.retry_flow(child.id(), None).unwrap();
-        assert_eq!(retry.id(), child.id());
+        assert_eq!(store.flow(initial.id()).unwrap().unwrap().id(), first.id());
+        let retry = store.retry_flow(first.id(), None).unwrap();
+        assert_eq!(retry.id(), first.id());
         let interrupted = store.release_flow(retry.id(), retry.version, None).unwrap();
-        assert_eq!(interrupted.id(), child.id());
+        assert_eq!(interrupted.id(), first.id());
         let decision = successful_boundary(&store, &interrupted, None);
-        let sibling = successful_boundary(&store, &decision, Some(FlowDecision::Iterate));
-        assert_eq!(sibling.id(), child.id());
-        assert_eq!(sibling.cursor.iteration, 2);
-        assert!(!store.flow(root.id()).unwrap().unwrap().finished);
+        let second = successful_boundary(&store, &decision, Some(FlowDecision::Iterate));
+        assert_eq!(second.id(), first.id());
+        assert_eq!(second.cursor.iteration, 2);
+        assert!(!store.flow(initial.id()).unwrap().unwrap().finished);
         assert!(store
-            .checkpoint_flow(decision.id(), decision.version, &sibling.cursor, None, None)
+            .checkpoint_flow(decision.id(), decision.version, &second.cursor, None, None)
             .is_err());
 
-        let decision = successful_boundary(&store, &sibling, None);
+        let decision = successful_boundary(&store, &second, None);
         let selected = attempt(&store, decision.id(), None, "proof");
         let actor = store.test_flow_turn(&selected.artifact_key);
         store
@@ -2768,11 +2752,11 @@ mod tests {
             "no continuation before exact success"
         );
         store.test_finish_flow_turn(&actor, "completed");
-        let returned = store
+        let advanced = store
             .checkpoint_flow(saved.id(), saved.version, &next, None, None)
             .unwrap();
-        assert_eq!(returned.id(), root.id());
-        assert_eq!((returned.cursor.index, returned.cursor.iteration), (2, 2));
+        assert_eq!(advanced.id(), initial.id());
+        assert_eq!((advanced.cursor.index, advanced.cursor.iteration), (2, 2));
         assert!(store
             .checkpoint_flow(saved.id(), saved.version, &next, None, None)
             .is_err());
@@ -2787,11 +2771,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(consumed, 5);
-        let finished = successful_boundary(&store, &returned, None);
+        let finished = successful_boundary(&store, &advanced, None);
         store
             .end_flow(finished.id(), finished.version, None, "done")
             .unwrap();
-        assert!(store.flow(root.id()).unwrap().unwrap().finished);
+        assert!(store.flow(initial.id()).unwrap().unwrap().finished);
     }
 
     #[test]

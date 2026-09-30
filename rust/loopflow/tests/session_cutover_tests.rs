@@ -1058,6 +1058,9 @@ fn declared_agent_can_start_another_tasks_flow() {
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
+    // Y needs a harness that supports the checkout boundary. Its mechanical
+    // Flow never starts a provider; X's interactive OpenCode only issues the command.
+    store.set_task_agent(&target.task.id, "claude").unwrap();
     let flow = store
         .start_task_flow(
             &target.task.id,

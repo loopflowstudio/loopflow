@@ -12,6 +12,7 @@ enum WorkspaceDestination: Hashable {
     case flow(String)
     case chooseFlow(String)
     case rename(String)
+    case bind(String)
     case monitor(String)
 }
 

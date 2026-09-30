@@ -10,6 +10,24 @@ import ViewInspector
 @Suite("Workspace destinations", .serialized)
 @MainActor
 struct WorkspaceDestinationTests {
+    @Test func paletteBindingTargetsOnlyTheSelectedUnassignedSession() async throws {
+        let scopes: [WorkReference?] = [nil, .wave(id: "wave-product"), .task(id: "task-bound")]
+        for work in scopes {
+            let record = try renameFixtureRecord("binding-session", title: "Conversation", work: work)
+            let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
+            let model = PodiumModel(query: RegistryQuery { args, _ in
+                if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
+                throw RegistryQueryError("No other read or mutation permitted")
+            }, repoPath: "/src/loopflow")
+            await model.refreshSessions()
+            #expect(model.searchDestinations("Bind").isEmpty)
+            model.navigation.selectedSessionId = record.id
+            #expect(model.searchDestinations("Bind").map(\.id) == (work?.kind == .task ? [] : [.bind(record.id)]))
+            model.navigation.selectedSessionId = "missing-session"
+            #expect(model.searchDestinations("Bind").isEmpty)
+        }
+    }
+
     @Test func taskLinkParsesOneDecodedIdentifier() throws {
         let link = try TaskLink(url: #require(URL(string: "loopflow://task/LOO-303?repo=%2Fsrc%2Fspace%20here")))
         #expect(link.issue == "LOO-303")

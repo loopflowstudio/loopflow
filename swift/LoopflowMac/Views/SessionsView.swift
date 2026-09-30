@@ -559,6 +559,9 @@ struct SessionsView: View {
             guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
             openSession(record)
             model.beginSessionRename(record)
+        case .bind(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            model.beginSessionBinding(record)
         case .monitor(let id): showMonitor(id)
         }
         model.remember(destination)

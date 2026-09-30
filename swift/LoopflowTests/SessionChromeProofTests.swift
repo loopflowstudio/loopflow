@@ -429,6 +429,34 @@ struct SessionChromeProofTests {
         #expect(model.navigation.palette == nil)
         #expect(window.attachedSheet == nil)
         #expect(window.firstResponder === terminals[1])
+
+        // The palette opens the breadcrumb's existing permanent-bind picker.
+        var unassigned = records
+        unassigned[0]["work"] = NSNull()
+        await inventory.replace(String(decoding: try JSONSerialization.data(withJSONObject: unassigned), as: UTF8.self))
+        await model.refreshSessions()
+        model.navigation.selectedSessionId = record.id
+        try await settle(window)
+        window.makeFirstResponder(terminals[0])
+        let bindDraft = "binding-retained-draft"
+        terminals[0].insertText(bindDraft, replacementRange: NSRange(location: NSNotFound, length: 0))
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let bindSheet = try #require(window.attachedSheet)
+        try await settle(bindSheet)
+        for char in "Bind" { try press(String(char), keyCode: 0, modifiers: [], in: bindSheet) }
+        #expect(model.searchDestinations("Bind").map(\.id) == [.bind(record.id)])
+        try press("\r", keyCode: 36, modifiers: [], in: bindSheet)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(model.navigation.palette == nil)
+        #expect(window.attachedSheet == nil)
+        #expect(model.navigation.binding?.sessionId == record.id)
+        #expect(model.navigation.binding?.preview == nil)
+        #expect(model.navigation.selectedSessionId == record.id)
+        model.cancelSessionBinding()
+        #expect(model.navigation.binding == nil)
+        try await expectEcho(bindDraft, on: surfaces[0])
+        for surface in surfaces { #expect(!terminalText(surface).contains("Bind")) }
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
     }

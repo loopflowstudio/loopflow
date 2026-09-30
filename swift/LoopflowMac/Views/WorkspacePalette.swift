@@ -55,9 +55,14 @@ extension PodiumModel {
             rows.append(.init(id: .monitor(selection.id), title: "Monitor \(found.task.task.identifier)",
                               detail: "Action · Inspect Runs", key: "Monitor"))
         }
-        if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }),
-           session.titleSource != .unavailable {
-            rows.append(.init(id: .rename(id), title: "Rename \(session.title)", detail: "Action · Edit name", key: "Rename"))
+        if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
+            if session.titleSource != .unavailable {
+                rows.append(.init(id: .rename(id), title: "Rename \(session.title)", detail: "Action · Edit name", key: "Rename"))
+            }
+            if session.work?.kind != .task {
+                rows.append(.init(id: .bind(id), title: "Bind to Task…",
+                                  detail: "Action · \(session.title) · Review permanent assignment", key: "Bind"))
+            }
         }
         return rows
     }

@@ -147,6 +147,10 @@ search all historical Tasks. Failed reads preserve the workspace and offer Retry
 If a highlighted row disappears, Return opens the first remaining visible result;
 with no results it does nothing.
 
+With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
+the Session name. Both open the same picker: review the named Task, then choose
+**Bind permanently**. Opening the picker leaves the conversation and terminal intact.
+
 ```sh
 open 'loopflow://task/LOO-303'
 open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'

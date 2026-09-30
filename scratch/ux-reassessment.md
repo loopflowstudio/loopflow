@@ -1,7 +1,9 @@
 # LOO-303 UX reassessment
 
-Research only, 2026-09-30. Jack Heart requested it after LOO-298 settled its model
-and LOO-353 was accepted. No code changed.
+Historical research, 2026-09-30. Jack Heart requested it after LOO-298 settled
+its model and LOO-353 was accepted. The latest Linear steers `0db66249` and
+`39781cad` resolved the questions below. The accepted scope and finish line now
+live in `workspace-ux-on-data-model.md`; this record preserves the rationale.
 
 ## Summary
 

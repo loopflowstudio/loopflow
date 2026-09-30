@@ -1346,12 +1346,29 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
 }
 
 /// Machine installation is separate from execution in a registered Task checkout.
-pub(crate) fn require_unmanaged_checkout(repo: &Path) -> OpsResult<()> {
+pub(crate) fn require_unmanaged_checkout(repo: &Path, database: Option<&Path>) -> OpsResult<()> {
     block_on_task(async {
-        if matches!(
-            resolve_managed_task(repo).await?,
-            ManagedTask::Managed { .. }
-        ) {
+        let managed = if let Some(database) = database {
+            if !database.try_exists().map_err(task_error)?
+                && std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none()
+            {
+                return Ok(());
+            }
+            let store: SharedStore = Arc::new(Store {
+                sqlite: crate::store::sqlite::SqliteStore::open_read_only(database)
+                    .map_err(task_error)?,
+            });
+            matches!(
+                crate::ops::resolve_execution_binding(&store, repo).await?,
+                Some(binding) if matches!(binding.work, crate::durable::WorkRef::Task(_))
+            )
+        } else {
+            matches!(
+                resolve_managed_task(repo).await?,
+                ManagedTask::Managed { .. }
+            )
+        };
+        if managed {
             return Err(task_error("Task Work cannot change the machine installation. Run installation outside the Task checkout without a Task --as declaration."));
         }
         Ok(())

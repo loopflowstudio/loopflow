@@ -17,6 +17,95 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Current slice — receipt-pinned installation continuation, 2026-09-30
+
+The incoming migration review is preserved at `3b4cd6592`. This cut removes the
+ordinary-selection dependency from `advance_switch`; the initiating promotion
+still checks Task ownership, and advancement still verifies the exclusive
+coordinator lock, exact receipt, candidate path/digest, handoff phase and build
+authority. Direct recovery remains a separate caller: it checks Task ownership
+read-only in the receipt's advanced target, or its prior store before advancement.
+It never opens the ordinary selected registry for that check. As with ordinary
+ownership resolution, an absent database is unmanaged only without a Work
+declaration; inaccessible evidence still fails. No receipt or store schema changes.
+
+The disposable proof now interrupts first activation after target-store advance,
+registers a Task, refuses recovery from that Task checkout, and recovers with the
+receipt's candidate from an unmanaged Git checkout. First installation remains
+inside Git; moving it outside Git is not the fix. The later development promotion
+also checks Task-owned refusal before using the unmanaged Git checkout.
+
+The first harness pass reached Task admission after successful first-install
+advance/recovery, then failed because control-context resolution did not recognize
+the installed `lf-<digest>` executable without PATH assistance. Installed pinned
+execution now resolves and verifies its executable through the existing receipt;
+uninstalled resolution keeps its existing behavior. No basename allowlist or
+ambient PATH repair was added.
+
+Review caught that simply removing the recovery guard would permit Task-owned
+recovery. The final implementation retains it with an explicit database input to
+the existing ownership check. The second build caught a `Store`/`SqliteStore`
+constructor mismatch; it was corrected before behavioral verification. The third
+harness pass confirmed Task recovery refusal and unmanaged recovery, then retained
+the same admission failure; its source snapshot predates the executable fix.
+Logs: `.lf/tmp/loo334-receipt-installation.log`, `-2.log`, and `-3.log`.
+
+The final-source attempt in `.lf/tmp/loo334-receipt-installation-final.log`
+stalled during compilation while Docker also failed a bounded ten-second info
+probe. Its owned harness was interrupted; exact container cleanup subsequently
+succeeded after Docker responded. The retry (`-retry.log`) passed the four
+migration checks, first-install recovery, Task recovery refusal, the first real
+worker and pending review preparation. It then disproved the existing promotion
+guard: the development candidate's earlier private snapshot lacked the Task,
+so promotion from the Task checkout succeeded in the disposable container.
+Promotion now checks the selected installation's store as well as its ordinary
+context through the same ownership resolver. No host installation was changed.
+
+The ownership rerun (`-ownership.log`) passed Task-owned promotion refusal and
+promotion from the unmanaged Git checkout, then failed full Flow preservation.
+The initial hypothesis was a stale fixture baseline from before `session open`.
+The fixture now captures the full state after `session open`, before the two
+promotion commands, and still compares both old and copied stores against it.
+The repeated failure below disproves that baseline-only explanation.
+
+Final behavioral command: `uv run python scripts/test_task_installation.py`, log
+`.lf/tmp/loo334-receipt-installation-continuity.log`. All 43 drafts materialized,
+the four populated migration tests passed, and both executable variants built.
+The normal-promotion scenario passed first-install advancement in Git, failed
+activation recovery, Task-owned recovery refusal, the first actual worker,
+pending-review preparation, Task-owned promotion refusal, and unmanaged
+development promotion. It then failed at the copied Flow preservation assertion:
+the pre-promotion baseline has `version=2` and `published=false`; the copied
+Flow has `version=3` and `published=true`. A comparison of the full assertion
+payloads found only those two differences. This does not yet locate the writer:
+the refused source invocation, successful promotion, store opening and copy
+inspection are all between the observations. Do not call this a harmless
+projection, move the baseline again, or weaken the assertion without finding it.
+The public post-switch status/open, exact completion, second worker and digest
+assertions were not reached; later harness tests did not execute.
+
+Next isolate when that Flow mutation occurs and reconcile it with the preserved
+review contract before proceeding into normal-copy succession. Keep old-store
+and copied-store evidence distinct. The final fixture retains the full comparison
+and the required two-worker continuation path. The implement skill's counterexample
+rule returns this unresolved preservation finding to review; it does not choose
+Flow navigation or authorize a new installation policy.
+
+`cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` and
+`git diff --check` passed. Final Clippy log:
+`.lf/tmp/loo334-receipt-clippy-continuity.log`. The last edit only corrects the
+fixture comment and this evidence note. Against `3b4cd6592`, production Rust is
+**+47 / −8 physical lines** across three files, excluding integration tests,
+docs and scratch. No runtime owner, migration, compatibility alias or Task
+disposition was added. The earlier mutation-free local Task guard assumption
+is no longer sufficient evidence for promotion preservation.
+
+Full-design cases 1–15 remain the publication boundary. Normal-copy
+succession, exact review completion and two worker digests, genuine divergence,
+recursive locking and decoy agent PATH, Session-owner discovery, chapter archive
+integration and the separate pending relationship Ask remain open. No publication,
+host promotion, Task completion or Flow navigation follows from this cut.
+
 ### Slice review — migration integration, 2026-09-30
 
 Reviewed `08e70e45c..d6f71dcc2` against Jack Heart's completed migration unblock.

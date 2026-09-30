@@ -162,6 +162,9 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()? {
+        return Ok(selection.verified_cli()?.to_path_buf());
+    }
     let candidate = resolve_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {

@@ -399,7 +399,9 @@ fn normal_promotion_preserves_pending_task_review() {
         command
     };
     let targets = tempfile::tempdir().unwrap();
-    let public_cli = targets.path().join("lf");
+    let blocked_target = targets.path().join("blocked");
+    fs::write(&blocked_target, "not a directory").unwrap();
+    let public_cli = blocked_target.join("lf");
     let published = std::path::PathBuf::from(
         std::env::var_os("TASK_PROOF_PUBLISHED_DIR")
             .expect("harness supplies a release-provenance predecessor"),
@@ -415,11 +417,51 @@ fn normal_promotion_preserves_pending_task_review() {
     )
     .output()
     .unwrap();
+    assert!(!installed.status.success(), "activation must fail");
+    let MachineInstallState::Switching(receipt) =
+        machine_install::read_state(&machine_install::root().unwrap()).unwrap()
+    else {
+        panic!("failed first activation must retain its receipt")
+    };
+    assert!(receipt.prior.is_none());
+    assert!(receipt.published_fallback.is_none());
     assert!(
-        installed.status.success(),
-        "published setup failed:\n{}\n{}",
+        receipt.target_store_advanced,
+        "first installation did not advance from a Git checkout:\n{}\n{}",
         String::from_utf8_lossy(&installed.stdout),
         String::from_utf8_lossy(&installed.stderr)
+    );
+    assert!(!receipt.active_selection_committed);
+    assert_eq!(receipt.target.store, home.join("loopflow.db"));
+    let task = register_unrun_task(
+        &home,
+        repo.path(),
+        "jack/promotion-review",
+        &repo.head_sha(),
+    );
+    fs::remove_file(&blocked_target).unwrap();
+    let mut recovery = command(
+        &receipt.candidate.path,
+        &["install", "recover-switch", "--switch", &receipt.id],
+    );
+    let refused = recovery.output().unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("Task Work cannot change the machine installation"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let machine_checkout = TestRepo::new();
+    let recovered = recovery
+        .current_dir(machine_checkout.path())
+        .output()
+        .unwrap();
+    assert!(
+        recovered.status.success(),
+        "first installation recovery failed:\n{}\n{}",
+        String::from_utf8_lossy(&recovered.stdout),
+        String::from_utf8_lossy(&recovered.stderr)
     );
     let MachineInstallState::Settled(predecessor) =
         machine_install::read_state(&machine_install::root().unwrap()).unwrap()
@@ -432,12 +474,6 @@ fn normal_promotion_preserves_pending_task_review() {
         .artifact(&ArtifactRole::Cli)
         .unwrap();
     original_cli.verify().unwrap();
-    let task = register_unrun_task(
-        &home,
-        repo.path(),
-        "jack/promotion-review",
-        &repo.head_sha(),
-    );
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut invocation =
         loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
@@ -518,10 +554,15 @@ fn normal_promotion_preserves_pending_task_review() {
         String::from_utf8_lossy(&before.stderr)
     );
     let before: serde_json::Value = serde_json::from_slice(&before.stdout).unwrap();
+    // Preserve the exact review state immediately before promotion.
+    let position = runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .unwrap();
 
     // Both installations use real promotion. The development switch includes
     // preflight, SQLite backup, activation and settlement.
-    let promoted = command(
+    let mut promotion = command(
         std::path::Path::new(env!("CARGO_BIN_EXE_lf")),
         &[
             "install",
@@ -531,9 +572,19 @@ fn normal_promotion_preserves_pending_task_review() {
             "--cli-target",
             public_cli.to_str().unwrap(),
         ],
-    )
-    .output()
-    .unwrap();
+    );
+    let refused = promotion.output().unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("Task Work cannot change the machine installation"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let promoted = promotion
+        .current_dir(machine_checkout.path())
+        .output()
+        .unwrap();
     assert!(
         promoted.status.success(),
         "promotion failed:\n{}\n{}",

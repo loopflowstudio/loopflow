@@ -1508,6 +1508,9 @@ installation does not transfer them. Use the retained development restoration be
 Run installation outside Task execution. Tasks and their descendants cannot
 promote, update, roll back, or recover the machine installation, including after
 switching to private branch data. Read-only candidate preflight remains usable.
+An interrupted first installation can recover through its receipt-pinned
+candidate before any installation is selected. Recovery checks Task ownership
+against the receipt's database without migrating it for that check.
 
 To restore retained development data while promoting a local build:
 

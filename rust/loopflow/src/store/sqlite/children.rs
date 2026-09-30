@@ -245,12 +245,7 @@ impl SqliteStore {
         }
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         complete_task_work_in(&transaction, task)?;
-        // A claimed worker retains its exact boundary until its provider exits.
-        // Unclaimed saved execution cannot resume a terminal Task.
-        transaction.execute(
-            "DELETE FROM task_flow_positions WHERE task_id=?1 AND claim_json IS NULL",
-            [task.id.as_str()],
-        )?;
+        // Cleanup settles the selected Flow after both driver and step exit.
         transaction.commit()?;
         Ok(())
     }

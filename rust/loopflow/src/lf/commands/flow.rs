@@ -436,6 +436,27 @@ async fn drive_loop(
         if flow.finished {
             return Ok(FlowOutcome::Completed);
         }
+        if let Some(task_id) = &flow.task_id {
+            if store
+                .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
+                .await?
+                == crate::durable::WorkStatus::Done
+                && store
+                    .task_flow(task_id)
+                    .await?
+                    .is_some_and(|managed| managed.id() == id)
+            {
+                store
+                    .end_flow(&id, flow.version, owned_claim.as_ref(), "Task completed")
+                    .await?;
+                let task = store
+                    .get_task(task_id)
+                    .await?
+                    .context("completed Task disappeared")?;
+                crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                return Ok(FlowOutcome::Completed);
+            }
+        }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
                 "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
@@ -483,6 +504,13 @@ async fn drive_loop(
                         progress.as_deref().unwrap_or_default(),
                     )
                     .await?;
+                if let Some(task_id) = flow.task_id.as_ref().filter(|_| claim.is_some()) {
+                    let task = store
+                        .get_task(task_id)
+                        .await?
+                        .context("Flow Task disappeared")?;
+                    crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                }
                 Ok(FlowOutcome::Completed)
             }
             Ok(Some(FlowOutcome::Waiting)) => Ok(FlowOutcome::Waiting),

@@ -236,6 +236,23 @@ pub(super) fn task_flow_in(
     .transpose()
 }
 
+/// Terminal Tasks retire only their selected, unclaimed execution and retain history.
+pub(super) fn retire_unclaimed_task_flow_in(
+    conn: &Connection,
+    task_id: &TaskId,
+) -> StoreResult<()> {
+    conn.execute(
+        &format!("UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {TASK_INVOCATION} AND claim_json IS NULL"),
+        params![task_id.as_str(), now_unix()],
+    )?;
+    conn.execute(
+        "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1 AND current_invocation_id IN
+         (SELECT id FROM flow_sessions WHERE state='replaced' AND claim_json IS NULL)",
+        [task_id.as_str()],
+    )?;
+    Ok(())
+}
+
 fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowSession> {
     let flow = flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
     if flow.finished {

@@ -847,33 +847,6 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let response: WorkflowStatesData = self.graphql(
-            r#"query CanceledWorkflowStates($teamId: ID!) {
-                workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                    nodes { id position }
-                }
-            }"#,
-            json!({ "teamId": team_id }),
-        ).await?;
-        let state = response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .ok_or_else(|| {
-                PmError::Message(format!("no canceled issue state for team {team_id}"))
-            })?;
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item_id, "stateId": state.id }),
-            )
-            .await?;
-        Ok(())
-    }
-
     pub async fn create_project(
         &self,
         initiative_id: &str,
@@ -1353,7 +1326,7 @@ impl LinearClient {
             .graphql(
                 r#"query CanceledWorkflowStates($teamId: ID!) {
               workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                nodes { id }
+                nodes { id position }
               }
             }"#,
                 json!({ "teamId": item.team_id }),
@@ -1363,7 +1336,7 @@ impl LinearClient {
             .workflow_states
             .nodes
             .into_iter()
-            .next()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
             .ok_or_else(|| PmError::Message("no canceled Linear workflow state found".into()))?;
         let result: PmResult<Value> = self
             .graphql(

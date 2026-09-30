@@ -3494,26 +3494,13 @@ mod tests {
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "code",
-                        0,
-                        "implement",
-                        None,
-                        false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: Default::default(),
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-                    updated_at: time::OffsetDateTime::now_utc(),
-                },
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 0, "implement", None, false),
+                    Default::default(),
+                ),
             )
             .await
             .unwrap();
@@ -3540,10 +3527,14 @@ mod tests {
         assert!(store.begin_task_abandon(&task.id).await.is_err());
         assert!(store.abandon(&work, "canceled").await.is_err());
         assert_eq!(
-            store.flow_position(&task.id).await.unwrap().unwrap().claim,
+            store.task_flow(&task.id).await.unwrap().unwrap().claim,
             Some(claim.clone())
         );
-        store.release_task_worker(&task.id, &claim).await.unwrap();
+        let held = store.task_flow(&task.id).await.unwrap().unwrap();
+        let position = store
+            .release_flow(held.id(), held.version, Some(&claim))
+            .await
+            .unwrap();
         store.begin_task_abandon(&task.id).await.unwrap();
         assert!(store
             .claim_task_worker(
@@ -3557,7 +3548,7 @@ mod tests {
             .is_err());
 
         store.abandon(&work, "canceled").await.unwrap();
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store
             .get_task_by_issue(&task.plan.identifier)

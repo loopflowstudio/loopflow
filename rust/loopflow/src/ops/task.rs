@@ -5970,16 +5970,6 @@ time.sleep(30)
             .unwrap();
         let position = claim_stop_fixture(&fixture, std::process::id()).await;
         let claim = position.claim.as_ref().unwrap();
-        let bound = fixture
-            .store
-            .bind_task_worker_run(
-                &fixture.task.id,
-                claim,
-                &crate::durable::RunId::new(),
-                &claim.owner,
-            )
-            .await
-            .unwrap();
         fixture
             .store
             .complete_task(&fixture.task, None)
@@ -5992,21 +5982,21 @@ time.sleep(30)
         assert_eq!(
             fixture
                 .store
-                .flow_position(&fixture.task.id)
+                .task_flow(&fixture.task.id)
                 .await
                 .unwrap()
                 .unwrap()
                 .claim,
-            Some(bound.clone())
+            Some(claim.clone())
         );
         assert!(fixture
             .store
-            .finish_task_flow(&fixture.task, claim, None)
+            .end_flow(position.id(), position.version + 1, Some(claim), "done")
             .await
             .is_err());
         fixture
             .store
-            .finish_task_flow(&fixture.task, &bound, None)
+            .end_flow(position.id(), position.version, Some(claim), "done")
             .await
             .unwrap();
 

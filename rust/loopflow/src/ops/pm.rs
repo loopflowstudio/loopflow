@@ -2937,11 +2937,7 @@ pub(crate) async fn chapter_sweep_candidates(
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
-        let chapter = store
-            .chapter(wave.id(), None)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
+        let chapter = super::chapter::current_project(&store, &wave).await?;
         for project in ctx
             .client
             .list_projects_including_archived(&ctx.initiative, true)
@@ -2949,7 +2945,7 @@ pub(crate) async fn chapter_sweep_candidates(
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
             validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
-            if project.id == chapter.project_id {
+            if project.id == chapter.id {
                 continue;
             }
             for item in ctx
@@ -2992,12 +2988,8 @@ pub(crate) async fn require_outside_current_chapter(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
-    let chapter = store
-        .chapter(wave.id(), None)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message("current chapter is unavailable".into()))?;
-    if resolved.item.project_id == chapter.project_id
+    let chapter = super::chapter::current_project(&store, &wave).await?;
+    if resolved.item.project_id == chapter.id
         || resolved.item.completed
         || matches!(
             resolved.item.state.as_deref(),

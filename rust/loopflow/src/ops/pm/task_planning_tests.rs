@@ -103,7 +103,17 @@ async fn planning_graphql(
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
-        json!({"initiative":{"projects":page(vec![project])}})
+        let projects = if project_id == "prior-project" {
+            let mut previous = project.clone();
+            previous["status"] = json!({"type":"completed"});
+            let mut current = project.clone();
+            current["id"] = json!("project-1");
+            current["name"] = json!("Chapter");
+            vec![previous, current]
+        } else {
+            vec![project]
+        };
+        json!({"initiative":{"projects":page(projects)}})
     } else if query.contains("query ListProjectIssues") {
         let mut state = state.lock().await;
         if !state.issues.is_empty() && state.fail_confirmation {
@@ -842,12 +852,18 @@ fi
                     .success());
             }
             let timestamp = time::OffsetDateTime::now_utc();
-            let project = runtime
-                .block_on(fixture.store.get_project_by_project("project-1"))
-                .unwrap()
-                .expect("task_create synced the current Project");
-            assert_eq!(project.wave_id, *wave.id());
-            assert_eq!(project.plan.status, crate::pm::ProjectStatus::Started);
+            let project = crate::work::project::Project {
+                id: crate::durable::ProjectId::new(),
+                plan: crate::planning::ProjectPlan {
+                    id: crate::planning::LinearProjectId::new("project-1").unwrap(),
+                    slug: "chapter".into(), name: "Chapter".into(),
+                    flow: "feature".into(), status: crate::pm::ProjectStatus::Started,
+                    prompt_context: String::new(), pm_snapshot_synced_at: 1,
+                },
+                wave_id: wave.id().clone(), iteration: 0, abandon_intent: None,
+                created_at: timestamp, updated_at: timestamp,
+            };
+            runtime.block_on(fixture.store.create_project(&project)).unwrap();
             let task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {
@@ -1223,7 +1239,6 @@ fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
         std::env::set_var("LF_DB_PATH", &fixture.database);
         let (repo, wave) = runtime.block_on(fixture.planning_repo());
         runtime.block_on(fixture.seed(now() + 86_400));
-        runtime.block_on(fixture.seed_current_chapter(&wave));
         let remote = fixture.directory.path().join("loopflowstudio/fixture.git");
         std::fs::create_dir_all(&remote).unwrap();
         let git = |cwd: &Path, args: &[&str]| {
@@ -1528,9 +1543,8 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
     std::env::set_var("LF_DB_PATH", &fixture.database);
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
-    runtime.block_on(fixture.seed_current_chapter(&wave));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {

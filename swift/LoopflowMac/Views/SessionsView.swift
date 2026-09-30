@@ -339,15 +339,23 @@ struct SessionsView: View {
         workspaces.workspace(for: taskPath ?? worktreeLayout.focusedPath ?? store.repoPath).multiplexer
     }
     private var taskPath: String? {
-        guard let task = fileTask else { return nil }
+        guard let task = fileTask else {
+            return selectedWorkspace?.taskId == nil ? nil : selectedWorkspace?.worktree
+        }
         let workspace = task.task.reference.workspace
         if workspace?.localExists != true, let prepared = navigation.preparedTaskWorktrees[task.task.id] {
             return prepared
         }
         return workspace?.worktree
     }
+    private var selectedWorkspace: SessionWorkspace? {
+        model.sessions.value?.first { $0.id == navigation.selectedSessionId }?.workspace
+    }
+    private var fileTaskId: String? {
+        fileTask?.task.runtime?.workId ?? selectedWorkspace?.taskId ?? fileTask?.task.task.identifier
+    }
     private var availablePaths: [String] {
-        worktreeLayout.knownPaths.union(store.sessions.map(\.record.cwd)).sorted()
+        worktreeLayout.knownPaths.union(store.sessions.map { $0.record.workspace?.worktree ?? $0.record.cwd }).sorted()
     }
 
     init(model: PodiumModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
@@ -456,13 +464,13 @@ struct SessionsView: View {
                         .frame(maxWidth: .infinity)
                         .clipped()
                     }
-                    if showsFiles, let task = fileTask, let taskPath {
+                    if showsFiles, let taskId = fileTaskId, let taskPath {
                         TaskFilesView(
                             store: workspaces.workspace(for: taskPath).files(
-                                taskId: task.task.id, issue: task.task.task.identifier, cwd: taskPath, query: query),
-                            prURL: task.task.activePr?.publication?.github?.url
+                                taskId: taskId, issue: taskId, cwd: taskPath, query: query),
+                            prURL: fileTask?.task.activePr?.publication?.github?.url
                         )
-                        .id(task.task.id)
+                        .id(taskId)
                         .frame(minWidth: 480, idealWidth: 700)
                     }
                 }
@@ -524,7 +532,7 @@ struct SessionsView: View {
             multiplexer.setFocusedPane(id)
             store.surfaces.focus(.shell(id))
         } else {
-            worktreeLayout.select(record.cwd)
+            worktreeLayout.select(record.workspace?.worktree ?? record.cwd)
             multiplexer.load(sessionId: record.id)
             store.surfaces.focus(.session(record.id))
         }

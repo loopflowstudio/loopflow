@@ -188,6 +188,7 @@ fn session_surface(run: &FlowRun, token: &StepToken) -> Result<SessionRecord> {
         actions: human_session::session_actions(SessionKind::Flow, state),
         terminal_ids: Vec::new(),
         work: None,
+        workspace: None,
         wave_id: None,
         title: name.title,
         title_source: name.source,

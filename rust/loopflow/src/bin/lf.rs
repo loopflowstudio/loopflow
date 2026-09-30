@@ -1151,6 +1151,31 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             }
             Ok(())
         }
+        TaskCommand::Files {
+            issue,
+            directory,
+            cursor,
+            show_ignored,
+            json,
+        } => {
+            let snapshot = loopflow::ops::task::task_files(
+                issue,
+                directory,
+                cursor.as_deref(),
+                *show_ignored,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            } else {
+                for entry in snapshot.entries {
+                    println!("{}", entry.path);
+                }
+                if let Some(cursor) = snapshot.next_cursor {
+                    eprintln!("Next page: --cursor {cursor}");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::File {
             issue,
             path,
@@ -1715,6 +1740,7 @@ fn execute_command(
                 cmd @ (TaskCommand::Changes { .. }
                 | TaskCommand::Diff { .. }
                 | TaskCommand::File { .. }
+                | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
         Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {

@@ -31,6 +31,28 @@ use super::durable::{create_project_work, create_task_work};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.home_id
+             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let home: Option<String> = row.get(4)?;
+            Ok(super::TaskCheckout {
+                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
+                issue_id: row.get(1)?,
+                issue_identifier: row.get(2)?,
+                worktree: PathBuf::from(row.get::<_, String>(3)?),
+                home_id: home
+                    .map(|id| crate::durable::HomeId::parse(&id))
+                    .transpose()
+                    .map_err(|error| invalid_column(4, error))?,
+            })
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
     // Durable Tasks: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 

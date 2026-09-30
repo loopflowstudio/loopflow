@@ -195,6 +195,15 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Current contents of one file, constrained to the Task worktree.
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil,
+                          showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
+        var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
+        if let cursor { args += ["--cursor", cursor] }
+        if showIgnored { args.append("--show-ignored") }
+        return try Self.decode(TaskDirectory.self, from: try await run(args, cwd))
+    }
+
+    /// Current contents of one file, constrained to the Task worktree.
     public func taskFile(
         issue: String,
         path: String,

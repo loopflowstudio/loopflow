@@ -966,7 +966,19 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Read one file from this Task's worktree
+    /// List one directory in this Task's worktree
+    Files {
+        issue: String,
+        #[arg(default_value = ".")]
+        directory: String,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long)]
+        show_ignored: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read one file from the Task checkout
     File {
         issue: String,
         path: String,
@@ -2393,6 +2405,21 @@ mod tests {
 
     #[test]
     fn task_workspace_commands_address_the_task_then_optional_file() {
+        let files = Cli::try_parse_from([
+            "lf",
+            "task",
+            "files",
+            "INF-123",
+            "src",
+            "--cursor",
+            "page",
+            "--show-ignored",
+            "--json",
+        ])
+        .expect("parse task directory");
+        assert!(matches!(files.command, Some(Commands::Task {
+            cmd: TaskCommand::Files { issue, directory, cursor: Some(cursor), show_ignored: true, json: true }
+        }) if issue == "INF-123" && directory == "src" && cursor == "page"));
         let changes = Cli::try_parse_from(["lf", "task", "changes", "INF-123", "--json"])
             .expect("parse task changes");
         assert!(matches!(

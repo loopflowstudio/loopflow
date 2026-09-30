@@ -46,5 +46,11 @@
     "iterations": [
       []
     ]
+  },
+  "workspace": {
+    "home_id": "home_00000000000000000000000000000001",
+    "worktree": "/src/loopflow.task",
+    "task_id": "task_00000000000000000000000000000001",
+    "unavailable": null
   }
 }

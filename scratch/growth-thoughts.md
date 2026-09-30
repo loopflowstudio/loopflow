@@ -77,10 +77,14 @@ later units here as bounded implementation direction; elaborate their final
 launch plans when selected. Keep all three units visible during design review.
 This kickoff files no follow-up Tasks and launches no implementation workers.
 
-Unit 1 remains the selected implementation boundary. Its first slice removes
-planning and PR dependencies from checkout/file access and preserves access
-changes independently of content revisions. Local probes support these choices;
-the configured desktop proof remains outstanding. Unit 2 is not launch-ready:
+Unit 1 remains the selected implementation boundary and is not ready to ship.
+The first internal cut now implements shared checkout association, directory pages,
+file access without Project/PR hydration, and retained read-only access changes.
+Swift grouping and the file navigator consume those readings. Focused Rust and
+Swift proofs have passed; the connected desktop/provider demo remains outstanding.
+The retained workspace, participation projection/indications, and raw Ask retry key
+in cuts 2–4 remain to build. Keep them in this PR's delivery boundary.
+Unit 2 is not launch-ready:
 native primary-turn delivery remains unproved, and Flow replacement needs the
 durable transition specified below. [Evidence](kickoff-evidence.md) separates
 source findings and executed probes from required implementation proof.
@@ -861,10 +865,10 @@ Task Ask/Flow handoff before claiming the intended experience works.
 
 Kickoff's production-model zoom/close probe passed. It confirmed reuse of zoom
 and disproved close/undo as collapse. The follow-up checkout-root probe also
-passed for subdirectories, symlink aliases, and distinct main/linked roots;
-its command and limits are in `kickoff-evidence.md`. No application implementation,
-full suite, primary-session launch, or live Ask demonstration has occurred. The
-Unit 2 native turn-delivery spike is required work, not an executed pass.
+passed for subdirectories, symlink aliases, and distinct main/linked roots.
+First-cut implementation evidence and remaining proof are recorded in
+`kickoff-evidence.md`. No full gate, primary-session launch, or live Ask
+demonstration has occurred. The Unit 2 native turn-delivery spike remains required.
 
 ## Alternatives, exclusions, and review
 

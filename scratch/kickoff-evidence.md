@@ -296,3 +296,76 @@ comparison refresh, and keep terminal identity independent of location grouping.
 The design now names no-PR browser/save/refresh and live reassociation proofs in
 the existing `TaskFilesTests` and `WorktreeWorkspaceTests` owners. These are
 required implementation proofs, not passes from this source inspection.
+
+## First internal cut — implementation evidence
+
+Implementation on 2026-09-30, following Jack Heart's accepted design. This is an
+internal cut of Unit 1, not a separately shippable unit or a configured desktop demo.
+
+- `SessionRecord.workspace` is derived from a batch SQLite reading of Task and
+  Work-placement rows. The resolver caches Git checkout roots, retains recorded
+  missing-checkout evidence, and leaves ambiguous or unplaced ownership explicit.
+  List, open, preparation, and completion use it. Remote Flow readings retain
+  their recorded Home/Task with an unavailable resolution; this Home never resolves
+  their paths locally. Swift grouping consumes workspace Task identity and keeps
+  recorded Run attribution and Flow membership intact.
+- File reads/saves use the same checkout reading without hydrating Projects or
+  requiring an active PR. Comparison data remains separate. The `task files`
+  command pages immediate children and batches Git ignore classification.
+- The native navigator reads directory pages independently of optional Changes,
+  including invalidation and post-save refresh. An associated Session exposes
+  file access even when its Task is absent from the planning outline.
+- Access is refreshed independently of content revisions. Internal symlinks and
+  symlink parents are readable but not editable; changing access retains the draft,
+  selection and Undo while disabling manual Save and canceling queued autosave.
+  The existing no-follow, revisioned writer is unchanged.
+
+Executed focused proof:
+
+- `cargo test -p loopflow --lib ops::human_session::`: 21 passed, including
+  source association and unavailable-placement snapshot propagation.
+- `cargo test -p loopflow --lib task_files`: 6 passed, including pagination beyond
+  500 entries, ignore visibility, outside-link rejection, same-content symlink
+  access, no-Project/no-PR read/save/list, and stale-save rejection.
+- `swift test --package-path swift --no-parallel --filter TaskFilesTests`:
+  18 passed. Includes no-PR directory/save/filesystem refresh, independent Changes
+  errors, page reset with retained drafts, and both leaf/parent symlink save gates.
+- `swift test --package-path swift --no-parallel --filter 'TaskFilesTests|WorkspaceNavigationTests'`:
+  41 passed before the final added file cases; navigation proved location grouping
+  with conflicting attribution and retained independent Flow membership.
+
+Swift transport is simulated. The tests exercise native documents, observation,
+views and retained surfaces; they do not connect the production Rust CLI to a real
+provider or prove the opening desktop demo. One intermediate Swift build rejected
+source edits during compilation; the subsequent stable-input proof passed. The
+missing-Project fixture initially failed foreign-key setup; disabling constraints
+only in that isolated fixture established the intended retained-row condition.
+A DTO build also caught the new non-JSON cursor output formatting error; it was fixed.
+
+Review findings fixed in this cut: PR comparison failure no longer clears file
+navigation, same revision no longer hides changed access, and `.gitignore` changes
+invalidate affected loaded directory readings. Final CLI parser proof passed (one
+case); the Rust DTO fixture suite passed (10 cases), and
+`cargo clippy --all-targets -- -D warnings` passed. `cargo fmt` and diff whitespace
+checks passed. The Xcode fallback proof also passed:
+
+```sh
+cd swift
+xcodegen generate
+xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac \
+  -destination platform=macOS -derivedDataPath .build/xcode-derived-data -jobs 4 \
+  -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES \
+  CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
+```
+
+This executes the `--loopflow` suite's build commands directly without broadening
+this implementation pass to the affected-suite gate. It compiled the fallback app
+and test targets; it did not execute hosted UI tests.
+
+Remaining Unit 1 implementation: Home/worktree-keyed retained workspace ownership,
+collapse and focus/restore, reassociation without surface destruction, replacement
+of the old Task terminal owner, participatory graph/navigation and indications,
+raw Ask keys, and the configured desktop/provider walkthrough. Do not publish this
+internal cut as completion of Unit 1. The headless run has no rendering environment;
+`uv run python scripts/test.py --ui-host` and the configured live Ask/Flow handoff
+require the maintained desktop host. No hosted UI or live provider proof was attempted.

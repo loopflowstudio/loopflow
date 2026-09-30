@@ -280,6 +280,7 @@ fn chapter_history_keeps_dated_task_evidence() {
 fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Files {
+        directory: loopflow::ops::task::TaskDirectory,
         changes: loopflow::ops::task::TaskChangesSnapshot,
         diff: loopflow::ops::task::TaskDiffSnapshot,
         file: loopflow::ops::task::TaskFileSnapshot,

@@ -34,8 +34,11 @@ excluded by the pinned Ghostty build.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Choose **Show Files** in a Task or Session toolbar to read `scratch/` and changed files
-beside the retained terminal. **Parent** compares the worktree with the Task PR's
+Choose **Show Files** in a Task or Session toolbar to browse its checkout beside
+the retained terminal. Expand folders to read one page of up to 500 entries;
+**Load more** continues the directory and **Show ignored** includes ignored paths.
+Tracked, unchanged and untracked files remain available without an active PR.
+**Changes** optionally compares the worktree with the Task PR's
 recorded base; **HEAD** compares with its current commit. The displayed SHA pins
 the file list and selected diff. A recorded PR links above the file navigator.
 Use ↑/↓ in the navigator to select files; hover a row for its full path.
@@ -45,6 +48,9 @@ Use ↑/↓ in the navigator to select files; hover a row for its full path.
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Switching files, hiding Files and returning to the Task keeps the draft.
+Files reached through symlinks remain readable within the checkout and show a
+read-only explanation. If a regular file becomes a symlink, its retained draft
+and Undo survive while editing, Save and autosave stop.
 
 Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
 app menu for explicit **Save** (⌘S). Both modes receive filesystem changes live,

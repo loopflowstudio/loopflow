@@ -8,6 +8,7 @@ import ViewInspector
 @testable import LoopflowMac
 
 private struct FilesFixture: Decodable {
+    let directory: TaskDirectory
     let changes: TaskChangesSnapshot
     let diff: TaskDiffSnapshot
     let file: TaskFileSnapshot
@@ -26,7 +27,37 @@ struct TaskFilesTests {
 
     private func snapshot(_ text: String, revision: String? = nil) -> TaskFileSnapshot {
         TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: "note.txt",
-                         content: text, state: .text, revision: revision ?? text, sizeBytes: UInt64(text.utf8.count))
+                         content: text, state: .text, revision: revision ?? text, readOnlyReason: nil, sizeBytes: UInt64(text.utf8.count))
+    }
+
+    @Test func directoryPagesRefreshIndependentlyOfComparisonAndRetainDocuments() async throws {
+        let query = RegistryQuery { args, _ in
+            if args[1] == "changes" { throw RegistryQueryError("Task has no active PR") }
+            let path = args.contains("--cursor") ? "second.txt" : "first.txt"
+            var entries = [["path": path, "kind": "file"]]
+            if args.contains("--show-ignored") { entries.append(["path": "ignored.txt", "kind": "file"]) }
+            var value: [String: Any] = ["path": "", "entries": entries]
+            if !args.contains("--cursor") { value["next_cursor"] = "next" }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: query)
+        store.showsChanges = true
+        await store.refresh()
+        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt"])
+        #expect(store.changesError == "Task has no active PR")
+        let document = store.document("first.txt")
+        await document.reconcile(snapshot("original"))
+        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
+        store.autosave = false
+        await store.loadDirectory("", more: true)
+        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt", "second.txt"])
+        store.showIgnored = true
+        await store.refreshDirectories()
+        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt", "ignored.txt"])
+        #expect(store.selectedDocument === document)
+        #expect(document.text == "draft")
+        #expect(document.canSave)
+        #expect(store.directoryErrors.isEmpty)
     }
 
     @Test func diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() async {
@@ -45,6 +76,71 @@ struct TaskFilesTests {
         #expect(!document.editor.undoManager!.canUndo)
         document.editor.undoManager?.redo()
         #expect(document.text == "disk\ntwo\nTHREE\n")
+    }
+
+    @Test func sameRevisionAccessChangePreservesDraftSelectionAndUndo() async {
+        let document = TaskFileDocument(path: "note.txt")
+        let original = snapshot("original")
+        await document.reconcile(original)
+        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
+        document.editor.setSelectedRange(NSRange(location: 2, length: 1))
+        let readOnly = TaskFileSnapshot(recoveries: [], issueIdentifier: original.issueIdentifier,
+            taskId: original.taskId, path: original.path, content: original.content, state: .text,
+            revision: original.revision, readOnlyReason: "Symlink is read-only", sizeBytes: original.sizeBytes)
+        await document.reconcile(readOnly)
+        #expect(document.text == "draft")
+        #expect(document.editor.selectedRange() == NSRange(location: 2, length: 1))
+        #expect(document.editor.undoManager?.canUndo == true)
+        #expect(!document.editor.isEditable)
+        #expect(!document.canSave)
+        #expect(document.readOnlyReason == "Symlink is read-only")
+        await document.reconcile(original)
+        #expect(document.editor.isEditable)
+        #expect(document.canSave)
+        document.editor.undoManager?.undo()
+        #expect(document.text == "original")
+    }
+
+    @Test(arguments: [false, true])
+    func symlinkAccessCancelsQueuedAutosaveAndManualSave(parentLink: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("directory")
+        let targetDirectory = root.appendingPathComponent("target")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("note.txt")
+        let target = targetDirectory.appendingPathComponent("note.txt")
+        try Data("original".utf8).write(to: file)
+        try Data("original".utf8).write(to: target)
+        let query = RegistryQuery(runWithInput: { _, _, draft in
+            try Data(draft.utf8).write(to: target)
+            return "{}"
+        }, run: { _, _ in
+            var value = try fileJSON(file)
+            if (try? FileManager.default.destinationOfSymbolicLink(atPath: (parentLink ? directory : file).path)) != nil {
+                value["read_only_reason"] = "Files reached through a symlink are read-only."
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        let store = TaskFilesStore(issue: "TEST-1", cwd: root.path, query: query)
+        store.autosave = true
+        store.selection = "directory/note.txt"
+        await store.loadFile()
+        let document = try #require(store.selectedDocument)
+        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
+        await Task.yield()
+        try FileManager.default.removeItem(at: parentLink ? directory : file)
+        try FileManager.default.createSymbolicLink(at: parentLink ? directory : file,
+                                                  withDestinationURL: parentLink ? targetDirectory : target)
+        await store.loadFile()
+        await document.save(issue: store.issue, cwd: store.cwd, query: query)
+        try await Task.sleep(for: .milliseconds(2200))
+        #expect(try String(contentsOf: target, encoding: .utf8) == "original")
+        #expect(document.text == "draft")
+        #expect(!document.canSave)
+        #expect(!document.editor.isEditable)
     }
 
     @Test func mergePreservesUnicodeLineEndingsAndSeveralSeparatedEdits() {
@@ -92,8 +188,9 @@ struct TaskFilesTests {
         }, run: { args, _ in
             let value: [String: Any]
             if args[1] == "changes" {
-                value = ["issue_identifier": "TEST-1", "task_id": "task-files", "base_commit": "base",
-                         "head_commit": "head", "files": [], "scratch": ["note.txt"], "scratch_truncated": false]
+                throw RegistryQueryError("Task has no active PR")
+            } else if args[1] == "files" {
+                value = ["path": "", "entries": [["path": "note.txt", "kind": "file"]]]
             } else { value = try fileJSON(file) }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
@@ -101,6 +198,10 @@ struct TaskFilesTests {
         store.autosave = false
         store.selection = "note.txt"
         store.observeFiles()
+        store.showsChanges = true
+        await store.refresh()
+        #expect(store.directories[""]?.entries.first?.path == "note.txt")
+        #expect(store.changesError == "Task has no active PR")
         #expect(store.error == nil)
         await store.loadFile()
         let document = try #require(store.selectedDocument)
@@ -125,6 +226,9 @@ struct TaskFilesTests {
         #expect(try String(contentsOf: file, encoding: .utf8) == "ONE\nexternal\n")
         await document.save(issue: store.issue, cwd: store.cwd, query: query)
         #expect(try String(contentsOf: file, encoding: .utf8) == "local\nexternal\n")
+        await store.refresh()
+        #expect(store.directories[""]?.entries.first?.path == "note.txt")
+        #expect(store.directoryErrors.isEmpty)
         store.autosave = true
         document.editor.insertText("auto", replacementRange: NSRange(location: 0, length: 5))
         try await eventually { (try? String(contentsOf: file, encoding: .utf8)) == "auto\nexternal\n" }
@@ -215,6 +319,7 @@ struct TaskFilesTests {
 
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
+        #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])
         #expect(fixture.changes.baseCommit == fixture.diff.baseCommit)
         #expect(fixture.changes.files[0].oldPath == "old.txt")
         #expect(fixture.file.content == "\u{feff}notes\r\n")
@@ -261,7 +366,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let store = TaskFilesStore(issue: "TEST-1", cwd: directory.path, query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            var value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
             if args[1] == "diff" { value["patch"] = try String(contentsOf: file, encoding: .utf8) }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
@@ -309,7 +414,7 @@ struct TaskFilesTests {
         await document.reconcile(TaskFileSnapshot(recoveries: [TaskFileRecovery(directory: "/recovery", changed: true,
                                                                          message: "Late writer")],
             issueIdentifier: baseline.issueIdentifier, taskId: baseline.taskId, path: baseline.path,
-            content: baseline.content, state: baseline.state, revision: baseline.revision, sizeBytes: baseline.sizeBytes))
+            content: baseline.content, state: baseline.state, revision: baseline.revision, readOnlyReason: baseline.readOnlyReason, sizeBytes: baseline.sizeBytes))
         #expect(document.editor.undoManager?.canRedo == true)
         #expect(document.recoveries.first?.changed == true)
     }
@@ -348,7 +453,7 @@ struct TaskFilesTests {
         #expect(document.saveMessage == "Updated from disk")
         // The Save's own filesystem event rereads content, which carries no history.
         await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files",
-            path: original.path, content: "external again", state: .text, revision: "again", sizeBytes: 14))
+            path: original.path, content: "external again", state: .text, revision: "again", readOnlyReason: nil, sizeBytes: 14))
         #expect(document.recoveries.first?.changed == true)
     }
 
@@ -438,7 +543,7 @@ struct TaskFilesTests {
         #expect(registry.surfaces.view(for: identity) === terminal)
         #expect(terminal.surface == surface)
         let changed = TaskFileSnapshot(recoveries: [], issueIdentifier: "TEST-1", taskId: "task-files", path: original.path,
-                                       content: "external\n", state: .text, revision: "different", sizeBytes: 9)
+                                       content: "external\n", state: .text, revision: "different", readOnlyReason: nil, sizeBytes: 9)
         await document.reconcile(changed)
         #expect(document.text == "external\ndraft")
         #expect(document.external == nil)

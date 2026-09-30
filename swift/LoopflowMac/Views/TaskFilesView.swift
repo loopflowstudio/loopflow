@@ -12,8 +12,6 @@ struct TaskFilesView: View {
     @Bindable var store: TaskFilesStore
     let prURL: URL?
     @Environment(\.palette) private var palette
-    @State private var showsScratch = true
-    @State private var showsDiff = true
     @FocusState private var navigatorFocused: Bool
 
     private var diffIdentity: String {
@@ -33,9 +31,11 @@ struct TaskFilesView: View {
             // Refresh membership/base only; document synchronization is event-driven.
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                await store.refresh()
+                if store.showsChanges || store.mode == .diff { await store.refreshChanges() }
             }
         }
+        .task(id: store.showIgnored) { await store.refreshDirectories() }
+        .task(id: store.showsChanges) { if store.showsChanges { await store.refreshChanges() } }
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
             if store.mode == .file { await store.loadFile() }
         }
@@ -61,17 +61,13 @@ struct TaskFilesView: View {
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        sectionHeader("scratch/", expanded: $showsScratch)
-                        if showsScratch {
-                            ForEach(store.changes?.scratch ?? [], id: \.self) { path in
-                                row(path, label: String(path.dropFirst("scratch/".count)), mode: .file)
+                        Toggle("Show ignored", isOn: $store.showIgnored).font(.caption)
+                        directoryRows("")
+                        sectionHeader("Changes", expanded: $store.showsChanges).padding(.top, 12)
+                        if store.showsChanges {
+                            if let reason = store.changesError {
+                                Text(reason).font(.caption).foregroundStyle(palette.textSecondary)
                             }
-                            if store.changes?.scratchTruncated == true {
-                                Text("Listing limited to 2,000 entries").font(.caption)
-                            }
-                        }
-                        sectionHeader("diff", expanded: $showsDiff).padding(.top, 12)
-                        if showsDiff {
                             Picker("Compare against", selection: $store.base) {
                                 Text("Parent").tag("parent")
                                 Text("HEAD").tag("head")
@@ -93,8 +89,8 @@ struct TaskFilesView: View {
                 }
                 .focusable().focused($navigatorFocused)
                 .onMoveCommand { direction in
-                    let rows = (showsScratch ? (store.changes?.scratch ?? []).map { ($0, TaskFilesStore.Mode.file) } : [])
-                        + (showsDiff ? (store.changes?.files ?? []).map { ($0.path, TaskFilesStore.Mode.diff) } : [])
+                    let rows = visibleFiles("").map { ($0, TaskFilesStore.Mode.file) }
+                        + (store.showsChanges ? (store.changes?.files ?? []).map { ($0.path, TaskFilesStore.Mode.diff) } : [])
                     guard !rows.isEmpty, direction == .up || direction == .down else { return }
                     let current = rows.firstIndex { $0.0 == store.selection && $0.1 == store.mode }
                     let index = min(max((current ?? -1) + (direction == .down ? 1 : -1), 0), rows.count - 1)
@@ -111,6 +107,49 @@ struct TaskFilesView: View {
         }
         .background(palette.surfaceMuted)
         .frame(minWidth: 190, idealWidth: 230, maxWidth: 320)
+    }
+
+    private func directoryRows(_ path: String) -> AnyView {
+        AnyView(VStack(alignment: .leading, spacing: 2) {
+            if let error = store.directoryErrors[path] {
+                Text(error).font(.caption).foregroundStyle(Color.statusWarning)
+            }
+            ForEach(store.directories[path]?.entries ?? []) { entry in
+                if entry.kind == .directory {
+                    Button {
+                        if store.expandedDirectories.contains(entry.path) {
+                            store.expandedDirectories.remove(entry.path)
+                        } else {
+                            store.expandedDirectories.insert(entry.path)
+                            Task { await store.loadDirectory(entry.path) }
+                        }
+                    } label: {
+                        Label((entry.path as NSString).lastPathComponent,
+                              systemImage: store.expandedDirectories.contains(entry.path) ? "folder.fill" : "folder")
+                            .font(.system(size: 11, design: .monospaced))
+                            .padding(.vertical, 5)
+                    }.buttonStyle(.plain)
+                    if store.expandedDirectories.contains(entry.path) {
+                        directoryRows(entry.path).padding(.leading, 12)
+                    }
+                } else {
+                    row(entry.path, label: (entry.path as NSString).lastPathComponent
+                        + (entry.kind == .symlink ? " ↗" : ""), mode: .file)
+                }
+            }
+            if store.directories[path]?.nextCursor != nil {
+                Button("Load more") { Task { await store.loadDirectory(path, more: true) } }.font(.caption)
+            }
+        })
+    }
+
+    private func visibleFiles(_ path: String) -> [String] {
+        (store.directories[path]?.entries ?? []).flatMap { entry in
+            if entry.kind == .directory {
+                return store.expandedDirectories.contains(entry.path) ? visibleFiles(entry.path) : []
+            }
+            return [entry.path]
+        }
     }
 
     private var documentPane: some View {
@@ -130,9 +169,9 @@ struct TaskFilesView: View {
                     .fixedSize()
                 }
                 Picker("View", selection: $store.mode) {
-                    ForEach(TaskFilesStore.Mode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
+                    Text("File").tag(TaskFilesStore.Mode.file)
+                    Text("Diff").tag(TaskFilesStore.Mode.diff)
+                        .disabled(store.changesError != nil)
                 }.pickerStyle(.segmented).labelsHidden()
                     .accessibilityLabel("View").frame(width: 110).fixedSize()
             }
@@ -143,6 +182,9 @@ struct TaskFilesView: View {
             if let error = store.error {
                 Text(error).font(.caption).foregroundStyle(Color.statusWarning).padding(8)
             }
+            if let reason = store.selectedDocument?.readOnlyReason {
+                Text(reason).font(.caption).padding(8)
+            }
             if let document = store.selectedDocument, let external = document.external {
                 Text("\(stateLabel(external.state)) · local draft retained; saving unavailable")
                     .font(.caption).padding(8)
@@ -152,7 +194,7 @@ struct TaskFilesView: View {
                 if let message = document.saveMessage {
                     Text(message).font(.system(size: 10)).foregroundStyle(palette.textSecondary).padding(6)
                 } else if document.dirty {
-                    Text(store.autosave ? "Autosave pending · draft retained" : "Unsaved draft · retained in this window")
+                    Text(store.autosave && document.canSave ? "Autosave pending · draft retained" : "Unsaved draft · retained in this window")
                         .font(.system(size: 10)).foregroundStyle(palette.textSecondary).padding(6)
                 }
                 if !document.recoveries.isEmpty {
@@ -216,6 +258,8 @@ struct TaskFilesView: View {
                     TaskPatchView(patch: diff.patch, lines: store.patchLines)
                     if diff.truncated { Text("Diff truncated at 1 MB").font(.caption) }
                 }
+            } else if let reason = store.changesError {
+                ContentUnavailableView("Comparison unavailable", systemImage: "doc", description: Text(reason))
             } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         } else if let document = store.selectedDocument, let snapshot = document.snapshot {
             if snapshot.state == .text {

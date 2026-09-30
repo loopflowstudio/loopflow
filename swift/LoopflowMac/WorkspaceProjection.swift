@@ -44,7 +44,7 @@ struct WorkspaceProjection {
         var matched = Set<String>()
         func attached(to work: WorkReference?) -> [SessionRecord] {
             guard let work else { return [] }
-            let records = sessions.filter { $0.work == work }
+            let records = sessions.filter { $0.workspace?.taskId == work.id }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -55,8 +55,8 @@ struct WorkspaceProjection {
                 roadmap: wave,
                 sessions: {
                     let records = sessions.filter {
-                        $0.work == .wave(id: wave.wave.id)
-                            || ($0.work?.kind == .project && $0.waveId == wave.wave.id)
+                        $0.workspace?.taskId == nil && ($0.work == .wave(id: wave.wave.id)
+                            || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
                     }
                     matched.formUnion(records.map(\.id))
                     return records

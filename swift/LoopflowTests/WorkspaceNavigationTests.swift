@@ -8,6 +8,23 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkspaceNavigationTests {
+    @Test("Checkout association groups independent Sessions despite different attribution")
+    func checkoutOwnsGroupingWithoutGrantingFlowMembership() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
+        let original = try session("independent", work: .task(id: "another-task"))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        json["workspace"] = ["home_id": "local", "worktree": "/src/loopflow.review",
+                             "task_id": "ts_review00000000000000000000000000"]
+        let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [associated])
+        let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
+        #expect(task.task.runtime?.workId == associated.workspace?.taskId)
+        #expect(associated.work == .task(id: "another-task"))
+        #expect(associated.flowMembership == .independent)
+        #expect(projection.unmatchedSessions.isEmpty)
+        #expect(projection.subject(for: associated.id) == task.id.work)
+    }
+
     @Test("Repository path spellings share one outline root")
     func repositoryAliasesShareRoot() async throws {
         let source = try ReadingSource(
@@ -620,8 +637,10 @@ struct WorkspaceNavigationTests {
     private func session(_ id: String, work: WorkReference?, state: SessionState = .active) throws -> SessionRecord {
         let workData = try JSONEncoder().encode(work)
         let workJSON = String(decoding: workData, as: UTF8.self)
+        let taskJSON = String(decoding: try JSONEncoder().encode(work?.kind == .task ? work?.id : nil), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
         {"id":"\(id)", "run_id": "\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
+         "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(id == "project" ? "\"wave-1\"" : "null"),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: state.rawValue)),
          "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}

@@ -1,3 +1,6 @@
+mod workspace;
+pub use workspace::SessionWorkspace;
+
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
@@ -174,6 +177,7 @@ pub struct SessionRecord {
     pub run_id: RunId,
     pub kind: SessionKind,
     pub work: Option<WorkRef>,
+    pub workspace: Option<SessionWorkspace>,
     pub wave_id: Option<crate::id::WaveId>,
     pub work_path: Option<String>,
     pub actions: Vec<SessionAction>,
@@ -736,7 +740,9 @@ pub(crate) async fn prepare(
     if dir.join("prepared").exists() {
         launch_flow(task, &position).await?;
     }
-    flow_surface(store, task, &position).await
+    let mut session = flow_surface(store, task, &position).await?;
+    workspace::associate(store, std::slice::from_mut(&mut session)).await?;
+    Ok(session)
 }
 
 pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
@@ -747,6 +753,7 @@ pub(crate) async fn list(store: &SharedStore) -> Result<Vec<SessionRecord>> {
     }
     let boundary_runs = boundary_run_ids(store).await?;
     sessions.extend(list_interactive_sessions(store, &boundary_runs).await?);
+    workspace::associate(store, &mut sessions).await?;
     sessions.sort_by(|left, right| left.title.cmp(&right.title).then(left.id.cmp(&right.id)));
     Ok(sessions)
 }
@@ -798,7 +805,7 @@ fn provider_history(dir: &Path, manifest: &RunManifest) -> Result<ProviderSessio
 }
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
-    match target {
+    let mut session = match target {
         SessionTarget::Interactive { dir, manifest, .. } => {
             interactive_surface(store, dir, manifest).await
         }
@@ -807,7 +814,9 @@ async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<
         SessionTarget::StandaloneFlow(token) => {
             attribute_standalone_session(store, crate::ops::flow_session::surface(token)?).await
         }
-    }
+    }?;
+    workspace::associate(store, std::slice::from_mut(&mut session)).await?;
+    Ok(session)
 }
 
 pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()> {
@@ -1142,7 +1151,7 @@ pub(crate) async fn open(
     let target = find_session(store, session_id)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    match &target {
+    let mut session = match &target {
         SessionTarget::StandaloneFlow(token) => {
             let session = crate::ops::flow_session::open(token, mode, resume).await?;
             attribute_standalone_session(store, session).await
@@ -1199,13 +1208,21 @@ pub(crate) async fn open(
             let target = find_session(store, &id)
                 .await?
                 .ok_or_else(|| session_not_found(&id))?;
-            let mut session = session_surface(store, &target).await?;
+            let mut session = match &target {
+                SessionTarget::Ask(record) => ask_surface(store, record).await?,
+                SessionTarget::Flow { task, position } => {
+                    flow_surface(store, task, position).await?
+                }
+                _ => unreachable!("prepared boundary remains Ask or Flow"),
+            };
             if resume {
                 session.run_id = open_boundary(store, &id).await?;
             }
             Ok(session)
         }
-    }
+    }?;
+    workspace::associate(store, std::slice::from_mut(&mut session)).await?;
+    Ok(session)
 }
 
 pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<SessionRecord> {
@@ -1459,6 +1476,7 @@ async fn interactive_surface(
         id: manifest.run_id.to_string(),
         run_id: manifest.run_id.clone(),
         kind: SessionKind::Interactive,
+        workspace: None,
         wave_id: session_wave_id(store, work.as_ref()).await?,
         work_path: session_work_path(store, work.as_ref()).await?,
         work,
@@ -1915,6 +1933,12 @@ async fn flow_surface(
         run_id,
         id,
         kind: SessionKind::Flow,
+        workspace: (home.route != "local").then(|| SessionWorkspace {
+            home_id: home.id.clone(),
+            worktree: task.worktree.clone(),
+            task_id: Some(task.id.clone()),
+            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+        }),
         wave_id: Some(task.wave_id.clone()),
         work: Some(position.work()),
         work_path: session_work_path(store, Some(&position.work())).await?,
@@ -1952,6 +1976,7 @@ async fn ask_surface(store: &SharedStore, record: &AskSessionRecord) -> Result<S
         id: record.id.clone(),
         run_id,
         kind: SessionKind::Ask,
+        workspace: None,
         wave_id: session_wave_id(store, record.work.as_ref()).await?,
         work: record.work.clone(),
         work_path: session_work_path(store, record.work.as_ref()).await?,

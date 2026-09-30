@@ -1,5 +1,32 @@
 import Foundation
 
+public enum TaskFileKind: String, Decodable, Sendable {
+    case file, directory, symlink
+}
+
+public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
+    public var id: String { path }
+    public let path: String
+    public let kind: TaskFileKind
+}
+
+public struct TaskDirectory: Decodable, Sendable, Hashable {
+    public let path: String
+    public let entries: [TaskFileEntry]
+    public let nextCursor: String?
+
+    public init(path: String, entries: [TaskFileEntry], nextCursor: String?) {
+        self.path = path
+        self.entries = entries
+        self.nextCursor = nextCursor
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case path, entries
+        case nextCursor = "next_cursor"
+    }
+}
+
 /// One path changed from a Task's immutable base commit.
 public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { path }
@@ -81,6 +108,7 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     public let content: String?
     public let state: TaskFileState
     public let revision: String?
+    public let readOnlyReason: String?
     public let sizeBytes: UInt64
 
     enum CodingKeys: String, CodingKey {
@@ -88,5 +116,6 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
         case issueIdentifier = "issue_identifier"
         case taskId = "task_id"
         case sizeBytes = "size_bytes"
+        case readOnlyReason = "read_only_reason"
     }
 }

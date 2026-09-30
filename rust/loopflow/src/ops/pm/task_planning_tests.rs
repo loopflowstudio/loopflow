@@ -852,18 +852,10 @@ fi
                     .success());
             }
             let timestamp = time::OffsetDateTime::now_utc();
-            let project = crate::work::project::Project {
-                id: crate::durable::ProjectId::new(),
-                plan: crate::planning::ProjectPlan {
-                    id: crate::planning::LinearProjectId::new("project-1").unwrap(),
-                    slug: "chapter".into(), name: "Chapter".into(),
-                    flow: "feature".into(), status: crate::pm::ProjectStatus::Started,
-                    prompt_context: String::new(), pm_snapshot_synced_at: 1,
-                },
-                wave_id: wave.id().clone(), iteration: 0, abandon_intent: None,
-                created_at: timestamp, updated_at: timestamp,
-            };
-            runtime.block_on(fixture.store.create_project(&project)).unwrap();
+            let project = runtime
+                .block_on(fixture.store.get_project_by_project("project-1"))
+                .unwrap()
+                .unwrap();
             let task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {

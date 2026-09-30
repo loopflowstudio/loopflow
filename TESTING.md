@@ -474,6 +474,15 @@ belong in `session_lifecycle_tests`; Chapter convergence belongs in
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
+
+After Project ownership or uniqueness changes, run the Task-planning consumers
+against CI's materialized schema. Planning sync already creates the local Project;
+registered-Task fixtures must reuse it rather than insert a second owner.
+
+```bash
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
+```
+
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
 control authority, and Session lookup otherwise reads outside the fixture's Home.

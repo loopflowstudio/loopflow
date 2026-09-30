@@ -155,8 +155,6 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
             let flow = runtime
                 .block_on(store.flow(id))?
                 .ok_or_else(|| anyhow!("Flow {id} has no invocation row"))?;
-            let id = flow.id().to_owned();
-            let id = id.as_str();
             if let Some(task_id) = &flow.task_id {
                 if runtime
                     .block_on(store.task_flow(task_id))?
@@ -671,7 +669,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if skill.human {
-            // Reaching review releases the claim. The Task's selected Flow,
+            // Reaching review releases the claim. The Task's selected Flow
             // still owns review preparation.
             let managed_task = match &flow.task_id {
                 Some(task_id)

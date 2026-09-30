@@ -5336,7 +5336,6 @@ mod tests {
                 &fixture.task.id,
                 crate::durable::FlowSession {
                     task_id: Some(fixture.task.id.clone()),
-
                     wave_id: Some(fixture.task.wave_id.clone()),
                     cwd: fixture.task.worktree.clone(),
                     message: None,

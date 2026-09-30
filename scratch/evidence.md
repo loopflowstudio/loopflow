@@ -478,3 +478,12 @@ No full local suite ran. These are local source/materialized and scripted CLI
 proofs, not hosted CI, configured-provider/Desktop acceptance, real-Home conversion,
 installation, merge or Task completion. The remaining implementation items and
 full-design obligations are unchanged.
+
+Compression after `a66f42a0a` removes the former recursive checkpoint helper,
+repeated movement calculation and full Flow clone; pass-test names now describe
+positions. The first proof attempt stopped below the 32 GiB reserve; after Jack
+Heart's supervisor freed space, preflight passed at 44.7 GiB. All 14 focused checks
+pass (`fold-compress-focused.log`, `fold-compress-boundaries.log`), including
+Task claim/progress fencing and public Task/taskless retry, loop and review paths
+with scripted providers. All-target Clippy with warnings denied
+(`fold-compress-clippy.log`), formatting and diff checks pass. No full suite ran.

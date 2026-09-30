@@ -3,6 +3,9 @@
 import fcntl
 import importlib.util
 import os
+import select
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -309,42 +312,82 @@ def test_uv_cleanup_preserves_busy_cache_then_prunes_when_idle(tmp_path: Path, m
     assert not payload.exists()
 
 
-def test_disk_pressure_prunes_uv_through_its_supported_boundary(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize("busy", [False, True], ids=["unlocked", "busy"])
+def test_disk_pressure_recovers_builds_even_when_uv_cache_is_busy(
+    tmp_path: Path, monkeypatch, busy: bool
 ) -> None:
     cache = tmp_path / "uv-cache"
-    cache.mkdir()
-    (cache / "archive").write_bytes(b"x" * 4096)
+    archive = cache / "archive-v0" / "unused"
+    archive.mkdir(parents=True)
+    (archive / "module.py").write_bytes(b"x" * 4096)
+    project = tmp_path / "project"
+    (project / "target").mkdir(parents=True)
+    (project / "target/artifact").write_bytes(b"x" * 4096)
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "cache-lock-fixture"\nversion = "0.0.0"\n'
+    )
+    for key in tuple(os.environ):
+        if key.startswith(("UV_", "_UV_", "LF_", "LOOPFLOW_")) or key == "VIRTUAL_ENV":
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
+    monkeypatch.setenv("UV_NO_CONFIG", "1")
     policy = _policy(minimum_free_disk_bytes=1_000)
-    source = resources.ResourceSource(
-        id="cache:uv",
-        kind="cache",
-        owner="uv",
-        root=cache,
-        paths=(cache,),
-        bytes=resources._allocated_bytes(cache),
-        budget_bytes=1_000_000,
-        disposable=True,
-        active=False,
-        action="uv cache prune",
-    )
-    called = []
+    sources = [
+        _source(cache, id="cache:uv", kind="cache", owner="uv", budget=1_000_000),
+        _source(project, id="build:fixture"),
+    ]
+    holder = None
+    try:
+        if busy:
+            holder = subprocess.Popen(
+                [
+                    "uv",
+                    "run",
+                    "--project",
+                    str(project),
+                    "--python",
+                    sys.executable,
+                    "python",
+                    "-c",
+                    "import select, sys; print('ready', flush=True); "
+                    "select.select([sys.stdin], [], [], 10)",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            assert select.select([holder.stdout], [], [], 15)[0], "uv fixture did not start"
+            assert holder.stdout.readline().strip() == "ready"
 
-    def _prune() -> "resources.RecoveryAction":
-        called.append(True)
-        return resources.RecoveryAction(
-            "cache:uv", "uv", source.bytes, (), "pruned", "supported boundary"
-        )
+        actions = resources.recover_resources(policy, _snapshot(policy, sources, free=100))
 
-    monkeypatch.setattr(resources, "_prune_uv_cache", _prune)
+        assert [action.source for action in actions] == ["cache:uv", "build:fixture"]
+        assert actions[0].status == ("failed" if busy else "pruned")
+        assert archive.exists() is busy
+        assert not (project / "target").exists()
+        assert (project / "pyproject.toml").exists()
+        if busy:
+            assert "lock" in actions[0].detail.lower()
+            assert actions[0].removed_bytes == 0
+            assert holder.poll() is None
+        else:
+            assert actions[0].removed_bytes > 0
+    finally:
+        if holder is not None:
+            try:
+                holder.communicate(input="", timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(holder.pid, signal.SIGKILL)
+                holder.communicate()
 
-    actions = resources.recover_resources(
-        policy,
-        _snapshot(policy, [source], free=100),
-    )
-
-    assert called == [True]
-    assert actions[0].source == "cache:uv"
+    if busy:
+        action = resources._prune_uv_cache()
+        assert action.status == "pruned"
+        assert not archive.exists()
 
 
 def test_oversized_active_builds_survive_recovery_and_real_disk_pressure_stops(

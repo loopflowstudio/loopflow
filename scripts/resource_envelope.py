@@ -24,6 +24,7 @@ BUILD_RELATIVE_PATHS = (
     Path("website/node_modules"),
 )
 GATE_RELATIVE_PATH = Path(".lf/tmp/gate")
+UV_CACHE_PRUNE_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -681,23 +682,36 @@ def _prune_old_gate_artifacts(
 
 
 def _prune_uv_cache() -> RecoveryAction:
-    before = _allocated_bytes(_uv_cache_dir())
-    # `uv run` itself holds a reader lock for the lifetime of this script.
-    result = subprocess.run(
-        ["uv", "cache", "prune"],
-        capture_output=True,
-        text=True,
-        env={**os.environ, "UV_LOCK_TIMEOUT": "0"},
-    )
-    after = _allocated_bytes(_uv_cache_dir())
-    detail = result.stderr.strip() or result.stdout.strip()
+    cache = _uv_cache_dir()
+    before = _allocated_bytes(cache)
+    try:
+        # An enclosing `uv run` can hold the cache lock until this script exits.
+        result = subprocess.run(
+            ["uv", "cache", "prune"],
+            capture_output=True,
+            text=True,
+            timeout=UV_CACHE_PRUNE_TIMEOUT_SECONDS,
+            env={**os.environ, "UV_LOCK_TIMEOUT": "0"},
+        )
+    except subprocess.TimeoutExpired:
+        status = "timed_out"
+        detail = (
+            f"uv cache prune exceeded {UV_CACHE_PRUNE_TIMEOUT_SECONDS}s; "
+            "the cache may be in use, including by an enclosing `uv run`. "
+            "Other recovery continues; retry `uv cache prune` after other uv processes exit"
+        )
+    else:
+        status = "pruned" if result.returncode == 0 else "failed"
+        detail = result.stderr.strip() or result.stdout.strip()
+        detail = detail or f"uv cache prune exited {result.returncode}"
+    after = _allocated_bytes(cache)
     return RecoveryAction(
         "cache:uv",
         "uv",
         max(0, before - after),
         (),
-        "pruned" if result.returncode == 0 else "failed",
-        detail or f"uv cache prune exited {result.returncode}",
+        status,
+        detail,
     )
 
 

@@ -1,6 +1,5 @@
-//! Human review of a saved Flow. The review is a Session whose Runs name the
-//! Flow's invocation and the Flow's Work, Task included; the invocation row
-//! waits on it through `pending_session_id`.
+//! Human review of a saved Flow. The review Session retains the Flow and Work
+//! attribution; the Flow waits on it through `pending_session_id`.
 use anyhow::{anyhow, bail, ensure, Context, Result};
 
 use crate::durable::FlowSession;
@@ -40,7 +39,7 @@ pub(crate) async fn membership(
     )?))
 }
 
-/// Store the review the Flow waits at, with its first Run prepared. Returns
+/// Store the review the Flow waits at, with its first input prepared. Returns
 /// the feedback once the review is complete.
 pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<Option<String>> {
     let session = match &flow.pending_session_id {
@@ -138,13 +137,9 @@ pub(crate) async fn prepare_exec(
     session_id: &str,
 ) -> Result<()> {
     let flow = store.waiting_review(session_id).await?;
-    let step = ActiveStep {
-        invocation: flow.id().to_owned(),
-        version: flow.version,
-    };
     command
         .arg("--tui")
-        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(&step)?);
+        .env(flow_run::FLOW_STEP_ENV, ActiveStep::of(&flow).env_value()?);
     if let Some(model) = &flow.model {
         command.args(["--model", model]);
     }

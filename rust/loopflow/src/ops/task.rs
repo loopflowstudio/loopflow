@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
-use crate::durable::{WorkRef, WorkStatus};
+use crate::durable::{FlowSession, WorkRef, WorkStatus};
 use crate::engine::agent::{checkout_execution_boundary, probe_execution_boundary};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -2405,31 +2405,29 @@ async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         .task_flow(&task.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    if let Some(exec) = position
+    position
         .as_ref()
-        .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
-        .transpose()
+        .map_or(Ok(false), |flow| flow_worker_live(store, flow))
+}
+
+fn flow_worker_live(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
+    // A selected step can stay live after its driver's claim is released.
+    let step_live = store
+        .sqlite
+        .pending_flow_step_exec(flow.id())
         .map_err(task_error)?
-        .flatten()
-    {
-        if crate::journal::exec_process_evidence(&store.sqlite, &exec)
-            == crate::journal::ProcessIdentityEvidence::Live
-        {
-            return Ok(true);
-        }
-    }
-    Ok(position
-        .and_then(|position| position.claim)
-        .is_some_and(|claim| {
+        .is_some_and(|exec| {
+            crate::journal::exec_process_evidence(&store.sqlite, &exec)
+                == crate::journal::ProcessIdentityEvidence::Live
+        });
+    Ok(step_live
+        || flow.claim.as_ref().is_some_and(|claim| {
             crate::journal::task_worker_owner_evidence(&claim.owner)
                 == crate::journal::ProcessIdentityEvidence::Live
         }))
 }
 
-async fn stop_task_worker(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Option<crate::durable::FlowSession>> {
+async fn stop_task_worker(store: &SharedStore, task: &Task) -> OpsResult<Option<FlowSession>> {
     let position = store
         .task_flow(&task.id)
         .await
@@ -2438,20 +2436,7 @@ async fn stop_task_worker(
         return Ok(None);
     };
     let claim = position.claim.as_ref();
-    let step_live = store
-        .sqlite
-        .pending_flow_step_exec(position.id())
-        .map_err(task_error)?
-        .is_some_and(|exec| {
-            crate::journal::exec_process_evidence(&store.sqlite, &exec)
-                == crate::journal::ProcessIdentityEvidence::Live
-        });
-    if step_live
-        || claim.is_some_and(|claim| {
-            crate::journal::task_worker_owner_evidence(&claim.owner)
-                == crate::journal::ProcessIdentityEvidence::Live
-        })
-    {
+    if flow_worker_live(store, &position)? {
         store
             .append_interrupt(&WorkRef::Task(task.id.clone()))
             .await
@@ -2465,15 +2450,13 @@ async fn stop_task_worker(
             .task_flow(&task.id)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        let replaced = if let Some(current) = &current {
+        let replaced = current.as_ref().is_some_and(|current| {
             current.id() != position.id()
                 || current
                     .claim
                     .as_ref()
                     .is_some_and(|active| Some(active) != claim)
-        } else {
-            false
-        };
+        });
         if replaced {
             return Err(task_error(format!(
                 "Task {} worker changed while stopping; retry `lf task restart {}`",

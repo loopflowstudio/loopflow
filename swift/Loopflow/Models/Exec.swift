@@ -16,10 +16,10 @@ public struct Exec: Codable, Sendable, Equatable, Identifiable {
     public let outcome: String?
     public let exitCode: Int32?
     public let signal: String?
-    public let wave: String?
+    public let error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, command, repo, cwd, outcome, signal, wave
+        case id, command, repo, cwd, outcome, signal, error
         case traceID = "trace_id"
         case parentExecID = "parent_exec_id"
         case viaAgent = "via_agent"

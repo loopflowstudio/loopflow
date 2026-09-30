@@ -1959,10 +1959,13 @@ fi"#;
                 )
                 .unwrap();
             assert!(via_agent, "the repair agent invokes the nested rebase");
-            let completions: i64 = db.query_row(
-                "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='run' AND event IN ('completed','errored')",
-                [&parent.0], |row| row.get(0),
-            ).unwrap();
+            let completions: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM execs WHERE id=?1 AND completed_at IS NOT NULL",
+                    [&parent.0],
+                    |row| row.get(0),
+                )
+                .unwrap();
             assert_eq!(
                 completions, 1,
                 "the command completes once across worker threads"

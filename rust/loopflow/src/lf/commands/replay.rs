@@ -18,7 +18,7 @@ pub fn run(selector: &str) -> Result<()> {
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let database = crate::store::database_path_from_env()?;
     let artifact = if database.is_file() {
-        let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
         match store.resolve_history_input(selector) {
             Ok(selected) => store
                 .session(&selected)?
@@ -243,7 +243,7 @@ mod tests {
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&registry)
+        let session = crate::store::sqlite::SqliteStore::open_execs_read_only(&registry)
             .unwrap()
             .session_for_artifact(&source_id)
             .unwrap()

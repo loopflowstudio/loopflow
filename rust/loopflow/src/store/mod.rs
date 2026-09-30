@@ -30,29 +30,6 @@ mod token_crypto;
 pub use branch_data::isolate_branch_data;
 pub(crate) use branch_data::observation_database_path;
 
-/// One row of the machine-grain run ledger (`run_events`): a lifecycle event
-/// for a run, flow, or skill, written directly by `lf` into the local store.
-///
-/// Lineage only. Provider usage lives in generic Run records.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunEventRow {
-    pub run_id: String,
-    pub process_id: String,
-    pub parent_process_id: Option<String>,
-    pub seq: i64,
-    pub ts: i64,
-    pub repo: Option<String>,
-    pub worktree: Option<String>,
-    pub wave: Option<String>,
-    pub node: String,
-    pub event: String,
-    pub command: Option<String>,
-    pub flow: Option<String>,
-    pub skill: Option<String>,
-    pub step_index: Option<i64>,
-    pub error: Option<String>,
-}
-
 /// One wave's locally readable PM projection. Linear owns the payload; sync
 /// replaces this row atomically so readers never observe a partial refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +110,7 @@ pub(crate) fn production_database_path() -> PathBuf {
 /// Development builds normally isolate writes under `.lf-dev/worktrees`.
 /// Observability is different: it must describe the Home that launched the
 /// process (after source CLI startup redirects installed Homes), and opening it
-/// through `open_run_ledger_read_only` cannot migrate
+/// through `open_execs_read_only` cannot migrate
 /// or otherwise mutate its schema. Explicit control authority wins, followed
 /// by an ordinary override, then the installed Home.
 pub(crate) fn authority_home_dir() -> PathBuf {
@@ -1281,11 +1258,10 @@ pub async fn open_registry_for_authority() -> Result<Store, RegistryUnavailable>
 pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
-    use super::sqlite::SqliteStore;
     use super::{
         default_lf_home_dir_for, guard_development_database, may_apply_migrations,
         read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
-        ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
+        ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
@@ -3176,27 +3152,6 @@ mod tests {
         assert_eq!(root.parent_wave_id(), None);
     }
 
-    /// A run_events row with no usage attached.
-    fn event_row(run_id: &str, seq: i64, node: &str, event: &str) -> RunEventRow {
-        RunEventRow {
-            run_id: run_id.to_string(),
-            process_id: run_id.to_string(),
-            parent_process_id: None,
-            seq,
-            ts: seq,
-            repo: Some("/repo".to_string()),
-            worktree: None,
-            wave: None,
-            node: node.to_string(),
-            event: event.to_string(),
-            command: None,
-            flow: None,
-            skill: None,
-            step_index: None,
-            error: None,
-        }
-    }
-
     #[tokio::test]
     async fn pm_snapshot_replacement_is_atomic_per_wave() {
         let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
@@ -3228,45 +3183,6 @@ mod tests {
             Some(snapshot)
         );
         let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn completion_without_admission_retains_observed_process_start_and_missing_event() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("loopflow.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let mut row = event_row("process", 1, "run", "completed");
-        row.ts = 20;
-        store
-            .insert_run_event(&row, 10, None, None, Some(0))
-            .unwrap();
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        let times: (i64, i64) = connection
-            .query_row(
-                "SELECT started_at,completed_at FROM execs WHERE id='process'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(times, (10, 20));
-        let events = store.list_run_events_since(0).unwrap();
-        assert_eq!(
-            events.len(),
-            1,
-            "a missed start receipt must remain missing"
-        );
-        assert_eq!(events[0].event, "completed");
-    }
-
-    #[test]
-    fn a_closed_vocabulary_rejects_an_unknown_node() {
-        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
-        let store = SqliteStore::new(&db_path).expect("store should open");
-        let row = event_row("bad-node", 0, "task", "started");
-        let error = store
-            .insert_run_event(&row, row.ts, None, None, None)
-            .expect_err("unknown node must violate the ledger contract");
-        assert!(error.to_string().contains("CHECK constraint failed"));
     }
 
     #[tokio::test]

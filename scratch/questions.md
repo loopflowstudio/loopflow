@@ -40,7 +40,7 @@ proposals remain in [committed history](https://github.com/loopflowstudio/loopfl
   a branch binary against the installed Home or promoting it.
 
 No additional product decision is needed to continue implementation. The
-[remaining work](remaining-work.md) and [import obligations](import-preservation.md)
+[remaining work](remaining-work.md) and [import obligations](compress-history.md)
 retain acceptance and preservation requirements.
 
 - **Discovery surface:** use `flow list/show --sessions` for saved FlowSessions,
@@ -297,3 +297,13 @@ parking 334"):
 - One remaining item per implement iteration: finish it, publish, let the loop
   decide.
 LOO-334 keeps running in parallel.
+
+2026-09-30 · **Historical compatibility removed, current state retained.** Jack Heart:
+“Also can we simplify the migration chains? We dont have to support any clients
+other than literally this machine.” And: “In general we should try to 'compress'
+this change as much as possible. Whatever history or extra state we don't need,
+toss it now.” This supersedes historical-import, old-selector, old-format and
+intermediate-draft preservation obligations. Retain Waves, Projects, Tasks and
+PR/Linear/worktree links, provider accounts/routes and resumable Sessions.
+Use three direct migration groups. Verification may migrate a database copy only;
+never write the installed Home. Jack authorized commit and publication, then stop.

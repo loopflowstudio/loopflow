@@ -15,7 +15,7 @@
       "outcome": "failed",
       "exit_code": 42,
       "signal": null,
-      "wave": null
+      "error": null
     },
     {
       "id": "33333333-3333-4333-8333-333333333333",
@@ -32,7 +32,7 @@
       "outcome": null,
       "exit_code": null,
       "signal": null,
-      "wave": null
+      "error": null
     }
   ],
   "next": {

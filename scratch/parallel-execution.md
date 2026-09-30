@@ -3,10 +3,15 @@
 LOO-298 · Realigned for Jack Heart · 2026-09-30.
 
 The [contract](data-model-one-table-per.md), [remaining work](remaining-work.md),
-[import obligations](import-preservation.md) and [Chapters](chapters.md) retain
+[current-state cutover](compress-history.md) and [Chapters](chapters.md) retain
 whole-design acceptance. No Task completion, installation or shipment is claimed.
 
 ## Current position
+
+Jack Heart’s deep-compression directive supersedes the historical-import work
+below. The [current-state inventory](compress-history.md) records three direct
+migrations and the copied-Home rehearsal; configured acceptance and actual
+quiescent conversion remain separate.
 
 Item 2 is done. One started Flow retains one FlowSession through every loop
 pass; retry keeps its node/iteration position and Iterate advances return

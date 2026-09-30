@@ -202,7 +202,6 @@ mod tests {
         conn.execute_batch("CREATE TABLE waves(id TEXT, name TEXT, created_at INTEGER);
             CREATE TABLE projects(id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
             CREATE TABLE tasks(id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
-            CREATE TABLE run_events(run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command, flow, skill, step_index, error);
             CREATE TABLE operations(name TEXT, executable TEXT, home TEXT);").unwrap();
         conn
     }

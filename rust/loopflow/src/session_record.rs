@@ -169,9 +169,7 @@ pub struct SessionContextRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionCaptureManifest {
     pub schema_version: u32,
-    #[serde(rename = "run_id")]
     pub artifact_key: String,
-    #[serde(rename = "parent_run_id")]
     pub caller_artifact_key: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -184,7 +182,6 @@ pub struct SessionCaptureManifest {
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub flow: Option<SessionFlowMembership>,
-    #[serde(rename = "launch")]
     pub exec: Option<AgentExecRequest>,
     pub context: Option<SessionContextRef>,
     pub runtime_path: Option<PathBuf>,
@@ -1023,7 +1020,6 @@ pub(crate) fn project_input_history(
     let mut terminal: Option<TerminalReceipt> = None;
     let mut manifest: Option<SessionCaptureManifest> = None;
     let mut gaps = 0;
-    let mut stored = None;
     for event in history {
         if event.kind != crate::session::SessionEventKind::Observed {
             continue;
@@ -1041,8 +1037,6 @@ pub(crate) fn project_input_history(
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
-        } else if source == "runs" && input == artifact_key {
-            stored = Some(evidence);
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             match (
                 ordinal.parse::<u64>(),
@@ -1053,8 +1047,7 @@ pub(crate) fn project_input_history(
             }
         }
     }
-    // Earlier input observations may be imported after later ones. Keep the
-    // original event order for first-attempt timing and cumulative evidence.
+    // Keep event order for first-attempt timing and cumulative evidence.
     events.sort_by_key(|(ordinal, _)| *ordinal);
     let mut events: Vec<_> = events.into_iter().map(|(_, envelope)| envelope).collect();
     gaps += recover_native_usage(&mut events, history);
@@ -1062,18 +1055,6 @@ pub(crate) fn project_input_history(
     let evidence = reduce_usage_events(&events);
     gaps += evidence.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
-    let stored_text = |field: &str| {
-        stored
-            .and_then(|row| row[field].as_str())
-            .map(str::to_owned)
-    };
-    let stored_end = stored.and_then(|row| row["ended_at"].as_i64());
-    if let Some(terminal) = &terminal {
-        gaps += usize::from(
-            stored_text("outcome").is_some_and(|outcome| outcome != terminal.outcome)
-                || stored_end.is_some_and(|at| at != terminal.ended_at.unix_timestamp()),
-        );
-    }
     Ok(SessionHistory {
         session_id: session.id.clone(),
         captured: session.captured,
@@ -1082,18 +1063,7 @@ pub(crate) fn project_input_history(
         task_id: session.task_id.clone(),
         wave_id: session.wave_id.clone(),
         task_identifier: names.1,
-        work_source: stored
-            .and_then(|row| serde_json::from_value(row["work_source"].clone()).ok())
-            .or_else(|| {
-                manifest
-                    .as_ref()
-                    .and_then(|m| m.subjects.first())
-                    .map(|subject| match subject.source {
-                        AttributionSource::Declared => crate::session::WorkSource::Declared,
-                        AttributionSource::Inherited => crate::session::WorkSource::Inherited,
-                    })
-            })
-            .or(session.work_source),
+        work_source: session.work_source,
         wave_name: names.0,
         providers,
         task_pr_id: manifest.as_ref().and_then(|manifest| match &manifest.flow {
@@ -1107,26 +1077,15 @@ pub(crate) fn project_input_history(
         worktree: manifest
             .as_ref()
             .map(|m| m.cwd.to_string_lossy().into_owned())
-            .or_else(|| stored_text("cwd"))
             .or_else(|| current.then(|| session.cwd.to_string_lossy().into_owned())),
         skill: manifest
             .as_ref()
             .map(|m| m.skill.clone())
-            .unwrap_or_else(|| {
-                if stored.is_some() {
-                    stored_text("skill")
-                } else {
-                    current.then(|| session.skill.clone()).flatten()
-                }
-            }),
-        recorded_outcome: terminal
-            .as_ref()
-            .map(|receipt| receipt.outcome.clone())
-            .or_else(|| stored_text("outcome")),
+            .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+        recorded_outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         recorded_at: terminal
             .as_ref()
-            .map(|receipt| receipt.ended_at.unix_timestamp())
-            .or(stored_end),
+            .map(|receipt| receipt.ended_at.unix_timestamp()),
         observed_at: session.observed_at,
         first_provider_attempt_at: providers_first_start(history)
             .into_iter()
@@ -1137,24 +1096,12 @@ pub(crate) fn project_input_history(
         harness: manifest
             .as_ref()
             .map(|m| m.harness.clone())
-            .or_else(|| {
-                if stored.is_some() {
-                    stored_text("provider")
-                } else {
-                    current.then(|| session.provider.clone()).flatten()
-                }
-            })
+            .or_else(|| current.then(|| session.provider.clone()).flatten())
             .unwrap_or_else(|| "unknown".into()),
         model: manifest
             .as_ref()
             .map(|m| m.model.clone())
-            .unwrap_or_else(|| {
-                if stored.is_some() {
-                    stored_text("model")
-                } else {
-                    current.then(|| session.model.clone()).flatten()
-                }
-            }),
+            .unwrap_or_else(|| current.then(|| session.model.clone()).flatten()),
         surface: manifest
             .as_ref()
             .map(|m| m.surface.clone())
@@ -1171,33 +1118,6 @@ pub(crate) fn project_input_history(
     })
 }
 
-pub(crate) fn record_dirs(lf_home: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let root = lf_home.join("runs");
-    let prefixes = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut records = Vec::new();
-    for prefix in prefixes {
-        let prefix = prefix?;
-        if !prefix.file_type()?.is_dir() {
-            continue;
-        }
-        let entries = fs::read_dir(prefix.path())?;
-        for record in entries {
-            let record = record?;
-            if record.file_name().to_string_lossy().starts_with('.')
-                || !record.file_type()?.is_dir()
-            {
-                continue;
-            }
-            records.push(record.path());
-        }
-    }
-    Ok(records)
-}
-
 pub(crate) fn resolve_manifest(
     lf_home: &Path,
     selector: &str,
@@ -1209,37 +1129,40 @@ pub(crate) fn resolve_manifest(
             "Capture selector cannot be empty",
         ));
     }
-    let mut matches = record_dirs(lf_home)?
-        .into_iter()
-        .filter(|dir| {
-            let id = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
-            id.starts_with(selector)
-                || id
-                    .strip_prefix("run_")
-                    .is_some_and(|id| id.starts_with(selector))
-        })
-        .collect::<Vec<_>>();
-    matches.sort();
-    match matches.as_slice() {
-        [] => Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Capture {selector} was not found on this Home"),
-        )),
-        [dir] => {
-            let manifest = read_manifest(dir)?;
-            validate_manifest_path(dir, &manifest)?;
-            Ok((dir.clone(), manifest))
+    if let Some(dir) = record_dir(lf_home, selector) {
+        if dir.join("prepared").is_file() {
+            let manifest = read_manifest(&dir)?;
+            validate_manifest_path(&dir, &manifest)?;
+            return Ok((dir, manifest));
         }
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Capture prefix {selector} is ambiguous"),
-        )),
     }
+    let database = database_in(lf_home).map_err(std::io::Error::other)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)
+        .map_err(std::io::Error::other)?;
+    let artifact = store
+        .resolve_history_input(selector)
+        .map_err(|error| match error {
+            StoreError::NotFound => {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "Capture not found")
+            }
+            error => std::io::Error::other(error),
+        })?;
+    let session = store.session(&artifact).map_err(std::io::Error::other)?;
+    let artifact = session
+        .filter(|session| session.id == artifact)
+        .map(|session| session.artifact_key)
+        .unwrap_or(artifact);
+    let dir = record_dir(lf_home, &artifact).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid capture key")
+    })?;
+    let manifest = read_manifest(&dir)?;
+    validate_manifest_path(&dir, &manifest)?;
+    Ok((dir, manifest))
 }
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+    crate::store::sqlite::SqliteStore::open_execs_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
     )
     .and_then(|store| store.input_provider_session(&input))
@@ -1254,13 +1177,11 @@ pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<String> {
     parse_artifact_key(id).map_err(std::io::Error::other)
 }
 
-/// Fresh publications supersede the imported sidecar, whose import time says
-/// nothing about native identity. JSONL observations retain their original order.
+/// Read the current conversation’s published provider identity.
 pub(crate) fn provider_session_from_history(
     history: impl IntoIterator<Item = serde_json::Value>,
 ) -> std::io::Result<Option<ProviderSessionRef>> {
     let mut published = None;
-    let mut imported = None;
     let mut events = Vec::new();
     for observation in history {
         let Some(source) = observation["source"].as_str() else {
@@ -1269,14 +1190,12 @@ pub(crate) fn provider_session_from_history(
         let evidence = &observation["evidence"];
         if source.starts_with("provider-session:") {
             published = Some(evidence.clone());
-        } else if source == "provider-session.json" {
-            imported = Some(evidence.clone());
         } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
             let ordinal = ordinal.parse::<u64>().map_err(std::io::Error::other)?;
             events.push((ordinal, evidence.clone()));
         }
     }
-    if let Some(reference) = published.or(imported) {
+    if let Some(reference) = published {
         let reference: ProviderSessionRef =
             serde_json::from_value(reference).map_err(std::io::Error::other)?;
         reference.validate()?;
@@ -2816,17 +2735,25 @@ fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
 }
 
 fn row_database(dir: &Path) -> StoreResult<PathBuf> {
-    #[cfg(test)]
-    let path = std::env::var_os("LF_DB_PATH")
-        .map(PathBuf::from)
-        .or_else(|| Some(dir.ancestors().nth(3)?.join("loopflow.db")))
+    let home = dir
+        .ancestors()
+        .nth(3)
         .ok_or_else(|| record_error(std::io::Error::other("Session capture has no Home")))?;
+    database_in(home)
+}
+
+fn database_in(home: &Path) -> StoreResult<PathBuf> {
+    #[cfg(test)]
+    {
+        Ok(std::env::var_os("LF_DB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("loopflow.db")))
+    }
     #[cfg(not(test))]
-    let path = {
-        let _ = dir;
-        crate::store::database_path_from_env().map_err(record_error)?
-    };
-    Ok(path)
+    {
+        let _ = home;
+        crate::store::database_path_from_env().map_err(record_error)
+    }
 }
 
 pub(crate) fn inherited_caller() -> Option<String> {
@@ -3229,6 +3156,9 @@ mod tests {
 
     #[test]
     fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
         let (dir, mut manifest) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
@@ -3285,48 +3215,36 @@ mod tests {
 
     #[test]
     fn prepared_run_keeps_its_recorded_pr_instead_of_the_launching_pr() {
-        for historical in [false, true] {
-            let home = tempfile::tempdir().unwrap();
-            let original = crate::work::task::TaskPrId::new();
-            let mut step = super::SessionFlowStep {
-                task_id: Some(crate::work::task::TaskId::new()),
-                task_pr_id: Some(original.clone()),
-                invocation_id: "invocation".into(),
-                flow: "feature".into(),
-                step: "review".into(),
-                node: Some("1".into()),
-                iterations: Some(Vec::new()),
-            };
-            let mut prepared = spec(home.path());
-            prepared.flow = super::SessionFlowMembership::Step(step.clone());
-            let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
-            let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-            if historical {
-                let mut manifest: serde_json::Value =
-                    serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-                manifest["flow"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("task_pr_id");
-                fs::write(
-                    dir.join("manifest.json"),
-                    serde_json::to_vec(&manifest).unwrap(),
-                )
-                .unwrap();
-            }
-            step.task_pr_id = Some(crate::work::task::TaskPrId::new());
-            let mut exec = spec(home.path());
-            exec.flow = super::SessionFlowMembership::Step(step);
-            let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-            let capture = CaptureHandle::start_prepared(home.path(), &id, exec, &context).unwrap();
-            capture.finish("completed").unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
+        let home = tempfile::tempdir().unwrap();
+        let original = crate::work::task::TaskPrId::new();
+        let mut step = super::SessionFlowStep {
+            task_id: Some(crate::work::task::TaskId::new()),
+            task_pr_id: Some(original.clone()),
+            invocation_id: "invocation".into(),
+            flow: "feature".into(),
+            step: "review".into(),
+            node: Some("1".into()),
+            iterations: Some(Vec::new()),
+        };
+        let mut prepared = spec(home.path());
+        prepared.flow = super::SessionFlowMembership::Step(step.clone());
+        let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
+        let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
+        step.task_pr_id = Some(crate::work::task::TaskPrId::new());
+        let mut exec = spec(home.path());
+        exec.flow = super::SessionFlowMembership::Step(step);
+        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
+        let capture = CaptureHandle::start_prepared(home.path(), &id, exec, &context).unwrap();
+        capture.finish("completed").unwrap();
 
-            let manifest = super::read_manifest(&dir).unwrap();
-            let Some(super::SessionFlowMembership::Step(step)) = manifest.flow else {
-                panic!("prepared membership retained");
-            };
-            assert_eq!(step.task_pr_id, (!historical).then_some(original));
-        }
+        let manifest = super::read_manifest(&dir).unwrap();
+        let Some(super::SessionFlowMembership::Step(step)) = manifest.flow else {
+            panic!("prepared membership retained");
+        };
+        assert_eq!(step.task_pr_id, Some(original));
     }
 
     #[test]
@@ -3524,6 +3442,9 @@ mod tests {
 
     #[test]
     fn prepared_session_run_is_resolvable_and_consumed_once() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let caller = crate::session_record::new_artifact_key();
         let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), Some(caller.clone()))
@@ -3597,7 +3518,7 @@ mod tests {
             .outcome,
             "completed"
         );
-        assert_eq!(super::record_dirs(home.path()).unwrap().len(), 1);
+        assert!(super::record_dir(home.path(), &id).unwrap().is_dir());
     }
 
     #[test]
@@ -3625,11 +3546,11 @@ mod tests {
 
         let bytes = fs::read(capture.artifact_dir().join("manifest.json")).unwrap();
         let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(saved["run_id"], capture.artifact_key());
-        assert!(saved.get("parent_run_id").is_some());
-        assert!(saved.get("launch").is_some());
-        assert!(saved.get("artifact_key").is_none());
-        assert!(saved.get("exec").is_none());
+        assert_eq!(saved["artifact_key"], capture.artifact_key());
+        assert!(saved.get("caller_artifact_key").is_some());
+        assert!(saved.get("exec").is_some());
+        assert!(saved.get("run_id").is_none());
+        assert!(saved.get("launch").is_none());
         let manifest: SessionCaptureManifest = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(manifest.exec, Some(expected));
         let context_ref = manifest.context.expect("manifest references exact context");
@@ -3666,6 +3587,9 @@ mod tests {
 
     #[test]
     fn record_keeps_direct_usage_and_one_immutable_terminal_without_an_owner_claim() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
@@ -3734,6 +3658,9 @@ mod tests {
 
     #[test]
     fn final_answer_reader_returns_the_conclusion_without_commentary() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         capture.record_conversation(ConversationEvent::ItemCompleted {
@@ -3835,6 +3762,9 @@ mod tests {
 
     #[test]
     fn provider_account_observation_precedes_session_and_preserves_attempts() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH"]);
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();

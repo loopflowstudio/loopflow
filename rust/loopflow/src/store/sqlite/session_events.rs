@@ -432,7 +432,7 @@ mod tests {
             None
         );
         let pr = crate::work::task::TaskPrId::new();
-        let manifest = json!({"schema_version":1,"run_id":input,
+        let manifest = json!({"schema_version":1,"artifact_key":input,
             "created_at":"1970-01-01T00:00:01Z","harness":"codex","surface":"headless",
             "cwd":"/fixture","subjects":[],"host":"fixture",
             "flow":{"kind":"step","task_pr_id":pr,"invocation_id":"retained",

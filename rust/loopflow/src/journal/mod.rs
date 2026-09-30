@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -13,10 +13,9 @@ use time::OffsetDateTime;
 use tracing::{debug, warn};
 
 use crate::engine::worktrees::main_repo_root;
-use crate::exec::{AgentCaller, AGENT_CALLER_ENV};
+use crate::exec::{AgentCaller, Exec, AGENT_CALLER_ENV};
 use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
-use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
@@ -141,7 +140,6 @@ struct RunContext {
     run_dir: Option<PathBuf>,
     repo: Option<String>,
     wave: Option<String>,
-    seq: Arc<AtomicI64>,
     finished: Arc<AtomicBool>,
     /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
@@ -273,7 +271,7 @@ pub fn observe_process(command: &[String]) {
     }
     let observe = || -> anyhow::Result<()> {
         let path = crate::store::observation_database_path()?;
-        let ledger = SqliteStore::open_existing_run_ledger(&path)?;
+        let ledger = SqliteStore::open_existing_execs(&path)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
             command: Some(command.to_vec()),
@@ -444,8 +442,7 @@ fn try_emit(
         }
     }
 
-    let seq = next_seq();
-    ledger_insert(&context, &event, seq, repo_root, exit_code);
+    ledger_insert(&context, &event, repo_root, exit_code);
 
     if matches!(node, LfNode::Run)
         && matches!(
@@ -467,35 +464,42 @@ fn try_emit(
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
 /// run: the first failure warns, and later failures log at debug. Local-only —
 /// the ledger never leaves the machine.
-fn ledger_insert(
-    context: &RunContext,
-    event: &LfEvent,
-    seq: i64,
-    repo_root: &Path,
-    exit_code: Option<i32>,
-) {
-    let row = RunEventRow {
-        run_id: event.run_id.as_str().to_string(),
-        process_id: context.process_id.as_str().to_string(),
-        parent_process_id: context
-            .parent_process_id
+fn ledger_insert(context: &RunContext, event: &LfEvent, repo_root: &Path, exit_code: Option<i32>) {
+    if event.node != LfNode::Run {
+        return;
+    }
+    let outcome = match event.event {
+        LfEventType::Completed => Some("succeeded"),
+        LfEventType::Errored => Some("failed"),
+        LfEventType::Escalated => Some("interrupted"),
+        _ => None,
+    };
+    let record = Exec {
+        id: context.process_id.clone(),
+        trace_id: event.run_id.clone(),
+        parent_exec_id: context.parent_process_id.clone(),
+        via_agent: Some(context.agent_caller.is_some()),
+        caller_session_id: context
+            .agent_caller
             .as_ref()
-            .map(|id| id.as_str().to_string()),
-        seq,
-        ts: event.ts.unix_timestamp(),
+            .map(|caller| caller.session_id.clone()),
+        caller_provider_generation: context
+            .agent_caller
+            .as_ref()
+            .map(|caller| caller.provider_generation),
+        command: context.command.clone(),
         repo: context.repo.clone(),
-        worktree: Some(repo_root.display().to_string()),
-        wave: context.wave.clone(),
-        node: node_name(event.node).to_string(),
-        event: event_name(event.event).to_string(),
-        command: event
-            .command
-            .as_ref()
-            .and_then(|argv| serde_json::to_string(argv).ok())
-            .or_else(|| context.command.clone()),
-        flow: event.flow.clone(),
-        skill: event.skill.clone(),
-        step_index: event.index.map(i64::from),
+        cwd: Some(repo_root.display().to_string()),
+        started_at: context.started_at,
+        completed_at: outcome.map(|_| event.ts.unix_timestamp()),
+        outcome: outcome.map(str::to_owned),
+        exit_code: exit_code.or(match event.event {
+            LfEventType::Completed => Some(0),
+            LfEventType::Errored => Some(1),
+            LfEventType::Escalated => Some(130),
+            _ => None,
+        }),
+        signal: event.signal.clone(),
         error: event.error.clone(),
     };
 
@@ -505,23 +509,11 @@ fn ledger_insert(
         .map_or_else(|| SqliteStore::new(&context.ledger_path), Ok)
     {
         Ok(store) => {
-            let exit_code = exit_code.or(match (event.node, event.event) {
-                (LfNode::Run, LfEventType::Completed) => Some(0),
-                (LfNode::Run, LfEventType::Errored) => Some(1),
-                (LfNode::Run, LfEventType::Escalated) => Some(130),
-                _ => None,
-            });
-            if let Err(err) = store.insert_run_event(
-                &row,
-                context.started_at,
-                context.agent_caller.as_ref(),
-                event.signal.as_deref(),
-                exit_code,
-            ) {
+            if let Err(err) = store.record_exec(&record) {
                 if first_ledger_failure() {
-                    warn!(error = %err, run_id = %row.run_id, "ledger insert failed — this run is not being recorded");
+                    warn!(error = %err, run_id = %record.trace_id, "ledger insert failed — this run is not being recorded");
                 } else {
-                    debug!(error = %err, run_id = %row.run_id, "ledger insert failed");
+                    debug!(error = %err, run_id = %record.trace_id, "ledger insert failed");
                 }
             }
         }
@@ -570,23 +562,6 @@ fn ledger_db_path() -> Result<PathBuf, crate::store::StoreError> {
         .get_or_init(|| tempfile::TempDir::new().expect("test ledger home"))
         .path()
         .join("loopflow.db"))
-}
-
-fn node_name(node: LfNode) -> &'static str {
-    match node {
-        LfNode::Run => "run",
-        LfNode::Flow => "flow",
-        LfNode::Skill => "skill",
-    }
-}
-
-fn event_name(event: LfEventType) -> &'static str {
-    match event {
-        LfEventType::Started => "started",
-        LfEventType::Completed => "completed",
-        LfEventType::Errored => "errored",
-        LfEventType::Escalated => "escalated",
-    }
 }
 
 fn ensure_run_context(
@@ -751,7 +726,6 @@ fn create_run_context(
         run_dir,
         repo: (!early).then_some(repo),
         wave: wave_name.clone(),
-        seq: Arc::new(AtomicI64::new(0)),
         finished: Arc::new(AtomicBool::new(false)),
         minted_run_id,
     };
@@ -778,13 +752,7 @@ fn create_run_context(
         };
         // ctrlc's termination hook does not identify which signal arrived.
         // Keep that unknown while recording the observed interrupted exit.
-        ledger_insert(
-            &interrupted,
-            &event,
-            interrupted.seq.fetch_add(1, Ordering::Relaxed),
-            &directory,
-            Some(130),
-        );
+        ledger_insert(&interrupted, &event, &directory, Some(130));
     });
     // Never write process-control receipts into a different inherited Home.
     if same_store {
@@ -828,7 +796,7 @@ fn parent_is_recorded(parent: &ExecId) -> bool {
             return true;
         }
     };
-    match SqliteStore::open_run_ledger_read_only(&path)
+    match SqliteStore::open_execs_read_only(&path)
         .and_then(|store| store.process_is_recorded(parent.as_str()))
     {
         Ok(recorded) => recorded,
@@ -841,10 +809,6 @@ fn parent_is_recorded(parent: &ExecId) -> bool {
             true
         }
     }
-}
-
-fn next_seq() -> i64 {
-    current_context().map_or(0, |context| context.seq.fetch_add(1, Ordering::Relaxed))
 }
 
 fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
@@ -965,21 +929,14 @@ pub(crate) fn task_worker_owner_evidence(
     if !path.exists() {
         return ProcessIdentityEvidence::Unknown;
     }
-    let Ok(store) = SqliteStore::open_run_ledger_read_only(&path) else {
+    let Ok(store) = SqliteStore::open_execs_read_only(&path) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    let Ok(events) = store.run_events_matching_exec(owner.exec_id.as_str()) else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    if events.iter().any(|event| {
-        event.run_id == owner.trace_id.as_str()
-            && event.process_id == owner.exec_id.as_str()
-            && event.node == "run"
-            && matches!(event.event.as_str(), "completed" | "errored" | "escalated")
-    }) {
-        ProcessIdentityEvidence::Dead
-    } else {
-        ProcessIdentityEvidence::Unknown
+    match store.exec(&owner.exec_id) {
+        Ok(Some(exec)) if exec.trace_id == owner.trace_id && exec.completed_at.is_some() => {
+            ProcessIdentityEvidence::Dead
+        }
+        _ => ProcessIdentityEvidence::Unknown,
     }
 }
 
@@ -1196,8 +1153,7 @@ mod tests {
         ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
-    use crate::id::{ExecId, TraceId, WaveId};
-    use crate::work::wave::Wave;
+    use crate::id::{ExecId, TraceId};
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -1479,173 +1435,6 @@ mod tests {
     }
 
     #[test]
-    fn main_repo_runs_record_to_file_journal_and_ledger() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let command = vec!["lf".to_string(), "implement".to_string()];
-
-        emit(
-            repo.path(),
-            LfNode::Run,
-            LfEventType::Started,
-            started_fields(&command, repo.path(), "main"),
-        );
-        emit(
-            repo.path(),
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-
-        // The file journal exists in the main repo too — generic contexts
-        // record as much as possible; only the wave field is absent.
-        let run_dir = only_run_dir(repo.path());
-        let file_events = read_events(&run_dir).expect("file events");
-        assert_eq!(file_events.len(), 2);
-        assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
-
-        // And the machine-grain ledger has the run's lineage and a null wave.
-        // LF_HOME points this test at its own store, so every row here belongs
-        // to this invocation.
-        let store = super::open_ledger().expect("ledger");
-        let events = store.list_run_events_since(0).expect("ledger rows");
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].node, "run");
-        assert_eq!(events[0].event, "started");
-        assert!(events[0].repo.is_some());
-        assert!(std::path::Path::new(events[0].repo.as_deref().unwrap()).is_absolute());
-        assert_eq!(events[0].wave, None);
-        assert!(events[0]
-            .command
-            .as_deref()
-            .unwrap_or("")
-            .contains("implement"));
-        assert_eq!(events[1].event, "completed");
-        assert_eq!(events[0].process_id, events[1].process_id);
-        assert_eq!(events[1].command, events[0].command);
-    }
-
-    #[test]
-    fn explicit_wave_env_overrides_the_worktree_for_ledger_attribution() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let worktree = repo.create_named_worktree("ambient");
-        let wave = Wave::new(
-            WaveId::new(),
-            "context".to_string(),
-            repo.path().display().to_string(),
-        );
-        super::open_ledger()
-            .expect("ledger")
-            .create_wave(&wave)
-            .expect("explicit wave row");
-        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, wave.id().as_str());
-
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Started,
-            started_fields(
-                &["lf".to_string(), "design".to_string()],
-                &worktree,
-                "context",
-            ),
-        );
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-
-        let events = super::open_ledger()
-            .expect("ledger")
-            .list_run_events_since(0)
-            .expect("events");
-        assert_eq!(events[0].wave.as_deref(), Some("context"));
-        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
-    }
-
-    /// W2-239: a stale ambient UUID (registry has no row for it) is propagated
-    /// into the run record as a classified failure, never silently re-attributed
-    /// to the worktree or a different wave. The run records `wave: None`
-    /// (honest — no valid name) and the stale failure in the existing `error`
-    /// field; the text names the stale id and the `--wave <name>` recovery.
-    #[test]
-    fn stale_ambient_uuid_is_propagated_not_inferred_from_the_worktree() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let worktree = repo.create_named_worktree("ambient");
-
-        // A valid wave exists; the run's env names a different, unregistered UUID.
-        let registered = Wave::new(
-            WaveId::new(),
-            "context".to_string(),
-            repo.path().display().to_string(),
-        );
-        super::open_ledger()
-            .expect("ledger")
-            .create_wave(&registered)
-            .expect("registered wave row");
-        let stale_id = WaveId::new();
-        std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, stale_id.as_str());
-
-        // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::work::wave::context::exec_attribution(Some(&worktree));
-        assert_eq!(
-            attribution.wave, None,
-            "stale identity attributes to no wave"
-        );
-        let failure = attribution
-            .failure
-            .clone()
-            .expect("classified stale failure");
-        assert!(failure.contains("stale"), "failure text: {failure}");
-        assert!(
-            failure.contains(stale_id.as_str()),
-            "failure names the stale id: {failure}"
-        );
-        assert!(
-            failure.contains("--wave"),
-            "failure names the explicit recovery: {failure}"
-        );
-
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Started,
-            LfEventFields {
-                wave_name: attribution.wave,
-                error: attribution.failure,
-                worktree: Some(worktree.display().to_string()),
-                command: Some(vec!["lf".to_string(), "design".to_string()]),
-                ..LfEventFields::default()
-            },
-        );
-        emit(
-            &worktree,
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-
-        let events = super::open_ledger()
-            .expect("ledger")
-            .list_run_events_since(0)
-            .expect("events");
-        let started = events
-            .iter()
-            .find(|row| row.node == "run" && row.event == "started")
-            .expect("started row");
-        // Attributed to NO wave — never the worktree or the registered wave —
-        // and the stale failure rides the existing error field (honest wire).
-        assert_eq!(started.wave, None);
-        assert_eq!(started.error.as_deref(), Some(failure.as_str()));
-
-        std::env::remove_var(crate::work::wave::context::WAVE_ID_ENV);
-    }
-
-    #[test]
     fn a_nested_lf_gets_its_own_span_and_names_its_parent() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
@@ -1799,34 +1588,6 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_row_names_the_work_its_started_row_named() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let command = vec!["lf".to_string(), "gate".to_string()];
-
-        emit(
-            repo.path(),
-            LfNode::Run,
-            LfEventType::Started,
-            started_fields(&command, repo.path(), "main"),
-        );
-        emit(
-            repo.path(),
-            LfNode::Run,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-
-        let events = super::open_ledger()
-            .expect("ledger")
-            .list_run_events_since(0)
-            .expect("events");
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[1].command, events[0].command);
-        assert!(events[1].command.as_deref().unwrap_or("").contains("gate"));
-    }
-
-    #[test]
     fn journal_writes_run_flow_and_skill_events_in_wave_worktree() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
@@ -1913,36 +1674,6 @@ mod tests {
         );
 
         assert!(is_clean(&worktree).expect("worktree should stay clean"));
-    }
-
-    #[test]
-    fn nested_runtime_keeps_the_outer_exec_open_until_its_result() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let argv = vec!["lf".into(), "flow".into(), "resume".into()];
-        let result: anyhow::Result<()> = super::with_runtime(repo.path(), &argv, || {
-            let outer = super::current_context().unwrap().process_id;
-            super::with_runtime(repo.path(), &argv, || Ok(()))?;
-            assert_eq!(super::current_context().unwrap().process_id, outer);
-            let rows = super::open_ledger()
-                .unwrap()
-                .run_events_matching_exec(outer.as_str())
-                .unwrap();
-            assert_eq!(
-                rows.len(),
-                1,
-                "inner return must not finish the outer command"
-            );
-            anyhow::bail!("outer command failed after inner success")
-        });
-        assert!(result.is_err());
-        let rows = super::open_ledger()
-            .unwrap()
-            .list_run_events_since(0)
-            .unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].process_id, rows[1].process_id);
-        assert_eq!(rows[1].event, "errored");
     }
 
     #[test]

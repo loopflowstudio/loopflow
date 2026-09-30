@@ -59,23 +59,13 @@ No new full-suite or configured acceptance result follows from this realignment.
 2. **Remove loop passes as FlowSessions — done.** Implementation `a66f42a0a`
    replayed as `cbd2b1d7c`; checkpoint simplification is `4f2ec5491`. One
    FlowSession retains its cursor and return counters across retry and Iterate.
-   The forward `fold_flow_passes` migration moves child history, conversation
-   membership and the deepest active selection to the root, retaining original
-   rows and import payloads as immutable evidence. Parent columns, indexes,
-   triggers, managed-child view, child claim transfer, deepest-child reads and
-   driver-lock indirection are deleted. Seven focused source checks, the same
-   seven on materialized schema, and five public CLI/discovery checks pass.
-   Compression removes recursive checkpointing, repeated movement calculation
-   and a full Flow clone; its 14 focused checks pass. These receipts precede the
-   rebase; the 13 rebase checks above cover the reconciled discovery/execution paths.
-   See [evidence](evidence.md#one-flowsession-through-loop-passes--2026-09-30).
-   Configured acceptance and the whole-design import obligations remain open.
+   The new direct ownership migration creates that final shape. The earlier
+   child-pass archive and intermediate migration are deleted per Jack's current
+   compression decision; loop/retry behavior and configured acceptance remain.
 3. **Simplify attribution and the parent tree — done.** Implementation
    `974f1dfd5` and fixture simplification `7beb3600b` complete this item.
-   The forward `drop_flow_turn_caller` draft archives non-null historical tokens,
-   removes `execs.caller_flow_turn` and `flow_turn_caller`, and retains selected
-   Flow-event payloads unchanged. Rust/Swift/DTO mirrors, `AgentCaller.flow_turn`,
-   unused `FlowTurnSelection.caller_token`, and `LF_PARENT_RUN_ID` are removed.
+   The final Exec schema omits the dead caller token. No intermediate table or
+   archive survives.
    Native test helpers reference the existing Session event sequence, without
    synthetic caller Execs. Session/provider-generation parent resolution remains.
    Explicit command `--as` → checkout → inherited `LF_AS` is unchanged.
@@ -87,17 +77,21 @@ No new full-suite or configured acceptance result follows from this realignment.
    The Docker installation check remains unexecuted: its ten-second probe timed
    out before creating a container (`caller-install.log`). These local proofs
    do not close configured acceptance, broader Flow membership provenance or
-   full-design import obligations.
+   current-state cutover.
 4. **One naming commit — implemented.** The [before/after table](naming.md)
    records Exec process APIs, Session capture/recorder types and `compile_flow`.
-   Manifest and saved-graph encodings retain their historical fields. The real
+   Manifest and saved-graph encodings now use the current names only. The real
    Desktop breadcrumb consumer retains definition provenance as `sources` in
    Rust/Swift/current wire fixtures. `session_events` → `agent_events` and
-   `run_events` → `exec_events` remain proposals only. Focused proof and measured
+   the `run_events` ledger has been deleted. Focused proof and measured
    production changes are in [evidence](evidence.md). Jack's acceptance remains
-   separate; no history-table migration or new lifecycle owner is introduced.
-5. **Released-populated import**, executed through the public binary and on a
-   materialized copy. Obligations: [import-preservation.md](import-preservation.md).
+   separate; no new lifecycle owner is introduced.
+5. **Compress historical compatibility — implemented.** Jack Heart superseded historical
+   import and intermediate-draft preservation on 2026-09-30: “Whatever history
+   or extra state we don't need, toss it now.” Retain current operating state
+   and resumable conversations; remove finished-history import, old formats and
+   archives. Inventory: [compress-history.md](compress-history.md). Verify a
+   fresh Home and a copy of the installed database; never migrate the original.
 6. **Docs, skills and generated pages** for final behavior after the remaining
    cuts. The architecture reference already records the successful Codex
    synthetic-Responses retry and the one-FlowSession implementation; retain

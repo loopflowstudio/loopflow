@@ -208,10 +208,9 @@ inferred; it does not fabricate successful work.
 
 Historical attribution is not bulk rewritten just because the Session's current
 driver changes. Preserve the existing historical-attempt boundary when converting
-Runs. **Supervisor implementation assumption, not a new Jack decision:** a bind
-affects subsequent work; earlier usage retains its recorded attribution. Jack
-was asked about whole-conversation versus prospective binding and no answer has
-been recorded. Proceed with this conservative boundary, recording the assignment
+Runs. **Jack Heart decided on 2026-09-30:** a bind affects subsequent work;
+earlier usage retains its recorded attribution. Keep this a single read-time
+choice; a separate Intelligence-Wave Task will re-evaluate it. Retain the assignment
 time so mid-turn cumulative usage cannot silently move the whole earlier turn.
 Attribute a turn/receipt according to its recorded start/assignment evidence;
 unknown allocation remains explicit rather than inventing a token split.

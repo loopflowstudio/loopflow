@@ -287,10 +287,10 @@ the exact target before writing. CLI adds no confirmation prompt. The writer com
 conversation/driver and ancestry atomically. Binding cannot alter Flow membership
 or bind one member of a taskless Flow inconsistently with its owner.
 
-The supervisor's conservative implementation assumption is prospective usage
+Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
-This is not an additional decision from Jack. Preserve active-turn start/assignment
-evidence; unknown allocation remains unknown rather than inventing a token split.
+The history reader owns this single choice; a separate Intelligence Task may
+re-evaluate it. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
 Authorized Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 

@@ -13,6 +13,7 @@ pub enum FlowDecision {
     Advance,
     #[serde(alias = "repeat", alias = "continue")]
     Iterate,
+    Blocked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +101,14 @@ pub fn finish_step(
     };
 
     match decision {
+        FlowDecision::Blocked => Ok(FlowTransition::Blocked(
+            progress
+                .verdict
+                .as_ref()
+                .expect("blocked decision has a verdict")
+                .summary
+                .clone(),
+        )),
         FlowDecision::Iterate => {
             let Some((id, target)) = edge else {
                 bail!("repeat decision at step {index} has no declared backward edge");

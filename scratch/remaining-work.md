@@ -18,7 +18,8 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
   passes are lenses over that graph and its history, never their own
   FlowSessions (Jack, 2026-09-29 and 2026-09-30).
 - **Flow decisions** are typed results of the selected successful turn. The
-  in-turn decide and route commands are gone.
+  in-turn decide, route and blocked commands are gone. Blocked requires a reason
+  and returns Ask feedback to another turn of the same conversation.
 - **Where running a skill directly and running it as a Task step disagree,
   the direct behavior wins** (Jack). Task specifics are input to the same command.
 
@@ -27,12 +28,15 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
 1. **Every step runs its ordinary lf command.** Ops and skills are converted and
    both launchers are deleted (`9cb7b4c86`, net −1,242). Common Task seed/name,
    checkout context after landing, PATH step selection and schema-gap preservation
-   are implemented in the current working slice. Account and command-equivalence
-   proof is in progress; retain repeated decisions, failure release, explicit
-   retry and keyed-unblock proofs. Task controls already use the common command;
-   do not build another transport. Add typed `blocked` with a required reason,
-   remove `lf flow blocked`, and continue the same conversation after keyed Ask
-   feedback. See [the current audit](task-command-equivalence.md) and
+   are checkpointed at `2ebfd9f51`. Public scripted account/name/context,
+   driver recovery and Chapter preservation passed. Retain managed repeated
+   decisions, failure release, explicit retry and configured account/control
+   proofs. Task controls already use the common command;
+   do not build another transport. Typed `blocked` with a required reason now
+   replaces `lf flow blocked`; the public taskless proof recovers the keyed Ask
+   and continues three deciding turns in the same native conversation. See
+   [blocked decisions](blocked-decision.md); managed/interactive acceptance is
+   still distinct. See [the current audit](task-command-equivalence.md) and
    [the before/after inventory](exec-per-step.md#direct-skill-command-cut--2026-09-29).
 2. **Remove loop passes as FlowSessions** (Jack, 2026-09-30). The contract text
    is updated (`d61295196`); the code is not. A forward migration folds existing

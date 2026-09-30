@@ -99,3 +99,9 @@ that definition before deleting `skill show`. The separate expression
 it timed out after five seconds and is not an inspection proof or a first local
 result. The test process was terminated by Python; no provider result was observed.
 Use explicit `help` for this regression, with provider executables absent.
+
+The ownership review also rejects the draft's `home tokens` placement:
+`lf/commands/tokens.rs:46` requires a repository and measures tracked source or
+Git history. Its catalog verdict is **repo tokens**, preserving its distinct
+purpose from provider consumption. This is an adopted object-ownership repair,
+not a new operation or an unresolved preference.

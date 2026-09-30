@@ -69,7 +69,7 @@ pub enum PmRefresh {
     Auto,
     /// Always refresh before reading (`--sync`).
     Force,
-    /// Never touch the network; serve the cache as-is (`--no-sync`).
+    /// Never touch the network; serve the cache as-is (the default for status reads).
     Never,
 }
 

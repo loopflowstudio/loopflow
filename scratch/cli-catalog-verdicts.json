@@ -2936,12 +2936,17 @@
     {
       "row_id": "C112",
       "path": "lf tokens",
-      "owner": "lf home",
+      "owner": "lf repo",
       "description": "Measure this codebase: lines and tokens per directory (tracked files only)",
       "hidden": false,
       "source_line": 370,
       "source_end": 379,
       "callers": [
+        [
+          "rust/loopflow/src/lf/commands/tokens.rs",
+          46,
+          "implementation boundary"
+        ],
         [
           "swift/Loopflow/Services/RegistryQuery.swift",
           325,
@@ -2958,9 +2963,9 @@
           "Desktop"
         ]
       ],
-      "overlap": "Owns Measure this codebase: lines and tokens per directory (tracked files only); no equivalent operation identified.",
+      "overlap": "Measures tracked repository files/history; repo owns it, not Home (tokens.rs:46). Distinct from provider usage.",
       "verdict": "rename",
-      "target": "lf home tokens"
+      "target": "lf repo tokens"
     },
     {
       "row_id": "C113",
@@ -21546,7 +21551,7 @@
       "short_aliases": [],
       "row_id": "A427",
       "canonical": "lf tokens --json",
-      "owner": "lf home tokens",
+      "owner": "lf repo tokens",
       "description": "Emit structured evidence for this operation",
       "source_line": 373,
       "callers": [
@@ -21589,7 +21594,7 @@
       "short_aliases": [],
       "row_id": "A428",
       "canonical": "lf tokens --days",
-      "owner": "lf home tokens",
+      "owner": "lf repo tokens",
       "description": "Walk git history instead: the codebase's size on each day it changed",
       "source_line": 376,
       "callers": [
@@ -21632,7 +21637,7 @@
       "short_aliases": [],
       "row_id": "A429",
       "canonical": "lf tokens --help",
-      "owner": "lf home tokens",
+      "owner": "lf repo tokens",
       "description": "Explain this canonical command without performing it",
       "source_line": 370,
       "callers": [

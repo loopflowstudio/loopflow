@@ -27,11 +27,11 @@ pub struct Cli {
     pub docs: Vec<String>,
 
     /// Include clipboard content in prompt
-    #[arg(short = 'c', long = "clipboard", short_alias = 'C')]
+    #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
     /// Model to use (harness or harness:model)
-    #[arg(short = 'm', long = "model", short_alias = 'M')]
+    #[arg(short = 'm', long = "model")]
     pub model: Option<String>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
@@ -65,11 +65,11 @@ pub struct Cli {
     pub yolo: bool,
 
     /// Run interactively
-    #[arg(short = 'i', long = "interactive", short_alias = 'I')]
+    #[arg(short = 'i', long = "interactive")]
     pub interactive: bool,
 
     /// Run in batch/headless mode
-    #[arg(short = 'b', long = "batch", short_alias = 'B')]
+    #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
     /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
@@ -109,7 +109,7 @@ pub struct Cli {
     pub max_turns: Option<u32>,
 
     /// Select Wave Work, or qualify a selected Task
-    #[arg(short = 'w', long = "wave", short_alias = 'W')]
+    #[arg(short = 'w', long = "wave")]
     pub wave: Option<String>,
 
     /// Select Task Work
@@ -350,9 +350,9 @@ pub enum Commands {
     },
     /// Commit changes
     Commit {
-        #[arg(short = 'm', long = "message", short_alias = 'M')]
+        #[arg(short = 'm', long = "message")]
         message: Option<String>,
-        #[arg(short = 'p', long = "push", short_alias = 'P')]
+        #[arg(short = 'p', long = "push")]
         push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
@@ -670,8 +670,6 @@ pub enum SkillCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect a skill without launching it
-    Show { name: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -887,11 +885,8 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
         /// Refresh planning from Linear before reading
-        #[arg(long, conflicts_with = "no_sync")]
+        #[arg(long)]
         sync: bool,
-        /// Read cached planning
-        #[arg(long = "no-sync")]
-        no_sync: bool,
     },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
@@ -1256,7 +1251,7 @@ pub enum PrCommand {
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
-        #[arg(short = 'm', long = "model", short_alias = 'M')]
+        #[arg(short = 'm', long = "model")]
         model: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
@@ -1266,7 +1261,7 @@ pub enum PrCommand {
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
-        #[arg(short = 'm', long = "model", short_alias = 'M')]
+        #[arg(short = 'm', long = "model")]
         model: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
@@ -1628,8 +1623,6 @@ pub enum WtCommand {
     List {
         #[arg(long)]
         format: Option<String>,
-        #[arg(long)]
-        full: bool,
         /// Fetch origin and fast-forward main before listing (mutates the
         /// canonical checkout). Off by default so a list never touches it.
         #[arg(long)]
@@ -1642,7 +1635,6 @@ pub enum WtCommand {
         dry_run: bool,
     },
     /// Remove a worktree
-    #[command(alias = "rm")]
     Remove {
         /// Worktree name to remove
         name: String,
@@ -1703,7 +1695,6 @@ mod tests {
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
-            vec!["lf", "wave", "status", "product", "--no-sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
@@ -1712,7 +1703,8 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "wave", "status", "--sync", "--no-sync"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wt", "list", "--full"]).is_err());
     }
 
     #[test]

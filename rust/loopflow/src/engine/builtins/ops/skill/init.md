@@ -162,7 +162,7 @@ Read its `wave/<name>/GOAL.md`, then verify its shared state:
 ```bash
 lf wave status <wave> --json
 lf roadmap --wave <wave> --json
-lf wave status <wave> --no-sync
+lf wave status <wave>
 ```
 
 If PM is not bound and Linear is connected, offer the explicit binding command:

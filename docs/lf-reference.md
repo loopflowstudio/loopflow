@@ -98,20 +98,11 @@ lf mon top                          # fixed short name
 lf account status
 ```
 
-Commands have one canonical name and may advertise a fixed short name in help.
-Both names reach the same operation. Already-short names such as `pr`, `task`,
-and `land` need no second spelling. Use the documented short name, not an
-arbitrary prefix.
-
-| Full name | Short name |
-|---|---|
-| `monitor` | `mon` |
-| `pr` | `pr` |
-| `task` | `task` |
-| `land` | `land` |
-
-An explicit short name wins before owner omission. Print the machine identifier
-with `lf home id`. The account family has no short alias.
+Commands have one canonical name. `monitor` also has the selected short spelling
+`mon`; no arbitrary prefix matching or additional aliases are supported.
+Already-short names such as `pr`, `task`, and `land` use that one spelling.
+Print the machine identifier with `lf home id`. The account family has no
+short alias.
 
 ### Commands take precedence over definitions
 
@@ -160,12 +151,13 @@ if the name is also a verb within that family, put `--` before it:
 lf skill commit                     # a skill named commit
 lf flow -- list                     # a flow named list
 lf skill -- show                    # a skill named show
+lf help skill -- list               # inspect a skill named list without running it
 ```
 
 ### Skills
 
 ```bash
-lf skill show debug
+lf help skill debug
 lf skill debug "The request fails after reconnecting"
 lf skill implement: add caching
 lf run npx/vercel-labs/deep-research
@@ -627,7 +619,7 @@ doppler run -- lf account connect linear
 lf wave connect designer --team-key DSG
 lf wave sync designer
 lf wave status designer --sync
-lf wave status designer --no-sync
+lf wave status designer
 ```
 
 Connection links the Wave to its planning service. Chapter is the repository
@@ -1173,22 +1165,16 @@ the installation that owns execution; follow that reported binary and store
 when inspecting the running work. A private database does not isolate shared
 worktree edits or external service effects.
 
-### Capture a page or measure context
+### Capture a page
 
 ```bash
 lf home screenshot page.html -o page.png
 lf home screenshot https://loopflow.studio -o mobile.png --width 390 --height 844
-lf home tokens
-lf home tokens --days 365
-lf home tokens --json
 ```
 
 Screenshot uses a standalone headless browser and a temporary profile. Failed
 or interrupted captures preserve existing output. If the backend is missing,
 install it with `playwright install --only-shell chromium`.
-
-Tokens reports line and model-token counts by tracked path. History reads Git
-blobs without checking them out; untracked and non-UTF-8 files are skipped.
 
 ## Repo: releases and integrations
 
@@ -1204,6 +1190,17 @@ CI reports repair attempts and their later passing or merge observations.
 Release run owns the release lifecycle: preparation, verification, notes,
 tagging, publication, and recovery. An interrupted release resumes its
 recorded state rather than skipping to a newer version.
+
+### Measure context
+
+```bash
+lf repo tokens
+lf repo tokens --days 365
+lf repo tokens --json
+```
+
+Tokens reports line and model-token counts by tracked path. History reads Git
+blobs without checking them out; untracked and non-UTF-8 files are skipped.
 
 ### Release operations
 

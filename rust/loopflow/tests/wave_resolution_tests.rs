@@ -177,12 +177,11 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
     command
         .args(args)
         .current_dir(repo)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", home)
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_TRACE_ID")
-        .env_remove("LF_WAVE_ID");
+        .env("LF_DB_PATH", home.join("loopflow.db"));
     if let Some(id) = wave_id {
         command.env("LF_WAVE_ID", id);
     }
@@ -216,27 +215,17 @@ fn cached_status_honors_the_shared_resolution_rules() {
     let overridden = lf(
         &home,
         &repo,
-        &["wave", "status", "product", "--no-sync", "--json"],
+        &["wave", "status", "product", "--json"],
         Some(&WaveId::new().to_string()),
     );
     assert_eq!(wave_field(&overridden), "product");
 
     // Hand-set name resolves the same wave.
-    let named = lf(
-        &home,
-        &repo,
-        &["wave", "status", "--no-sync", "--json"],
-        Some("product"),
-    );
+    let named = lf(&home, &repo, &["wave", "status", "--json"], Some("product"));
     assert_eq!(wave_field(&named), "product");
 
     // No context: the classified "pass --wave" error, not a UUID-as-name crash.
-    let missing = lf(
-        &home,
-        &repo,
-        &["wave", "status", "--no-sync", "--json"],
-        None,
-    );
+    let missing = lf(&home, &repo, &["wave", "status", "--json"], None);
     assert!(!missing.status.success());
     assert!(
         String::from_utf8_lossy(&missing.stderr).contains("no wave in context"),
@@ -247,12 +236,7 @@ fn cached_status_honors_the_shared_resolution_rules() {
     // Stale identity: a real UUID with no registry row is a distinct error that
     // names the stale id, never a silent fallback.
     let stale_id = WaveId::new().to_string();
-    let stale = lf(
-        &home,
-        &repo,
-        &["wave", "status", "--no-sync", "--json"],
-        Some(&stale_id),
-    );
+    let stale = lf(&home, &repo, &["wave", "status", "--json"], Some(&stale_id));
     assert!(!stale.status.success());
     let stale_err = String::from_utf8_lossy(&stale.stderr);
     assert!(
@@ -306,7 +290,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["wave", "status", "definitely-unknown", "--no-sync"],
+            &["wave", "status", "definitely-unknown"],
             None,
         ),
         "cached status (no ambient)",
@@ -326,7 +310,7 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["wave", "status", "definitely-unknown", "--no-sync"],
+            &["wave", "status", "definitely-unknown"],
             Some(uuid),
         ),
         "cached status (with ambient)",

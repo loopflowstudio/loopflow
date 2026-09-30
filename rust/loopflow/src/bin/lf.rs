@@ -70,9 +70,7 @@ struct CommandArgTables {
 }
 
 /// What `reorder_args` needs to know about the CLI, derived from the clap
-/// definition so it can never drift from it (the old hand-maintained lists
-/// were missing the uppercase short aliases `-D`/`-C`/`-M`/`-I`/`-B`/`-W`,
-/// misrouting e.g. `lf unbreak -M codex`).
+/// definition so argument reordering and parsing use the same flag ownership.
 struct ArgTables {
     /// Top-level subcommands, indexed by canonical name and aliases.
     commands: HashMap<String, CommandArgTables>,
@@ -1659,7 +1657,6 @@ fn execute_command(
                     wave,
                     json,
                     sync,
-                    no_sync: _,
                 },
         }) => {
             let refreshed = if *sync {
@@ -2006,10 +2003,8 @@ mod tests {
         assert!(line.contains("GitHub #931"), "{line}");
     }
 
-    /// The derived tables cover everything the old hand lists carried, plus
-    /// the uppercase short aliases those lists had drifted away from.
     #[test]
-    fn derived_tables_cover_commands_flags_and_aliases() {
+    fn derived_tables_cover_commands_and_flags() {
         let tables = arg_tables();
         for command in [
             ":",
@@ -2039,11 +2034,9 @@ mod tests {
         for flag in [
             "--docs",
             "-m",
-            "-M",
             "--model",
             "--max-turns",
             "-w",
-            "-W",
             "--wave",
             "--task",
         ] {
@@ -2051,13 +2044,10 @@ mod tests {
         }
         for flag in [
             "-c",
-            "-C",
             "--clipboard",
             "--yolo",
             "-i",
-            "-I",
             "-b",
-            "-B",
             "--tui",
             "--ide",
             "--chrome",
@@ -2074,20 +2064,6 @@ mod tests {
         ] {
             assert!(tables.top_level.boolean.contains(flag), "bool flag {flag}");
         }
-    }
-
-    /// Uppercase short aliases reorder exactly like their lowercase forms —
-    /// the drift the hand-maintained lists had (`lf unbreak -M codex` used to
-    /// treat `codex` as a skill arg).
-    #[test]
-    fn reorder_args_uppercase_value_alias_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "debug".to_string(),
-            "-M".to_string(),
-            "codex".to_string(),
-        ];
-        assert_eq!(reorder_args(args), vec!["lf", "-M", "codex", "debug"]);
     }
 
     #[test]
@@ -2120,12 +2096,6 @@ mod tests {
         drop(guard);
 
         assert_eq!(std::env::current_dir().unwrap(), previous);
-    }
-
-    #[test]
-    fn reorder_args_uppercase_bool_alias_after_skill() {
-        let args = vec!["lf".to_string(), "debug".to_string(), "-C".to_string()];
-        assert_eq!(reorder_args(args), vec!["lf", "-C", "debug"]);
     }
 
     #[test]
@@ -2457,12 +2427,12 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "wt", "--force", "rm", "old-tree"]
+        let args: Vec<String> = ["lf", "wt", "--force", "remove", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "wt", "rm", "--force", "old-tree"]
+            vec!["lf", "wt", "remove", "--force", "old-tree"]
         );
     }
 

@@ -103,7 +103,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     assert!(collision.contains("flow (.lf/flows/release-run.yaml)"));
     assert!(collision.contains("lf skill release-run"));
     assert!(collision.contains("flow wins untyped lookup"));
-    let skill = success(run(repo.path(), home.path(), &["skill", "show", "paired"]));
+    let skill = success(run(repo.path(), home.path(), &["help", "skill", "paired"]));
     assert!(String::from_utf8_lossy(&skill).contains("Skill paired body."));
     let uncached = success(run(
         repo.path(),
@@ -127,7 +127,7 @@ fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
     let home = tempfile::tempdir().unwrap();
     fs::write(repo.path().join(".lf/flows/paired.yaml"), "- [invalid\n").unwrap();
 
-    let help = success(run(repo.path(), home.path(), &["skill", "show", "paired"]));
+    let help = success(run(repo.path(), home.path(), &["help", "skill", "paired"]));
     let help = String::from_utf8(help).unwrap();
     assert!(help.contains("lf skill paired [message]"), "{help}");
     assert!(
@@ -139,6 +139,67 @@ fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
     let untyped = run(repo.path(), home.path(), &["run", "paired", "--help"]);
     assert_eq!(untyped.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&untyped.stderr).contains("invalid flow"));
+}
+
+#[test]
+fn typed_help_inspects_reserved_definitions_without_launching() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(
+        repo.path().join(".lf/skills/list.md"),
+        "Reserved skill body.",
+    )
+    .unwrap();
+
+    let skill = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "skill", "--", "list"],
+    ));
+    let skill = String::from_utf8(skill).unwrap();
+    assert!(skill.contains("Reserved skill body."), "{skill}");
+    assert!(skill.contains("lf skill -- list"), "{skill}");
+    for owner in ["flow", "run"] {
+        let flow = success(run(
+            repo.path(),
+            home.path(),
+            &["help", owner, "--", "list"],
+        ));
+        let flow = String::from_utf8(flow).unwrap();
+        assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
+    }
+    let collection = success(run(repo.path(), home.path(), &["help", "skill", "list"]));
+    assert!(String::from_utf8_lossy(&collection).contains("List skills"));
+    assert_eq!(
+        success(run(repo.path(), home.path(), &["help", "--", "task"])),
+        success(run(repo.path(), home.path(), &["help", "task"]))
+    );
+    assert!(
+        !home.path().join(".lf").exists(),
+        "help created runtime state"
+    );
+}
+
+#[test]
+fn removed_options_and_aliases_report_usage_errors_without_effects() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        &["wt", "list", "--full"][..],
+        &["wave", "status", "--no-sync"],
+        &["wt", "rm", "unused"],
+        &["-M", "unused", "run", "solo"],
+        &["-C", "run", "solo"],
+    ] {
+        let result = run(repo.path(), home.path(), args);
+        assert_eq!(result.status.code(), Some(2), "{args:?}");
+        assert!(result.stdout.is_empty(), "{args:?}");
+        assert!(!result.stderr.is_empty(), "{args:?}");
+    }
+    assert!(
+        !home.path().join(".lf").exists(),
+        "invalid input wrote state"
+    );
 }
 
 #[test]
@@ -310,11 +371,12 @@ fn transitive_lookup_counts_canonical_targets_and_respects_exact_aliases() {
             ),
         )
         .subcommand(clap::Command::new("repo").subcommand(clap::Command::new("pr")))
-        .subcommand(clap::Command::new("identity").visible_alias("id"))
+        .subcommand(clap::Command::new("monitor").visible_alias("mon"))
         .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());
     assert_eq!(resolve("pull-request").unwrap().unwrap(), ["task", "pr"]);
-    assert_eq!(resolve("id").unwrap().unwrap(), ["identity"]);
+    assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
+    assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
 }

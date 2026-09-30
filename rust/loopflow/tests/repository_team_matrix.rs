@@ -292,11 +292,7 @@ fn repository_team_matrix() {
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(
-            &home,
-            &repo,
-            &["wave", "status", wave, "--no-sync", "--json"],
-        );
+        let show = run_lf(&home, &repo, &["wave", "status", wave, "--json"]);
         let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
@@ -431,7 +427,7 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["wave", "status", "product", "--no-sync", "--json"],
+            &["wave", "status", "product", "--json"],
         ),
         "legacy cached read",
     );

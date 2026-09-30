@@ -12,6 +12,7 @@ def main() -> None:
     old = path.read_text()
     data = json.loads(Path('scratch/cli-catalog-verdicts.json').read_text())
     commands = {row['path']: row for row in data['commands']}
+    baseline = "https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8"
     refs: dict[tuple[str, int], str] = {}
     notes: dict[str, str] = {}
 
@@ -28,7 +29,7 @@ def main() -> None:
         return notes[text]
 
     out = [old.split('## Commands')[0], '## Commands', '',
-           'P:LINE refers to the [baseline Clap declarations](../rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.', '',
+           'P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.', '',
            '| Row | Canonical path | Target owner | Purpose | Callers / source | Overlap | Verdict → target |',
            '|---|---|---|---|---|---|---|']
     for row in commands.values():
@@ -56,7 +57,7 @@ def main() -> None:
     out += ['', '## Rationale key', '']
     out.extend(f'- **{key}**: {text}' for text, key in notes.items())
     out += ['', '## Caller evidence', '']
-    out.extend(f'[{key}]: ../{name}#L{line}' for (name, line), key in refs.items())
+    out.extend(f'[{key}]: {baseline}/{name}#L{line}' for (name, line), key in refs.items())
     out += ['', '## Extra aliases' + old.split('## Extra aliases', 1)[1]]
     path.write_text('\n'.join(out))
 

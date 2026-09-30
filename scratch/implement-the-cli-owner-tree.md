@@ -60,8 +60,12 @@ and option counts. Absence of a repository caller alone does not establish
 absence of public users; inspect defaults and positional inputs too.
 
 The earlier in-progress owner edits were restored to HEAD when this direction
-arrived. This slice now establishes the complete catalog and reviews its
-verdicts against callers before implementation.
+arrived. The catalog prerequisite is complete at `ad023a72c`; the first culling
+slice below is verified. The next implementation slice should switch accepted
+object owners and their consumers end to end. Do not repeat the baseline audit
+or treat this first cleanup as convergence. Integrate/coordinate LOO-298 before
+monitor's Exec/Session reader cut. The broader overviews, first local result,
+child readiness and every remaining catalog verdict still block demo readiness.
 
 ## Slice ledger
 
@@ -84,3 +88,55 @@ help must display its body without a provider on PATH; removed options reject
 and cached reads retain their behavior. Afterward, all owner moves, overviews,
 LOO-298 integration, readiness and live first-result proof remain required. Every target above remains required before
 demo readiness; no Task completion or landing follows from a catalog alone.
+
+### Implementation after the catalog checkpoint
+
+Catalog checkpoint: `ad023a72c`. Current slice implements C141 (merge skill show
+into typed help), C039/A full and C080/A no-sync deletions, and all ten extra
+alias deletions. The reserved-definition escape is preserved only for typed
+help; ordinary help delimiters and execution passthrough retain their meaning.
+Primary short/long flags remain one option. STYLE.md no longer recommends
+restoring uppercase aliases.
+
+The cached-status proof initially failed with `no wave in context` because its
+subprocess inherited LF_RUN_DIR from this worker. Branch isolation correctly
+cleared the fixture's ambient Wave selection when it detected foreign execution.
+The fixture now starts with an empty environment, explicit PATH, HOME, LF_HOME
+and LF_DB_PATH before adding its selected Wave. No production authority rule
+was weakened. Initial failing command:
+`env -u LF_HOME -u LF_DB_PATH -u LF_CONTROL_HOME -u LF_CONTROL_DB_PATH -u LF_RUN_CONTEXT -u LF_FLOW_STEP -u LF_HUMAN_SESSION cargo test -p loopflow --test wave_resolution_tests cached_status_honors_the_shared_resolution_rules`.
+
+Final focused proof:
+
+- `cargo test -p loopflow --test cli_discovery`: 10 passed, including reserved
+  typed help, removed-input exit 2, no stdout/runtime writes, and help/discovery.
+- `cargo test -p loopflow --test wave_resolution_tests cached_status_honors_the_shared_resolution_rules`:
+  1 passed after fixture isolation; seeded state, not live planning.
+- `cargo test -p loopflow --lib consolidated_commands_parse_without_old_namespaces`:
+  1 passed; removed flags reject and existing commands parse.
+- `cargo test -p loopflow --bin lf reorder_args`: 16 passed.
+- After updating the synthetic alias example from identity/id to monitor/mon,
+  `cargo test -p loopflow --test cli_discovery transitive_lookup_counts_canonical_targets_and_respects_exact_aliases`:
+  1 passed; no broad behavioral rerun needed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`
+  and `git diff --check`: passed. Generated website docs resynced with
+  `uv run python website/dev.py sync-docs --source docs` (21 files; ignored copies).
+- `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-current.json`:
+  passed; current 140 commands below root / 437 flags / 94 positional arguments /
+  0 extra aliases, versus 141 / 440 / 95 / 10 at baseline. The lost third flag
+  is auto-help on the removed skill-show command, not another user option.
+
+Measured production Rust and builtin-instruction diff from `ad023a72c` to this
+slice: **+35 / −33 lines**. Excludes test modules and integration tests, generated
+files, public docs, style guide and scratch evidence. Command and argument
+counts include all hidden surfaces; no reduction is claimed from planned moves.
+
+Review changed the implementation: the initial deletion of skill-show required
+preserving reserved definition inspection, and help's ordinary `-- task`
+delimiter must not become a definition escape. Both have public-CLI proof.
+Deleted uppercase-only reorder tests instead of converting them into duplicates.
+Existing ordinary Wave-status fixture now supplies its own environment rather
+than weakening source isolation. No new domain owner, state store or alias
+registry was introduced. Catalog verdicts remain
+requirements for following slices, including the separate retired-op deletion;
+no assertion of a completed reorganization, overview, provider journey or demo.

@@ -113,7 +113,7 @@ When editing `*_test.py` or `test_*.py` files:
 - Delete flaky tests rather than adding retries
 
 When writing CLI code with Typer:
-- Prefer lowercase short flags (`-p`, `-c`), support uppercase as aliases
+- Prefer lowercase short flags (`-p`, `-c`); do not add uppercase aliases
 - Pass args through to underlying tools rather than re-implementing
 - Default to sensible behavior (e.g., whole repo as context)
 

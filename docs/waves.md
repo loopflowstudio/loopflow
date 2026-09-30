@@ -311,7 +311,7 @@ namespace. Don't paste ids by hand.
 lf wave connect --wave infra --team-key LOO     # first Wave establishes the repo Team
 lf wave connect --all                           # all nested Waves reuse it
 lf wave sync --wave infra                    # refresh the local SQLite snapshot
-lf wave status infra --no-sync          # deterministic cache-only read
+lf wave status infra          # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"
 ```
@@ -414,7 +414,7 @@ Migration shim     → Legacy API compatibility layer
 Cleanup            → Remove old billing code
 ```
 
-The Wave reads its chapter and Tasks with `lf wave status --no-sync`, judges the
+The Wave reads its chapter and Tasks with `lf wave status`, judges the
 KR evidence, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 

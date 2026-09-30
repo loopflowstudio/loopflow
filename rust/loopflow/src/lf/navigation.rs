@@ -110,6 +110,15 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     while index < args.len() {
         let value = &args[index];
         if value == "--" {
+            // Preserve a definition escape in help's positional path after
+            // Clap consumes its own option delimiter.
+            if current.get_name() == "help"
+                && output
+                    .last()
+                    .is_some_and(|owner| matches!(owner.as_str(), "run" | "skill" | "flow"))
+            {
+                output.push("--".to_string());
+            }
             output.extend_from_slice(&args[index..]);
             break;
         }
@@ -197,7 +206,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         Commands::Help { .. }
             | Commands::List { .. }
             | Commands::Skill {
-                cmd: SkillCommand::List { .. } | SkillCommand::Show { .. }
+                cmd: SkillCommand::List { .. }
             }
             | Commands::Flow {
                 cmd: FlowCommand::List { .. }
@@ -220,12 +229,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 path.extend(namespace.iter().cloned());
                 crate::lf::commands::list::show(&path, &repo, *json)?;
             }
-            Commands::Skill {
-                cmd: SkillCommand::Show { name },
-            } => print!(
-                "{}",
-                definition_help(&command_tree(), &repo, name, Some(DefinitionKind::Skill))?
-            ),
             Commands::Flow {
                 cmd: FlowCommand::List { json, inventory },
             } => {
@@ -273,6 +276,16 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
 
 pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
     let tree = command_tree();
+    if let [owner, escape, name] = path {
+        if escape == "--" && matches!(owner.as_str(), "run" | "skill" | "flow") {
+            let kind = match owner.as_str() {
+                "skill" => Some(DefinitionKind::Skill),
+                "flow" => Some(DefinitionKind::Flow),
+                _ => None,
+            };
+            return definition_help(&tree, repo, name, kind);
+        }
+    }
     if path.is_empty() {
         if all {
             let mut output = String::from("Usage: lf <command> | run <name> [message]\n\n");

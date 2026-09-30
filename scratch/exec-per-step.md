@@ -382,3 +382,28 @@ reused only for their own boundary:
 
 These gaps keep item 1 open. They do not authorize another launcher or restoring
 fake harness injection into production.
+
+### Shared command reduction · 2026-09-29
+
+Removed `drive_saved` and `PromptLaunchContext`. The driver now passes command
+options straight to the shared executor; each child reads work, captured skill
+and model fallback from its selected Flow row. Prompt assembly resolves the
+participant once and derives the surface from the command, without an unused
+override bundle. Failed children read their selected result through the driver's
+existing store instead of reopening it. Rust code/test delta: +23 / -90 lines.
+
+Review retained Task admission preflight, live input cursors and the comment
+refresh lifetime: these preserve policy and retry continuity, unlike the deleted
+adapters. No schema, wire or naming cut is included. Existing managed-command,
+account, configured-provider and acceptance gaps above remain open.
+
+Focused isolated proof: `.lf/tmp/cut-i/task-command-compress.log` passed all
+30 selected tests (one slow; 1,588 outside the filter). Covers captured prompts,
+participant names, Task-bound context, source-free review, and agent/mechanical
+child survival with exact-once consumption after driver death. Providers are
+scripted; this is not configured-provider or whole-design acceptance.
+
+All-target Clippy (`task-command-compress-clippy.log`), formatting, architecture
+coverage and diff checks also pass. The pre-existing `scratch/questions.md`
+contribution is unchanged. Final gate and materialized full-matrix proof remain
+with their planned boundaries.

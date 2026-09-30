@@ -445,6 +445,11 @@ object or table. Decisions below are Jack's unless marked; the branch's
   process driving that agent ("to be clear i still want being called by an
   agent process to give you the right parent-lf process"). The word parent means
   Exec to Exec only; loop and template relations need other words.
+  Implementation matches Session/provider generation and origin to the current driver;
+  a replaced provider retains its proven historical parent. Causal ancestry
+  grants neither Task attribution nor Flow settlement authority. The unused
+  caller-turn token is removed, with historical values archived by forward
+  migration; selected native events already identify Flow completions.
 - **Definitions compile; runs are skills and ops.** A Flow definition may
   reference other Flows; starting it compiles them into one graph (Jack's word).
   A subflow is "more of a lens than an operational entity". Loop passes are not
@@ -472,7 +477,7 @@ object or table. Decisions below are Jack's unless marked; the branch's
   review: derive the user's objects and APIs from the product first, then check
   the infrastructure for hops.
 
-Lessons from implementing it (2026-09-29):
+Lessons from implementing it (2026-09-29–30):
 
 - Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
   unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
@@ -482,6 +487,12 @@ Lessons from implementing it (2026-09-29):
   SQL reader, selected boundaries resolve captured Skills before the mutable
   catalog, and Ask escapes reserved Skill names. The main integration has 13
   focused passes for these paths; it is not configured-provider acceptance.
+- Automatic skill checkpointing must use the same Work binding reader as
+  execution: explicit command `--as`, then checkout, then inherited `LF_AS`.
+  Checking explicit flags alone can commit another contributor's edits in a
+  Task checkout. The repair retains the managed Flow and HEAD; its fixture must
+  establish shared skill content before changing branches, without relying on
+  an incidental checkpoint from another launch.
 - The pinned 0.12.23 worker's output classifier read a quoted sentence in a
   scratch note as a capability denial. The source fix is on the branch; resume
   with the actual cause until workers run a release carrying it.

@@ -70,7 +70,8 @@ No new full-suite or configured acceptance result follows from this realignment.
    rebase; the 13 rebase checks above cover the reconciled discovery/execution paths.
    See [evidence](evidence.md#one-flowsession-through-loop-passes--2026-09-30).
    Configured acceptance and the whole-design import obligations remain open.
-3. **Simplify attribution and the parent tree — implemented this pass** (Jack).
+3. **Simplify attribution and the parent tree — done.** Implementation
+   `974f1dfd5` and fixture simplification `7beb3600b` complete this item.
    The forward `drop_flow_turn_caller` draft archives non-null historical tokens,
    removes `execs.caller_flow_turn` and `flow_turn_caller`, and retains selected
    Flow-event payloads unchanged. Rust/Swift/DTO mirrors, `AgentCaller.flow_turn`,
@@ -80,9 +81,13 @@ No new full-suite or configured acceptance result follows from this realignment.
    Explicit command `--as` → checkout → inherited `LF_AS` is unchanged.
    The rebase repair uses that same binding reader when deciding whether a skill
    may checkpoint shared edits; main's `skill -- NAME` and `cmd:` grammar stays.
-   [This pass's evidence](evidence.md#caller-token-removal-and-rebase-repairs--2026-09-30)
-   records verification and the disposable installation blocker. Broader Flow
-   membership provenance and full-design import obligations remain open.
+   [Evidence](evidence.md#caller-token-removal-and-rebase-repairs--2026-09-30)
+   records the requested file suites, source/materialized migration, real Codex
+   with synthetic Responses, 18 Swift DTO checks and 13 compression checks.
+   The Docker installation check remains unexecuted: its ten-second probe timed
+   out before creating a container (`caller-install.log`). These local proofs
+   do not close configured acceptance, broader Flow membership provenance or
+   full-design import obligations.
 4. **One naming commit** (Jack). Exec instead of launch or run for one agent
    start under one lf process; Session names for conversation things; "compile"
    for turning a definition into its graph; "parent" only for Exec to Exec, so

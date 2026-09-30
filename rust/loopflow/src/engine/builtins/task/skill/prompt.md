@@ -58,7 +58,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    Build a useful atom before choosing its place in a process. Require the
    information the task needs, not a preceding skill, named Flow, Task binding,
    branch name, or document layout that happened to supply it once. Keep real
-   domain constraints and authority boundaries. Let callers compose rebasing,
+   domain constraints and authority boundaries. Let callers compose synchronization,
    publication, and navigation around the operation.
 
    Match proof to maturity: an early Task needs a concrete problem and

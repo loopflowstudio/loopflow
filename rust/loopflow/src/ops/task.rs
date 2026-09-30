@@ -256,7 +256,7 @@ async fn task_store() -> OpsResult<SharedStore> {
 
 /// Durable placement for a Task PR forked from another Task's active PR.
 #[derive(Debug, Clone)]
-pub struct StackedRebase {
+pub struct StackedSync {
     pub fork_base: String,
     pub child: TaskPr,
     /// The live parent branch, or `None` once the parent has merged.
@@ -267,8 +267,8 @@ pub struct StackedRebase {
 /// GitHub because an out-of-band parent merge can precede registry reconcile.
 /// A worktree that is not a Task worktree yields `None`; a Task worktree whose
 /// registry is missing/inaccessible/incompatible is refused with an actionable
-/// authority error, so a stacked rebase never silently degrades to generic.
-pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+/// authority error, so a stacked sync never silently degrades to generic.
+pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(worktree).await? else {
             return Ok(None);
@@ -306,7 +306,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
                 parent.branch
             )));
         }
-        Ok(Some(StackedRebase {
+        Ok(Some(StackedSync {
             fork_base: active.base_commit.clone(),
             child: active,
             parent_branch: (!merged).then_some(parent.branch),
@@ -316,7 +316,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
 
 /// Return a stacked child only after its parent has merged. Landing before that
 /// would silently drop a dependency that is not present on the default branch.
-pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
+pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
         if let Some(parent) = &stacked.parent_branch {
@@ -328,13 +328,13 @@ pub fn stacked_collapse(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
     Ok(stacked)
 }
 
-/// Persist the exact base reached by a successful deterministic rebase. Clear
+/// Persist the exact base reached by a successful deterministic sync. Clear
 /// the parent link only when its work is now present on the default branch.
 /// Refuses with an actionable authority error if the registry is not usable, so
-/// a post-rebase base is never silently dropped — the rebase already pushed, so
+/// a post-sync base is never silently dropped — the sync already pushed, so
 /// the operator must know the durable record did not advance with it.
-pub fn record_stack_rebase(
-    stacked: &StackedRebase,
+pub fn record_stack_sync(
+    stacked: &StackedSync,
     new_base: &str,
     clear_parent: bool,
 ) -> OpsResult<()> {
@@ -348,9 +348,9 @@ pub fn record_stack_rebase(
         );
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
-        // collapse only repoints the mutable row to the post-merge truth.
+        // sync only repoints the mutable row to the post-merge truth.
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &pr_id,
                 &new_base,
                 clear_parent,
@@ -551,15 +551,17 @@ fn prepare_task(
 
 /// Recover checkout files from retained Task placement without replacing history.
 async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if task.worktree.join(".git").exists() {
-        return Ok(());
-    }
+    let pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task has no active PR from which to restore its checkout"))?;
     let wave = owning_wave(store, task).await?;
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
     let _lease =
         crate::engine::git::acquire_worktree_lease(&repo, &task.worktree, "Task checkout")?;
     if task.worktree.join(".git").exists() {
-        return Ok(());
+        return finish_task_checkout(store, task, &pr).await;
     }
     if task.worktree.symlink_metadata().is_ok() {
         return Err(task_error(format!(
@@ -567,11 +569,6 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             task.worktree.display()
         )));
     }
-    let pr = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("Task has no active PR from which to restore its checkout"))?;
     let checkouts = crate::engine::worktrees::list_worktrees(&repo)?;
     let destination = crate::store::canonicalize_with_missing_tail(&task.worktree)?;
     for other in checkouts
@@ -628,6 +625,10 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
         args.extend([task.worktree.display().to_string(), pr.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    finish_task_checkout(store, task, &pr).await
+}
+
+async fn finish_task_checkout(store: &SharedStore, task: &Task, pr: &TaskPr) -> OpsResult<()> {
     let events = store
         .task_events_after(&task.id, 0)
         .await
@@ -635,14 +636,26 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     if !events.iter().any(
         |event| matches!(&event.kind, TaskEventKind::PrStarted { pr_id, .. } if pr_id == &pr.id),
     ) {
+        // The first child commit owns the deletion. A retry after that commit
+        // but before PrStarted must preserve any notes the child has since made.
+        if pr.parent_pr_id.is_some() && rev_parse(&task.worktree, "HEAD")? == pr.base_commit {
+            git_output_bytes(
+                &task.worktree,
+                &["rm", "-r", "-f", "--ignore-unmatch", "--", "scratch"],
+            )?;
+            git_output_bytes(
+                &task.worktree,
+                &["commit", "--allow-empty", "-m", "Clear inherited scratch"],
+            )?;
+        }
         store
             .append_task_event(
                 &task.id,
                 &TaskEventKind::PrStarted {
-                    pr_id: pr.id,
+                    pr_id: pr.id.clone(),
                     sequence: pr.sequence,
-                    branch: pr.branch,
-                    base_commit: pr.base_commit,
+                    branch: pr.branch.clone(),
+                    base_commit: pr.base_commit.clone(),
                 },
             )
             .await
@@ -906,20 +919,7 @@ fn create_prepared_task(
             )));
         }
 
-        if let Err(error) = store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::PrStarted {
-                    pr_id: pr.id,
-                    sequence: pr.sequence,
-                    branch: pr.branch,
-                    base_commit: pr.base_commit,
-                },
-            )
-            .await
-        {
-            return Err(task_error(error));
-        }
+        finish_task_checkout(&store, &task, &pr).await?;
 
         if let Some(flow) = selected_flow.as_deref() {
             launch_task_process(&store, &mut task, Some(flow)).await?;
@@ -1977,12 +1977,12 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
 /// - `M == B` — parity holds; publish.
 /// - `M` ancestor of `B` — the recorded base itself carries commits absent from
 ///   `O` (inherited foreign ancestry, the #877/#882 shape). Refuse before any
-///   push, naming the foreign commits/files and the safe rebase.
+///   push, naming the foreign commits/files and the safe sync.
 /// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
 ///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
-///   both sides (`M..B` and `B..M`) plus the safe rebase.
+///   both sides (`M..B` and `B..M`) plus the safe sync.
 pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
@@ -1993,20 +1993,7 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Publication proof: require ancestry parity without changing the recorded
-/// fork. Only an explicit integration boundary may advance Task stack/base
-/// metadata.
-pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(&repo).await? else {
-            return Ok(());
-        };
-        verify_task_pr_range_mode(&store, &task, &repo, StaleBaseAction::Refuse, None).await
-    })
-}
-
-/// Prove the post-rebase Task range against the operation's immutable target
+/// Prove the post-sync Task range against the operation's immutable target
 /// without advancing durable metadata before a requested push is verified.
 pub(crate) fn validate_task_pr_range_for_integration(
     repo: &Path,
@@ -2054,7 +2041,7 @@ fn verify_task_pr_range_for_integration(
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
 /// recorded base — an empty PR that must not reach GitHub. Unconditional: an
-/// already-open PR reset or rebased empty is refused just like a first
+/// already-open PR reset or synced empty is refused just like a first
 /// publication. A worktree that is provably not a Task worktree is an explicit
 /// no-op; a Task worktree whose registry is unusable is refused with an
 /// actionable authority error rather than degrading to generic PR behavior.
@@ -2068,25 +2055,13 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Publication's post-commit proof: require a non-empty authoritative range
-/// while leaving integration metadata untouched.
-pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(&repo).await? else {
-            return Ok(());
-        };
-        require_task_pr_range_nonempty_mode(&store, &task, &repo, StaleBaseAction::Refuse).await
-    })
-}
-
 /// Resolve the upstream a Task PR's ancestry should be measured against. A root
 /// PR measures against `origin/<default>` (or local `<default>` without a
 /// remote). A stacked child with a live parent measures against the parent's
 /// branch tip — so the parent's own commits are expected ancestry, not foreign
 /// contamination, and the child's range is `fork_point..HEAD` against the
 /// durable parent boundary. A child whose parent merged (or was abandoned) has
-/// been collapsed onto `<default>` by [`record_stack_rebase`]; it measures
+/// been synced onto `<default>` by [`record_stack_sync`]; it measures
 /// against `origin/<default>` like a root PR.
 async fn resolve_verifier_upstream(
     store: &SharedStore,
@@ -2134,7 +2109,6 @@ pub(crate) async fn verify_task_pr_range_in(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StaleBaseAction {
     Accept,
-    Refuse,
     Heal,
 }
 
@@ -2205,16 +2179,8 @@ async fn verify_task_pr_range_mode(
         // B < M: the upstream advanced past a stale or squash-merged base.
         // Heal the recorded base to the true fork point so lf task changes and
         // the durable evidence report the minimal M..HEAD range.
-        match stale_base {
-            StaleBaseAction::Accept => return Ok(()),
-            StaleBaseAction::Refuse => {
-                return Err(task_error(format!(
-                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
-                    short(&base),
-                    short(&merge_base),
-                )));
-            }
-            StaleBaseAction::Heal => {}
+        if stale_base == StaleBaseAction::Accept {
+            return Ok(());
         }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
@@ -2259,16 +2225,7 @@ async fn require_task_pr_range_nonempty_in(
     task: &Task,
     repo: &Path,
 ) -> OpsResult<()> {
-    require_task_pr_range_nonempty_mode(store, task, repo, StaleBaseAction::Heal).await
-}
-
-async fn require_task_pr_range_nonempty_mode(
-    store: &SharedStore,
-    task: &Task,
-    repo: &Path,
-    stale_base: StaleBaseAction,
-) -> OpsResult<()> {
-    verify_task_pr_range_mode(store, task, repo, stale_base, None).await?;
+    verify_task_pr_range_in(store, task, repo).await?;
     let pr = store
         .active_task_pr(&task.id)
         .await

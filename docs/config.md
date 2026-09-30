@@ -397,7 +397,7 @@ sandbox, and OpenCode denies external-directory tools.
 Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
 the main repo as an extra writable directory. This keeps normal agent
 permissions, but lets Git write the linked worktree index under
-`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
+`<main>/.git/worktrees/<worktree>/` when the agent stages, commits, syncs, or
 runs mechanical `lf` commands. Durable Task provider turns do not add the main
 repo. Loopflow owns their Git mutations after the provider edits and tests the
 assigned files.

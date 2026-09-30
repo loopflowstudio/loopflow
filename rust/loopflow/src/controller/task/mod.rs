@@ -1221,7 +1221,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "rebase", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(
                     !super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap()
@@ -1295,7 +1295,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
-        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished =
                 super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
@@ -3239,7 +3239,7 @@ mod planning_tests {
         std::fs::create_dir_all(&flow_dir).unwrap();
         std::fs::write(
             flow_dir.join("two-ops.yaml"),
-            "- cmd: rebase --plan\n- cmd: rebase --plan\n",
+            "- cmd: sync --plan HEAD\n- cmd: sync --plan HEAD\n",
         )
         .unwrap();
         let mut flow = super::start_task_flow(&task, "two-ops").unwrap();
@@ -3269,7 +3269,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: rebase --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -3315,7 +3315,7 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.command, "sync");
         assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();

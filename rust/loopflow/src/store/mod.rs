@@ -3024,7 +3024,7 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "parent-tip-2",
                 false,
@@ -3032,16 +3032,16 @@ mod tests {
             )
             .await
             .unwrap();
-        let rebased = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
-        assert_eq!(rebased.base_commit, "parent-tip-2");
-        assert_eq!(rebased.parent_pr_id, Some(parent.id.clone()));
+        let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
+        assert_eq!(synced.base_commit, "parent-tip-2");
+        assert_eq!(synced.parent_pr_id, Some(parent.id.clone()));
 
         // The parent merges; the child collapses onto main, dropping the link.
         parent.merge_commit = Some("merge-200".to_string());
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "main-after-200",
                 true,

@@ -1550,21 +1550,21 @@ fn execute_command(
         Some(Commands::Wt { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
         }
-        Some(Commands::Rebase {
+        Some(Commands::Sync {
             plan,
             manual,
-            continue_rebase,
+            continue_sync,
             abort,
             adopt,
             onto,
         }) => {
-            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
+            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
             with_runtime(&repo, args, || {
-                loopflow::lf::commands::ops::run_rebase(
+                loopflow::lf::commands::ops::run_sync(
                     onto.as_deref(),
                     *plan,
                     *manual,
-                    *continue_rebase,
+                    *continue_sync,
                     *abort,
                     *adopt,
                 )
@@ -1984,7 +1984,7 @@ mod tests {
             "screenshot",
             "pr",
             "wt",
-            "rebase",
+            "sync",
             "commit",
             "auth",
             "release",

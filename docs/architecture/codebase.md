@@ -72,7 +72,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf <skill>`, `lf flow` | direct execution and composition |
 | `lf wave`, `project`, `task`, `work` | planning and Work coordination |
 | `lf ask`, `session` | durable Sessions and resolution |
-| `lf wt`, `commit`, `rebase`, `pr`, `ci` | worktree and delivery operations |
+| `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
 | `lf home`, `start`, `stop`, `pause`, `resume`, `ssh` | Home identity, placement, service routing |

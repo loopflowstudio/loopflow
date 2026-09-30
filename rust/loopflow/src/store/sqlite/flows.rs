@@ -1,8 +1,8 @@
 //! Every Flow invocation's driver transactions: keyed by invocation id, fenced
 //! by `position_version` for the cursor and `claim_json` for the Task worker.
-//! Navigation belongs to the selected native turn's caller Exec; mechanical
-//! results belong to Flow history. AgentSession owns launch publication and
-//! provider outcomes. A Task selects one Flow through `tasks.current_invocation_id`.
+//! Navigation consumes the selected native turn's successful completion;
+//! mechanical results belong to Flow history. AgentSession owns launch publication
+//! and provider outcomes. A Task selects one Flow through `tasks.current_invocation_id`.
 //! Loop passes advance its cursor and return counters under the same claim.
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -1794,21 +1794,28 @@ impl SqliteStore {
         start
     }
 
-    pub(crate) fn test_output(&self, start: &i64, value: &serde_json::Value) -> StoreResult<()> {
+    fn test_turn_event(
+        &self,
+        start: &i64,
+        kind: crate::session::SessionEventKind,
+        payload: &serde_json::Value,
+    ) -> StoreResult<()> {
         let (session, thread, turn): (String, String, String) =
             self.conn.lock().unwrap().query_row(
                 "SELECT session_id,provider_thread,provider_turn FROM session_events WHERE seq=?1",
                 [start],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?;
-        self.record_session_event(
-            &session,
-            &thread,
-            &turn,
+        self.record_session_event(&session, &thread, &turn, kind, payload)?;
+        Ok(())
+    }
+
+    pub(crate) fn test_output(&self, start: &i64, value: &serde_json::Value) -> StoreResult<()> {
+        self.test_turn_event(
+            start,
             crate::session::SessionEventKind::Output,
             &serde_json::json!({"value":value}),
-        )?;
-        Ok(())
+        )
     }
 
     pub(crate) fn test_decision_output(
@@ -1820,20 +1827,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn test_finish_flow_turn(&self, start: &i64, status: &str) {
-        let (session, thread, turn): (String, String, String) = self
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT session_id,provider_thread,provider_turn FROM session_events WHERE seq=?1",
-                [start],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        self.record_session_event(
-            &session,
-            &thread,
-            &turn,
+        self.test_turn_event(
+            start,
             crate::session::SessionEventKind::Completed,
             &serde_json::json!({"status":status}),
         )
@@ -1985,7 +1980,6 @@ mod tests {
                 &exec,
             )
             .unwrap();
-        let actor = start;
         let mut stale = selection.clone();
         stale.version += 1;
         assert!(store
@@ -2012,10 +2006,10 @@ mod tests {
             .is_err());
         assert!(!store.flow(flow.id()).unwrap().unwrap().finished);
         store
-            .test_decision_output(&actor, &verdict(FlowDecision::Advance))
+            .test_decision_output(&start, &verdict(FlowDecision::Advance))
             .unwrap();
         assert!(store
-            .test_decision_output(&actor, &verdict(FlowDecision::Iterate))
+            .test_decision_output(&start, &verdict(FlowDecision::Iterate))
             .is_err());
         let automatic_start = store
             .record_session_turn_origin(
@@ -2045,13 +2039,12 @@ mod tests {
             .select_flow_turn(&selection, &session.id, &driver, automatic_start)
             .unwrap();
         store
-            .test_decision_output(&actor, &verdict(FlowDecision::Advance))
+            .test_decision_output(&start, &verdict(FlowDecision::Advance))
             .unwrap();
         assert!(
             store.flow_output(flow.id()).is_err(),
             "a failed turn's retained result cannot navigate the retry"
         );
-        let actor = automatic_start;
         assert!(
             store
                 .flow(flow.id())
@@ -2065,10 +2058,10 @@ mod tests {
             "a failed native turn cannot supply the retry's navigation"
         );
         store
-            .test_decision_output(&actor, &verdict(FlowDecision::Iterate))
+            .test_decision_output(&automatic_start, &verdict(FlowDecision::Iterate))
             .unwrap();
         assert!(store
-            .test_decision_output(&actor, &verdict(FlowDecision::Advance))
+            .test_decision_output(&automatic_start, &verdict(FlowDecision::Advance))
             .is_err());
         assert!(
             store.recover_flow(flow.id(), None).is_err(),

@@ -361,3 +361,51 @@ removes duplicate settings validation and rendering branches (14 net Rust lines)
 and deletes the orphaned direction golden whose YAML case was already retired.
 Proof passed: `auth_tests` (5), `account_report_fixture` (1), `golden_prompt` (1),
 formatting, all-target Clippy (four jobs), and diff checks. Remaining scope is unchanged.
+
+### Account owner review · 2026-09-30
+
+Reviewed the active branch against `a6b1bc3df`, focusing on the Account cut
+`f46efdfc6..7b13a99e5`. **Pass for this slice; gap for whole-Task readiness.**
+No bounded production defect found. Parser, dispatch, scripts, builtin guidance,
+recovery commands and current docs use Account. `Commands::Auth`, `AuthCommand`
+and the old command modules are replaced, with no predecessor or account-short
+alias. Remaining auth argv belong to native providers; historical migration
+comments and negative tests do not provide a competing CLI owner.
+
+Bare Account delegates to Status and its existing read-only store, credential
+presence and local metadata readers. There is one transient report, no new
+writer or credential authority. Text adds next actions; JSON retains its schema.
+Missing credentials, unchecked server acceptance, retained window age/reset and
+unknown capacity remain distinct. Cached forwarding reports uninspected identity
+without contacting its broker. Account was not a typed Flow operation and has
+no Desktop command caller to migrate.
+
+Fresh executed proof:
+
+- `cargo test -p loopflow --test auth_tests account_overview --jobs 4`: 2 passed.
+  Real CLI in disposable Homes with no provider tools; overview/status JSON
+  agree, stale 73% capacity and missing credentials survive, account rows stay
+  unchanged and absent credential/Home directories remain absent.
+- `cargo test -p loopflow --test cli_discovery account_has_one_owner_without_predecessor_aliases --jobs 4`:
+  1 passed; canonical help and rejected predecessor names, without launch effects.
+- `git diff --check`: passed. Reuse the recorded unchanged-source account,
+  broker, parser, discovery, golden, formatting and Clippy proofs above. No
+  broader suite, live authentication or installed acceptance is claimed.
+
+Measured `f46efdfc6..7b13a99e5`: **+113 / −85 production Rust and builtin
+instruction lines**, pairing renamed files and using Git's line diff after
+excluding test modules. Excludes test-only files/helpers, integration tests,
+examples, scripts, generated artifacts, docs, memory and scratch. The net +28
+matches the implementation's +42 followed by compression's −14; rename churn
+is not counted as wholesale replacement.
+
+Convergence holds: `52816c03b` switched Task delivery consumers, `b13c57d93`
+switched Account consumers, and `7b13a99e5` compressed its shared dispatch and
+rendering. These are not two consecutive implementation passes replacing nothing.
+Next: finish Repo/Home/Wave/Session owner cuts with caller and canonical-path
+proofs; integrate LOO-298 before Monitor's Exec/Session readers. Monitor, authored
+Wave/unlinked-work discovery, destination readiness preserving restrictions,
+the real disposable first-provider-result walkthrough, remaining catalog/R01–R10
+requirements and Jack Heart's demo remain required. Full Done when claims do
+not hold; this review does not publish, land, complete the Task or choose Flow
+navigation.

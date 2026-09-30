@@ -17,6 +17,17 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Compression blocked by disk reserve — 2026-09-30
+
+At `230e3333e`, compression inspection made no source changes. Resource preflight
+reported 31.2 GiB free against the required 32 GiB floor. The prescribed
+`uv run python scripts/resource_envelope.py --recover` finished with 30.4 GiB
+free and no reclaimed space; active and recent builds were retained. A subsequent
+`UV_LOCK_TIMEOUT=0 uv cache prune` also failed because another process held the
+cache lock. No behavioral checks ran, and earlier proof is not a new pass.
+Resume compression after resource preflight permits testing. The untracked
+runtime/store decision consultation remains untouched and pending.
+
 ### Resumed implementation — official step selection, 2026-09-30
 
 At `1fd99a284`, the supplied worktree was clean. Jack Heart's latest direction

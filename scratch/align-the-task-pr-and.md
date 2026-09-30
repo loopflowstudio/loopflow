@@ -33,6 +33,14 @@ not inferred absent. GitHub branch matches include the source repository, so
 same-named branches in other forks are not closed. Attachment URLs cannot choose
 a host for GitHub credential-bearing reads.
 
+Cancellation and sweep share preparation and application. Preparation reads the
+Task PR records once and checks all unmerged records, including abandoned records
+whose GitHub PR reopened. Sweep preparation never releases worker claims. Apply
+uses the final fresh chapter-membership result directly before effects, instead
+of repeating the entire preparation and membership lookup. This removes the
+preview/apply discrepancy found during compression without changing the existing
+transactional claim fence, remote deletion lease, or partial-failure recovery.
+
 ## Remaining work
 
 - Resolve completion/landing checkout cleanup at Task-worker settlement; retain
@@ -89,3 +97,20 @@ Read-only configured GitHub observations: PR #1299 and PR #1318 both returned
 CLOSED, with headRepository loopflowstudio/loopflow. This confirms the PR facts
 only. The installed CLI remains 0.12.26 and rejects task abandon and task sweep;
 it provides neither a configured sweep result nor Task cancellation evidence.
+
+Compression verification (2026-09-30): the three abandonment/sweep/store tests
+passed, including reopened historical PR exclusion in both preview and apply,
+and membership changing into the current chapter during preparation. The other
+shared planning-fixture consumers and lifecycle parser passed 13 tests; one
+subprocess-only fixture entry was intentionally ignored. Commands used the same
+isolated environment described above:
+
+```text
+cargo test -p loopflow --lib -- task_abandon task_sweep_ --test-threads=1
+cargo test -p loopflow --lib -- task_planning_tests task_lifecycle_commands_ --skip task_abandon --skip task_sweep_ --test-threads=1
+```
+
+The review also removed temporary argument copies from lower-command validation
+and corrected the documentation's implied issue-ID inference for landing.
+All-target Clippy, formatting and diff checks passed after compression.
+Completion/deletion composition and configured live acceptance remain unfinished.

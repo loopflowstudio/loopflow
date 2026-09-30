@@ -100,6 +100,7 @@ struct PlanningState {
     completion_state: Option<String>,
     comments: Vec<serde_json::Value>,
     attachments: Vec<String>,
+    move_on_attachment_read: bool,
 }
 
 async fn planning_graphql(
@@ -209,7 +210,13 @@ async fn planning_graphql(
         }
         json!({"issueUpdate":{"issue":{"id":"issue-1"}}})
     } else if query.contains("query IssueAttachments") {
-        json!({"issue":{"attachments":page(state.lock().await.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
+        let mut state = state.lock().await;
+        if state.move_on_attachment_read {
+            state.move_on_attachment_read = false;
+            state.current_project_id = Some("project-1".into());
+            state.issues[0]["project"]["id"] = json!("project-1");
+        }
+        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueComments") {
         json!({"issue":{"comments":page(state.lock().await.comments.clone())}})
     } else if query.contains("mutation CreateComment") {
@@ -1470,6 +1477,32 @@ esac
                     json!("unstarted")
                 );
                 assert!(!checkout.exists());
+                // A reopened PR on an already-abandoned record must be excluded
+                // by preview as well as apply, even after its checkout is gone.
+                std::fs::remove_file(repo.join(".git/pr-closed")).unwrap();
+                runtime.block_on(async {
+                    let mut state = state.lock().await;
+                    state.current_project_id = Some("prior-project".into());
+                    state.issues[0]["project"]["id"] = json!("prior-project");
+                });
+                for apply in [false, true] {
+                    let entries = crate::ops::task::task_sweep(&repo, apply).unwrap();
+                    assert_eq!(entries.len(), 1);
+                    assert!(entries[0].outcome.contains("open PR"), "{:?}", entries);
+                    assert_eq!(
+                        runtime.block_on(async {
+                            state.lock().await.issues[0]["state"]["type"].clone()
+                        }),
+                        json!("unstarted")
+                    );
+                    assert!(!repo.join(".git/pr-closed").exists());
+                }
+                std::fs::write(repo.join(".git/pr-closed"), "").unwrap();
+                runtime.block_on(async {
+                    let mut state = state.lock().await;
+                    state.current_project_id = None;
+                    state.issues[0]["project"]["id"] = json!("project-1");
+                });
             } else {
                 // A later GitHub failure preserves enough evidence for a retry.
                 std::fs::write(repo.join(".git/fail-close"), "").unwrap();
@@ -1595,6 +1628,21 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         }
         runtime.block_on(async {
             state.lock().await.issues[0]["state"]["type"] = json!("unstarted");
+        });
+        // Membership changes after candidate enumeration still prevent writes.
+        runtime.block_on(async {
+            state.lock().await.move_on_attachment_read = true;
+        });
+        let moved = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert!(moved[0].outcome.contains("current chapter"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        runtime.block_on(async {
+            let mut state = state.lock().await;
+            state.current_project_id = Some("prior-project".into());
+            state.issues[0]["project"]["id"] = json!("prior-project");
         });
         let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(applied[0].outcome, "canceled");

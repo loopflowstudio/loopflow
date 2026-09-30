@@ -3018,7 +3018,10 @@ pub(crate) async fn chapter_sweep_candidates(
     Ok(candidates)
 }
 
-pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) -> OpsResult<()> {
+pub(crate) async fn require_outside_current_chapter(
+    repo: &Path,
+    issue: &str,
+) -> OpsResult<PmResolvedTask> {
     let resolved = pm_resolve_task_async(repo, issue).await?;
     let store = pm_store().await?;
     let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
@@ -3044,7 +3047,7 @@ pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) ->
             "issue moved to the current chapter or is already terminal".into(),
         ));
     }
-    Ok(())
+    Ok(resolved)
 }
 
 #[cfg(test)]

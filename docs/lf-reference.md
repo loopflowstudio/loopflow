@@ -402,7 +402,8 @@ Sweep reads every linked Wave's Initiative, including archived Projects, and
 compares issue membership with that Wave's current chapter. Current-chapter and
 terminal issues are excluded. Worker claims, open PRs, unreconciled merges,
 dirty checkouts and unavailable evidence are reported without canceling those
-Tasks. Apply rechecks ownership and chapter membership, uses Task abandonment,
+Tasks. Preview and apply check retained unmerged PRs even after local abandonment.
+Apply rechecks ownership and chapter membership, uses Task abandonment,
 and reports each outcome. A partial cancellation exits with an error and its
 retry command. A preview is not evidence of applied cleanup.
 

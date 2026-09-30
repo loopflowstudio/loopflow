@@ -5,9 +5,11 @@ use std::sync::Arc;
 use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
+use crate::ops::pm::PmResolvedTask;
+use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
-use crate::work::task::Task;
+use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, task_error, task_store};
 
@@ -36,9 +38,12 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     Ok(Some((store, task)))
 }
 
-async fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
+async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
     if let Some(position) = store.flow_position(&task.id).await.map_err(task_error)? {
         if let Some(claim) = position.claim {
+            if !settle_dead {
+                return Err(task_error("worker claim requires explicit settlement"));
+            }
             match crate::journal::task_worker_owner_evidence(&claim.owner) {
                 crate::journal::ProcessIdentityEvidence::Dead => {
                     store.release_task_worker(&task.id, &claim).await.map_err(task_error)?;
@@ -57,7 +62,7 @@ pub(crate) fn notice_retained_task(
 ) -> OpsResult<()> {
     block_on_task(async {
         if let Some((store, task)) = branch_task(repo, branch).await? {
-            require_idle(&store, &task).await?;
+            require_idle(&store, &task, true).await?;
             progress.status(&format!("Task {} and its Linear outcome remain unchanged; use `lf task abandon {}` to cancel the Task.", task.plan.identifier, task.plan.identifier));
         }
         Ok(())
@@ -132,14 +137,14 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
             .map_err(task_error);
     }
     let repo = task_repository(repo, Some(&selector))?;
-    block_on_task(abandon(&repo, &selector, force, false)).map_err(|error| {
+    block_on_task(abandon(&repo, &selector, force)).map_err(|error| {
         task_error(format!(
             "{error}. Abandonment is incomplete; retry `lf task abandon {selector}`."
         ))
     })
 }
 
-async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsResult<String> {
+async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> {
     let store = task_store().await?;
     let task = resolve_task(&store, selector).await?;
     let issue = task.as_ref().map_or(selector, |task| task.plan.id.as_str());
@@ -153,9 +158,28 @@ async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsRe
             resolved.item.identifier
         )));
     }
-    require_known_prs(repo, &store, task.as_ref(), &resolved.item.id).await?;
+    let deletions =
+        prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?;
+    apply_abandon(repo, &store, task.as_ref(), &resolved, deletions).await
+}
+
+// Preview and apply share every exclusion. Preparation never retires a sweep's
+// worker claim; explicit abandonment may settle a worker proven dead.
+async fn prepare_abandon(
+    repo: &Path,
+    store: &SharedStore,
+    task: Option<&Task>,
+    issue: &str,
+    force: bool,
+    sweep: bool,
+) -> OpsResult<Vec<BranchDeletion>> {
+    let prs = match task {
+        Some(task) => store.task_prs(&task.id).await.map_err(task_error)?,
+        None => Vec::new(),
+    };
+    require_known_prs(repo, &prs, issue).await?;
     let mut deletions = Vec::new();
-    if let Some(task) = &task {
+    if let Some(task) = task {
         if store
             .work_status(&WorkRef::Task(task.id.clone()))
             .await
@@ -164,8 +188,8 @@ async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsRe
         {
             return Err(task_error("completed Tasks cannot be abandoned"));
         }
-        require_idle(&store, task).await?;
-        for pr in store.task_prs(&task.id).await.map_err(task_error)? {
+        require_idle(store, task, !sweep).await?;
+        for pr in &prs {
             // Merged history is never recast as abandonment.
             if pr.merge_commit.is_none() {
                 let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
@@ -186,10 +210,17 @@ async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsRe
             }
         }
     }
-    if sweep {
-        crate::ops::pm::require_outside_current_chapter(repo, &resolved.item.id).await?;
-    }
-    if let Some(task) = &task {
+    Ok(deletions)
+}
+
+async fn apply_abandon(
+    repo: &Path,
+    store: &SharedStore,
+    task: Option<&Task>,
+    resolved: &PmResolvedTask,
+    deletions: Vec<BranchDeletion>,
+) -> OpsResult<String> {
+    if let Some(task) = task {
         store
             .begin_task_abandon(&task.id)
             .await
@@ -200,7 +231,7 @@ async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsRe
         .cancel_item(&resolved.item.id)
         .await
         .map_err(task_error)?;
-    if let Some(task) = &task {
+    if let Some(task) = task {
         let work = WorkRef::Task(task.id.clone());
         if store.work_status(&work).await.map_err(task_error)? != WorkStatus::Abandoned {
             // This transaction refuses a concurrently claimed worker.
@@ -215,32 +246,22 @@ async fn abandon(repo: &Path, selector: &str, force: bool, sweep: bool) -> OpsRe
     }
     let context = crate::ops::pm::resolve_context(repo, &resolved.wave).await?;
     crate::ops::pm::refresh_pm_snapshot(repo, &resolved.wave, &context).await?;
-    Ok(resolved.item.identifier)
+    Ok(resolved.item.identifier.clone())
 }
 
-async fn require_known_prs(
-    repo: &Path,
-    store: &SharedStore,
-    task: Option<&Task>,
-    issue: &str,
-) -> OpsResult<()> {
-    let tracked = match task {
-        Some(task) => store
-            .task_prs(&task.id)
-            .await
-            .map_err(task_error)?
-            .into_iter()
-            .filter_map(|pr| pr.github().map(|github| github.url.clone()))
-            .collect::<Vec<_>>(),
-        None => Vec::new(),
-    };
+async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResult<()> {
     for url in crate::ops::pm::issue_client(repo)
         .await?
         .item_attachment_urls(issue)
         .await
         .map_err(task_error)?
     {
-        if !url.contains("/pull/") || tracked.contains(&url) {
+        if !url.contains("/pull/")
+            || prs
+                .iter()
+                .filter_map(TaskPr::github)
+                .any(|github| github.url == url)
+        {
             continue;
         }
         let parsed = reqwest::Url::parse(&url).map_err(task_error)?;
@@ -309,70 +330,28 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
         let mut entries = Vec::new();
         for (wave, project, item) in candidates {
             let task = resolve_task(&store, &item.id).await?;
-            let mut exclusion = require_known_prs(repo, &store, task.as_ref(), &item.id)
+            let outcome = match prepare_abandon(repo, &store, task.as_ref(), &item.id, false, true)
                 .await
-                .err()
-                .map(|error| format!("skipped: {error}"));
-            if let Some(task) = task {
-                if store
-                    .work_status(&WorkRef::Task(task.id.clone()))
-                    .await
-                    .map_err(task_error)?
-                    == WorkStatus::Done
-                {
-                    exclusion = Some("skipped: local Task completed".to_string());
-                }
-                if store
-                    .flow_position(&task.id)
-                    .await
-                    .map_err(task_error)?
-                    .is_some_and(|position| position.claim.is_some())
-                {
-                    exclusion =
-                        Some("skipped: worker claim requires explicit settlement".to_string());
-                }
-                for pr in store
-                    .task_prs(&task.id)
-                    .await
-                    .map_err(task_error)?
-                    .into_iter()
-                    .filter(|pr| pr.is_active())
-                {
-                    match crate::ops::abandon::branch_prs(repo, &pr.branch) {
-                        Ok(prs)
-                            if prs
-                                .iter()
-                                .any(|(_, state)| state == "OPEN" || state == "MERGED") =>
-                        {
-                            exclusion = Some("skipped: open or unreconciled merged PR".into())
+            {
+                Err(error) => format!("skipped: {error}"),
+                Ok(_) if !apply => "would cancel Task and remove any retained branches".into(),
+                Ok(deletions) => {
+                    // Read membership after preparation, immediately before effects.
+                    match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
+                        Err(error) => format!("skipped: {error}"),
+                        Ok(resolved) => {
+                            match apply_abandon(repo, &store, task.as_ref(), &resolved, deletions)
+                                .await
+                            {
+                                Ok(_) => "canceled".into(),
+                                Err(error) => format!(
+                                    "incomplete: {error}; retry task abandon {}",
+                                    item.identifier
+                                ),
+                            }
                         }
-                        Err(error) => {
-                            exclusion = Some(format!("skipped: PR evidence unavailable: {error}"))
-                        }
-                        _ => {}
-                    }
-                    if let Err(error) = crate::ops::wt::prepare_delete(repo, &pr.branch, false) {
-                        exclusion = Some(format!("skipped: {error}"));
                     }
                 }
-            }
-            let outcome = if let Some(reason) = exclusion {
-                reason
-            } else if apply {
-                // Membership may have changed since preview. The provider is
-                // read again and compared with the current chapter before effects.
-                match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
-                    Ok(()) => match abandon(repo, &item.id, false, true).await {
-                        Ok(_) => "canceled".into(),
-                        Err(error) => format!(
-                            "incomplete: {error}; retry task abandon {}",
-                            item.identifier
-                        ),
-                    },
-                    Err(error) => format!("skipped: {error}"),
-                }
-            } else {
-                "would cancel Task and remove any retained branches".into()
             };
             entries.push(SweepEntry {
                 wave,

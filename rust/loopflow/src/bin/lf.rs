@@ -1332,11 +1332,13 @@ fn run_task_operation(
     args: &[String],
     agent: Option<&str>,
 ) -> anyhow::Result<()> {
-    let mut command_args = vec![operation.to_string()];
-    command_args.extend_from_slice(args);
     // Validate using the lower command's parser, before resolving or recovering
     // placement. There is one flag schema for each operation.
-    Cli::try_parse_from(std::iter::once("lf".to_string()).chain(command_args.clone()))?;
+    Cli::try_parse_from(
+        ["lf", operation]
+            .into_iter()
+            .chain(args.iter().map(String::as_str)),
+    )?;
     loopflow::ops::task::task_operation(repo, issue, operation, args, agent)?;
     Ok(())
 }

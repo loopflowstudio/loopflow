@@ -114,6 +114,12 @@ shell PATH, independent Session discovery, chapter archive integration and the
 full acceptance matrix remain open. No publication, host promotion, Task
 completion or whole-design acceptance follows from this slice.
 
+Compression removed copy-index bookkeeping, the repeated baseline lookup and a
+Task-ID clone (net −7 production lines), preserving comparisons and error paths.
+Formatting, all-target Clippy and diff checks passed; Clippy log:
+`.lf/tmp/loo334-copy-compress-clippy.log`. Behavior is unchanged; the failed public
+proof above was not rerun and its policy counterexample remains unresolved.
+
 ### Earlier slice — receipt-pinned installation continuation, 2026-09-30
 
 The incoming migration review is preserved at `3b4cd6592`. This cut removes the

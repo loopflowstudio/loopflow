@@ -110,8 +110,8 @@ fn existing_execution(
     // A retained backup is not another execution owner until it has changed.
     // The source must also be present; provenance never manufactures missing work.
     let receipts = machine_install::retained_receipts(&root)?;
-    let mut copies = BTreeSet::new();
-    for (index, (database, tasks)) in found.iter().enumerate() {
+    let mut locations = found.iter().map(|(path, _)| path).collect::<Vec<_>>();
+    for (database, tasks) in &found {
         if tasks.is_empty() {
             continue;
         }
@@ -137,24 +137,14 @@ fn existing_execution(
             }
             let mut unchanged = true;
             for task in tasks {
-                unchanged &= match baseline.get(task) {
-                    Some(expected) => {
-                        machine_install::execution_copy::unchanged(database, task, expected)?
-                    }
-                    None => false,
-                };
+                unchanged &=
+                    machine_install::execution_copy::unchanged(database, task, &baseline[task])?;
             }
             if unchanged {
-                copies.insert(index);
+                locations.retain(|path| *path != database);
             }
         }
     }
-    let locations = found
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !copies.contains(index))
-        .map(|(_, (path, _))| path)
-        .collect::<Vec<_>>();
     let database = match locations.as_slice() {
         [] if found.is_empty() => return Ok(None),
         [database] => *database,

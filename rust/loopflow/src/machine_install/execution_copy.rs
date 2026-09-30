@@ -19,7 +19,10 @@ pub(crate) fn task_fingerprints(database: &Path) -> Result<BTreeMap<String, Stri
         .collect::<rusqlite::Result<Vec<_>>>()?;
     tasks
         .into_iter()
-        .map(|task| Ok((task.clone(), fingerprint(&conn, &task)?)))
+        .map(|task| {
+            let hash = fingerprint(&conn, &task)?;
+            Ok((task, hash))
+        })
         .collect()
 }
 

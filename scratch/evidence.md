@@ -391,3 +391,27 @@ Final static checks pass: all-target Clippy with `-D warnings`
 (`ci-repair-clippy.log`), `cargo fmt --all -- --check`, changed Python Ruff and
 `git diff --check`. No new Swift code changed; Jack Heart's reported hosted
 Swift pass at `80232a3f2` remains the Swift evidence for this checkpoint.
+
+### Task-shortcut fixture correction · 2026-09-30
+
+Jack Heart's CI reading for `36cbb3d4b` reports full Rust and Swift passes.
+The retained `ci-latest-task-installation.log` shows the executable fallback
+matrix passing before `declared_agent_can_start_another_tasks_flow` failed:
+its Task selected OpenCode, which cannot enforce the checkout boundary.
+The remaining installation proofs did not run after that failure.
+
+The corrected fixture explicitly selects Claude for Task Y. Y's saved Flow is
+mechanical and starts no provider; X retains interactive scripted OpenCode to
+issue `lf task run Y`. The existing assertions still require Y's completed Flow,
+its explicit declaration and X's AgentSession in the causal parent tree. No
+production code or confinement policy changes. Review confirmed that the
+mechanical boundary skips provider-account preflight, so no credentials or
+unused provider script are added.
+
+The focused public command is
+`uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_flow`.
+Local execution stopped at the ten-second Docker probe, before creating a
+container (`task-shortcut-fixture-docker.log`). The repair is authored pending
+hosted execution; the prior Rust/Swift passes are not proof of this correction.
+Formatting, diff checks and all-target Clippy with `-D warnings` pass
+(`task-shortcut-fixture-clippy.log`), including compilation of the repaired test.

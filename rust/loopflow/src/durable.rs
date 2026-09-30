@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
-use crate::engine::{ConcreteStep, OccurrencePolicy};
+use crate::engine::ConcreteStep;
 use crate::id::{ExecId, TraceId, WaveId};
 
 /// The exact active Run named by an in-Run process.
@@ -143,13 +143,12 @@ pub struct FlowPosition {
 
 impl FlowPosition {
     pub fn is_decision(&self) -> bool {
-        matches!(self.current_plan(), ConcreteStep::Xor(_))
-            || self.current().policy.repeat.is_some()
+        matches!(self.current_plan(), ConcreteStep::Xor(_)) || self.current().repeat.is_some()
     }
 
     pub fn has_pending_decision(&self) -> bool {
         let leaf = self.cursor.leaf();
-        (self.current().policy.repeat.is_some() && leaf.progress.verdict.is_some())
+        (self.current().repeat.is_some() && leaf.progress.verdict.is_some())
             || (matches!(self.current_plan(), crate::engine::ConcreteStep::Xor(_))
                 && leaf.route.is_some())
     }
@@ -167,29 +166,27 @@ impl FlowPosition {
 
     pub fn current_checked(&self) -> Option<crate::engine::invocation::StepRef> {
         let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        let (step, kind, policy) = match steps.get(cursor.index)? {
+        let (step, kind, id, human, repeat) = match steps.get(cursor.index)? {
             ConcreteStep::Skill(skill) => (
                 skill.skill.name.clone(),
                 StepKind::Skill,
-                skill.policy.clone(),
+                skill.id.clone(),
+                skill.human,
+                skill.repeat.clone(),
             ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Op,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
+            ConcreteStep::Command(op) => (op.item.display_name(), StepKind::Op, None, false, None),
+            ConcreteStep::Xor(branch) => {
+                (branch.router.name.clone(), StepKind::Xor, None, false, None)
+            }
         };
         Some(StepRef {
             invocation_id: self.invocation.id.clone(),
             flow: self.invocation.flow.clone(),
             step,
             kind,
-            policy,
+            id,
+            human,
+            repeat,
             index: u32::try_from(self.cursor.index).ok()?,
             total: u32::try_from(self.invocation.steps.len()).ok()?,
             iteration: self.cursor.iteration,
@@ -202,7 +199,7 @@ impl FlowPosition {
     }
 
     pub fn is_human(&self) -> bool {
-        self.current().policy.human
+        self.current().human
     }
 }
 
@@ -224,11 +221,9 @@ pub(crate) fn test_flow_invocation(
             };
             crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
                 skill: crate::engine::Skill::named(&name),
-                policy: crate::engine::OccurrencePolicy {
-                    id: target.then(|| node_id.map(str::to_string)).flatten(),
-                    human: target && human,
-                    repeat: None,
-                },
+                id: target.then(|| node_id.map(str::to_string)).flatten(),
+                human: target && human,
+                repeat: None,
                 flow_parents: Vec::new(),
             })
         })

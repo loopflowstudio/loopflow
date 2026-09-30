@@ -119,14 +119,14 @@ fn nodes(steps: &[ConcreteStep], prefix: &str) -> Vec<FlowNode> {
                 ConcreteStep::Skill(skill) => FlowNode {
                     returns_to: return_target(steps, index).map(|target| node_key(prefix, target)),
                     key,
-                    id: skill.policy.id.clone(),
+                    id: skill.id.clone(),
                     label: skill.skill.name.clone(),
                     kind: FlowNodeKind::Skill,
-                    human: skill.policy.human,
+                    human: skill.human,
                     parents: skill.flow_parents.clone(),
                     paths: Vec::new(),
                 },
-                ConcreteStep::Op(op) => FlowNode {
+                ConcreteStep::Command(op) => FlowNode {
                     key,
                     id: None,
                     label: op.item.display_name(),
@@ -171,9 +171,9 @@ fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = &steps[index] else {
         return None;
     };
-    let from = skill.policy.repeat.as_ref()?.from.as_str();
+    let from = skill.repeat.as_ref()?.from.as_str();
     steps[..index].iter().position(|target| {
-        matches!(target, ConcreteStep::Skill(target) if target.policy.id.as_deref() == Some(from))
+        matches!(target, ConcreteStep::Skill(target) if target.id.as_deref() == Some(from))
     })
 }
 
@@ -189,7 +189,7 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
             let ConcreteStep::Skill(skill) = step else {
                 return None;
             };
-            let id = skill.policy.id.as_ref()?;
+            let id = skill.id.as_ref()?;
             Some(cursor.progress.repeats.get(id).copied().unwrap_or(0))
         })
         .collect();
@@ -281,8 +281,7 @@ fn collect_returns(
         let key = node_key(prefix, index);
         match step {
             ConcreteStep::Skill(skill) => {
-                let (Some(id), Some(_target)) = (&skill.policy.id, return_target(steps, index))
-                else {
+                let (Some(id), Some(_target)) = (&skill.id, return_target(steps, index)) else {
                     continue;
                 };
                 out.push(FlowReturn {
@@ -321,7 +320,7 @@ fn collect_returns(
                     );
                 }
             }
-            ConcreteStep::Op(_) => {}
+            ConcreteStep::Command(_) => {}
         }
     }
 }
@@ -332,8 +331,7 @@ mod tests {
 
     use crate::engine::execution::{ExecutionCursor, NestedCursor};
     use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, RepeatPolicy,
-        Skill,
+        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
     };
     use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowNodeKind};
     use crate::engine::{expand_flow, load_flow};
@@ -341,13 +339,11 @@ mod tests {
     fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
-            policy: OccurrencePolicy {
-                id: id.map(str::to_string),
-                human,
-                repeat: from.map(|from| RepeatPolicy {
-                    from: from.to_string(),
-                }),
-            },
+            id: id.map(str::to_string),
+            human,
+            repeat: from.map(|from| RepeatPolicy {
+                from: from.to_string(),
+            }),
             flow_parents: Vec::new(),
         })
     }

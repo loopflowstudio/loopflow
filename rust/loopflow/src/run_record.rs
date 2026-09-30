@@ -112,7 +112,7 @@ impl RunFlowStep {
     pub(crate) fn of_flow(run: &crate::ops::flow_run::FlowRun) -> anyhow::Result<Self> {
         let step = match run.current_step()? {
             crate::engine::ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            crate::engine::ConcreteStep::Op(op) => op.item.display_name(),
+            crate::engine::ConcreteStep::Command(op) => op.item.display_name(),
             crate::engine::ConcreteStep::Xor(branch) => branch.router.name.clone(),
         };
         Ok(Self {

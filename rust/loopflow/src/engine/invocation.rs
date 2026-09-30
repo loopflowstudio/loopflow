@@ -1,6 +1,7 @@
 //! Captured invocation identity and selected steps shared by durable Flows.
 
-use crate::engine::{expand_flow, load_flow, ConcreteStep, OccurrencePolicy};
+use crate::engine::flow::RepeatPolicy;
+use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
@@ -54,8 +55,12 @@ pub struct StepRef {
     pub flow: String,
     pub step: String,
     pub kind: StepKind,
-    #[serde(flatten)]
-    pub policy: OccurrencePolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub human: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<RepeatPolicy>,
     pub index: u32,
     pub total: u32,
     pub iteration: u32,
@@ -67,8 +72,12 @@ const LEGACY_STEP_PLAN: &str = "__legacy_step_plan__";
 struct LegacyStepPlan {
     name: String,
     kind: StepKind,
-    #[serde(flatten)]
-    policy: OccurrencePolicy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    human: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repeat: Option<RepeatPolicy>,
 }
 
 #[derive(Deserialize)]
@@ -84,7 +93,7 @@ enum StoredStep {
 // The original references remain in the append-only journal, never reloaded.
 #[derive(Deserialize)]
 enum UncapturedStep {
-    Xor(crate::engine::flow::XorDef),
+    Xor { router: Option<String> },
 }
 
 pub(crate) fn deserialize_steps<'de, D>(deserializer: D) -> Result<Vec<ConcreteStep>, D::Error>
@@ -97,11 +106,13 @@ where
             .map(|step| match step {
                 StoredStep::Current(step) => step,
                 StoredStep::Legacy(step) => legacy_step(step),
-                StoredStep::Uncaptured(UncapturedStep::Xor(branch)) => {
+                StoredStep::Uncaptured(UncapturedStep::Xor { router }) => {
                     legacy_step(LegacyStepPlan {
-                        name: branch.router.unwrap_or_else(|| "xor-route".into()),
+                        name: router.unwrap_or_else(|| "xor-route".into()),
                         kind: StepKind::Xor,
-                        policy: OccurrencePolicy::default(),
+                        id: None,
+                        human: false,
+                        repeat: None,
                     })
                 }
             })
@@ -114,11 +125,13 @@ fn legacy_step(step: LegacyStepPlan) -> ConcreteStep {
     match step.kind {
         StepKind::Skill => ConcreteStep::Skill(crate::engine::ConcreteSkill {
             skill: crate::engine::Skill::named(&step.name),
-            policy: step.policy,
+            id: step.id,
+            human: step.human,
+            repeat: step.repeat,
             flow_parents,
         }),
-        StepKind::Op => ConcreteStep::Op(crate::engine::ConcreteOp {
-            item: crate::engine::Op {
+        StepKind::Op => ConcreteStep::Command(crate::engine::ConcreteCommand {
+            item: crate::engine::Command {
                 command: step.name,
                 args: Vec::new(),
             },

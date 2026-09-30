@@ -563,7 +563,7 @@ async fn run_task_op_boundary(
                 &task,
                 &bound_claim,
                 &error.to_string(),
-                step.policy.repeat.is_none(),
+                step.repeat.is_none(),
             )
             .await?;
             return Err(error);
@@ -692,7 +692,6 @@ async fn settle_claimed_task_position(
     if next.is_human() {
         let node_id = next
             .current()
-            .policy
             .id
             .ok_or_else(|| anyhow!("Task review step has no stable node id"))?;
         checkpoint_worktree_before_human(task, &node_id).await;
@@ -732,12 +731,8 @@ async fn prepare_task_flow_step(
             "\n\nPrevious step feedback or iteration direction:\n{direction}"
         ));
     }
-    if let Some(repeat) = &skill.policy.repeat {
-        let edge = skill
-            .policy
-            .id
-            .as_deref()
-            .expect("a repeat occurrence has an id");
+    if let Some(repeat) = &skill.repeat {
+        let edge = skill.id.as_deref().expect("a repeat occurrence has an id");
         let traversals = flow
             .cursor
             .leaf()
@@ -803,9 +798,9 @@ pub(crate) async fn complete_human_flow_step(
     let mut task = load_task(store, &token.task_id).await?;
     let mut position = expected.clone();
     let step = position.current();
-    if !step.policy.human
+    if !step.human
         || step.invocation_id != token.invocation_id
-        || step.policy.id.as_deref() != Some(token.node_id.as_str())
+        || step.id.as_deref() != Some(token.node_id.as_str())
         || step.step != token.skill.name
         || step.iteration != token.iteration
         || step.flow != token.flow
@@ -867,7 +862,6 @@ pub(crate) async fn ensure_flow_position(
     if candidate.is_human() {
         let node_id = candidate
             .current()
-            .policy
             .id
             .ok_or_else(|| anyhow!("Task review step has no stable node id"))?;
         checkpoint_worktree_before_human(&task, &node_id).await;
@@ -889,7 +883,7 @@ fn finish_task_flow_turn(position: &mut FlowPosition, status: Lifecycle) -> Resu
 }
 
 async fn run_task_flow_op(task: &Task, position: &mut FlowPosition) -> Result<bool> {
-    let crate::engine::ConcreteStep::Op(op) = position.current_plan() else {
+    let crate::engine::ConcreteStep::Command(op) = position.current_plan() else {
         anyhow::bail!(
             "Task flow step {} is not an operation",
             position.current().step
@@ -898,7 +892,7 @@ async fn run_task_flow_op(task: &Task, position: &mut FlowPosition) -> Result<bo
     let op = op.clone();
     let worktree = task.worktree.clone();
     tokio::task::spawn_blocking(move || {
-        crate::ops::execute_flow_ops(&worktree, &op.item, &crate::ops::NullProgress)
+        crate::ops::execute_flow_command(&worktree, &op.item, &crate::ops::NullProgress)
     })
     .await
     .map_err(|error| anyhow!("Task flow op worker failed: {error}"))??;
@@ -1454,7 +1448,7 @@ mod planning_tests {
                     })?;
                 return Ok(());
             }
-            if step.policy.repeat.is_some() {
+            if step.repeat.is_some() {
                 self.store
                     .record_flow_verdict(
                         &self.task_id,
@@ -3108,7 +3102,7 @@ mod planning_tests {
         std::fs::create_dir_all(&flow_dir).unwrap();
         std::fs::write(
             flow_dir.join("two-ops.yaml"),
-            "- op: rebase --plan\n- op: rebase --plan\n",
+            "- cmd: rebase --plan\n- cmd: rebase --plan\n",
         )
         .unwrap();
         let mut flow = super::start_task_flow(&task, "two-ops").unwrap();
@@ -3130,7 +3124,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- op: rebase --plan\n",
+            "- original-proof\n- cmd: rebase --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -3146,7 +3140,7 @@ mod planning_tests {
 
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- replacement-proof\n- op: doctor\n",
+            "- replacement-proof\n- cmd: doctor\n",
         )
         .unwrap();
         std::fs::write(
@@ -3171,7 +3165,7 @@ mod planning_tests {
             .as_deref()
             .unwrap()
             .contains("captured at Flow start"));
-        let crate::engine::ConcreteStep::Op(active_op) = &persisted.invocation.steps[1] else {
+        let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
         assert_eq!(active_op.item.command, "rebase");
@@ -3182,7 +3176,7 @@ mod planning_tests {
             panic!("future first step is a skill")
         };
         assert_eq!(future_skill.skill.name, "replacement-proof");
-        let crate::engine::ConcreteStep::Op(future_op) = &future.invocation.steps[1] else {
+        let crate::engine::ConcreteStep::Command(future_op) = &future.invocation.steps[1] else {
             panic!("future second step is an op")
         };
         assert_eq!(future_op.item.command, "doctor");
@@ -3208,7 +3202,7 @@ mod planning_tests {
             task_id: task.id.clone(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
-            node_id: step.policy.id.unwrap(),
+            node_id: step.id.unwrap(),
             skill: planned.skill.clone(),
             iteration: position.cursor.iteration,
         }
@@ -3247,7 +3241,7 @@ mod planning_tests {
             &step.flow,
             replacement.cursor.index as u32,
             &step.step,
-            step.policy.id.as_deref(),
+            step.id.as_deref(),
             true,
         );
         let replacement = store

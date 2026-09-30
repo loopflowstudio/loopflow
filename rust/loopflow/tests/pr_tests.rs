@@ -7,11 +7,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::{FlowPosition, WorkStatus};
-use loopflow::engine::flow::Op;
+use loopflow::engine::flow::Command as FlowCommand;
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
-    arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_ops,
+    arm as land, commit_workflow, create_or_update_pr, current_pr, execute_flow_command,
     present_pr_review, CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
 };
 use loopflow::work::task::{
@@ -100,9 +100,9 @@ fn draft_open_stays_draft_until_publish_in_cli_and_flow() {
                 "Current work.",
             ];
             if headless {
-                execute_flow_ops(
+                execute_flow_command(
                     repo.path(),
-                    &Op {
+                    &FlowCommand {
                         command: "pr".to_string(),
                         args: args.iter().map(|arg| (*arg).to_string()).collect(),
                     },

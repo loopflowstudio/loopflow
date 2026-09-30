@@ -54,9 +54,9 @@ Project operator state remains in diagnostics.
 
 ```yaml
 # .lf/flows/build.yaml
-- skill: implement
-- skill: compress
-- skill: gate
+- step: implement
+- step: compress
+- step: gate
 ```
 
 ```bash
@@ -66,9 +66,30 @@ lf flow build
 A Flow is an ordered graph of:
 
 - Skill nodes, which launch a provider;
-- Op nodes, which perform a bounded mechanical action;
+- Command nodes, which perform a bounded mechanical action;
 - Xor nodes, which route from recorded results;
 - review nodes, which stop at an explicit interaction boundary.
+
+`Target` is the shared executable value: Skill, Command, Flow, or Xor.
+A `Flow` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
+Loading resolves bare names and `flow:` names flow-first, including nested Flow
+bodies, and rejects recursive references. `step:` selects a Skill explicitly,
+retaining its name and options until expansion; Xor router names also load then.
+Loading a Flow alone does not capture all instruction bodies.
+There is no separate FlowRef node. Review IDs and repeat edges belong to the
+Step itself, not to a reusable Target. The captured-step and journal APIs also
+expose those fields directly; only the private saved-plan codec retains the
+older nested `policy` JSON layout.
+
+Expansion produces `ConcreteStep` execution plans: nested Flows are flattened,
+parent paths are recorded, and every Skill body and Xor router/path is captured.
+Those plans are the persistence boundary for both Task and ordinary execution;
+resume never resolves names from the current source. Their existing serialized
+operation tags remain unchanged.
+
+Review Sessions launch the captured Skill explicitly, escaping command names.
+Execution selection reads that captured value before looking for authored files;
+help and list continue to inspect local definitions without Session state.
 
 A loopflow is the same Flow with one or more backward edges. Expansion captures
 Skill content and all Xor routers and paths, including unchosen paths, before
@@ -114,7 +135,7 @@ refresh provider truth and authored input
 choose next Flow boundary
           |
           v
-invoke Skill / Op / session
+invoke Skill / Command / session
           |
           v
 record one domain transition
@@ -265,7 +286,7 @@ Recovery can consume successful saved results without rerunning that provider;
 failure or explicit interruption discards candidates. Missing required output
 stops the boundary. Task transactions fence settlement with the position claim;
 ordinary Flow records retain the active boundary and Run receipt. This does not
-make external Op effects exactly once: an interrupted ordinary operation without
+make external command effects exactly once: an interrupted ordinary operation without
 a completion receipt remains blocked for inspection.
 
 The Wave resident's Playhead interpreter and queue still exist. Their removal

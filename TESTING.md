@@ -205,6 +205,14 @@ uv run pytest python/tests/                          # All Python tests
 uv run pytest python/tests/test_install_script.py -v # One file
 ```
 
+After changing the CLI guide, agent API docs, published Loopflow skill, or
+builtin `LOOPFLOW.md`, run the shared inspection-command check even when no
+Python files changed:
+
+```bash
+uv run pytest python/tests/test_loopflow_skill_alignment.py
+```
+
 ## Website Tests
 
 Browser and accessibility tests for `website/`. The dev helper syncs canonical
@@ -504,11 +512,12 @@ match the intended contract instead of restoring retired commands in the prose.
 cargo test -p loopflow --lib engine::builtins::tests
 ```
 
-When changing the builtin catalog or Flow composition, also exercise the CLI
-catalog renderer. Its written and expanded Flow examples must use retained names.
+When changing the builtin catalog or Flow composition, also exercise discovery.
+Listings keep effective skills and authored flows separate and show their sources
+and invocations; `lf flow show` expands a flow's steps.
 
 ```bash
-cargo test -p loopflow --lib lf::commands::list::tests
+cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sources_and_reserved_invocations
 ```
 
 Catalog retirement also affects historical migration tests. Keep their persisted
@@ -750,7 +759,7 @@ public release-channel demo. Discard the container afterward.
 ```bash
 package-smoke/lf --version
 package-smoke/lf --help
-package-smoke/lf catalog
+package-smoke/lf list
 ```
 
 Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.

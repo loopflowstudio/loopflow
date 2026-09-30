@@ -5,7 +5,7 @@ use crate::engine::{
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
-use crate::lf::Cli;
+use crate::lf::{Cli, FlowCommand};
 use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress, WorkBinding};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -20,7 +20,7 @@ pub fn run(
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
     let items = expand_flow(flow, repo)?;
-    print_pipeline_header(&flow.name, &items, repo)?;
+    print_pipeline_header(&flow.name, &items);
     let bound_message =
         binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
     execute(
@@ -33,9 +33,9 @@ pub fn run(
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
-    let flow = crate::engine::load_flow(name, repo)?;
+    let flow = crate::engine::flow::load_authored_flow(name, repo)?;
     let items = expand_flow(&flow, repo)?;
-    for line in render_pipeline_lines(&items, repo)? {
+    for line in render_pipeline_lines(&items) {
         println!("{line}");
     }
     Ok(())
@@ -58,7 +58,7 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 }
 
 pub fn validate(name: &str, repo: &Path) -> Result<()> {
-    let flow = crate::engine::load_flow(name, repo)?;
+    let flow = crate::engine::flow::load_authored_flow(name, repo)?;
     let mut human = human_occurrence_ids(&flow, repo)?;
     human.sort();
     if human.is_empty() {
@@ -128,15 +128,15 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     }
 }
 
-pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result<()> {
+pub fn control(command: &FlowCommand, cli: &Cli, repo: &Path) -> Result<()> {
     match command {
-        "decide" => {
-            let decision = match args.first().map(String::as_str) {
-                Some("advance") => FlowDecision::Advance,
-                Some("iterate") => FlowDecision::Iterate,
-                _ => anyhow::bail!("usage: lf flow decide advance|iterate SUMMARY"),
+        FlowCommand::Decide { decision, summary } => {
+            let decision = match decision.as_str() {
+                "advance" => FlowDecision::Advance,
+                "iterate" => FlowDecision::Iterate,
+                _ => anyhow::bail!("unknown decision {decision}"),
             };
-            let summary = args[1..].join(" ");
+            let summary = summary.join(" ");
             anyhow::ensure!(
                 !summary.trim().is_empty(),
                 "decision requires evidence or direction"
@@ -150,11 +150,10 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
             println!("Decision recorded; it takes effect when this Run finishes successfully.");
             Ok(())
         }
-        "route" => {
-            anyhow::ensure!(args.len() == 1, "usage: lf flow route PATH");
+        FlowCommand::Route { path } => {
             let run = active_run_id()?;
             if let Some(token) = flow_run::token()? {
-                flow_run::record_route(&token, &run, &args[0])?;
+                flow_run::record_route(&token, &run, path)?;
             } else {
                 let runtime = tokio::runtime::Runtime::new()?;
                 runtime.block_on(async {
@@ -166,15 +165,15 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                     let task = crate::ops::task::task_for_checkout(&store, repo)
                         .await?
                         .ok_or_else(|| anyhow!("no Task in this checkout"))?;
-                    store.record_flow_route(&task.id, &run, &args[0]).await?;
+                    store.record_flow_route(&task.id, &run, path).await?;
                     Ok::<_, anyhow::Error>(())
                 })?;
             }
             println!("Route recorded; it takes effect when this Run finishes successfully.");
             Ok(())
         }
-        "blocked" => {
-            let reason = args.join(" ");
+        FlowCommand::Blocked { reason } => {
+            let reason = reason.join(" ");
             anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async {
@@ -190,7 +189,7 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                         .ok_or_else(|| anyhow!("Task has no current Flow"))?;
                     anyhow::ensure!(position.claim.as_ref().and_then(|c| c.worker_run_id.as_ref()) == Some(&run_id)
                         && !position.is_human(), "this Run does not own the Task decision");
-                    anyhow::ensure!(matches!(position.current_plan(), ConcreteStep::Skill(s) if s.policy.repeat.is_some()),
+                    anyhow::ensure!(matches!(position.current_plan(), ConcreteStep::Skill(s) if s.repeat.is_some()),
                         "this step does not own a loop decision");
                     crate::ops::human_session::task_unblock_key(&position)
                 };
@@ -199,13 +198,9 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                 Ok(())
             })
         }
-        "resume" => {
-            anyhow::ensure!(
-                args.len() == 1 || (args.len() == 2 && args[1] == "--retry"),
-                "usage: lf flow resume INVOCATION [--retry]"
-            );
-            let record = flow_run::read(&args[0])?;
-            if args.len() == 2 {
+        FlowCommand::Resume { invocation, retry } => {
+            let record = flow_run::read(invocation)?;
+            if *retry {
                 let _driver = flow_run::driver_lock(&record.id)?;
                 flow_run::retry(&record.id)?;
             }
@@ -214,7 +209,7 @@ pub fn control(command: &str, args: &[String], cli: &Cli, repo: &Path) -> Result
                 report_outcome(drive_saved(&record.id, cli)?)
             })
         }
-        _ => anyhow::bail!("unknown Flow control {command}"),
+        _ => anyhow::bail!("not a Flow control: {command:?}"),
     }
 }
 
@@ -284,10 +279,9 @@ fn drive_saved(id: &str, cli: &Cli) -> Result<FlowOutcome> {
     }
 }
 
-fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -> Result<()> {
+fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep]) {
     let colors = Colors::new();
-    let lines = render_pipeline_lines(items, repo)?;
-    let pipeline = lines
+    let pipeline = render_pipeline_lines(items)
         .into_iter()
         .map(|line| {
             format!(
@@ -307,45 +301,31 @@ fn print_pipeline_header(flow_name: &str, items: &[ConcreteStep], repo: &Path) -
         name = flow_name,
         pipeline = pipeline,
     );
-    Ok(())
 }
 
-fn render_pipeline_lines(items: &[ConcreteStep], repo: &Path) -> Result<Vec<String>> {
+fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for item in items {
-        lines.extend(render_pipeline_item(item, repo)?);
+        match item {
+            ConcreteStep::Skill(skill) if skill.human => lines.push(format!(
+                "{} [review:{}]",
+                skill.skill.name,
+                skill
+                    .id
+                    .as_deref()
+                    .expect("validated review node has an id"),
+            )),
+            ConcreteStep::Skill(skill) => lines.push(skill.skill.name.clone()),
+            ConcreteStep::Command(command) => lines.push(command.item.to_string()),
+            ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
+        }
     }
-    Ok(lines)
+    lines
 }
 
-fn render_pipeline_item(item: &ConcreteStep, repo: &Path) -> Result<Vec<String>> {
-    match item {
-        ConcreteStep::Skill(skill) if skill.policy.human => Ok(vec![format!(
-            "{} [review:{}]",
-            skill.skill.name,
-            skill
-                .policy
-                .id
-                .as_deref()
-                .expect("validated review node has an id"),
-        )]),
-        ConcreteStep::Skill(skill) => Ok(vec![skill.skill.name.clone()]),
-        ConcreteStep::Op(ops) => Ok(vec![format!("op: {}", ops.item.display_name())]),
-        ConcreteStep::Xor(branch) => render_branch_item("xor", branch, repo),
-    }
-}
-
-fn render_branch_item(kind: &str, branch: &ConcreteXor, repo: &Path) -> Result<Vec<String>> {
-    render_branch_pipeline(kind, &branch.router.name, &branch.paths, repo)
-}
-
-fn render_branch_pipeline(
-    kind: &str,
-    router: &str,
-    paths: &std::collections::HashMap<String, crate::engine::ConcretePath>,
-    repo: &Path,
-) -> Result<Vec<String>> {
-    let mut lines = vec![format!("[{kind} via {router}]")];
+fn render_branch_lines(branch: &ConcreteXor) -> Vec<String> {
+    let mut lines = vec![format!("[xor via {}]", branch.router.name)];
+    let paths = &branch.paths;
     let mut keys: Vec<&String> = paths.keys().collect();
     keys.sort();
 
@@ -353,7 +333,7 @@ fn render_branch_pipeline(
         let path = paths
             .get(key)
             .expect("branch path key collected from map should exist");
-        let nested = render_pipeline_lines(&path.steps, repo)?;
+        let nested = render_pipeline_lines(&path.steps);
         let branch_prefix = tree_prefix(index, paths.len());
         if nested.is_empty() {
             lines.push(format!("{branch_prefix} {key}"));
@@ -364,7 +344,7 @@ fn render_branch_pipeline(
         lines.push(format!("{branch_prefix} {key} → {nested_chain}"));
     }
 
-    Ok(lines)
+    lines
 }
 
 fn tree_prefix(index: usize, total: usize) -> &'static str {
@@ -412,7 +392,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
-        if skill.policy.human {
+        if skill.human {
             let id = &self.invocation;
             let (token, completed) = flow_run::begin_boundary(id)?;
             if completed {
@@ -442,7 +422,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
             ));
         }
-        if skill.policy.repeat.is_some() {
+        if skill.repeat.is_some() {
             message.push_str("\n\nRecord this occurrence's decision with `lf flow decide advance \"evidence\"` or `lf flow decide iterate \"next action and proof\"`. If progress is stalled, use `lf flow blocked \"reason, attempted direction, evidence, and question\"`; it opens one Ask running unblock and returns the human's summary. Reassess afterward. Invalid commands return correction feedback; correct the decision here without replaying implementation. A recorded decision is accepted only after this Run succeeds.");
         }
         let mut launch = self.cli.launch_options();
@@ -480,8 +460,12 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         flow_run::checkpoint(&self.invocation, cursor)
     }
 
-    async fn run_op(&self, ops: &crate::engine::ConcreteOp, _ctx: ExecutionContext) -> Result<()> {
-        let name = format!("op: {}", ops.item.display_name());
+    async fn run_command(
+        &self,
+        ops: &crate::engine::ConcreteCommand,
+        _ctx: ExecutionContext,
+    ) -> Result<()> {
+        let name = format!("cmd: {}", ops.item.display_name());
         let (token, completed) = flow_run::begin_boundary(&self.invocation)?;
         if completed {
             return Ok(());
@@ -492,7 +476,7 @@ impl SkillExecutor for CliFlowExecutor<'_> {
         // Operations own blocking subprocesses and may enter their own async
         // controllers (for example the release's watched PR landing).
         let result = tokio::task::spawn_blocking(move || {
-            crate::ops::execute_flow_ops(&repo, &item, &NullProgress)
+            crate::ops::execute_flow_command(&repo, &item, &NullProgress)
         })
         .await?;
         flow_run::finish_boundary(
@@ -582,7 +566,7 @@ pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::render_pipeline_lines;
-    use crate::engine::{ConcreteSkill, ConcreteStep, Flow, Skill};
+    use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
     use crate::lf::Cli;
     use std::fs;
     use tempfile::tempdir;
@@ -603,43 +587,14 @@ mod tests {
         )
         .unwrap();
 
-        let flow = Flow {
-            name: "tend".to_string(),
-            items: vec![
-                crate::engine::flow::Step::Skill(crate::engine::flow::SkillStep {
-                    skill: crate::engine::flow::Skill::named("tend/scan-waves"),
-                    policy: crate::engine::OccurrencePolicy::default(),
-                }),
-                crate::engine::flow::Step::Xor(crate::engine::flow::XorDef {
-                    router: Some("tend/assess".to_string()),
-                    paths: [
-                        (
-                            "tune".to_string(),
-                            crate::engine::flow::XorPath {
-                                flow: Some("tend/tune".to_string()),
-                                skill: None,
-                                steps: Vec::new(),
-                                description: "Adjust the chord".to_string(),
-                            },
-                        ),
-                        (
-                            "silence".to_string(),
-                            crate::engine::flow::XorPath {
-                                flow: None,
-                                skill: None,
-                                steps: Vec::new(),
-                                description: "No-op".to_string(),
-                            },
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                }),
-            ],
-        };
+        fs::write(
+            temp.path().join(".lf/flows/tend.yaml"),
+            "- step: tend/scan-waves\n- xor:\n    router: tend/assess\n    paths:\n      tune:\n        flow: tend/tune\n        description: Adjust the chord\n      silence:\n        description: No-op\n",
+        ).unwrap();
+        let flow = crate::engine::load_flow("tend", temp.path()).unwrap();
 
         let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
-        let lines = render_pipeline_lines(&items, temp.path()).unwrap();
+        let lines = render_pipeline_lines(&items);
 
         assert_eq!(
             lines,
@@ -660,7 +615,7 @@ mod tests {
         let flow = crate::engine::load_flow("task-design", &repo).unwrap();
         let items = crate::engine::expand_flow(&flow, &repo).unwrap();
 
-        let lines = render_pipeline_lines(&items, &repo).unwrap();
+        let lines = render_pipeline_lines(&items);
         assert_eq!(
             lines,
             vec![
@@ -684,8 +639,7 @@ mod tests {
         let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
         assert_eq!(human, vec!["review_choice"]);
         let items = crate::engine::expand_flow(&flow, repo.path()).unwrap();
-        assert!(render_pipeline_lines(&items, repo.path())
-            .unwrap()
+        assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
     }
@@ -704,11 +658,9 @@ mod tests {
         };
         let steps = vec![ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named("concept-review"),
-            policy: crate::engine::OccurrencePolicy {
-                id: Some("review".into()),
-                human: true,
-                repeat: None,
-            },
+            id: Some("review".into()),
+            human: true,
+            repeat: None,
             flow_parents: vec![],
         })];
         let run = crate::ops::flow_run::create("proof", &steps, home.path(), None, &cli).unwrap();

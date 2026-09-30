@@ -184,7 +184,7 @@ Wave
   `-- Task
         `-- one active remote branch and PR
 
-Flow = ordered Skill | Op | Xor | review boundaries
+Flow = ordered Skill | Command | Xor | review boundaries
 Run  = evidence for one mediated harness launch
 
 WorkRef = Wave | Project | Task

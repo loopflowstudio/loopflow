@@ -1018,7 +1018,15 @@ async fn serve_flow_locked(
     })?;
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--as", &selector, &token.skill.name, &message])
+        .args([
+            "--tui",
+            "--as",
+            &selector,
+            "skill",
+            "--",
+            &token.skill.name,
+            &message,
+        ])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized);
     let run_id = session_run_id(&flow_token_id(&token), position.session_run_id.as_ref())?;
@@ -1105,7 +1113,7 @@ fn ask_launch_args(record: &AskSessionRecord) -> Vec<String> {
         args.extend(["--as".to_string(), selector.clone()]);
     }
     match &record.skill {
-        Some(skill) => args.extend(["skill".to_string(), skill.clone()]),
+        Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
     args.push(ask_message(record));
@@ -1996,7 +2004,6 @@ fn validate_task_position(task: &Task, position: &FlowPosition) -> Result<()> {
     }
     let step = position.current();
     let node_id = step
-        .policy
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
@@ -2024,10 +2031,7 @@ fn flow_token(task: &Task, position: &FlowPosition) -> Result<FlowSessionToken> 
         task_id: task.id.clone(),
         invocation_id: position.invocation.id.clone(),
         flow: step.flow,
-        node_id: step
-            .policy
-            .id
-            .expect("validated human position has a node id"),
+        node_id: step.id.expect("validated human position has a node id"),
         skill: planned.skill.clone(),
         iteration: position.cursor.iteration,
     })
@@ -2037,9 +2041,9 @@ fn token_matches(token: &FlowSessionToken, position: &FlowPosition) -> bool {
     let step = position.current();
     position.task_id == token.task_id
         && position.invocation.id == token.invocation_id
-        && step.policy.human
+        && step.human
         && step.flow == token.flow
-        && step.policy.id.as_deref() == Some(token.node_id.as_str())
+        && step.id.as_deref() == Some(token.node_id.as_str())
         && step.step == token.skill.name
         && position.cursor.iteration == token.iteration
 }
@@ -2063,7 +2067,6 @@ fn ask_message(record: &AskSessionRecord) -> String {
 async fn launch_flow(task: &Task, position: &FlowPosition) -> Result<()> {
     let step = position.current();
     let node_id = step
-        .policy
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
@@ -2166,7 +2169,6 @@ async fn start_durable_session(
 pub(crate) fn flow_id(position: &FlowPosition) -> Result<String> {
     let step = position.current();
     let node_id = step
-        .policy
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
@@ -2206,7 +2208,6 @@ fn flow_background_name(position: &FlowPosition) -> Result<String> {
         invocation_id: position.invocation.id.clone(),
         flow: step.flow,
         node_id: step
-            .policy
             .id
             .ok_or_else(|| anyhow!("review flow position has no node id"))?,
         skill: match position.current_plan() {
@@ -2382,9 +2383,9 @@ mod tests {
     use sha2::Digest;
 
     use super::{
-        active_flow_skill, ask, ask_background_name, ask_launch_args, ask_once, ask_record_path,
-        complete_ask, flow_background_name, flow_id, flow_token_id, human_open_argv,
-        list_ask_sessions, preferred_work_selector, question_title, read_ask_record, serve_ask,
+        ask, ask_background_name, ask_launch_args, ask_once, ask_record_path, complete_ask,
+        flow_background_name, flow_id, flow_token_id, human_open_argv, list_ask_sessions,
+        preferred_work_selector, question_title, read_ask_record, serve_ask,
         session_run_is_resumable, token_matches, wait_for_ask, write_ask_record, AskSessionRecord,
         AskSessionStatus, FlowSessionToken, HumanSessionToken, HUMAN_SESSION_ENV,
     };
@@ -3019,13 +3020,13 @@ mod tests {
         let ConcreteStep::Skill(start) = &mut review else {
             panic!("skill")
         };
-        start.policy.id = Some("begin".into());
+        start.id = Some("begin".into());
         let mut decide = review.clone();
         let ConcreteStep::Skill(end) = &mut decide else {
             panic!("skill")
         };
-        end.policy.id = Some("decide".into());
-        end.policy.repeat = Some(RepeatPolicy {
+        end.id = Some("decide".into());
+        end.repeat = Some(RepeatPolicy {
             from: "begin".into(),
         });
         position.invocation.steps = vec![
@@ -3092,7 +3093,7 @@ mod tests {
             task_id: position.task_id.clone(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
-            node_id: step.policy.id.unwrap(),
+            node_id: step.id.unwrap(),
             skill: match position.current_plan() {
                 crate::engine::ConcreteStep::Skill(planned) => planned.skill.clone(),
                 _ => panic!("human position must select a Skill"),
@@ -3118,13 +3119,14 @@ mod tests {
             panic!("human position must select a Skill")
         };
         planned.skill.content = Some("started instructions".to_string());
+        planned.skill.name = "retained-review".to_string();
         let planned_skill = planned.skill.clone();
         let step = position.current();
         let token = FlowSessionToken {
             task_id: position.task_id.clone(),
             invocation_id: position.invocation.id.clone(),
             flow: step.flow,
-            node_id: step.policy.id.unwrap(),
+            node_id: step.id.unwrap(),
             skill: planned_skill,
             iteration: position.cursor.iteration,
         };
@@ -3137,12 +3139,20 @@ mod tests {
             .unwrap(),
         );
 
-        let skill = active_flow_skill("review-design").unwrap().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let selected = crate::lf::discovery::resolve_definition(
+            repo.path(),
+            "retained-review",
+            Some(crate::engine::target::DefinitionKind::Skill),
+        );
 
         match previous {
             Some(value) => std::env::set_var(HUMAN_SESSION_ENV, value),
             None => std::env::remove_var(HUMAN_SESSION_ENV),
         }
+        let crate::engine::target::Target::Skill(skill) = selected.unwrap() else {
+            panic!("review must retain its captured Skill")
+        };
         assert_eq!(skill.content.as_deref(), Some("started instructions"));
     }
 
@@ -3162,7 +3172,7 @@ mod tests {
         let checkout = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(checkout.path().join(".lf/skills")).unwrap();
         std::fs::write(
-            checkout.path().join(".lf/skills/unblock.md"),
+            checkout.path().join(".lf/skills/list.md"),
             "Resolve the blocker with the human using the preserved evidence.",
         )
         .unwrap();
@@ -3175,7 +3185,7 @@ mod tests {
             title: "Choose the delivery policy".to_string(),
             detail: "concept-review".to_string(),
             prompt: "Choose the delivery policy".to_string(),
-            skill: Some("unblock".to_string()),
+            skill: Some("list".to_string()),
             cwd: checkout.path().to_path_buf(),
             model: "claude:opus".to_string(),
             session_run_id: None,
@@ -3207,13 +3217,17 @@ mod tests {
             None => std::env::remove_var("LF_HOME"),
         }
 
-        assert_eq!(reopened.skill.as_deref(), Some("unblock"));
+        assert_eq!(reopened.skill.as_deref(), Some("list"));
         assert_eq!(reopened.cwd, checkout.path());
         let args = ask_launch_args(&reopened);
         let cli = Cli::try_parse_from(std::iter::once("lf".to_string()).chain(args)).unwrap();
-        let Some(Commands::Skill { name, args }) = cli.command else {
+        let Some(Commands::Skill {
+            cmd: crate::lf::SkillCommand::External(mut args),
+        }) = cli.command
+        else {
             panic!("selected Ask must use the ordinary skill command")
         };
+        let name = args.remove(0);
         let prepared = prepare_launch_prompt(
             &Config {
                 diff: false,

@@ -4,10 +4,11 @@ use clap::{Args, Parser, Subcommand};
 
 pub mod commands;
 pub mod discovery;
+pub mod navigation;
 pub mod output;
 
 #[derive(Parser, Debug, Default)]
-#[command(name = "lf")]
+#[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
 #[command(version = crate::build_info::BUILD_VERSION)]
 pub struct Cli {
@@ -444,8 +445,18 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// List available skills and flows, including authored and collapsed flows
-    Catalog,
+    /// Discover commands, skills, and flows
+    List {
+        path: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain a command, skill, or flow without launching it
+    Help {
+        path: Vec<String>,
+        #[arg(long)]
+        all: bool,
+    },
     /// Show the current repository's roadmap: every open Task across the repo's
     /// Waves, joined to live evidence and bucketed into Now / Waiting /
     /// Available / Later. `--wave` scopes it; `--all` spans every repository on
@@ -631,27 +642,72 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         lf_args: Vec<String>,
     },
-    /// Run a flow by name — the explicit form for names that collide with a
-    /// built-in command
-    Flow {
-        /// Flow name
+    /// Run a definition, preferring a flow over a same-named skill
+    Run {
         name: String,
-        /// Message for the flow
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
-        /// JSON output for `lf flow list`
+    },
+    /// Run or inspect authored flows
+    Flow {
+        #[command(subcommand)]
+        cmd: FlowCommand,
+    },
+    /// Run or inspect skills
+    Skill {
+        #[command(subcommand)]
+        cmd: SkillCommand,
+    },
+    /// External: skill/flow name (when no subcommand matches)
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillCommand {
+    /// List skills, optionally inside a namespace
+    List {
+        namespace: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Run a skill (skill) by name — the explicit form
-    Skill {
-        /// Skill name
-        name: String,
-        /// Message for the skill
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
+    /// Inspect a skill without launching it
+    Show { name: String },
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FlowCommand {
+    /// List authored flows
+    List {
+        #[arg(long)]
+        json: bool,
     },
-    /// External: skill/flow name (when no subcommand matches)
+    /// Inspect the expanded steps of a flow
+    Show { name: String },
+    /// Validate a flow and its review points
+    Validate { name: String },
+    /// Record a decision for the current Flow boundary
+    Decide {
+        #[arg(value_parser = ["advance", "iterate"])]
+        decision: String,
+        #[arg(required = true, num_args = 1..)]
+        summary: Vec<String>,
+    },
+    /// Select an authored branch
+    Route { path: String },
+    /// Open a Session to resolve a blocked decision
+    Blocked {
+        #[arg(required = true, num_args = 1..)]
+        reason: Vec<String>,
+    },
+    /// Continue a saved Flow invocation
+    Resume {
+        invocation: String,
+        #[arg(long)]
+        retry: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1629,7 +1685,9 @@ mod tests {
         let command = Cli::command();
         assert!(command.find_subcommand("pm").is_none());
         assert!(command.find_subcommand("work").is_none());
-        for verb in ["start", "stop", "pause", "resume", "list", "ls", "status"] {
+        for verb in [
+            "start", "stop", "pause", "resume", "catalog", "ls", "status",
+        ] {
             assert!(
                 command.find_subcommand(verb).is_none(),
                 "removed root command {verb}"
@@ -1639,7 +1697,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
         }
         for args in [
-            vec!["lf", "catalog"],
+            vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
             vec!["lf", "wave", "probe", "product", "--json"],
             vec!["lf", "pr", "checks"],
@@ -1722,9 +1780,9 @@ mod tests {
     }
 
     #[test]
-    fn catalog_and_wave_reads_have_distinct_owners() {
-        let command = Cli::try_parse_from(["lf", "catalog"]).unwrap();
-        assert!(matches!(command.command, Some(Commands::Catalog)));
+    fn discovery_and_wave_reads_have_distinct_owners() {
+        let command = Cli::try_parse_from(["lf", "list"]).unwrap();
+        assert!(matches!(command.command, Some(Commands::List { .. })));
         assert!(Cli::try_parse_from(["lf", "--list"]).is_err());
         let waves = Cli::try_parse_from(["lf", "wave", "list", "--json"]).unwrap();
         assert!(matches!(

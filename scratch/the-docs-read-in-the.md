@@ -1,6 +1,6 @@
 # The docs read in the new voice
 
-Design for LOO-309 · 2026-09-26 · Reviewed implementation direction
+Design for LOO-309 · Updated 2026-09-27 after delivery review
 
 Task: The docs read in the new voice, from the overview to the reference.
 Base: `102522bc25adc146d4b8cc3f343677ed8170f636` (PR #1297).
@@ -8,12 +8,56 @@ Accepted audience and writing decisions: [growth memory](../wave/growth/MEMORY.m
 Jack completed the design review with the full Task as the implementation scope
 and unbounded PR size. This does not record approval of new copy.
 
+## Current correction — 2026-09-27
+
+Jack found the rewrite and its demo framing condescending and overextended:
+“our job is not to explain how ais to work together. just to explain how
+loopflow works”. See [demo feedback](docs-demo-feedback.md) for the full reply.
+This correction supersedes the earlier requirements to teach general
+engineering habits, explain every borrowed term on arrival, and ask readers
+to demonstrate understanding of AI use. The implementation ledger below is
+historical evidence of the first pass, not acceptance of its editorial scope.
+
+Keep the full-page scope, approachable voice, technical depth, Mac app context,
+and exact reference material. Explain Loopflow's concepts, operations, settings,
+defaults, and consequences. Assume a capable reader learning this product.
+Use the glossary as optional support instead of repeating elementary definitions
+throughout every page. Explain external concepts inline only when needed to
+understand a specific Loopflow behavior. Do not turn the docs into general AI
+collaboration advice or a software engineering course.
+
+### Remaining implementation direction
+
+- Review the entire changed corpus for generic instruction, repeated basic
+  definitions, and formulaic “Read this when” introductions. Lead with concrete
+  Loopflow behavior and examples where these explain the page more directly.
+- Configuration: state where settings live, precedence, additive lists, and
+  which files Loopflow includes. Remove coaching about how to experiment with
+  AI; keep actual input limits or costs only where they explain an operation.
+- Conducting and Authoring: explain Loopflow's status views, skill files, Flow
+  execution, and scratch handoff. Cut general lessons about working with agents
+  unless they describe a specific Loopflow requirement or built-in behavior.
+- Overview, Waves, Agent API, and references: remove repeated primers on Git,
+  APIs, repositories, and related terms where a link suffices. Preserve exact
+  operational distinctions and source-backed corrections, particularly Task
+  permissions, recovery, account selection, and chapter history.
+- Retain a single optional glossary; do not expand it to meet an exhaustive
+  jargon quota. Keep working links, routes, tables, flags, and the accepted
+  README/index opening.
+
+Review revised passages as product documentation: can a reader find the
+Loopflow operation, its inputs, and its effect? Present representative prose
+for Jack's editorial judgment without turning the demo into a comprehension
+quiz. Reuse earlier technical evidence where content is unchanged; after the
+revision run the focused docs/link/retrieval checks once. No new runtime UX
+is designed here. Ready/Complete remains a separate unresolved product concern.
+
 ## Problem
 
-Scott and Kim have enough programming knowledge to understand variables, loops,
-and files. The docs assume they also know why engineers use branches, reviews,
-CI, separate accounts, and remote machines. Changing the first paragraph leaves
-that gap throughout the rest of each page.
+Scott and Kim need clear documentation of Loopflow without assumed knowledge
+of its internal vocabulary. The first implementation overcorrected by adding
+general technical instruction and coaching. The remaining work is to make
+the pages direct and approachable while keeping their focus on the product.
 
 Jack requested friendly, literal documentation that can carry the same reader
 from a first task to his level of use. The Mac app is the primary experience;
@@ -27,11 +71,15 @@ does not fix installation or invent a first-task path that does not work.
 
 ## The demo
 
-Open `/docs/conducting` on the local website. A reader can find how to inspect
-running work, distinguish a Task from a Run and a Session, and understand why
-finishing a review returns feedback rather than approving a merge; each concept
-has a working glossary link and the corresponding command beside the explanation.
-The same explanations are available at `/docs/conducting.md`.
+Jack rejected Ready/Complete as a docs reading test on 2026-09-27 because that
+interaction still needs redesigning. The earlier Conducting review-completion
+scenario is superseded; see [demo feedback](docs-demo-feedback.md).
+
+The subsequent Configuration comprehension exercise is also superseded by
+Jack's correction above. After revision, show representative rendered passages
+about Loopflow configuration and skill execution with their commands. Ask for
+editorial feedback on scope and tone. Current review semantics must still be
+documented accurately, but they do not serve as the test for this rewrite.
 
 At Task completion, repeat that reading check across the public documentation
 and fetch `/llms.txt`: its first summary defines Loopflow in the accepted words,
@@ -51,13 +99,13 @@ Every revised page follows this editorial contract:
 2. Establish the app context first where that capability exists. For file or
    command-only work, say plainly that it is done in a file or terminal. Do not
    invent an app editor, setting, or button to satisfy a template.
-3. Define each unfamiliar term at first use and link the glossary. A reader
-   arriving directly at a reference page must not need to read all earlier pages.
+3. Explain Loopflow-specific terms where needed; link optional glossary support.
+   Do not repeat general technical definitions on every page.
 4. Put the command adjacent to its explanation. Explain placeholders before a
    reader might paste them, especially `<wave>`, task identifiers, and Home IDs.
-5. Explain the practical consequence of defaults: what happens without an
-   override, why that is useful, and when to choose differently. Do not invent
-   historical reasons for an implementation choice.
+5. State what Loopflow does by default and what an override changes. Explain
+   consequences that matter to the operation without generic AI-use coaching
+   or invented historical reasons for an implementation choice.
 6. Preserve the distinctions that change behavior: review versus merge, stopped
    versus completed, missing usage versus zero usage, Task versus Run, and local
    versus remote records. Plain language must make those distinctions clearer.
@@ -98,6 +146,10 @@ if a heading must change, update all referring links in the same change.
 | Overview and agent index | Check the existing front door and make `/llms.txt` agree with it. | README/index opening equality; existing Markdown negotiation, routes, and public/developer corpus split. |
 
 ### Vocabulary coverage
+
+The exhaustive coverage requirement and seed inventory below belong to the
+first pass and are superseded by the 2026-09-27 correction. Retain useful
+definitions and links; do not use this inventory as a quota for prose or glossary.
 
 "No page uses a term the glossary lacks" means every Loopflow concept and every
 borrowed technical term requiring knowledge beyond the stated CS 101 baseline.
@@ -222,6 +274,12 @@ view. This Task makes no new claim about LOO-317's completion.
   and index introduction unless a separately accepted change requires both.
 
 ## Done when
+
+Apply the 2026-09-27 correction above: the earlier exhaustive vocabulary and
+reader-comprehension criteria below are superseded. Acceptance now requires
+direct, product-specific explanations, retained technical behavior and reference
+material, working retrieval and links, and editorial review of the revised tone.
+The earlier read-aloud proposal is not a prerequisite imposed by this demo.
 
 For every in-scope page:
 

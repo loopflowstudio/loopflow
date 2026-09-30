@@ -385,6 +385,48 @@ Test skill body.
     }
 
     #[test]
+    fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
+        let plan = "Jack Heart accepted the design on 2026-09-30. Build Unit 1 first.";
+        let intent = "> $kickoff\n> ok just run kickoff here then";
+        fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
+        fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        let prepared = prepare_launch_prompt(
+            &default_test_config(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("implement".into()),
+                agent: Some("codex".into()),
+                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                message: Some(
+                    "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
+                        .into(),
+                ),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let submitted = &prepared.config.task_prompt;
+        assert!(submitted.contains("<lf:skill:implement>"));
+        assert!(submitted.contains("Turn the design doc into working code."));
+        assert!(submitted.contains(plan));
+        assert!(submitted.contains("scratch/nested/intent.md"));
+        assert_eq!(submitted.matches("&#36;kickoff").count(), 3);
+        assert!(!submitted.contains("$kickoff"));
+        assert!(!submitted.contains("<lf:skill:kickoff>"));
+        assert!(prepared
+            .components
+            .docs
+            .iter()
+            .any(|doc| doc.content == intent));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("scratch/nested/intent.md")).unwrap(),
+            intent
+        );
+    }
+
+    #[test]
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode"] {

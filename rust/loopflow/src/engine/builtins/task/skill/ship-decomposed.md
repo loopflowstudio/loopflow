@@ -61,7 +61,7 @@ as one PR; one large honest PR beats an artificially staged series.
 1. Order the slices foundation-first and name each one—the branch name
    becomes the PR title prefix.
 2. Build each slice as its own branch: independent slices branch from main;
-   dependent slices stack on the previous slice's branch and rebase forward
+   dependent slices stack on the previous slice's branch and sync forward
    as predecessors land.
 3. Move work with git—`git cherry-pick` for clean commits,
    `git checkout -p <big-branch> -- <paths>` to carve hunks out of mixed
@@ -71,6 +71,6 @@ as one PR; one large honest PR beats an artificially staged series.
 5. Verify each slice standalone—build and affected tests on that branch, not
    on the union.
 6. Land the series with the PR lifecycle: `lf pr publish` for headless
-   creation, `lf pr land` to watch through merge, next slice rebases and repeats.
+   creation, `lf pr land` to watch through merge, next slice syncs and repeats.
    Once the series is fully landed, retire the original big branch
    (`lf pr abandon` if it had a PR, otherwise delete it).

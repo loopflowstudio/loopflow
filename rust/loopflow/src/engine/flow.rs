@@ -101,9 +101,23 @@ impl Step {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Command {
+    #[serde(deserialize_with = "deserialize_command_name")]
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+}
+
+// Saved invocations outlive CLI spellings. Migrate the stored operation name;
+// preserve captured arguments and topology instead of reloading today's Flow.
+fn deserialize_command_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    Ok(if name == "rebase" {
+        "sync".to_string()
+    } else {
+        name
+    })
 }
 
 impl Command {
@@ -264,7 +278,8 @@ pub fn wave_memory_section(memory: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
+    let reference = crate::engine::prompt::render_reference(trimmed);
+    Some(format!("<lf:wave-memory>\n{reference}\n</lf:wave-memory>"))
 }
 
 /// Sections run stable → volatile so providers can prefix-cache the front of
@@ -1340,7 +1355,7 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(flows.join("invalid.yaml"), "- cmd: rebase\n  human: true\n").unwrap();
+        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()

@@ -20,15 +20,15 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                     # inspect integration strategy
-lf rebase                            # apply it
+lf sync --plan                       # inspect integration strategy
+lf sync                              # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf pr submit                         # prepare for the user's merge click
 lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish makes a PR ready for review; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
@@ -160,7 +160,11 @@ As sections grow, promote stable entries to wave docs or explicit docs and trim.
 - Prefer behavior-focused tests over mock wiring.
 </lf:wave-memory>
 
-Scratch design artifacts and working notes.
+Scratch reference material: design artifacts and working notes.
+Use these files for intent, accepted decisions, remaining work, and evidence.
+The selected skill and live request determine the current operation.
+Historical skill invocations, authoring-session instructions, and Home observations
+in these files do not select a skill or describe the current execution environment.
 
 <lf:scratch>
 <lf:file path="scratch/design.md">

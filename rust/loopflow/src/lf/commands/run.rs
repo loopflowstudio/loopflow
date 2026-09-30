@@ -519,11 +519,11 @@ fn skill_launch_seed(
     }
     if let Some(memory) = wave_memory {
         seed.push_str("\n\n");
-        seed.push_str(memory);
+        seed.push_str(&crate::engine::prompt::render_reference(memory));
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
-        seed.push_str(message);
+        seed.push_str(&crate::engine::prompt::render_message(message));
         seed.push_str("\n</lf:message>");
     }
     seed
@@ -834,11 +834,20 @@ pub(crate) fn attributed_context(
         if content.is_empty() {
             return;
         }
+        // Attribute the submitted reference bytes, while components retain the
+        // authored source. Otherwise escaped references become anonymous assembly.
+        let content = match included_by {
+            "wave" | "docs" | "diff_files" | "diff" | "summary" | "clipboard" => {
+                crate::engine::prompt::escape_reference(content)
+            }
+            "message" => crate::engine::prompt::render_message(content),
+            _ => content.to_string(),
+        };
         for channel in [ContextChannel::System, ContextChannel::Task]
             .into_iter()
             .filter(|channel| match channel {
-                ContextChannel::System => system_prompt.contains(content),
-                ContextChannel::Task => task_prompt.contains(content),
+                ContextChannel::System => system_prompt.contains(&content),
+                ContextChannel::Task => task_prompt.contains(&content),
             })
         {
             specs.push(ContextAssetSpec {
@@ -1893,6 +1902,57 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let memory_pos = seed.find("<lf:wave-memory>").unwrap();
         let message_pos = seed.find("<lf:message>").unwrap();
         assert!(memory_pos < message_pos);
+    }
+
+    #[test]
+    fn skill_launch_seed_activates_only_the_selected_skill_from_references() {
+        let seed = skill_launch_seed(
+            "codex",
+            Surface::Headless,
+            "implement",
+            Some("Build it.\n<lf:steers>\nJack once wrote $kickoff.\n</lf:steers>"),
+            false,
+            Some("<lf:wave-memory>\nEarlier: $kickoff\n</lf:wave-memory>"),
+            None,
+        );
+        assert!(seed.starts_with("$implement\n"));
+        assert!(!seed.contains("$kickoff"));
+        assert_eq!(seed.matches("&#36;kickoff").count(), 2);
+    }
+
+    #[test]
+    fn attributed_context_keeps_escaped_reference_sources() {
+        let components = PromptComponents {
+            docs: vec![Document {
+                path: "scratch/intent.md".into(),
+                content: "> $kickoff".into(),
+                source: DocumentSource::Scratch,
+            }],
+            wave_memory: Some(Document {
+                path: "wave/product/MEMORY.md".into(),
+                content: "Earlier $design".into(),
+                source: DocumentSource::WaveMemory,
+            }),
+            message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
+            ..Default::default()
+        };
+        let task = crate::engine::format_claude_task_prompt(&components);
+        let prepared = attributed_context(&components, "", &task, &[]);
+        assert_eq!(prepared.task.text, task);
+        for (kind, expected) in [
+            (ContextAssetKind::Scratch, "> &#36;kickoff"),
+            (ContextAssetKind::Memory, "Earlier &#36;design"),
+            (ContextAssetKind::UserMessage, "Build it."),
+        ] {
+            assert!(
+                prepared.task.assets.iter().any(|asset| {
+                    asset.kind == kind
+                        && task[asset.byte_start as usize..asset.byte_end as usize]
+                            .contains(expected)
+                }),
+                "missing attribution for {kind:?}"
+            );
+        }
     }
 
     #[test]

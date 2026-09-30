@@ -20,15 +20,15 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                     # inspect integration strategy
-lf rebase                            # apply it
+lf sync --plan                       # inspect integration strategy
+lf sync                              # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf pr submit                         # prepare for the user's merge click
 lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish makes a PR ready for review; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
@@ -184,6 +184,12 @@ Bring the plan and the implementation into agreement with what the work has taug
    repairs with the smallest relevant proof. Keep blockers, contrary evidence,
    and proof limits visible where they affect the next action. Stop dependent
    work when a required check cannot run; state the command and blocker.
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
 
 If no plan exists, update the supplied working context or write the smallest
 useful plan when continued work needs one.

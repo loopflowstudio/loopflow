@@ -12,21 +12,29 @@ and change while preserving required behavior. The output is a diff.
    Take every worthwhile simplification you find in that scope; do not stop
    after one small win or wander into unrelated cleanup.
 
-2. Look at every scale, from an expression to the overall design. Clearer names,
+2. Make the deepest cuts first. Read or update the plan's **Delete — do not
+   maintain** list of concrete files/symbols and their exclusive tests/fixtures.
+   Remove obsolete concepts, authorities, and paths before polishing surviving
+   code. Never repair, refactor, or extend code the plan removes, including its
+   exclusive tests/fixtures. Preserve required behavior, data, and proof on the
+   surviving path; include any minimum consumer cutover or migration in the same
+   cut. Temporary breakage within that cut calls for finishing it, not repairing
+   the predecessor. Keep remaining deletion targets current for the next pass.
+   Additive work needs no invented deletion.
+
+3. Then look at every scale in what remains. Clearer names,
    simpler control flow, better function boundaries, a more direct algorithm or
    data structure, less repeated work, and fewer concepts or dependencies all
    count. So do simpler tests, configuration, and documentation. These are
-   starting points, not an exhaustive checklist or a preference for one kind
-   of reduction.
+   starting points, not an exhaustive checklist.
 
-3. Choose the shape that makes the actual problem simplest. Extract or inline,
+4. Choose the shape that makes the actual problem simplest. Extract or inline,
    combine or split, share a real common idea or separate cases that were forced
    together. Reuse existing capabilities when they fit. Remove unnecessary
    indirection, state, and speculative flexibility; retain abstractions that
-   help readers. When replacing a path, move its consumers and delete the
-   predecessor in the same cut. Clarity matters more than brevity or line count.
+   help readers. Clarity matters more than brevity or line count.
 
-4. Make coherent edits and verify the affected behavior with focused proof.
+5. Make coherent edits and verify the affected behavior with focused proof.
    If proof fails, repair the reduction; if required proof cannot run, stop with
    its exact blocker. Reuse applicable passing evidence; gate and CI own broader
    suites.

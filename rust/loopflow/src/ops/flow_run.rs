@@ -38,6 +38,7 @@ pub(crate) struct FlowRun {
     pub cursor: ExecutionCursor,
     pub message: Option<String>,
     pub model: Option<String>,
+    pub accounts: Option<crate::provider_account::lease::AccountSelection>,
     pub wave: Option<String>,
     pub task: Option<String>,
     pub as_work: Option<String>,
@@ -160,6 +161,12 @@ pub(crate) fn create(
         cursor: ExecutionCursor::default(),
         message: message.map(str::to_owned),
         model: cli.model.clone(),
+        accounts: Some(
+            crate::provider_account::lease::AccountSelection::from_flags_or_env(
+                &cli.account,
+                &cli.only_account,
+            )?,
+        ),
         wave: cli.wave.clone(),
         task: cli.task.clone(),
         as_work: cli.as_work.clone(),

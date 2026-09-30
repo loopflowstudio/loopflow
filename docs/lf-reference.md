@@ -205,7 +205,7 @@ the same as asking it to publish or merge.
 |---|---|
 | `code` | Implement and simplify locally |
 | `task-design` | Shape the implementation plan and review the design |
-| `refresh` | Rebase, then reconcile the design and implementation |
+| `refresh` | Sync, then reconcile the design and implementation |
 | `queue` | Simplify, refresh, and verify without PR publication |
 | `pursue` | Iterate on implementation, publish, and review a demo |
 | `feature` | Review the design, pursue the work, verify, land, and complete |
@@ -317,7 +317,7 @@ lf task status                      # Task bound to this checkout
 lf task pr status                   # current branch's PR, with or without a Task
 ```
 
-Task commands manage concrete work. Commit, rebase, worktree, and PR operations
+Task commands manage concrete work. Commit, sync, worktree, and PR operations
 also work in an ordinary checkout. They do not create an issue merely to satisfy
 the command path.
 
@@ -482,27 +482,39 @@ work, the current checkout, the default branch, nonterminal Tasks, and live
 owned work. Inspect `--dry-run` before cleanup. Explicit forced removal is a
 separate destructive choice.
 
-### Commit and rebase
+### Commit and sync
 
 ```bash
 lf task commit -m "Fix keyboard navigation in dialogs"
 lf task commit --no-add              # commit only the existing index
-lf task rebase --plan                # inspect the integration strategy
-lf task rebase                      # integrate and publish the branch with a lease
+lf sync --plan                      # inspect the integration strategy
+lf sync                             # integrate and publish the branch with a lease
 ```
 
 Commit stages changes and generates a message unless given explicit options.
 Publishing is a separate PR operation.
 
-Rebase refreshes upstream, preserves local edits, integrates the appropriate
-base, and pushes the resulting branch with a lease. The default branch's local
-unpublished commits are preserved; it is not pushed. `--plan` uses local
-evidence and makes no changes.
+`lf sync` replaces `lf rebase`. Saved Flow command records migrate the old name
+on decode while preserving captured arguments and structure. It merges main into
+the current branch, or the live parent into a stacked child, then publishes with
+a lease. Original commits and reviewed merge resolutions stay in the branch.
+Unstacked empty and scratch-only branches reset to their target while preserving scratch.
+Stacked children retain their initial `Clear inherited scratch` commit and merge
+updates while keeping their own scratch, including inherited files the child deleted.
+CLI and Flow sync use the same Task parent. If the child already contains its
+parent's head, sync leaves its history and remote branch unchanged.
+Main retains unpublished commits and edits and is never pushed. `--plan` uses local
+evidence without fetching.
+
+After a stack parent lands by squash, synchronization uses the recorded parent
+base to compare the child's changes with main. The resulting merge records main
+as its parent, preserving the child's edits and original history. PR landing uses
+the same integration; GitHub's squash merge adds one commit to main.
 
 ```bash
-lf task rebase --manual
-lf task rebase --continue
-lf task rebase --abort
+lf sync --manual
+lf sync --continue
+lf sync --abort
 ```
 
 Manual recovery stays local and does not push. A retained conflict keeps its
@@ -538,7 +550,7 @@ as an unbound branch.
 | `next` | Continue a Task on its next PR after an out-of-band merge |
 | `abandon` | Close the PR and remove its branch and worktree |
 
-Publish leaves scratch notes and integration history alone. It does not rebase.
+Publish leaves scratch notes and integration history alone. It does not sync.
 Submit, arm, and land preserve useful conclusions, clear scratch, prepare a
 reviewable commit, and integrate the branch before publication. They preserve
 valid reviewer-facing copy and update Task merge consequences.
@@ -868,7 +880,7 @@ lf home doctor --json
 ```
 
 Install updates the CLI and supported application components from verified
-release artifacts. It does not require a source checkout. Use `task rebase`
+release artifacts. It does not require a source checkout. Use `sync`
 to update repository work instead. Scheduled installation supports weekly,
 daily, hourly, and five-minute cadences on macOS; Linux supports explicit
 installation.

@@ -48,13 +48,21 @@ Classify the shape:
   the target architecture, integration/deletion path, forbidden near-misses,
   and full proof intact while `This slice` moves.
 
+Sequence the deepest cuts first: remove obsolete concepts, authorities, and
+paths before building on what remains. Mark concrete files/symbols and their
+exclusive tests/fixtures **Delete — do not maintain** in the plan so later
+passes never repair code scheduled for removal. Name required behavior, data,
+and proof that must survive. If removal needs a consumer cutover or migration,
+include that minimum work in the same cut; do not first modernize the old path.
+Additive work needs no invented deletion.
+
 ### 3. Size-check
 
 A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 lines is a signal, not an automatic split. Split additive work into a keystone plus follow-ups; keep an indivisible architectural change whole. Do not create follow-up Tasks here.
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits or its state is unavailable, record that exact ambiguity instead of inventing ownership.
+Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Home state out of the design.
 
 Tighten the artifact to:
 
@@ -67,9 +75,13 @@ Tighten the artifact to:
 - **Done when** — focused behavioral proof and expected outcome.
 - **Current system** — concepts, authorities, writers, and paths that the change
   reshapes or deletes.
+- **Delete — do not maintain** — concrete removal targets, their exclusive
+  tests/fixtures, and any cutover dependencies; keep this list current as slices
+  finish or the design changes.
 - **Forbidden outcomes** — duplicate representations, compatibility layers, or
   locally passing states that still violate the intended architecture.
-- **Internal slices** — ordered coherent cuts, one marked `This slice`. Keep
+- **Internal slices** — deepest deletions first, then build on the surviving
+  structure; one coherent cut marked `This slice`. Keep
   consequential evidence and unresolved gaps in the working design while
   preserving the full target; no separate pass ledger is required.
 - **Measure** — only when a meaningful before/after quantity exists.
@@ -83,6 +95,12 @@ Comments may be collapsed: keep current blockers, dependencies, and accepted sco
 visible in the description. Reconcile changed scope instead of appending amendments.
 
 ## Handoff
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
 
 Leave the current design and its evidence ready for kickoff to shape into an
 implementation plan. Task allocation and launch belong to launch-plan when

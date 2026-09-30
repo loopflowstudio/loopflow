@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "qa", "research", "rebase-conflicts"] {
+        for name in ["implement", "gate", "qa", "research", "sync-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");

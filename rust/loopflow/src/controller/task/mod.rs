@@ -91,6 +91,12 @@ async fn drive_task(
         if before.claim.as_ref() != Some(&launch_claim) {
             anyhow::bail!("Task driver launch claim is stale");
         }
+        let _accounts = before
+            .invocation
+            .accounts
+            .clone()
+            .unwrap_or_default()
+            .activate()?;
         // A Flow may start with an operation or a recovered verdict, so the
         // launch can legitimately have no provider route yet.
         if before.current().kind != StepKind::Op && !before.has_pending_decision() {
@@ -1215,7 +1221,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "rebase", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(
                     !super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap()
@@ -1289,7 +1295,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
-        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished =
                 super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
@@ -2118,12 +2124,11 @@ mod planning_tests {
                 // Only provider/PM/session effects are simulated. Public resume owns
                 // adoption, reconciliation, account selection and the worker claim.
                 let account_home = guard.ledger.home().join("accounts/claude/fixture-account");
-                std::fs::create_dir_all(&account_home).unwrap();
-                std::fs::write(account_home.join(".credentials.json"),
-                    r#"{"claudeAiOauth":{"accessToken":"fixture-token","expiresAt":4102444800000}}"#).unwrap();
-                let account = crate::provider_account::new_account(
+                let mut account = crate::provider_account::new_account(
                     crate::provider_auth::Provider::Claude,
-                    crate::store::ProviderAccountId::parse("fixture-account").unwrap(), account_home, None);
+                    crate::store::ProviderAccountId::parse("fixture-account").unwrap(), account_home,
+                    Some(crate::profile::EmailAddress::parse("fixture@example.com").unwrap()));
+                crate::provider_account::identity::tests::write_claude_identity(&mut account);
                 store.upsert_provider_account(&account).await.unwrap();
                 store.set_provider_route(&crate::profile::ProviderRoute {
                     scope: crate::profile::RouteScope::Default, provider: crate::provider_auth::Provider::Claude,
@@ -3234,7 +3239,7 @@ mod planning_tests {
         std::fs::create_dir_all(&flow_dir).unwrap();
         std::fs::write(
             flow_dir.join("two-ops.yaml"),
-            "- cmd: rebase --plan\n- cmd: rebase --plan\n",
+            "- cmd: sync --plan HEAD\n- cmd: sync --plan HEAD\n",
         )
         .unwrap();
         let mut flow = super::start_task_flow(&task, "two-ops").unwrap();
@@ -3248,7 +3253,15 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Account launch intent is process-scoped.
     async fn active_task_invocation_ignores_later_flow_and_skill_edits() {
+        let _lock = crate::journal::test_env_lock();
+        let accounts = crate::provider_account::lease::AccountSelection::from_flags(
+            &["claude=first@".into(), "codex=second@".into()],
+            &[],
+        )
+        .unwrap();
+        let selected = accounts.activate().unwrap();
         let (store, task, _) = human_task_fixture().await;
         let flow_dir = task.worktree.join(".lf/flows");
         let skill_dir = task.worktree.join(".lf/skills");
@@ -3256,7 +3269,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: rebase --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -3265,6 +3278,7 @@ mod planning_tests {
         )
         .unwrap();
         let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        drop(selected);
         store
             .set_flow_position(&task.id, flow.clone())
             .await
@@ -3287,6 +3301,7 @@ mod planning_tests {
         .unwrap();
 
         let persisted = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let crate::engine::ConcreteStep::Skill(active_skill) = persisted.current_plan() else {
             panic!("active first step is a skill")
         };
@@ -3300,7 +3315,7 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.command, "sync");
         assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();

@@ -22,6 +22,73 @@ use sha2::{Digest, Sha256};
 use support::{register_unrun_task, EnvGuard};
 
 #[test]
+fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    repo.create_branch("parent");
+    repo.create_file("scratch/design.md", "parent design");
+    repo.create_file("scratch/review/notes.md", "parent review");
+    repo.stage_all();
+    repo.commit("Parent notes");
+    let parent_head = repo.head_sha();
+    let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
+    let child =
+        support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut pr = runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .unwrap();
+    pr.parent_pr_id = Some(parent.pr.id.clone());
+    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+
+    let checkout = || {
+        loopflow::ops::task::task_checkout(
+            repo.path(),
+            "INF-124",
+            loopflow::ops::task::TaskCheckoutOptions::default(),
+        )
+        .unwrap()
+    };
+    checkout();
+    assert!(!child.worktree.join("scratch").exists());
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD^").unwrap(),
+        parent_head
+    );
+    let subject = Command::new("git")
+        .current_dir(&child.worktree)
+        .args(["log", "-1", "--format=%s"])
+        .output()
+        .unwrap();
+    assert!(subject.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&subject.stdout).trim(),
+        "Clear inherited scratch"
+    );
+    let child_head = loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap();
+    fs::create_dir(child.worktree.join("scratch")).unwrap();
+    fs::write(child.worktree.join("scratch/design.md"), "child design").unwrap();
+    checkout();
+    assert_eq!(
+        loopflow::engine::git::rev_parse(&child.worktree, "HEAD").unwrap(),
+        child_head
+    );
+    assert_eq!(
+        fs::read_to_string(child.worktree.join("scratch/design.md")).unwrap(),
+        "child design"
+    );
+    assert_eq!(repo.head_sha(), parent_head);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("scratch/design.md")).unwrap(),
+        "parent design"
+    );
+    assert!(repo.path().join("scratch/review/notes.md").exists());
+}
+
+#[test]
 fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

@@ -1335,3 +1335,214 @@ fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
     assert_eq!(status.lines().next(), Some("INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
 }
+
+#[test]
+fn mixed_provider_flow_keeps_launch_accounts_after_driver_exit() {
+    use base64::Engine;
+    use loopflow::store::{
+        CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+    };
+    use sha2::{Digest, Sha256};
+
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let _env = support::EnvGuard::with_lf_home(&[], home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    for provider in ["claude", "codex"] {
+        for label in ["chosen", "other"] {
+            let id = format!("{provider}-{label}");
+            let email = format!("{id}@example.com");
+            let account_home = home.path().join("accounts").join(provider).join(&id);
+            fs::create_dir_all(&account_home).unwrap();
+            let credential = if provider == "claude" {
+                serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
+            } else {
+                let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(serde_json::json!({"email":email,"sub":id}).to_string());
+                serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()
+            };
+            fs::write(
+                account_home.join(if provider == "claude" {
+                    ".credentials.json"
+                } else {
+                    "auth.json"
+                }),
+                &credential,
+            )
+            .unwrap();
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            runtime
+                .block_on(
+                    store.upsert_provider_account(&ProviderAccount {
+                        provider: provider.into(),
+                        account_id: ProviderAccountId::parse(&id).unwrap(),
+                        home: Some(account_home),
+                        login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+                        observed_email: Some(email),
+                        observed_subject: Some(id),
+                        observed_credential_digest: (provider == "claude")
+                            .then(|| format!("{:x}", Sha256::digest(credential.as_bytes()))),
+                        observed_plan: None,
+                        credential_state: CredentialState::Connected,
+                        // Explicit selection must work even when automatic routing prefers another login.
+                        routing_state: if label == "chosen" {
+                            RoutingState::ExplicitOnly
+                        } else {
+                            RoutingState::Automatic
+                        },
+                        plan: None,
+                        paid_through: None,
+                        utilization_percent: None,
+                        cooldown_until: None,
+                        cooldown_reason: None,
+                        last_selected_at: None,
+                        created_at: now,
+                        updated_at: now,
+                    }),
+                )
+                .unwrap();
+        }
+    }
+    for (skill, provider) in [
+        ("c1", "claude"),
+        ("d1", "codex"),
+        ("c2", "claude"),
+        ("d2", "codex"),
+        ("d-review", "codex"),
+    ] {
+        write_skill(
+            repo.path(),
+            skill,
+            &format!("---\nagent: {provider}\n---\nRun {skill}."),
+        );
+    }
+    write_flow(
+        repo.path(),
+        "pair",
+        "- c1\n- d1\n- c2\n- d2\n- step:\n    id: review\n    name: d-review\n    human: true\n",
+    );
+    run_git(repo.path(), &["add", "."]);
+    run_git(repo.path(), &["commit", "-m", "mixed provider fixture"]);
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("claude"),
+        r#"#!/bin/sh
+case "$1" in --version) exit 0;; esac
+printf 'claude:%s\n' "$CLAUDE_CONFIG_DIR" >> "$LF_HOME/selected"
+if [ -f "$LF_HOME/first-claude" ] && [ ! -f "$LF_HOME/retry" ]; then exit 23; fi
+touch "$LF_HOME/first-claude"
+cat >/dev/null
+echo done
+"#,
+    );
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script(
+            "done",
+            r#"if [ "$1" = --version ]; then exit 0; fi
+printf 'codex:%s\n' "$CODEX_HOME" >> "$LF_HOME/selected"
+case "$*" in *app-server*) ;; *)
+  printf '%s' '{"schema_version":1,"provider_session_id":"review-fixture","account_id":null}' > "$LF_RUN_DIR/provider-session.json"
+  exit 0;; esac"#,
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--account",
+            "claude=claude-chosen@",
+            "--account",
+            "codex=codex-chosen@",
+            "-b",
+            "flow",
+            "pair",
+        ],
+        Some(&path),
+    );
+    assert!(
+        !output.status.success(),
+        "fixture pauses on second Claude step"
+    );
+    let flow_dir = fs::read_dir(home.path().join("flows"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(flow_dir.join("position.json")).unwrap()).unwrap();
+    assert_eq!(
+        saved["cursor"]["index"],
+        2,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(home.path().join("retry"), "").unwrap();
+    // A new CLI has no broker and no account flags. It must recover saved intent.
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "-b",
+            "flow",
+            "resume",
+            saved["id"].as_str().unwrap(),
+            "--retry",
+        ],
+        Some(&path),
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("waiting for human input"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sessions = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--json"],
+        Some(&path),
+    );
+    let sessions: serde_json::Value = serde_json::from_slice(&sessions.stdout).unwrap();
+    let session = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["kind"] == "flow")
+        .unwrap_or(&sessions[0]);
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "open", session["id"].as_str().unwrap()],
+        Some(&path),
+    );
+    // The TUI fixture exits immediately; it proves account delivery, not native resume.
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("before becoming resumable"));
+    let selected = fs::read_to_string(home.path().join("selected")).unwrap();
+    let expected = ["claude", "codex", "claude", "claude", "codex", "codex"].map(|provider| {
+        format!(
+            "{provider}:{}",
+            home.path()
+                .join("accounts")
+                .join(provider)
+                .join(format!("{provider}-chosen"))
+                .display()
+        )
+    });
+    assert_eq!(
+        selected.lines().collect::<Vec<_>>(),
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+}

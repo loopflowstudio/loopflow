@@ -1,8 +1,10 @@
 use std::io::BufRead;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use regex::Regex;
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
@@ -1065,30 +1067,26 @@ fn completed_boundary_failure(
     output: Option<&str>,
     exit_code: Option<i32>,
 ) -> Option<String> {
-    if status != Lifecycle::Failed && exit_code.is_none_or(|code| code == 0) {
+    if status != Lifecycle::Failed {
         return None;
     }
-    let output = output?;
-    let lower = output.to_ascii_lowercase();
-    if ![
-        "operation not permitted",
-        "permission denied",
-        "read-only file system",
-        "network access is disabled",
-        "network is unreachable",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-    {
-        return None;
-    }
-    let command = command.join(" ");
-    let detail = output
+    // Aggregated output includes file contents. A quoted denial string in a
+    // failed search is not a diagnostic from the command that failed.
+    static DENIAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+            r"(?i)(?:^|: )(?:operation not permitted|permission denied|",
+            r"read-only file system|network access is disabled(?: by policy)?|",
+            r"network is unreachable|connection refused|",
+            r"command not found(?:: [\w./+-]+)?|executable file not found in \$PATH)",
+            r"(?: \(os error \d+\))?$",
+        ))
+        .expect("execution denial diagnostic regex is valid")
+    });
+    let detail = output?
         .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
         .map(str::trim)
-        .unwrap_or("no command error output");
+        .find(|line| DENIAL.is_match(line))?;
+    let command = command.join(" ");
     let detail = detail.chars().take(1_000).collect::<String>();
     let exit = exit_code
         .map(|code| format!(" (exit {code})"))
@@ -2635,13 +2633,91 @@ mod planning_tests {
 
     #[test]
     fn ordinary_failed_probe_is_not_an_execution_boundary_blocker() {
-        assert!(completed_boundary_failure(
-            &["rg".into(), "missing-pattern".into()],
+        // LOO-346 printed these source literals before its final rg exited 1.
+        // LOO-340 matched archived JSON containing a denial; a missing search
+        // path made that batch exit 2.
+        let source = "        \"operation not permitted\",\n        \"permission denied\",\n        \"read-only file system\",\n        \"network access is disabled\",\n        \"network is unreachable\",\n";
+        for (output, code) in [
+            (String::new(), 1),
+            (source.to_string(), 1),
+            (
+                format!("{source}rg: missing.rs: No such file or directory (os error 2)\n"),
+                2,
+            ),
+            (
+                "archive.json:1:{\"description\":\"commit: Operation not permitted\\nretry\"}\nrg: engine: No such file or directory (os error 2)\n".into(),
+                2,
+            ),
+            ("test result: FAILED. 1 failed\n".into(), 101),
+            ("usage: command [OPTIONS]\n".into(), 2),
+        ] {
+            let failure = completed_boundary_failure(
+                &["sed -n '1020,1160p' task.rs; rg missing-pattern missing.rs".into()],
+                Lifecycle::Failed,
+                Some(&output),
+                Some(code),
+            );
+            assert!(
+                failure.is_none(),
+                "ordinary output became a blocker: {failure:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn execution_boundary_blocker_requires_a_failed_command_and_names_its_denial() {
+        for diagnostic in [
+            "fatal: Unable to create '/repo/index.lock': Operation not permitted",
+            "rg: private: Permission denied (os error 13)",
+            "mkdir: /readonly: Read-only file system",
+            "network access is disabled by policy",
+            "connect: Network is unreachable",
+            "connect: Connection refused (os error 61)",
+            "zsh:1: command not found: missing-tool",
+        ] {
+            let output = format!("{diagnostic}\nunrelated trailing output\n");
+            let command = ["some-command".into()];
+            let failure =
+                completed_boundary_failure(&command, Lifecycle::Failed, Some(&output), Some(1))
+                    .expect("a failed command with a denial diagnostic blocks");
+            assert!(failure.ends_with(diagnostic));
+            assert!(!failure.contains("unrelated trailing output"));
+            assert!(completed_boundary_failure(
+                &command,
+                Lifecycle::Completed,
+                Some(&output),
+                Some(1),
+            )
+            .is_none());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn execution_boundary_blocker_preserves_real_sandbox_denial() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("denied");
+        let output = std::process::Command::new("/usr/bin/sandbox-exec")
+            .args([
+                "-p",
+                "(version 1)(allow default)(deny file-write*)",
+                "/usr/bin/touch",
+            ])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!target.exists());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(target.to_str().unwrap()), "{stderr}");
+        let failure = completed_boundary_failure(
+            &["touch".into(), target.display().to_string()],
             Lifecycle::Failed,
-            Some(""),
-            Some(1),
+            Some(&stderr),
+            output.status.code(),
         )
-        .is_none());
+        .expect("the OS sandbox denial must still block");
+        assert!(failure.contains("Operation not permitted"), "{failure}");
     }
 
     #[test]

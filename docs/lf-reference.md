@@ -373,9 +373,9 @@ lf task delete DES-123
 ```
 
 Complete planning work directly, or complete a placed Task after its delivery
-obligations settle. Delete removes the connected issue and reconciles the local
-record; it preserves authored files and retained history. Deleting unfinished
-work does not record success. If an operation partially succeeds, its error
+obligations settle. Delete cancels unfinished placed work and removes its PRs
+and branches before trashing the issue. Completed work keeps its successful
+outcome and uses completion cleanup. Both retain delivery history. If an operation partially succeeds, its error
 identifies the retained state and the command to retry.
 
 ### Cancel work and sweep old chapters
@@ -410,7 +410,7 @@ retry command. A preview is not evidence of applied cleanup.
 ### Lifecycle action inventory
 
 `task pr ISSUE ACTION` selects the Task's checkout and passes the action and
-flags to the existing PR command. `task rebase ISSUE` does the same for rebase.
+flags to the existing PR command. `task sync ISSUE` does the same for sync.
 Neither needs a prior `cd`. These use the selected installation for managed
 operations; a source checkout cannot transfer private Task identity implicitly.
 
@@ -423,25 +423,50 @@ operations; a source checkout cannot transfer private Task identity implicitly.
 | Replace workflow | `task restart ISSUE --flow FLOW` | Checkpoint + stop worker + replace Flow + start |
 | Hand off direction | `task comment ISSUE --steer TEXT` | Linear direction + durable steer; does not launch work |
 | Split dependent work | `task create --run --stack-on ISSUE` | New issue, Task, checkout and PR based on parent |
-| Sync with main/parent | `task rebase ISSUE` | Existing integration operation in Task checkout |
+| Sync with main/parent | `task sync ISSUE` | Existing integration operation in Task checkout |
 | Publish | `task pr ISSUE publish` | Commit/push + GitHub ready PR + Task PR linkage |
 | Open review | `task pr ISSUE open` | Push + draft PR + browser; ready PR stays ready |
 | Submit | `task pr ISSUE submit` | Prepare + user merge request; no automatic merge |
 | Arm | `task pr ISSUE arm` | Prepare + head-specific auto-merge request |
 | Land | `task pr ISSUE land` | Arm + watch/repair + record authoritative merge; keep Task open |
-| Land and complete | `task pr ISSUE land -c` | Land + store Done + Linear completed |
-| Record success | `task complete ISSUE --summary TEXT` | Complete planning work or a Task with settled delivery |
+| Land and complete | `task pr ISSUE land -c` | Land + store Done + Linear completed + cleanup after worker settlement |
+| Record success | `task complete ISSUE --summary TEXT` | Complete settled delivery + cleanup; retry incomplete cleanup by issue ID |
 | Continue serial delivery | `task pr ISSUE next [SLUG]` | Retain prior PR + rotate to next branch, carry follow-up |
 | Cancel | `task abandon ISSUE` | Linear canceled + store abandoned + PR abandonment + checkout deletion |
-| Delete issue | `task delete ISSUE` | Linear trash + local deletion evidence; retain authored checkout and history |
+| Delete issue | `task delete ISSUE` | Cancel unfinished placed work or clean completed delivery, then Linear trash; retain history |
 | Recover interrupted execution | `task run ISSUE --reason TEXT` | Retry saved boundary after correcting the blocker |
 | Delete checkout | `wt delete BRANCH` | Remote branch + local checkout/branch; retain PR and Task outcomes |
 
 `pr abandon BRANCH` owns closing GitHub and settling its Task PR record, then
 uses the same checkout deletion as `wt delete`. `wt remove` and `wt rm` are
 removed. Prune remains a separate selection policy for eligible clean checkouts.
-Recovery above restores placement or saved execution; it does not reopen an
-abandoned outcome or undelete a Linear issue.
+`pr land` removes a merged standalone PR's checkout and branches. Task landing
+keeps the Task open and explicitly retains its checkout for the saved Flow or
+next PR; `-c` also completes the Task and cleans up. A running Task worker keeps
+its checkout until its provider stops and its exact claim settles. Cleanup never
+forces dirty files or branch tips beyond the merged head. The primary checkout
+is retained and reported.
+
+`task complete ISSUE --summary "Retry cleanup"` retries partial cleanup without
+reopening the outcome or duplicating completion. Empty successors retain their
+branch identity as abandoned PR history so cleanup can retry after a crash.
+`task delete ISSUE` composes cancellation for unfinished placed Tasks, cleanup
+for completed Tasks, and issue trash. A live or unresolved worker blocks deletion.
+Planning-only deletion allocates no checkout. Provider trash confirmation and
+Task/PR/Run history survive retries.
+
+Recovery restores missing placement (`task checkout ISSUE`), resumes saved
+execution (`task run ISSUE --reason TEXT`), or retries the failed lifecycle
+command. It does not reopen a terminal outcome or undelete a Linear issue.
+
+| Lower layer | Actions | Owned effects |
+|---|---|---|
+| PR | `publish`, `open`, `submit`, `arm`, `land`, `abandon`, `next` | GitHub lifecycle and retained Task PR record; land/abandon use checkout deletion |
+| Worktree | `wt create`, `wt delete` | Local checkout/branch; delete also removes the remote branch |
+| Integration | `sync`, `task sync ISSUE` | Integrate main or the recorded stack parent; preserve Task and PR outcomes |
+
+`task sync` replaces this branch's earlier `task rebase` spelling, without an
+alias, matching the root `sync` command.
 
 ### Read and edit another Task's files
 

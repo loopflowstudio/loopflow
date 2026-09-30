@@ -1,1 +1,1 @@
-Align Task cancellation, PR abandonment and worktree deletion
+Compose Task cancellation, completion and deletion through PR and checkout owners

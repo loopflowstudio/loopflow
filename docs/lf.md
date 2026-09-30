@@ -127,6 +127,7 @@ lf task worktree create csv-export   # create a worktree without a tracked Task
 lf task commit -m "Add CSV export"  # save local changes
 lf sync --plan                       # inspect the integration strategy
 lf task pr EXP-12 checks --watch     # follow the PR's checks
+lf task sync EXP-12 --plan           # inspect this Task's integration
 ```
 
 These controls operate on the same work as the higher-level workflows.

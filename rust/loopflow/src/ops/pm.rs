@@ -1714,10 +1714,12 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 .as_ref()
                 .and_then(|publication| publication.github.as_ref())
             {
-                eprintln!("Retained PR: {}", github.url);
+                eprintln!("Retained PR history: {}", github.url);
             }
         }
-        eprintln!("Retained authored checkout: {}", task.worktree.display());
+        if task.worktree.exists() {
+            eprintln!("Retained checkout: {}", task.worktree.display());
+        }
     }
     Ok(identifier)
 }

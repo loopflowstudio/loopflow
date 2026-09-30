@@ -475,18 +475,22 @@ async fn run_task_with(
                         if flow.claim.as_ref() != Some(&bound_claim) {
                             anyhow::bail!("Task worker was replaced before settlement");
                         }
-                        let flow_completed = match finish_task_flow_turn(&mut flow, status) {
-                            Ok(completed) => completed,
-                            Err(error) => {
-                                return finish_claimed_failure(
-                                    &store, &task, &bound_claim, harness.as_mut(),
-                                    &error.to_string(), false, capture.as_ref(),
-                                ).await;
+                        let flow_completed = if store.work_status(&work).await? == crate::durable::WorkStatus::Done {
+                            true
+                        } else {
+                            match finish_task_flow_turn(&mut flow, status) {
+                                Ok(completed) => completed,
+                                Err(error) => {
+                                    return finish_claimed_failure(
+                                        &store, &task, &bound_claim, harness.as_mut(),
+                                        &error.to_string(), false, capture.as_ref(),
+                                    ).await;
+                                }
                             }
                         };
                         let latest = load_task(&store, &task.id).await?;
                         task.pm_writeback = latest.pm_writeback;
-                        let _ = harness.stop().await;
+                        harness.stop().await?;
                         finish_capture(capture.as_ref(), if status == Lifecycle::Interrupted { "interrupted" } else { "completed" });
                         return finish_claimed_task_boundary(
                             &store,
@@ -653,8 +657,16 @@ async fn finish_claimed_task_boundary(
     text: &str,
 ) -> Result<()> {
     let work = WorkRef::Task(task.id.clone());
-    if store.work_status(&work).await? != crate::durable::WorkStatus::Ready {
-        return Ok(());
+    match store.work_status(&work).await? {
+        crate::durable::WorkStatus::Done => {
+            // The delivery operation records success while this worker still
+            // owns its checkout. Only now has the provider/operation stopped.
+            store.finish_task_flow(task, claim, Some(text)).await?;
+            crate::ops::task::cleanup_completed_task(store, task).await?;
+            return Ok(());
+        }
+        crate::durable::WorkStatus::Abandoned => return Ok(()),
+        crate::durable::WorkStatus::Ready => {}
     }
     task.updated_at = time::OffsetDateTime::now_utc();
 

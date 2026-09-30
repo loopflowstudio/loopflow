@@ -1255,9 +1255,14 @@ impl Drop for PlanningEnvironment {
 }
 
 #[test]
-fn task_abandon_composes_cancellation_pr_and_git_from_issue_branch_and_checkout() {
+fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
     let _lock = crate::journal::test_env_lock();
-    for selector in [Some("FIX-1"), Some("cancel-me"), None] {
+    for (selector, delete) in [
+        (Some("FIX-1"), false),
+        (Some("cancel-me"), false),
+        (None, false),
+        (Some("FIX-1"), true),
+    ] {
         let _restore = PlanningEnvironment::isolate();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(Fixture::new());
@@ -1519,7 +1524,11 @@ esac
                 std::fs::remove_file(repo.join(".git/fail-close")).unwrap();
             }
             assert_eq!(
-                crate::ops::task::task_abandon(caller, selector, false).unwrap(),
+                if delete {
+                    crate::ops::task::task_delete(caller, "FIX-1").unwrap()
+                } else {
+                    crate::ops::task::task_abandon(caller, selector, false).unwrap()
+                },
                 "FIX-1"
             );
             assert!(!checkout.exists());
@@ -1548,9 +1557,16 @@ esac
                 runtime.block_on(fixture.store.task_prs(&task.id)).unwrap()[0].phase(),
                 PrPhase::Abandoned
             );
-            assert!(!runtime.block_on(async { state.lock().await.trashed }));
-            // Historical branch lookup survives deletion of the checkout and refs.
-            crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
+            assert_eq!(
+                runtime.block_on(async { state.lock().await.trashed }),
+                delete
+            );
+            // Both retry paths survive deletion of the checkout and refs.
+            if delete {
+                crate::ops::task::task_delete(caller, "FIX-1").unwrap();
+            } else {
+                crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
+            }
         });
         server.abort();
         std::env::set_var("PATH", path);

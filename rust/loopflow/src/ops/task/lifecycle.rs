@@ -9,9 +9,94 @@ use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
-use crate::work::task::{Task, TaskPr};
+use crate::work::task::{PrPhase, Task, TaskPr};
 
 use super::{block_on_task, task_error, task_store};
+
+/// Completion is durable before cleanup; failure never reverses the outcome.
+pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    if super::task_work_status(store, task).await? != WorkStatus::Done {
+        return Ok(());
+    }
+    if let Some(position) = store.flow_position(&task.id).await.map_err(task_error)? {
+        if let Some(claim) = position.claim {
+            if crate::journal::task_worker_owner_evidence(&claim.owner)
+                != crate::journal::ProcessIdentityEvidence::Dead
+            {
+                eprintln!(
+                    "Task {} is complete; checkout cleanup waits for its worker to settle.",
+                    task.plan.identifier
+                );
+                return Ok(());
+            }
+            if claim.worker_run_id.is_some() {
+                store
+                    .finish_task_flow(task, &claim, None)
+                    .await
+                    .map_err(task_error)?;
+            } else {
+                store
+                    .release_task_worker(&task.id, &claim)
+                    .await
+                    .map_err(task_error)?;
+            }
+        }
+        store.complete_task(task, None).await.map_err(task_error)?;
+    }
+    let result = async {
+        let wave = super::owning_wave(store, task).await?;
+        let repo = main_repo_root(Path::new(wave.repo()))?;
+        if task.worktree.exists()
+            && std::fs::canonicalize(&task.worktree)? == std::fs::canonicalize(&repo)?
+        {
+            eprintln!(
+                "Task {} is complete; retained the primary checkout and branch.",
+                task.plan.identifier
+            );
+            return Ok(());
+        }
+        let _mutation = task
+            .worktree
+            .exists()
+            .then(|| super::lock_task_pr_mutation(&task.worktree))
+            .transpose()?;
+        let mut deletions = Vec::new();
+        for pr in store.task_prs(&task.id).await.map_err(task_error)? {
+            let deletion = match pr.phase() {
+                PrPhase::Merged => crate::ops::wt::prepare_landed_delete(
+                    &repo,
+                    &pr.branch,
+                    pr.head_sha()
+                        .ok_or_else(|| task_error("merged PR has no recorded head"))?,
+                )?,
+                PrPhase::Abandoned if pr.publication.is_none() => {
+                    crate::ops::wt::prepare_landed_delete(&repo, &pr.branch, &pr.base_commit)?
+                }
+                PrPhase::Abandoned => crate::ops::wt::prepare_delete(&repo, &pr.branch, false)?,
+                _ => {
+                    return Err(task_error(
+                        "Task still has an unsettled PR; retained checkout",
+                    ))
+                }
+            };
+            deletions.push(deletion);
+        }
+        for deletion in deletions {
+            crate::ops::wt::apply_delete(deletion, &NullProgress)?;
+        }
+        if task.worktree.exists() {
+            return Err(task_error(
+                "checkout is on a different branch; retained it for explicit wt delete",
+            ));
+        }
+        Ok(())
+    }
+    .await;
+    result.map_err(|error| task_error(format!(
+        "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task complete {} --summary 'Retry cleanup'`.",
+        task.plan.identifier, task.plan.identifier,
+    )))
+}
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
     let store = match open_registry_for_authority().await {
@@ -161,6 +246,35 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     let deletions =
         prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?;
     apply_abandon(repo, &store, task.as_ref(), &resolved, deletions).await
+}
+
+/// Trash the issue after its placed work has been canceled or completed.
+pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
+    let repo = task_repository(repo, Some(issue))?;
+    block_on_task(async {
+        let store = task_store().await?;
+        if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
+            let deleted = store
+                .task_deletion(&task.wave_id, task.plan.id.as_str())
+                .await
+                .map_err(task_error)?
+                .is_some();
+            if !deleted {
+                if super::task_work_status(&store, &task).await? == WorkStatus::Done {
+                    require_idle(&store, &task, true).await?;
+                    cleanup_completed_task(&store, &task).await?;
+                } else {
+                    abandon(&repo, issue, false).await?;
+                }
+            }
+        }
+        crate::ops::pm::delete_task(&repo, issue).await
+    })
+    .map_err(|error| {
+        task_error(format!(
+            "{error}. Removal is incomplete; retry `lf task delete {issue}`."
+        ))
+    })
 }
 
 // Preview and apply share every exclusion. Preparation never retires a sweep's
@@ -364,7 +478,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     })
 }
 
-/// Address the existing PR/rebase operation through its owning Task.
+/// Address the existing PR/sync operation through its owning Task.
 pub fn task_operation(
     repo: &Path,
     issue: &str,
@@ -372,8 +486,8 @@ pub fn task_operation(
     args: &[String],
     agent: Option<&str>,
 ) -> OpsResult<()> {
-    if !matches!(operation, "pr" | "rebase") {
-        return Err(task_error("expected a PR or rebase operation"));
+    if !matches!(operation, "pr" | "sync") {
+        return Err(task_error("expected a PR or sync operation"));
     }
     if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
         crate::ops::task_destination::check_task(&destination, issue).map_err(task_error)?;

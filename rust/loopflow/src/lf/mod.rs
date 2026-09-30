@@ -991,8 +991,8 @@ pub enum TaskCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Integrate the Task with its base using the ordinary rebase operation
-    Rebase {
+    /// Integrate the Task with its base using the ordinary sync operation
+    Sync {
         issue: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -1021,7 +1021,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Delete a Task from Linear and reconcile its local record
+    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
     Delete { issue: String },
     /// Edit a Task's title or notes, before or after placement
     Edit {
@@ -1086,7 +1086,7 @@ impl TaskCommand {
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
             | Self::Pr { issue, .. }
-            | Self::Rebase { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Complete { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
@@ -1656,11 +1656,12 @@ mod tests {
             vec!["lf", "task", "abandon"],
             vec!["lf", "task", "abandon", "LOO-355"],
             vec!["lf", "task", "sweep", "--apply", "--json"],
-            vec!["lf", "task", "rebase", "LOO-355", "--plan"],
+            vec!["lf", "task", "sync", "LOO-355", "--plan"],
             vec!["lf", "wt", "delete", "feature"],
         ] {
             Cli::try_parse_from(args).unwrap();
         }
+        assert!(Cli::try_parse_from(["lf", "task", "rebase", "LOO-355"]).is_err());
         for removed in ["remove", "rm"] {
             assert!(Cli::try_parse_from(["lf", "wt", removed, "feature"]).is_err());
         }

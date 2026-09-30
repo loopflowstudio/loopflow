@@ -1161,9 +1161,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             Ok(())
         }
         TaskCommand::Pr { issue, args } => run_task_operation(repo, issue, "pr", args, agent),
-        TaskCommand::Rebase { issue, args } => {
-            run_task_operation(repo, issue, "rebase", args, agent)
-        }
+        TaskCommand::Sync { issue, args } => run_task_operation(repo, issue, "sync", args, agent),
         TaskCommand::Complete {
             issue,
             summary,

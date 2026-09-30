@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::engine::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
-    worktree_remove_owned,
+    rev_parse, worktree_remove_owned,
 };
 use crate::engine::worktrees::{list_worktrees, main_repo_root, sibling_worktree_name};
 use crate::ops::{OpsError, OpsResult, Progress};
@@ -15,6 +15,7 @@ pub(crate) struct BranchDeletion {
     pub branch: String,
     worktree: Option<PathBuf>,
     remote_head: Option<String>,
+    local_head: Option<String>,
     force: bool,
 }
 
@@ -90,6 +91,9 @@ pub(crate) fn prepare_delete(
         None
     };
     Ok(BranchDeletion {
+        local_head: ref_exists(&repo, &format!("refs/heads/{branch}"))?
+            .then(|| rev_parse(&repo, &format!("refs/heads/{branch}")))
+            .transpose()?,
         repo,
         branch,
         worktree: worktree.map(|wt| wt.path),
@@ -98,18 +102,45 @@ pub(crate) fn prepare_delete(
     })
 }
 
+pub(crate) fn prepare_landed_delete(
+    repo: &Path,
+    branch: &str,
+    merged_head: &str,
+) -> OpsResult<BranchDeletion> {
+    let deletion = prepare_delete(repo, branch, false)?;
+    if [&deletion.local_head, &deletion.remote_head]
+        .into_iter()
+        .flatten()
+        .any(|head| head != merged_head)
+    {
+        return Err(OpsError::Message(format!(
+            "{branch} has work beyond its merged head; retained checkout and branches"
+        )));
+    }
+    Ok(deletion)
+}
+
 pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -> OpsResult<()> {
     let BranchDeletion {
         repo,
         branch,
         worktree,
         remote_head,
+        local_head,
         force,
     } = deletion;
     let lease = worktree
         .as_ref()
         .map(|path| acquire_worktree_lease(&repo, path, "branch deletion"))
         .transpose()?;
+    let current_head = ref_exists(&repo, &format!("refs/heads/{branch}"))?
+        .then(|| rev_parse(&repo, &format!("refs/heads/{branch}")))
+        .transpose()?;
+    if current_head != local_head {
+        return Err(OpsError::Message(
+            "local branch changed during deletion; retained its branches".into(),
+        ));
+    }
     if let Some(path) = &worktree {
         if !force && !is_clean(path)? {
             return Err(OpsError::Message(

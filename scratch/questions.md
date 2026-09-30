@@ -1,41 +1,46 @@
-# LOO-355 assumptions and remaining boundaries
+# LOO-355 lifecycle decisions and acceptance boundary
 
-2026-09-30 — Jack Heart requested composable lifecycle operations and action
-coverage. This implementation uses `task pr ISSUE ACTION` to address the existing
-PR parser, rather than duplicating all PR flags as new Task verbs. Start/resume,
-interruption, Flow replacement, checkout recovery and dependent splitting retain
-`run`, `interrupt`, `restart`, `checkout` and `create --stack-on` respectively.
+2026-09-30 — Jack Heart requested composable lifecycle operations and issue-addressed
+action coverage. The latest supervising steer assigns completion cleanup, deletion
+and recovery reconciliation here, with configured live proofs after landing.
 
-Cancellation may retire an unclaimed review cursor. A live or unknown worker is
-excluded. The existing abandonment-intent columns fence new worker claims before
-Linear is contacted; a failed provider request retains that intent for retry.
-No new lease table, migration or cancellation receipt format is introduced.
+## Implementation decisions
 
-## Remaining implementation/design boundary
+- `task pr ISSUE ACTION` uses the existing PR parser. `task sync ISSUE` now uses
+  main's sole integration command; the temporary Task `rebase` spelling is removed.
+- Bare Task landing retains its open outcome and checkout for the saved Flow or
+  next PR, and reports that explicitly. Completing landing composes merge,
+  Task/Linear success and branch cleanup. A standalone landed PR deletes its
+  checkout and branches. Primary checkouts remain protected and reported.
+- Completion records its outcome before cleanup. Claimed workers keep their
+  captured boundary until their provider stops and the exact worker settles.
+  A dead worker can be settled on explicit completion retry; live or unknown
+  execution defers cleanup. No self-wait, new lease table or migration is added.
+- Empty successors are retired as abandoned PR history in the completion
+  transaction, preserving the branch identity needed for cleanup retries.
+- `task delete ISSUE` composes cancellation for unfinished placed work, completion
+  cleanup for Done work, and provider trash. It refuses live/unknown workers and
+  dirty work. Planning-only deletion allocates nothing. Retained history and
+  provider trash confirmations remain authoritative on retry.
+- Recovery means checkout recovery, saved execution continuation, or retrying a
+  partial lifecycle operation. It never reopens a terminal outcome or interprets
+  missing membership as cancellation. No new terminal-outcome reopening authority
+  was requested; that remains an explicit future product decision.
 
-The requested completion/landing symmetry is not fully implemented by the new
-cancellation path. Existing `task pr ISSUE land -c` composes authoritative landing
-with Task/Linear completion, but landing still retains the Task checkout. Calling
-`wt delete` unconditionally from that path would delete the checkout beneath the
-Task worker executing its own delivery Flow. Resolve cleanup at worker settlement
-before changing that path; do not add a self-wait or bypass ownership.
+These are implementation choices within Jack Heart's requested composition,
+not a separate recorded acceptance of the finished behavior.
 
-`task complete` still records success only after delivery settles. `task delete`
-still trashes the issue while retaining authored work. The requested inventory
-makes those distinctions explicit; it does not establish the stronger downward
-composition for completion and deletion. Recovery currently means checkout or
-saved-execution recovery, not reopening an abandoned outcome. These remain part
-of LOO-355, not silently removed acceptance criteria.
+## Configured acceptance after landing
 
-## Live acceptance blocker
+The earlier 0.12.26 parser observations are historical. Jack Heart's supervising
+steer reports v0.12.27 installed and explicitly places the disposable configured
+Task proof and Wave sweep preview/apply after this change lands, using installed
+`lf`. The branch was synced through `lf sync` (merge). No source binary has been
+used against the installed store and no promotion or provider cancellation was
+performed in this implementation pass.
 
-The selected `lf 0.12.26` rejects both `lf task abandon --help` and
-`lf task sweep --help` with `unknown command`. Jack's retained infrastructure
-constraint forbids running a source binary against the installed store or
-promoting it from a Task. New Task operations follow the selected installation,
-so private copied data cannot serve as installed acceptance.
-
-Do not patch the installed database or cancel issues through a separate Linear
-writer as a substitute. Ordinary delivery must make the new operation available
-before its configured disposable-Task proof, live sweep preview/apply, and
-LOO-309/LOO-329 closure. No installed Task or Linear outcome was changed here.
+The caller owns publication, landing, installation and Flow navigation. After
+installation: prove abandonment on a disposable Task across Linear/store/GitHub/Git,
+preview all configured Waves, then apply eligible cancellations including LOO-309
+and LOO-329. Missing evidence and exclusions remain visible; never substitute a
+separate Linear writer or database patch for the composed operation.

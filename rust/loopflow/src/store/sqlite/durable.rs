@@ -1134,7 +1134,11 @@ pub(super) fn release_task_worker_in(
     task_id: &TaskId,
     expected: &TaskWorkerClaim,
 ) -> StoreResult<FlowPosition> {
-    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    // Completion may precede Run binding. Releasing its exact launch claim
+    // cannot resume or reopen a terminal Task.
+    if work_status_in(conn, &WorkRef::Task(task_id.clone()))? == WorkStatus::Abandoned {
+        return Err(stale_task_worker(task_id));
+    }
     let expected_json = serde_json::to_string(expected)?;
     let mut position = flow_position_in(conn, task_id)?.ok_or(StoreError::NotFound)?;
     let leaf = position.cursor.leaf_mut();
@@ -1218,7 +1222,11 @@ pub(super) fn finish_task_flow_in(
             "only a bound Task worker Run may finish a Task Flow".to_string(),
         ));
     }
-    require_ready_work(conn, &WorkRef::Task(task_id.clone()))?;
+    // Delivery can complete the Task inside its last worker turn. The bound
+    // worker still owns settlement after stopping its provider.
+    if work_status_in(conn, &WorkRef::Task(task_id.clone()))? == WorkStatus::Abandoned {
+        return Err(stale_task_worker(task_id));
+    }
     let expected_json = serde_json::to_string(expected)?;
     if conn.execute(
         "DELETE FROM task_flow_positions

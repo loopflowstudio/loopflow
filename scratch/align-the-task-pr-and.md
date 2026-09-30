@@ -17,6 +17,16 @@ current-chapter sweep members, dirty checkouts without explicit force, and live
 or unknown execution. Preserve Task/PR/Run history. Sweep is dry-run by default;
 report open PRs and execution as exclusions before applying safe candidates.
 
+## Delete — do not maintain
+
+- Removed Task-only `rebase` dispatch; `task sync ISSUE` delegates to the sole
+  integration command after the 2026-09-30 merge from main.
+- Remove the terminal-worker early return that strands its claim. Preserve the
+  bound worker fence, captured Flow until settlement, and authoritative merge gate.
+- Remove issue deletion's standalone placed-Task path: cancellation or completion
+  cleanup now precedes provider trash. Preserve history and confirmed-deletion
+  retry evidence. No terminal-outcome reopening follows from execution recovery.
+
 ## Current implementation
 
 The action/ownership inventory is in `docs/lf-reference.md` under Lifecycle action
@@ -24,7 +34,7 @@ inventory and copied into the prepared PR body. Task cancellation now uses the
 same PR abandonment operation as `pr abandon`; that operation uses the same
 checkout/branch deletion as `wt delete`. Missing refs and checkouts support retry.
 Task repository selection follows retained Wave ownership before requiring the
-caller to be in Git. PR and rebase operations are reachable by issue ID.
+caller to be in Git. PR and sync operations are reachable by issue ID.
 
 Sweep includes archived Projects and issues, defaults to preview, rechecks chapter
 membership on apply, and reports exclusions and incomplete operations. It reads
@@ -41,19 +51,31 @@ of repeating the entire preparation and membership lookup. This removes the
 preview/apply discrepancy found during compression without changing the existing
 transactional claim fence, remote deletion lease, or partial-failure recovery.
 
+Completion cleanup now runs at worker settlement, after provider shutdown and
+exact-claim retirement. Explicit completion retries cleanup without recreating a
+checkout or rerecording success. PM writeback uses the durable Wave repository,
+so a removed Task checkout does not prevent retry. Merged branch tips must still
+match the recorded head; dirty work and advanced local/remote branches survive.
+Unclaimed execution retires with completion; claimed execution retains its saved
+boundary until settlement. Empty successors retain abandoned branch history for
+cleanup retries. Standalone landing shares the same checkout deletion. Bare Task
+landing retains and reports the open Task's checkout for continued delivery.
+
+Deletion now cancels unfinished placed work or cleans completed work before
+provider trash. Recovery uses the existing checkout/run commands and idempotent
+lifecycle retries. It does not reopen terminal outcomes. The final action table
+is maintained in the reference guide and prepared PR body.
+
 ## Remaining work
 
-- Resolve completion/landing checkout cleanup at Task-worker settlement; retain
-  the existing completion gate and captured Flow. The cancellation implementation
-  must not be treated as proof of the full requested completion/deletion symmetry.
-- Reconcile Task deletion and terminal-outcome recovery with the full action
-  coverage. Current differences and preservation constraints are in questions.md.
-- Demonstrate abandonment on a disposable configured Task across Linear, the
-  owning store, GitHub and Git. Source fixtures do not replace that live proof.
-- Run the configured Wave sweep preview, then apply eligible cancellations.
-  Close LOO-309 and LOO-329 through the new operation. The selected CLI does not
-  implement it yet; no source access to the installed store or promotion occurred.
-- Caller owns publication, installation and Flow navigation. LOO-355 is unfinished.
+- After landing and installation, demonstrate abandonment on a disposable
+  configured Task across Linear, the owning store, GitHub and Git.
+- Then run the configured Wave sweep preview and apply eligible cancellations,
+  including LOO-309 and LOO-329. The latest supervising steer explicitly places
+  these proofs after landing through installed `lf`; v0.12.27 supersedes the
+  earlier parser-version observation below.
+- Caller owns publication, installation and Flow navigation. LOO-355 remains
+  unfinished until the configured acceptance above succeeds.
 
 ## Proof and review evidence (2026-09-30)
 
@@ -95,7 +117,7 @@ PR links; and match source repository identity. No full gate or CI ran.
 
 Read-only configured GitHub observations: PR #1299 and PR #1318 both returned
 CLOSED, with headRepository loopflowstudio/loopflow. This confirms the PR facts
-only. The installed CLI remains 0.12.26 and rejects task abandon and task sweep;
+only. The earlier installed CLI observation was 0.12.26 and rejects task abandon and task sweep;
 it provides neither a configured sweep result nor Task cancellation evidence.
 
 Compression verification (2026-09-30): the three abandonment/sweep/store tests
@@ -113,4 +135,59 @@ cargo test -p loopflow --lib -- task_planning_tests task_lifecycle_commands_ --s
 The review also removed temporary argument copies from lower-command validation
 and corrected the documentation's implied issue-ID inference for landing.
 All-target Clippy, formatting and diff checks passed after compression.
-Completion/deletion composition and configured live acceptance remain unfinished.
+At that compression checkpoint, completion/deletion composition and configured
+live acceptance remained unfinished. The subsequent pass above supersedes the
+implementation gap; configured acceptance remains after landing.
+
+## Completion/deletion review (2026-09-30)
+
+`lf sync --plan` selected merge_target; `lf sync` merged v0.12.27. The owned
+resolver reconciled `docs/lf.md` and reported the Task-only `rebase` dispatch
+left behind by main's rename. This pass replaced it with `task sync` and removed
+the old spelling rather than adding an alias.
+
+The simulated review changed four boundaries:
+
+- Worker settlement must survive Task success recorded inside its own turn.
+  Terminal success no longer strands the exact claim; provider stop failure
+  prevents cleanup. New worker claims still require Ready Work.
+- Cleanup retries need branch identity after an empty successor is retired.
+  The completion transaction now retains that abandoned record instead of
+  deleting it. Task success and Flow settlement remain separate events.
+- A deleted checkout cannot be the context for PM writeback or completion retry.
+  Writeback uses retained Wave ownership; a Done Task's absent checkout is
+  expected when rendering its completion gate.
+- Provider issue trash cannot strand placed execution and Git state. The public
+  deletion operation now composes cancellation/completion cleanup first, then
+  invokes the existing confirmed-trash recovery path.
+
+All new behavioral proof remains disposable/synthetic. The new cleanup fixture
+initially failed because its PR lacked reviewer copy, then because it attempted
+to change the immutable base through the general update writer; it now uses the
+existing base-healing and merge-settlement writers. A compile attempt also
+passed a timestamp without the required Option. Those failures are retained
+observations, not passing proof. No live provider credentials were used.
+
+Final focused evidence for this pass:
+
+- `cargo test -p loopflow --lib -- task_completion_ task_deletion_planning_ --test-threads=1`:
+  15 passed, including public completion retry and snapshot after checkout removal,
+  worker deferral, dirty/local/remote follow-up preservation, retained history,
+  planning deletion confirmation retries and prior completion/writeback behavior.
+- `cargo test -p loopflow --lib -- task_completion_cleanup_ task_abandon_and_delete_ task_sweep_ task_lifecycle_commands_ --test-threads=1`:
+  cancellation/deletion, sweep and parser passed; cleanup's fixture failure was
+  subsequently corrected and passed in the final command above. Deletion was
+  exercised from outside Git and retried after issue trash.
+- `cargo test -p loopflow --test pr_tests completing_land_discards_an_empty_successor_without_a_controller -- --test-threads=1`:
+  1 passed, proving completion retains the retired successor for cleanup recovery
+  without creating an empty GitHub PR.
+- `cargo test -p loopflow --lib -- task_completion_cleanup_ pr_landing_observes_ci_fix_publication --test-threads=1`:
+  the landing supervisor proof passed; the earlier cleanup fixture failed and is
+  superseded by the final focused proof above.
+
+Commands removed inherited `LF_*` variables and pinned `LF_BIN` to the source
+checkout's compiled CLI. No affected-suite gate, full repository suite or hosted
+CI ran. Configured acceptance remains the caller's post-installation obligation.
+
+Final `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
+`git diff --check` passed after the public cleanup-retry proof was added.

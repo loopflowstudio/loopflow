@@ -177,7 +177,7 @@ def _provider() -> None:
     stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
     Path(os.environ["CHAPTER_ENGINE_RECEIPT"]).write_text(json.dumps([pid, stamp]))
     endpoint = sys.argv[sys.argv.index("--listen") + 1].removeprefix("unix://")
-    thread_id = "chapter-thread"
+    thread_id = f"chapter-thread-{pid}"
     controls = os.environ.get("CHAPTER_STEP_CONTROLS") == "1"
     receipt = Path(os.environ["CHAPTER_PROVIDER_RECEIPT"])
     proof_root = receipt.parent
@@ -192,6 +192,14 @@ def _provider() -> None:
             with lock:
                 state["status"] = "completed"
             try:
+                if os.environ.get("CHAPTER_CREDENTIAL_REVOKED") == "1":
+                    with lock:
+                        state["status"] = "failed"
+                    socket.send(json.dumps({"method": "turn/completed", "params": {
+                        "threadId": thread_id,
+                        "turn": {"id": "chapter-turn", "status": "failed", "error": {"message": "token_invalidated"}},
+                    }}))
+                    return
                 for method, params in (
                     (
                         "item/agentMessage/delta",
@@ -323,7 +331,7 @@ def _stop_provider(root: Path) -> None:
 
 
 def _run(
-    argv: list[str], cwd: Path, env: dict[str, str], logs: Path
+    argv: list[str], cwd: Path, env: dict[str, str], logs: Path, success: bool = True
 ) -> subprocess.CompletedProcess:
     result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=90)
     with logs.open("a") as output:
@@ -338,7 +346,7 @@ def _run(
             )
             + "\n"
         )
-    assert result.returncode == 0, f"{shlex.join(argv)}\n{result.stdout}\n{result.stderr}"
+    assert (result.returncode == 0) == success, f"{shlex.join(argv)}\n{result.stdout}\n{result.stderr}"
     return result
 
 
@@ -406,7 +414,12 @@ def _exercise_step_controls(
     while not (root / "provider.json").exists():
         assert time.monotonic() < deadline, "Task skill did not start"
         time.sleep(0.1)
-    saved = _snapshot(Path(env["LF_DB_PATH"]))
+    while True:
+        saved = _snapshot(Path(env["LF_DB_PATH"]))
+        if saved["flow"]["selected_start"] is not None:
+            break
+        assert time.monotonic() < deadline, "Provider turn was not selected"
+        time.sleep(0.1)
     claim = json.loads(saved["flow"]["claim_json"])
     owner = claim["owner"]
     panes = _run(
@@ -464,7 +477,7 @@ def _exercise_step_controls(
                 assert resume.poll() in (None, 0), output.read_text()
                 waiting = _snapshot(Path(env["LF_DB_PATH"]))
                 assert waiting["flow"]["failure_json"] is None, waiting["flow"]
-                assert waiting["flow"]["selected_start"] == saved["flow"]["selected_start"]
+                assert waiting["flow"]["selected_start"] == saved["flow"]["selected_start"], (saved, waiting)
                 # tmux closes the worker's terminal on death. If that also ends
                 # the skill client, resume observes the same surviving engine.
                 os.kill(json.loads((root / "engine.json").read_text())[0], 0)
@@ -593,7 +606,8 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         with sqlite3.connect(env["LF_DB_PATH"]) as db:
             flow = db.execute(
                 "SELECT f.pending_session_id,f.claim_json,f.failure_json "
-                "FROM flow_sessions f JOIN tasks t ON t.current_invocation_id=f.id"
+                "FROM flow_sessions f JOIN tasks t ON t.current_invocation_id=f.id "
+                "JOIN agent_sessions s ON s.id=f.pending_session_id WHERE s.input_published=1"
             ).fetchone()
             workers = db.execute(
                 "SELECT outcome FROM execs WHERE command LIKE '%__worker%' AND id IS NOT ?",
@@ -673,7 +687,50 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     before = _snapshot(first / "loopflow.db")
     assert before["prs"] and all(pr["github_number"] == 17 for pr in before["prs"]), before["prs"]
     assert _snapshot(second / "loopflow.db") == before
+    # Ordinary commands in the Task checkout receive the same seed and name,
+    # without acquiring or advancing its managed Flow at the pending review.
+    _stop_provider(root)
     checkout = Path(before["task"]["worktree"])
+    for label, command in (
+        ("direct", ["-b", "skill", "chapter-marker"]),
+        ("saved-flow", ["-b", "flow", "successor-proof"]),
+    ):
+        proof = root / label
+        proof.mkdir()
+        command_env = {
+            **env,
+            "CHAPTER_PROVIDER_RECEIPT": str(proof / "provider.json"),
+            "CHAPTER_ENGINE_RECEIPT": str(proof / "engine.json"),
+            "CHAPTER_STEP_CONTROLS": "0",
+        }
+        try:
+            _run([str(lf), *command], checkout, command_env, logs)
+            rendered = json.dumps(json.loads((proof / "provider.json").read_text())["request"])
+            for required in ("Fixture Operator", "Linear Task FIX-1", "Retain execution.", "lf:task-workspace"):
+                assert required in rendered, f"{label} lost common context {required}"
+            assert "current Task worker" not in rendered, "context must not appoint a second worker"
+            _preserved(before, _snapshot(first / "loopflow.db"))
+        finally:
+            _stop_provider(proof)
+
+    proof = root / "revoked-account"
+    proof.mkdir()
+    try:
+        _run([str(lf), "-b", "flow", "successor-proof"], checkout, {
+            **env,
+            "CHAPTER_PROVIDER_RECEIPT": str(proof / "provider.json"),
+            "CHAPTER_ENGINE_RECEIPT": str(proof / "engine.json"),
+            "CHAPTER_STEP_CONTROLS": "0",
+            "CHAPTER_CREDENTIAL_REVOKED": "1",
+        }, logs, success=False)
+        with sqlite3.connect(first / "loopflow.db") as db:
+            assert db.execute("SELECT credential_state FROM provider_accounts WHERE account_id='fixture'").fetchone() == ("missing",)
+        status = _cli("auth", "status", "--json")
+        assert "missing" in status.stdout and "fixture" in status.stdout
+        _preserved(before, _snapshot(first / "loopflow.db"))
+    finally:
+        _stop_provider(proof)
+
     authored = checkout / "retained.txt"
     authored.write_text("Preserve this unfinished Task across the chapter.\n")
     provider_before = copy.deepcopy(server.state["projects"])

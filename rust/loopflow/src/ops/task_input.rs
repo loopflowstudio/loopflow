@@ -1,6 +1,6 @@
 //! Task context and live input for the ordinary skill command.
 use crate::child::ChildRef;
-use crate::durable::{FlowSession, Steer, WorkRef};
+use crate::durable::{Steer, WorkRef};
 use crate::harness::Harness;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -18,47 +18,25 @@ pub(crate) struct TaskSeed {
     pub interrupt: i64,
 }
 
-pub(crate) async fn prepare(
-    store: &SharedStore,
-    task: &Task,
-    wave: &str,
-    flow: &FlowSession,
-) -> Result<TaskSeed> {
+pub(crate) async fn prepare(store: &SharedStore, task: &Task, wave: &str) -> Result<TaskSeed> {
     let steers = store.task_steers(&task.id).await?;
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
     let pr = store
-        .active_task_pr(&task.id)
+        .task_prs(&task.id)
         .await?
-        .ok_or_else(|| anyhow!("Task {} has no active PR", task.id))?;
+        .pop()
+        .ok_or_else(|| anyhow!("Task {} has no recorded PR", task.id))?;
     let project = store
         .get_project(&task.project_id)
         .await?
         .ok_or_else(|| anyhow!("Task Project is missing"))?;
-    let mut message = format!(
+    let message = format!(
         "{}\n\n{}",
         task_seed(task, &project.plan, &pr, wave, &steers),
         crate::ops::task::task_workspace_context(task, &pr)?
     );
-    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
-        .ok_or_else(|| anyhow!("Task boundary has no skill"))?;
-    if let Some(repeat) = &skill.policy.repeat {
-        let edge = skill
-            .policy
-            .id
-            .as_deref()
-            .expect("repeat occurrence has an id");
-        let traversals = flow
-            .cursor
-            .leaf()
-            .progress
-            .repeats
-            .get(edge)
-            .copied()
-            .unwrap_or(0);
-        message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
-    }
     Ok(TaskSeed {
         task: task.clone(),
         message,
@@ -82,31 +60,18 @@ struct Controls {
     task: Task,
     steer: i64,
     interrupt: i64,
-    receiver: tokio::sync::mpsc::UnboundedReceiver<String>,
+    receiver: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
     next_steer: Instant,
 }
 
 impl TaskInput {
     pub(crate) fn new(store: SharedStore, seed: TaskSeed) -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        std::thread::spawn(move || {
-            for line in std::io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                if sender.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-        println!(
-            "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-            seed.task.plan.identifier
-        );
         Self(Arc::new(tokio::sync::Mutex::new(Controls {
             store,
             task: seed.task,
             steer: seed.steer,
             interrupt: seed.interrupt,
-            receiver,
+            receiver: None,
             next_steer: Instant::now(),
         })))
     }
@@ -143,6 +108,22 @@ impl TaskInput {
             receiver,
             next_steer,
         } = &mut *controls;
+        let receiver = receiver.get_or_insert_with(|| {
+            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+            std::thread::spawn(move || {
+                for line in std::io::stdin().lock().lines() {
+                    let Ok(line) = line else { break };
+                    if sender.send(line).is_err() {
+                        break;
+                    }
+                }
+            });
+            println!(
+                "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
+                task.plan.identifier
+            );
+            receiver
+        });
         while let Ok(line) = receiver.try_recv() {
             handle_attachment(store, task, harness, line).await?;
         }
@@ -223,6 +204,6 @@ pub(crate) fn task_seed(
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name, steers);
     format!(
-        "{context}\n\nYou are the current Task worker. Run the selected immutable Flow from its persisted boundary. This Flow does not choose what a later worker will run. Typed PR and Task operations own publication, landing, rotation, and completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward."
+        "{context}\n\nTyped PR and Task operations own publication, landing, rotation, and completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward."
     )
 }

@@ -392,7 +392,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
-        user_name: None,
+        user_name: crate::engine::config::launch_user_name()?,
         docs,
         diff,
         diff_files,

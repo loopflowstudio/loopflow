@@ -184,3 +184,47 @@ are local fixture proofs; configured-provider/Desktop acceptance remains open.
 
 Prospective usage attribution and retained `flow blocked` feedback are operating
 assumptions for Jack's review. No slice establishes Task completion or shipment.
+
+## Common Task context and PATH steps · 2026-09-30
+
+Working slice after `a35af5223`; Jack Heart's subsequent decisions are retained
+in questions.md and [the command-equivalence audit](task-command-equivalence.md).
+
+- `path-step-2.log`: one public CLI proof passed. PATH selects a wrapper for each
+  step; after its first successful operation adds a synthetic future migration,
+  the old driver refuses settlement and replay, preserving the selected effect.
+  This is simulated schema advancement, not two released lf versions.
+- `common-name.log`: shared launch surfaces/provider prompt proof passed.
+  `checkout-context-2.log`: three public checkout tests passed, including landed
+  Task context and branch identity independent of upstream. Comment refresh can
+  fail without erasing confirmed Task context; the first run exposed this and
+  the common reader now retains that context with a warning.
+- `common-command-proof-4.log`: disposable Linux public CLI proof passed using
+  real lf and scripted Linear/Codex/tmux. Managed Task step, direct skill and
+  ordinary saved Flow carry the same name and Task seed; independent commands
+  preserve the managed review. Revoked credentials in a Flow step mark the
+  account missing in SQLite and public auth status. Existing driver-death,
+  attached-steer, exact-completion consumption, Chapter rotation and second-Home
+  sync-only adoption assertions also passed. Hash inventory and results are in
+  `.lf/tmp/cut-i/common-command-proof-4-source.json` and its results directory.
+- Earlier public attempts remain counterexamples: attempt 1 sampled before the
+  selected native start; attempt 2 sampled before review input publication.
+  The fixture now waits for those specific durable events. Attempt 3 found a
+  production error-loss bug: Codex failed-turn completion discarded its inline
+  error, leaving the account connected. The shared harness now forwards that
+  error to existing account invalidation/failover; no Task classifier was added.
+- `common-boundary.log`: two moved checkout-boundary tests passed.
+  `common-account-preflight.log`: account preflight refusal passed without
+  creating a registry. The common account selector enforces the execution
+  boundary on each attempt, including inherited account routes and retries.
+
+These are focused branch proofs. Configured account failover/control, repeated
+managed decisions, typed blocked/keyed continuation, both-dead explicit retry,
+release-before-publication failure and integrated materialized coverage remain
+open where not already covered by identical retained bytes. No promotion,
+installed-data access, publication or Task completion occurred in this slice.
+
+Final static checks for this common-command slice: `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings` (`common-command-clippy-final.log`)
+and `git diff --check` passed. Review caught the two snapshot races and the
+lost inline provider error above; the public proof was rerun after each repair.

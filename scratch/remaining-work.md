@@ -25,10 +25,14 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
 ## Order, deepest first
 
 1. **Every step runs its ordinary lf command.** Ops and skills are converted and
-   both launchers are deleted (`9cb7b4c86`, net −1,242). Remaining: hosted
-   verification of that cut; a channel from the driver to the child step for
-   live steers, interrupts and attached input; the Task preflight policy
-   exception; review and account proofs. See
+   both launchers are deleted (`9cb7b4c86`, net −1,242). Common Task seed/name,
+   checkout context after landing, PATH step selection and schema-gap preservation
+   are implemented in the current working slice. Account and command-equivalence
+   proof is in progress; retain repeated decisions, failure release, explicit
+   retry and keyed-unblock proofs. Task controls already use the common command;
+   do not build another transport. Add typed `blocked` with a required reason,
+   remove `lf flow blocked`, and continue the same conversation after keyed Ask
+   feedback. See [the current audit](task-command-equivalence.md) and
    [the before/after inventory](exec-per-step.md#direct-skill-command-cut--2026-09-29).
 2. **Remove loop passes as FlowSessions** (Jack, 2026-09-30). The contract text
    is updated (`d61295196`); the code is not. A forward migration folds existing
@@ -44,12 +48,17 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
    `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn token and
    `LF_PARENT_RUN_ID`. One owner per attribution fact; derive the rest. Keep the
    lookup that resolves an agent-issued command's parent through Session and
-   provider generation.
+   provider generation. Jack's September 30 rule removes all inherited Task
+   identity: only explicit `--as` or checkout binding names a Task. Remove
+   `agent_work_in` Task inheritance, `LF_TASK_ORIGIN`, and claim/manifest Task
+   discovery; move affected PR/installation checks to the checkout or selector.
 4. **One naming commit** (Jack). Exec instead of launch or run for one agent
    start under one lf process; Session names for conversation things; "compile"
    for turning a definition into its graph; "parent" only for Exec to Exec, so
-   template provenance gets its own word. Proposals go in a before and after
-   table for Jack.
+   template provenance is removed unless a real consumer needs it. Swift's
+   `TaskFlowView` currently displays its `from …` breadcrumb; this consumer is
+   reported in the audit for Jack, not renamed. Proposals go in a before and
+   after table for Jack.
 5. **Released-populated import**, executed through the public binary and on a
    materialized copy. Obligations: [import-preservation.md](import-preservation.md).
 6. **Docs, skills and generated pages** for final behavior, including the stale

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{WorkRef, WorkStatus};
+use crate::engine::agent::{checkout_execution_boundary, probe_execution_boundary};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
@@ -20,15 +21,13 @@ use crate::engine::git::{
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::tmux_session_slug;
 use crate::engine::worktrees::{
-    create_from_placement_plan, git_common_dir, plan_placement, PlacementPlan, PlacementStrategy,
-    WorktreeSegment,
+    create_from_placement_plan, plan_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, AgentExecutionBoundary, ConcreteStep};
+use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::PmSnapshot;
-use crate::provider_auth::Provider;
 use crate::store::{
     open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
     SharedStore, Store, StoreError,
@@ -1125,7 +1124,8 @@ async fn select_task_agent(
     agent: Option<&str>,
 ) -> OpsResult<()> {
     if let Some(agent) = agent {
-        task_execution_boundary(&task.worktree, agent)?;
+        checkout_execution_boundary(&task.worktree, agent)
+            .map_err(|error| task_error(error.to_string()))?;
         store
             .set_task_agent(&task.id, agent)
             .await
@@ -1139,7 +1139,7 @@ async fn select_task_agent(
 }
 
 fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>) -> Option<String> {
-    task_execution_boundary(
+    checkout_execution_boundary(
         &task.worktree,
         &resolve_task_agent(&task.worktree, task.agent.as_deref(), skill),
     )
@@ -1182,96 +1182,16 @@ pub(crate) fn task_event_launch_refusal(
     }
 }
 
-pub(crate) fn task_execution_boundary(
-    repo: &Path,
-    agent: &str,
-) -> OpsResult<AgentExecutionBoundary> {
-    let (harness, _) = parse_agent(agent);
-    if !matches!(harness.as_str(), "codex" | "claude") {
-        return Err(task_error(format!(
-            "Task execution cannot converge: agent {agent:?} uses harness {harness:?}, which has no managed account route for the required linked Git, Loopflow control-store, provider credential, and network capabilities; select codex or claude"
-        )));
-    }
-    let common_dir = git_common_dir(repo).map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: failed to resolve linked Git metadata from {}: {error}",
-            repo.display()
-        ))
-    })?;
-    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: Loopflow control-plane authority is unavailable: {error}"
-        ))
-    })?;
-    let control_store = control.db_path.parent().ok_or_else(|| {
-        task_error(format!(
-            "Task execution cannot converge: Loopflow control database {} has no writable parent",
-            control.db_path.display()
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control_store.to_path_buf()];
-    writable_roots.sort();
-    writable_roots.dedup();
-    Ok(AgentExecutionBoundary { writable_roots })
-}
-
-fn probe_task_execution_boundary(boundary: &AgentExecutionBoundary) -> OpsResult<()> {
-    for root in &boundary.writable_roots {
-        let probe = root.join(format!(
-            ".loopflow-task-capability-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let result = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&probe)
-            .and_then(|file| {
-                file.sync_data()?;
-                std::fs::remove_file(&probe)
-            });
-        if let Err(error) = result {
-            let _ = std::fs::remove_file(&probe);
-            return Err(task_error(format!(
-                "Task execution cannot converge: required writable authority for {} is unavailable: {error}. Run the Task from a Loopflow host whose managed execution profile includes linked Git metadata and the Loopflow control store",
-                root.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
 pub(crate) async fn preflight_task_execution(
     repo: &Path,
     agent: &str,
 ) -> OpsResult<ProviderAccountId> {
-    let boundary = task_execution_boundary(repo, agent)?;
-    probe_task_execution_boundary(&boundary)?;
-    let (harness, _) = parse_agent(agent);
-    let provider = harness.parse::<Provider>().map_err(|_| {
-        task_error(format!(
-            "Task execution cannot converge: agent {agent:?} has no managed provider-account route; select codex or claude"
-        ))
-    })?;
-    let route = crate::provider_account::resolve_provider_account_exact(provider, None, None)
+    let boundary =
+        checkout_execution_boundary(repo, agent).map_err(|error| task_error(error.to_string()))?;
+    probe_execution_boundary(&boundary).map_err(|error| task_error(error.to_string()))?;
+    crate::provider_account::preflight_agent_account(agent)
         .await
-        .map_err(|error| {
-            task_error(format!(
-                "Task execution cannot converge: provider account capability for {harness} is unavailable: {error}. Connect an eligible managed account and retry"
-            ))
-        })?
-        .ok_or_else(|| {
-            task_error(format!(
-                "Task execution cannot converge: provider account capability for {harness} resolved account_id=null. Configure and connect an eligible managed account before retrying"
-            ))
-        })?;
-    route.verify_ready().await.map_err(|error| {
-        task_error(format!(
-            "Task execution cannot converge: provider credential capability for {}/{} is unavailable: {error}. Reconnect that managed account before retrying",
-            harness,
-            route.account_id()
-        ))
-    })?;
-    Ok(route.account_id().clone())
+        .map_err(|error| OpsError::Message(error.to_string()))
 }
 
 fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
@@ -2668,7 +2588,8 @@ pub(crate) async fn launch_task_process(
         task.agent.as_deref(),
         skill.as_ref().map(|step| &step.skill),
     );
-    task_execution_boundary(&task.worktree, &agent)?;
+    checkout_execution_boundary(&task.worktree, &agent)
+        .map_err(|error| task_error(error.to_string()))?;
     let requires_provider = matches!(
         position.current_plan(),
         crate::engine::ConcreteStep::Skill(_)
@@ -5074,7 +4995,8 @@ async fn restart_task_async(
         WorkStatus::Ready => {}
     }
     if let Some(agent) = agent.as_deref() {
-        task_execution_boundary(&task.worktree, agent)?;
+        checkout_execution_boundary(&task.worktree, agent)
+            .map_err(|error| task_error(error.to_string()))?;
     }
     // Reject an unusable replacement before any refresh, checkpoint, or stop so
     // the pinned Flow and its worker stay exactly as they were.
@@ -5242,7 +5164,7 @@ pub(crate) async fn continue_task_async(
             super::linear_observe::publish_task_steer(&store, &task, reason).await?;
         } else if feedback.is_none() {
             return Err(task_error(format!(
-                "{}\nCorrect the capability, then use `lf task run {} --reason \"<what changed>\"`.",
+                "{}\nResolve the failure, then use `lf task run {} --reason \"<what changed>\"`.",
                 failure.reason, task.plan.identifier
             )));
         }
@@ -5322,9 +5244,9 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_merged_task_landing, launch_task_process, lock_task_pr_mutation,
-        preflight_task_execution, probe_task_execution_boundary, resolve_task_create_input,
-        select_task_worker_flow_from_project, task_event_launch_refusal, task_execution_boundary,
+        apply_merged_task_landing, checkout_execution_boundary, launch_task_process,
+        lock_task_pr_mutation, preflight_task_execution, probe_execution_boundary,
+        resolve_task_create_input, select_task_worker_flow_from_project, task_event_launch_refusal,
     };
     use crate::child::ChildRef;
     use crate::durable::{WorkRef, WorkStatus};
@@ -7115,7 +7037,7 @@ mod tests {
         let file = directory.path().join("not-a-directory");
         std::fs::write(&file, "occupied").unwrap();
 
-        let error = probe_task_execution_boundary(&AgentExecutionBoundary {
+        let error = probe_execution_boundary(&AgentExecutionBoundary {
             writable_roots: vec![file.clone()],
         })
         .expect_err("a descriptive root that cannot accept a file is not a capability");
@@ -7174,7 +7096,7 @@ mod tests {
         std::env::set_var("LF_CONTROL_HOME", &control);
         std::env::set_var("LF_CONTROL_DB_PATH", &database);
 
-        let boundary = task_execution_boundary(&worktree, "codex").unwrap();
+        let boundary = checkout_execution_boundary(&worktree, "codex").unwrap();
 
         assert_eq!(boundary.writable_roots.len(), 2);
         assert!(boundary
@@ -7219,7 +7141,9 @@ mod tests {
             .await
             .expect_err("headless Task launch requires an explicit account route");
 
-        assert!(error.to_string().contains("account_id=null"));
+        assert!(error
+            .to_string()
+            .contains("connected managed account is required"));
         assert!(!database.exists(), "preflight must not create a registry");
     }
 

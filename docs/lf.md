@@ -62,6 +62,18 @@ Independent conversations may share Task attribution without sharing driver or
 Flow authority. Give concurrent file contributions distinct ownership and
 checkpoint a coherent result with `lf commit`.
 
+Inside a Task checkout, ordinary skills and Flows receive the same Task seed,
+workspace details and live steers as managed steps, including after its PR lands.
+Use `--as task:DES-123` from elsewhere. Context does not grant permission to
+advance the managed Flow. Unattended commands in that checkout share the same
+worktree confinement and account selection. Every assembled agent prompt resolves
+the participant name through `LF_USER_NAME`, global `user.name`, then Git.
+
+Flow steps resolve `lf` through PATH. If a newer child advances the database
+schema beyond its driver's support, the driver preserves the selected result
+and exits with a compatibility diagnostic. Resume through a compatible `lf`;
+the old driver does not settle or replay the completed step.
+
 Each agent boundary has a conversation and native completion history. Flow retry
 continues the selected conversation; a new boundary captures its instructions and
 current context. Mechanical operations execute as authored. Use

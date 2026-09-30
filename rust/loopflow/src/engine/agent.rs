@@ -121,12 +121,68 @@ pub enum AgentWriteScope {
     Worktree,
 }
 
-/// Roots that a managed delivery launch must prove writable before it starts.
-///
-/// Presence marks a trusted Loopflow Task boundary.
+/// Additional writable roots required by a confined agent command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AgentExecutionBoundary {
     pub writable_roots: Vec<PathBuf>,
+}
+
+pub(crate) fn checkout_execution_boundary(
+    repo: &Path,
+    agent: &str,
+) -> anyhow::Result<AgentExecutionBoundary> {
+    let (harness, _) = parse_agent(agent);
+    if !matches!(harness.as_str(), "codex" | "claude") {
+        return Err(anyhow::anyhow!(format!(
+            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex or claude"
+        )));
+    }
+    let common_dir = crate::engine::worktrees::git_common_dir(repo).map_err(|error| {
+        anyhow::anyhow!(format!(
+            "Agent execution unavailable: failed to resolve linked Git metadata from {}: {error}",
+            repo.display()
+        ))
+    })?;
+    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
+        anyhow::anyhow!(format!(
+            "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
+        ))
+    })?;
+    let control_store = control.db_path.parent().ok_or_else(|| {
+        anyhow::anyhow!(format!(
+            "Agent execution unavailable: Loopflow control database {} has no writable parent",
+            control.db_path.display()
+        ))
+    })?;
+    let mut writable_roots = vec![common_dir, control_store.to_path_buf()];
+    writable_roots.sort();
+    writable_roots.dedup();
+    Ok(AgentExecutionBoundary { writable_roots })
+}
+
+pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> anyhow::Result<()> {
+    for root in &boundary.writable_roots {
+        let probe = root.join(format!(
+            ".loopflow-write-probe-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let result = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .and_then(|file| {
+                file.sync_data()?;
+                std::fs::remove_file(&probe)
+            });
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&probe);
+            return Err(anyhow::anyhow!(format!(
+                "Agent execution unavailable: required writable authority for {} is unavailable: {error}. Use an execution profile with access to linked Git metadata and the Loopflow control store",
+                root.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
@@ -254,7 +310,7 @@ fn resolve_account_route_blocking(
     provider: Provider,
     launch: &AgentConfig,
 ) -> Result<Option<ProviderAccountRoute>, crate::provider_account::ProviderAccountError> {
-    match (
+    let route = match (
         launch.provider_account_id.clone(),
         launch.provider_account_authority_home.clone(),
     ) {
@@ -272,7 +328,14 @@ fn resolve_account_route_blocking(
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
         )),
+    }?;
+    if route.is_none() && launch.execution_boundary.is_some() {
+        return Err(crate::provider_account::ProviderAccountError::NoEligibleAccount {
+            provider,
+            accounts: "a connected managed account is required by this execution boundary; ambient credentials cannot satisfy it".to_string(),
+        });
     }
+    Ok(route)
 }
 
 /// Build the effective system prompt including structured reply guidance.

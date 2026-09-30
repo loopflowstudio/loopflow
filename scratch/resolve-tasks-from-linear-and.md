@@ -17,6 +17,46 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Slice review — recorded installation copies, 2026-09-30
+
+**Blocked; no publication.** Reviewed the complete slice from `2d63d6488` to
+`9fea0552f`, including its consumers, receipt transitions, tests and documentation.
+The required public proof still fails before ordinary Task continuation. Resolving
+that failure changes the runtime/store contract, beyond a bounded review repair.
+
+Fresh proof: `uv run python scripts/test_task_installation.py` passed **3 + 1
+populated migration checks**, built both CLI provenances and compiled the selected
+integration targets. The first public case preserved first-install recovery,
+Task-owned refusal, the first worker, exact review publication and both complete
+Flow comparisons across normal promotion. Public status then failed at
+`task_initialization_tests.rs:661`: the selected development CLI refuses
+`/home/lf-task-proof/.lf/loopflow.db`. The accompanying missing Exec-ledger message
+does not establish a different cause. Log:
+`.lf/tmp/loo334-review-copy-installation.log`. The remaining nine public cases,
+review completion, second worker and divergent-copy refusal were not reached.
+The harness removed its disposable container; an independent Docker listing
+confirmed absence. No host installation or Home was mounted.
+
+The source review finds real consumer replacement: recorded backup provenance
+replaces treating every matching installation as independent execution, and
+AgentSession/captured-event lookup replaces manifest scanning for retained Session
+discovery. Unknown or changed copies still refuse routing; readiness forwards its
+exact token to the owning store. Final production Rust delta is **+239 / −34**
+(net +205), excluding trailing unit-test modules, integration tests, documentation,
+scratch and inherited parent work. The preceding receipt-pinned slice also replaced
+real consumers; the two successive no-replacement rule does not apply. Reuse the
+recorded formatting/Clippy passes for these unchanged source bytes.
+
+Next: reconcile selected development runtime, original execution-directory
+preservation and production-store isolation, then repeat this same proof through
+automatic continuation, exact review completion and the second actual worker.
+Do not silently select the retained release, transfer ownership to the copy or
+weaken isolation. The failed policy Ask remains failed evidence; do not duplicate
+or modify the separate pending relationship-repair Ask. Recursive locks, provider
+shell PATH, independent Session discovery, chapter archive integration and
+acceptance cases 1–15 remain open. This review establishes neither configured
+acceptance, host promotion, Task completion nor whole-design acceptance.
+
 ### Current slice — recorded installation copies, 2026-09-30
 
 Incoming direction: preserve normal promotion's complete Flow copies while making

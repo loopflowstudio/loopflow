@@ -167,3 +167,8 @@ This establishes source behavior, not an installed-provider or real browser demo
 No live account, real reset, publication, full gate or Task completion is claimed.
 This closes the marked browser-ownership slice. The remaining slices above
 still require implementation and proof.
+
+Compression: moved Codex's file-store setup into its command builder and removed
+the refresh fixture's trace file, decoding and executable-permission setup.
+The same isolated Codex transport, refresh and account-first commands above passed
+17 tests with fake providers; formatting, all-target Clippy and diff checks passed.

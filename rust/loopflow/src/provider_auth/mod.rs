@@ -1493,26 +1493,23 @@ impl CodexAuthBroker {
         }
     }
 
-    fn command(&self) -> Command {
+    fn command(&self, subcommand: &str) -> Command {
         let mut command = Command::new("codex");
         command.env("CODEX_HOME", &self.codex_home);
         command
             .env_remove("CODEX_ACCESS_TOKEN")
             .env_remove("OPENAI_API_KEY");
-        command
-    }
-
-    fn add_file_store_override(&self, command: &mut Command) {
         if self.force_file_store {
             command.args(["-c", "cli_auth_credentials_store=\"file\""]);
         }
+        command.arg(subcommand);
+        command
     }
 
     async fn refresh_access_token(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("app-server");
-        codex::refresh(&mut command).await.map(|_| ())
+        codex::refresh(&mut self.command("app-server"))
+            .await
+            .map(|_| ())
     }
 }
 
@@ -1523,10 +1520,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("app-server");
-        codex::start_login(&mut command).await
+        codex::start_login(&mut self.command("app-server")).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1549,11 +1543,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("logout");
-
-        match command.output().await {
+        match self.command("logout").output().await {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) | Err(_) => {
                 let auth_path = self.codex_home.join("auth.json");
@@ -2711,10 +2701,7 @@ pub(crate) async fn verify_codex_identity(
     AuthError,
 > {
     let broker = CodexAuthBroker::for_profile(home.to_path_buf());
-    let mut command = broker.command();
-    broker.add_file_store_override(&mut command);
-    command.arg("app-server");
-    let response = codex::refresh(&mut command).await?;
+    let response = codex::refresh(&mut broker.command("app-server")).await?;
     let identity = codex_identity_from_account(home, &response).map_err(|message| {
         AuthError::CommandFailed {
             provider: Provider::Codex,
@@ -5132,43 +5119,25 @@ attributes:
     async fn codex_refresh_uses_app_server_managed_auth_flow() {
         let tmp = tempdir().expect("tempdir");
         let script = tmp.path().join("codex-app-server");
-        let trace = tmp.path().join("requests.jsonl");
         fs::write(
             &script,
             r#"#!/bin/sh
-trace="$1"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
+IFS= read -r initialize
 printf '{"id":1,"result":{}}\n'
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-printf '{"id":2,"result":{"account":null}}\n'
+IFS= read -r initialized
+IFS= read -r request
+case "$request" in
+  *'"method":"account/read"'*'"refreshToken":true'*)
+    echo '{"id":2,"result":{"account":{"email":"operator@example.com"}}}';;
+  *) exit 90;;
+esac
 "#,
         )
         .expect("write fake app-server");
-        let mut permissions = fs::metadata(&script)
-            .expect("script metadata")
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).expect("make script executable");
-
-        let mut command = Command::new(&script);
-        command.arg(&trace);
-        codex::refresh(&mut command)
+        let response = codex::refresh(Command::new("/bin/sh").arg(script))
             .await
             .expect("refresh through fake app-server");
-
-        let requests = fs::read_to_string(trace).expect("read request trace");
-        let requests = requests
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request json"))
-            .collect::<Vec<_>>();
-        assert_eq!(requests[0]["method"], "initialize");
-        assert_eq!(requests[1]["method"], "initialized");
-        assert_eq!(requests[2]["method"], "account/read");
-        assert_eq!(requests[2]["params"]["refreshToken"], true);
+        assert_eq!(response["account"]["email"], "operator@example.com");
     }
 
     #[tokio::test]

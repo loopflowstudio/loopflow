@@ -39,6 +39,95 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
 }
 
 #[test]
+fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade() {
+    for upgrade in [false, true] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        write_flow(
+            repo.path(),
+            "path-proof",
+            "- op: rebase --plan\n- op: rebase --plan\n",
+        );
+        // A replacement executable delegates the actual effect to lf, then
+        // simulates a future build committing an additive schema migration.
+        let migration = if upgrade {
+            r#"sqlite3 "$LF_HOME/loopflow.db" <<'SQL'
+BEGIN IMMEDIATE;
+CREATE TABLE future_flow_feature (id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS development_migrations (
+ position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
+ name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL);
+INSERT INTO development_migrations
+ SELECT COUNT(*), 'future', 'future_flow_feature', 'fixture', 1 FROM development_migrations;
+COMMIT;
+SQL
+"#
+        } else {
+            ""
+        };
+        write_executable(
+            &bin.join("lf"),
+            &format!(
+                "#!/bin/sh\nset -eu\necho selected >> '{}'\n'{}' \"$@\"\n{migration}",
+                home.path().join("selected").display(),
+                env!("CARGO_BIN_EXE_lf")
+            ),
+        );
+        let output = lf_command(
+            repo.path(),
+            home.path(),
+            &["flow", "path-proof", "-b", "--no-loopflow"],
+            None,
+        )
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+        assert_eq!(
+            output.status.success(),
+            !upgrade,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let completed: i64 = conn.query_row("SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(completed, if upgrade { 1 } else { 2 });
+        let state: String = conn
+            .query_row("SELECT state FROM flow_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, if upgrade { "current" } else { "completed" });
+        if upgrade {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"));
+            let selected: Option<i64> = conn
+                .query_row("SELECT operation_start FROM flow_sessions", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert!(
+                selected.is_some(),
+                "retain the exact completed effect for a compatible driver"
+            );
+            let id: String = conn
+                .query_row("SELECT id FROM flow_sessions", [], |r| r.get(0))
+                .unwrap();
+            let retry = run_lf(repo.path(), home.path(), &["flow", "resume", &id], None);
+            assert!(
+                !retry.status.success(),
+                "an older executable must still refuse the new store"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(home.path().join("selected"))
+                .unwrap()
+                .lines()
+                .count(),
+            completed as usize
+        );
+    }
+}
+
+#[test]
 fn mechanical_flow_boundaries_each_have_their_own_child_exec() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
@@ -507,9 +596,16 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("NO_COLOR", "1");
-    if let Some(path) = path {
-        command.env("PATH", path);
-    }
+    let binary_dir = Path::new(env!("CARGO_BIN_EXE_lf")).parent().unwrap();
+    command.env(
+        "PATH",
+        format!(
+            "{}:{}",
+            binary_dir.display(),
+            path.map(str::to_owned)
+                .unwrap_or_else(|| std::env::var("PATH").unwrap())
+        ),
+    );
     command
 }
 
@@ -1719,8 +1815,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let _ = json(&["runs", "--active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
 
-    // Once the branch's PR has landed with nothing after it, the checkout no
-    // longer tracks the Task's work: a plain launch still works, unbound.
+    // Landing preserves the checkout's Task context and historical attribution.
     let mut landed = task.pr.clone();
     landed.publication = Some(loopflow::work::task::PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
@@ -1737,8 +1832,11 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
     let after_landing = launch(&["--tui", "binding-work", "--no-loopflow"]);
-    assert_eq!(session(&after_landing)["work"], serde_json::Value::Null);
-    assert_eq!(task_runs("INF-123"), vec![bound]);
+    assert_eq!(
+        session(&after_landing)["work"],
+        serde_json::json!({"kind": "task", "id": task.task.id})
+    );
+    assert_eq!(task_runs("INF-123"), vec![after_landing, bound]);
 }
 
 #[test]

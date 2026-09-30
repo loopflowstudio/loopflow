@@ -626,6 +626,24 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, provider_session_id, None).await
 }
 
+pub(crate) async fn preflight_agent_account(
+    agent: &str,
+) -> Result<ProviderAccountId, ProviderAccountError> {
+    let (harness, _) = crate::engine::config::parse_agent(agent);
+    let provider = harness
+        .parse::<Provider>()
+        .map_err(|_| ProviderAccountError::UnsupportedProvider)?;
+    let route = resolve_provider_account_exact(provider, None, None)
+        .await?
+        .ok_or_else(|| ProviderAccountError::NoEligibleAccount {
+            provider,
+            accounts: "a connected managed account is required; configure a route before retrying"
+                .into(),
+        })?;
+    route.verify_ready().await?;
+    Ok(route.account_id().clone())
+}
+
 pub(crate) async fn resolve_provider_account_exact(
     provider: Provider,
     provider_session_id: Option<&str>,

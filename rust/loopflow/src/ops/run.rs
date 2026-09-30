@@ -148,17 +148,6 @@ pub async fn resolve_work_selection(
             store.get_task_by_issue(value).await.map_err(run_error)?
         }
         .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
-        if store
-            .task_deletion(&task.wave_id, task.plan.id.as_str())
-            .await
-            .map_err(run_error)?
-            .is_some()
-        {
-            return Err(run_error(format!(
-                "Task {} was deleted and cannot be selected for execution",
-                task.plan.identifier
-            )));
-        }
         let wave = store
             .get_wave(&task.wave_id)
             .await
@@ -179,10 +168,11 @@ pub async fn resolve_work_selection(
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
         let pr = store
-            .active_task_pr(&task.id)
+            .task_prs(&task.id)
             .await
             .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Task {} has no active PR", task.id)))?;
+            .pop()
+            .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
         let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()
@@ -235,12 +225,7 @@ pub async fn resolve_work_selection(
     Err(run_error("select a Task or Wave"))
 }
 
-/// The Task whose current PR branch is checked out here, bound exactly as
-/// `--task` binds it. Jack decided on 2026-09-26 that an `lf` launch inside a
-/// Task worktree belongs to that Task; a branch no Task owns stays unbound, and
-/// so does a branch whose PR already landed with no PR after it (the checkout
-/// no longer contains that Task's active work). The binding's cwd is the checkout
-/// that proved it, never the registered path.
+/// Resolve checkout attribution independently of Task or PR execution eligibility.
 pub async fn resolve_checkout_binding(
     store: &SharedStore,
     repo: &Path,
@@ -248,14 +233,6 @@ pub async fn resolve_checkout_binding(
     let Some(task) = crate::ops::task::task_for_checkout(store, repo).await? else {
         return Ok(None);
     };
-    if store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(run_error)?
-        .is_none()
-    {
-        return Ok(None);
-    }
     let id = task.id.to_string();
     let mut binding = resolve_work_selection(
         store,
@@ -529,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolates the native Session and Ask environment.
-    async fn deleted_task_refuses_launch_selection_but_retains_run_attribution() {
+    async fn deleted_task_retains_context_and_run_attribution() {
         let _environment = crate::journal::test_env_lock();
         let (directory, store) = test_store().await;
         let repo = loopflow_test_support::TestRepo::new();
@@ -548,8 +525,7 @@ mod tests {
         let pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         std::fs::write(repo.path().join("authored.txt"), "keep this work").unwrap();
 
-        // Retirement alone is not confirmation, and historical identity is not
-        // itself permission to launch after native removal is confirmed.
+        // Context and attribution survive retirement and provider deletion.
         store.abandon(&work, "fixture retirement").await.unwrap();
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await
@@ -568,10 +544,10 @@ mod tests {
             task.plan.id.as_str(),
             &task.plan.identifier,
         ] {
-            let error = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
+            let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
                 .await
-                .unwrap_err();
-            assert!(error.to_string().contains("was deleted"));
+                .unwrap();
+            assert_eq!(binding.work, work);
             let previous_db = std::env::var_os("LF_DB_PATH");
             std::env::set_var("LF_DB_PATH", directory.path().join("registry.db"));
             let capture = crate::run_record::CaptureHandle::begin_at(
@@ -669,9 +645,8 @@ mod tests {
         }
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("was deleted"));
+            .unwrap()
+            .is_some());
         assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
         assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(pr));
         assert_eq!(

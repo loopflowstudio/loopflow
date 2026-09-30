@@ -53,6 +53,14 @@ async fn drive_task(
     let cli = crate::lf::Cli::try_parse_from(std::iter::once("lf".to_string()).chain(options))?;
     let result =
         crate::lf::commands::flow::drive(store.clone(), flow, Some(launch_claim), &cli).await;
+    if result.as_ref().err().is_some_and(|error| {
+        matches!(
+            error.downcast_ref::<crate::lf::commands::flow::StepEnd>(),
+            Some(crate::lf::commands::flow::StepEnd::StoreChanged(_))
+        )
+    }) {
+        return result.map(|_| ());
+    }
     if result.is_err() {
         if let Some(blocked) = store.task_flow(&task_id).await? {
             if blocked
@@ -1035,7 +1043,7 @@ mod planning_tests {
             .await
             .unwrap();
 
-        let prepared = crate::ops::task_input::prepare(&store, &task, "human-task-proof", &flow)
+        let prepared = crate::ops::task_input::prepare(&store, &task, "human-task-proof")
             .await
             .unwrap();
 

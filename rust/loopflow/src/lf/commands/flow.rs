@@ -22,10 +22,17 @@ pub fn run(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
+    let checkout = if binding.is_none() {
+        crate::lf::commands::run::checkout_binding(cli)?
+    } else {
+        None
+    };
+    let binding = binding.or(checkout.as_ref());
     let items = expand_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items);
-    let bound_message =
-        binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
+    let bound_message = binding
+        .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
+        .map(|binding| crate::lf::commands::run::bound_message(binding, message));
     execute(
         &flow.name,
         &items,
@@ -244,12 +251,14 @@ fn active_step() -> Result<flow_run::ActiveStep> {
 #[derive(Debug)]
 pub(crate) enum StepEnd {
     Interrupted,
+    StoreChanged(String),
 }
 
 impl std::fmt::Display for StepEnd {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Interrupted => formatter.write_str("step interrupted"),
+            Self::StoreChanged(reason) => write!(formatter, "Flow store changed: {reason}"),
         }
     }
 }
@@ -513,6 +522,7 @@ async fn drive_loop(
             // A step's failure is what the caller hears; a write the row no longer
             // accepts (the Flow was replaced or ended meanwhile) is logged.
             Err(error) => match error.downcast_ref::<StepEnd>() {
+                Some(StepEnd::StoreChanged(_)) => Err(error),
                 Some(StepEnd::Interrupted) => {
                     record(store.release_flow(&id, version, claim.as_ref()).await);
                     Ok(FlowOutcome::Waiting)
@@ -846,8 +856,7 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
 }
 
 async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Result<()> {
-    let executable = std::env::current_exe().context("locate the executing Flow driver")?;
-    let mut command = tokio::process::Command::new(executable);
+    let mut command = tokio::process::Command::new("lf");
     command
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
@@ -868,10 +877,16 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
             serde_json::to_string(claim)?,
         );
     }
-    let status = command
-        .status()
-        .await
-        .context("could not execute captured Flow step")?;
+    let status = command.status().await;
+    // PATH can select a newer child. Never settle its result through an older
+    // schema, including recording a failure which would discard that selection.
+    store.sqlite.validate_current_schema().map_err(|error| {
+        StepEnd::StoreChanged(format!(
+            "{error}; this driver cannot settle Flow {}. Resume with a compatible lf using `lf flow resume {}`; the selected step result is retained",
+            flow.id(), flow.id()
+        ))
+    })?;
+    let status = status.context("could not execute captured Flow step")?;
     if status.code() == Some(130) {
         return Err(StepEnd::Interrupted.into());
     }

@@ -115,43 +115,23 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         crate::ops::flow_run::FLOW_STEP_ENV,
         &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
     );
-    let task_input = if claim.is_some() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        Some(runtime.block_on(async {
-            let shared = std::sync::Arc::new(
-                crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
-            );
-            let id = flow
-                .task_id
-                .as_ref()
-                .ok_or_else(|| anyhow!("claimed Flow has no Task"))?;
-            let task = shared
-                .get_task(id)
-                .await?
-                .ok_or_else(|| anyhow!("Task {id} is missing"))?;
-            crate::ops::linear_observe::refresh_task_comments(&shared, &task).await?;
-            let seed = crate::ops::task_input::prepare(
-                &shared,
-                &task,
-                launch.wave.as_deref().unwrap_or_default(),
-                &flow,
-            )
-            .await?;
-            Ok::<_, anyhow::Error>((shared, seed))
-        })?)
-    } else {
-        None
-    };
-    if let Some((_, seed)) = &task_input {
-        launch.model = seed.task.agent.clone().or(launch.model);
+    let mut message = flow.message.clone().unwrap_or_default();
+    if let Some(repeat) = &skill.policy.repeat {
+        let edge = skill
+            .policy
+            .id
+            .as_deref()
+            .expect("repeat occurrence has an id");
+        let traversals = flow
+            .cursor
+            .leaf()
+            .progress
+            .repeats
+            .get(edge)
+            .copied()
+            .unwrap_or(0);
+        message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
     }
-    let mut message = task_input
-        .as_ref()
-        .map(|(_, seed)| seed.message.clone())
-        .or_else(|| flow.message.clone())
-        .unwrap_or_default();
     if let Some(direction) = &flow.cursor.leaf().progress.direction {
         message.push_str(&format!(
             "\n\nPrevious step feedback or iteration direction:\n{direction}"
@@ -175,15 +155,6 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
     built.subjects = launch.work_subject_selector().into_iter().collect();
     built.work = flow.declared_work();
     built.claim = claim;
-    if let Some((store, seed)) = task_input {
-        built.agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
-        built.agent_config.execution_boundary = Some(crate::ops::task::task_execution_boundary(
-            &flow.cwd,
-            built.agent_config.agent(),
-        )?);
-        built.agent_config.skip_permissions = true;
-        built.process.task_input = Some(crate::ops::task_input::TaskInput::new(store, seed));
-    }
     print_context_header(&built, &launch);
     launch_prompt(&built, &launch).map(|_| ())
 }
@@ -228,7 +199,15 @@ fn launch_bound(
     binding: &crate::ops::WorkBinding,
     source: crate::session::WorkSource,
 ) -> Result<Option<crate::run_record::FinalAnswer>> {
-    let message = bound_message(binding, message);
+    let mut launch = cli.launch_options();
+    let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
+        launch.task = Some(id.to_string());
+        launch.model = binding.agent.clone().or(launch.model);
+        message.unwrap_or_default().to_owned()
+    } else {
+        bound_message(binding, message)
+    };
+    let cli = &launch;
     let resolved_skill = skill
         .map(crate::ops::human_session::active_flow_skill)
         .transpose()?
@@ -257,7 +236,7 @@ fn launch_bound(
 /// the caller selected Work explicitly (Jack, 2026-09-26). No registry, an
 /// unreadable one, a checkout outside git or an unregistered branch all leave
 /// the launch unbound; nothing here refuses a launch that worked before.
-fn checkout_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+pub(crate) fn checkout_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
     if cli.work_subject_selector().is_some() {
         return Ok(None);
     }
@@ -347,6 +326,38 @@ fn build_bound_prompt_at(
     )
 }
 
+// Keep the existing unattended Task confinement while applying it equally to
+// direct skills and Flows. The broader checkout-only versus unattended-only
+// policy remains Jack's choice; neither is selected by this intersection.
+fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
+    task_checkout && !interactive
+}
+
+fn prepare_task_input(
+    cli: &Cli,
+) -> Result<Option<(crate::store::SharedStore, crate::ops::task_input::TaskSeed)>> {
+    let Some(id) = &cli.task else { return Ok(None) };
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let store = std::sync::Arc::new(
+            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
+        );
+        let task = store
+            .get_task_by_issue(id)
+            .await?
+            .ok_or_else(|| anyhow!("Task {id} is missing"))?;
+        let wave = store
+            .get_wave(&task.wave_id)
+            .await?
+            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
+        if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
+            tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
+        }
+        let seed = crate::ops::task_input::prepare(&store, &task, wave.name()).await?;
+        Ok(Some((store, seed)))
+    })
+}
+
 fn build_prompt_at(
     skill: Option<&str>,
     message: Option<&str>,
@@ -356,7 +367,13 @@ fn build_prompt_at(
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
     resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
-    let user_name = crate::engine::config::launch_user_name()?;
+    let is_interactive = is_interactive_run(cli, skill, message);
+    let task_input = prepare_task_input(cli)?;
+    let confine = confine_checkout_agent(task_input.is_some(), is_interactive);
+    let task_message = task_input
+        .as_ref()
+        .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
+    let message = task_message.as_deref().or(message);
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
     debug!(
@@ -381,8 +398,6 @@ fn build_prompt_at(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
     );
-
-    let is_interactive = is_interactive_run(cli, skill, message);
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
@@ -419,9 +434,11 @@ fn build_prompt_at(
             wave,
             wave_memory,
             message: message.map(|value| value.to_string()),
-            user_name,
             no_loopflow: cli.no_loopflow,
-            agent: cli.model.clone(),
+            agent: task_input
+                .as_ref()
+                .and_then(|(_, seed)| seed.task.agent.clone())
+                .or_else(|| cli.model.clone()),
             cwd: Some(repo_root.clone()),
             max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
@@ -455,6 +472,8 @@ fn build_prompt_at(
         .unwrap_or(if message.is_some() { "inline" } else { "chat" })
         .to_string();
     let process = ProcessConfig {
+        task_input: task_input
+            .map(|(store, seed)| crate::ops::task_input::TaskInput::new(store, seed)),
         auto: !is_interactive,
         stream: !is_interactive,
         ..Default::default()
@@ -464,6 +483,14 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
+    if confine {
+        agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+        agent_config.execution_boundary = Some(crate::engine::agent::checkout_execution_boundary(
+            &repo_root,
+            agent_config.agent(),
+        )?);
+        agent_config.skip_permissions = true;
+    }
     let mut prompt = prepared.prompt;
     // IDE deep links use the vendor skill sigil to stay below their URL cap.
     // Terminal sessions receive the fully assembled prompt from `lf <skill>`;

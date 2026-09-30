@@ -31,8 +31,6 @@ pub struct LaunchPromptInput {
     /// Wave memory already resolved by the Work layer.
     pub wave_memory: Option<String>,
     pub message: Option<String>,
-    /// Current participant supplied by the request boundary, never the host owner.
-    pub user_name: Option<String>,
     pub no_loopflow: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
@@ -68,7 +66,6 @@ pub fn prepare_launch_prompt(
         wave,
         wave_memory,
         message,
-        user_name,
         no_loopflow,
         agent,
         cwd,
@@ -107,9 +104,6 @@ pub fn prepare_launch_prompt(
     };
 
     let mut components = gather_context(&opts)?;
-    components.user_name = user_name
-        .as_deref()
-        .and_then(crate::engine::config::normalize_user_name);
     if let Some(skill) = resolved_skill {
         components.skill = Some(skill);
     }
@@ -258,6 +252,11 @@ Test skill body.
 
     #[test]
     fn preferred_name_reaches_provider_prompts_on_every_surface() {
+        let _lock = crate::journal::test_env_lock();
+        let _name = crate::lf::commands::flow::EnvVarGuard::set(
+            crate::engine::config::USER_NAME_ENV,
+            "  Jack  ",
+        );
         let tmp = create_repo_fixture();
         for agent in ["claude", "codex", "opencode"] {
             for surface in [
@@ -272,7 +271,6 @@ Test skill body.
                     LaunchPromptInput {
                         repo_root: tmp.path().to_path_buf(),
                         surface,
-                        user_name: Some("  Jack  ".into()),
                         agent: Some(agent.into()),
                         ..Default::default()
                     },

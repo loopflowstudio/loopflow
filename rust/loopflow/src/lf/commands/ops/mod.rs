@@ -2146,7 +2146,6 @@ fn launch_skill_agent(
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
-            user_name: crate::engine::config::launch_user_name()?,
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {

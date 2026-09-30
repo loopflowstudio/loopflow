@@ -96,27 +96,18 @@ fn current_or_sibling_lf_binary() -> Option<PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
-/// A recursive executable lock puts its `lf` first on PATH. Ordinary step
-/// discovery uses that same shell order, then the selected installation, then
-/// this driver. Historical control pins never override a newly selected lf.
+/// Select the official runtime at each step boundary. Ambient PATH and control
+/// pins are not explicit locks; PATH remains a fallback on uninstalled machines.
 pub(crate) fn resolve_step_lf_binary(cwd: &Path) -> Result<PathBuf> {
+    if let Some(cli) = official_lf_binary()? {
+        return Ok(cli);
+    }
     let search_path = std::env::var_os("PATH").unwrap_or_default();
     if let Some(path) = std::env::split_paths(&search_path)
         .map(|directory| cwd.join(directory).join("lf"))
         .find(|candidate| candidate.is_file())
     {
         return Ok(path);
-    }
-    if let Some(selection) =
-        crate::machine_install::current_selection(&crate::machine_install::root()?)?
-    {
-        if let Some(cli) = selection
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .filter(|cli| cli.path.is_file())
-        {
-            return Ok(cli.path.clone());
-        }
     }
     std::env::current_exe().context("resolve Flow driver executable as final fallback")
 }

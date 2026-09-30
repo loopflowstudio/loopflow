@@ -2860,17 +2860,15 @@ fn flow_step_executable_falls_back_without_losing_its_store() {
     };
     let candidate = Path::new(env!("CARGO_BIN_EXE_lf"));
     execute(candidate, "/usr/bin:/bin", candidate);
+    let bin = home.path().join("path-bin");
+    fs::create_dir(&bin).unwrap();
+    let path_lf = bin.join("lf");
+    fs::copy(candidate, &path_lf).unwrap();
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    execute(candidate, &path, &path_lf);
     let installed = installation::Installation::new(home.path());
     let alias = home.path().join("driver");
     fs::copy(&installed.cli, &alias).unwrap();
     execute(&alias, "/usr/bin:/bin", &installed.cli);
-    let bin = home.path().join("path-bin");
-    fs::create_dir(&bin).unwrap();
-    let path_lf = bin.join("lf");
-    fs::copy(&installed.cli, &path_lf).unwrap();
-    execute(
-        &alias,
-        &format!("{}:/usr/bin:/bin", bin.display()),
-        &path_lf,
-    );
+    execute(&alias, &path, &installed.cli);
 }

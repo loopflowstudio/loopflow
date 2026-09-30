@@ -17,6 +17,86 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Resumed implementation — official step selection, 2026-09-30
+
+At `1fd99a284`, the supplied worktree was clean. Jack Heart's latest direction
+keeps this branch stacked and forbids rebasing until LOO-298 republishes its
+compressed branch. No rebase, publication, host promotion or host-store experiment
+was performed. Resource preflight passed with 44.0 GiB available against the
+32 GiB floor; the disposable build used two workers at nice +10.
+
+The public retained-installation proof exposed a production defect: the resumed
+Task worker selected the obsolete `lf` first on PATH for its mechanical child.
+`resolve_step_lf_binary` now reuses the verified official-runtime selector before
+considering PATH. Artifact verification failure remains an error. Uninstalled
+machines retain PATH, then the current driver, as fallbacks. This follows Jack's
+approved rule that ambient PATH is not a deliberate pin. Self-review removed the
+duplicate installation lookup instead of adding another selector or runtime owner.
+Persisted explicit locks and provider-shell propagation remain unfinished.
+
+The fixture now supplies terminal transport before launch, observes a published
+review, runs an actual mechanical step on each side of that review, and checks
+both worker Execs. Historical conversation setup imports the captured-input files
+through public `session import`. The incompatible-draft fixture works after
+canonical materialization; divergent execution uses a fresh invocation and compares
+the complete persisted Flow before and after refusal. The harness accepts several
+names after `--test` to share one disposable build across related proofs.
+
+**Focused evidence:**
+
+- `loo334-official-step-proof.log`: four populated migration checks and public
+  `flow_step_executable_falls_back_without_losing_its_store` passed. This covers
+  uninstalled driver/PATH fallback and installed precedence over PATH. The later
+  test failed on a fixture worker-count expectation; this is not a green combined run.
+- `loo334-two-worker-final.log`: four populated migration checks and public
+  `installation_switch_preserves_task_review_without_store_overrides` passed.
+  Public status/run/open/ready/complete retain the exact published review and
+  original execution directory, execute two Task workers under their respective
+  installation binaries, complete the Flow once, preserve incompatible database
+  bytes, import/reopen retained conversation history with PTY input, and refuse
+  divergent execution without changing either Flow. Installation records and
+  terminal/provider effects are fixtures, not normal promotion or configured
+  provider acceptance. The fixture's review launch reported missing Claude.
+- `cargo fmt --all`, all-target Clippy with warnings denied, Ruff on the harness,
+  and `git diff --check` passed. Logs are under `.lf/tmp/`. Every disposable
+  container was removed and its absence independently confirmed.
+
+**Retained failures:** `loo334-resume-installation-switch.log` found late tmux
+fixture setup; `-2.log` observed `review Run changed while opening` during
+publication; `-3.log` found the absent synthetic draft ledger; `-4.log` exposed
+the obsolete PATH child. `loo334-official-step-proof.log` then found the fixture
+started at review and had only one Task worker. `loo334-two-worker-proof.log`
+passed both workers but found the old prefixed-artifact directory assumption;
+`loo334-two-worker-proof-2.log` passed terminal input and divergent refusal but
+compared input version 0 against persisted version 1. The final proof excludes
+no fields from preservation. Waiting for publication before opening establishes
+stable-review continuation only; the publication-concurrent Open failure remains
+unfixed and is not rewritten as a pass.
+
+**Remaining boundaries:**
+
+- The ordinary installed `lf ask` opened
+  `ask_883713ce782642b8adf9b73e07d4daa5`; its waiting command has not returned a
+  decision. The original production-directory/selected-development-runtime
+  conflict remains. The Session owns `installation-runtime-store-decision.md`;
+  its recommendation is not approval. The relationship-repair Ask is separate.
+- Delayed startup needs the actual child's Exec/process evidence before the
+  caller returns Starting. Removing the ten-second claim release alone is
+  insufficient: the claim still names the launching Exec, whose later exit lets
+  a retry reclaim before the delayed worker's handoff. Preserve the existing
+  version/generation fence; a tmux pane is not a synthetic lf Exec.
+- Chapter archival must recover beyond a lost completion response. The stacked
+  operation never calls `complete_and_archive_project`; simply adding it misses
+  retry because `plan_rotation` selects no predecessor once the successor is
+  Started and the old Project Completed. Identify the intended historical Project
+  through provider facts, without silently choosing newest history or archiving
+  every Completed Project. These startup/archival findings are source inspections,
+  not new behavioral proofs.
+
+Normal promotion's production-store failure, explicit locks, provider-shell PATH,
+Session-owner discovery and full acceptance cases 1–15 remain open. These focused
+results establish neither a full gate nor whole-design completion.
+
 ### Slice review — recorded installation copies, 2026-09-30
 
 **Blocked; no publication.** Reviewed the complete slice from `2d63d6488` to

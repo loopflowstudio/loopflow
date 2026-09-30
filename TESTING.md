@@ -632,6 +632,8 @@ uv run python scripts/test_task_installation.py
 uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
+Pass several names after `--test` to share one disposable build across related proofs.
+
 This copies source into a disposable Linux container, materializes its draft
 migrations and builds release-provenance and development CLIs with
 two Cargo jobs. Before promotion it checks populated planning upgrades from the

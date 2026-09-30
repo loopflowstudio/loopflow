@@ -821,6 +821,14 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
     repo.create_branch("jack/switch-review");
+    let stale = tempfile::tempdir().unwrap();
+    let worker_log = stale.path().join("worker.log");
+    let tmux = stale.path().join("tmux");
+    fs::write(&tmux, format!(
+        "#!/bin/sh\ncase \"$1\" in\nnew-session) for argument do last=$argument; done; sh -c \"$last\" >>'{}' 2>&1 & ;;\nhas-session) exit 1 ;;\nesac\n",
+        worker_log.display(),
+    )).unwrap();
+    fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
     let task = register_unrun_task(
         home.path(),
         repo.path(),
@@ -830,16 +838,20 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut invocation =
         loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
-    invocation.steps.push(loopflow::engine::ConcreteStep::Op(
-        loopflow::engine::flow::ConcreteOp {
-            item: loopflow::engine::flow::Op {
-                command: "rebase".into(),
-                args: vec!["--plan".into()],
-            },
-            flow_parents: vec!["task-design".into()],
+    let review_step = invocation
+        .steps
+        .iter()
+        .find(|step| matches!(step, loopflow::engine::ConcreteStep::Skill(skill) if skill.policy.human))
+        .unwrap()
+        .clone();
+    let operation = loopflow::engine::ConcreteStep::Op(loopflow::engine::flow::ConcreteOp {
+        item: loopflow::engine::flow::Op {
+            command: "rebase".into(),
+            args: vec!["--plan".into()],
         },
-    ));
-    let review_index = invocation.steps.iter().position(|step| matches!(step, loopflow::engine::ConcreteStep::Skill(skill) if skill.policy.human)).unwrap();
+        flow_parents: vec!["task-design".into()],
+    });
+    invocation.steps = vec![operation.clone(), review_step, operation];
     let position = loopflow::durable::FlowSession {
         parent_id: None,
         task_id: Some(task.task.id.clone()),
@@ -852,10 +864,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         invocation,
         pending_session_id: None,
         ready_summary: None,
-        cursor: loopflow::engine::ExecutionCursor {
-            index: review_index,
-            ..Default::default()
-        },
+        cursor: Default::default(),
         version: 0,
         worker_generation: 0,
         claim: None,
@@ -866,7 +875,18 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .block_on(task.store.start_task_flow(&task.task.id, position))
         .unwrap();
     let installation = installation::Installation::new(home.path());
-    let command = |cli: &Path, args: &[&str]| unbound_command(cli, repo.path(), args);
+    let command = |cli: &Path, args: &[&str]| {
+        let mut command = unbound_command(cli, repo.path(), args);
+        command.env(
+            "PATH",
+            format!(
+                "{}:{}",
+                stale.path().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+        command
+    };
     let started = command(&installation.cli, &["task", "run", "INF-123", "--json"])
         .output()
         .unwrap();
@@ -875,10 +895,25 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         "{}",
         String::from_utf8_lossy(&started.stderr)
     );
-    let position = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let position = loop {
+        let position = runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .unwrap();
+        if position.pending_session_id.is_some()
+            && position.claim.is_none()
+            && position.review_artifact_key().is_some()
+        {
+            break position;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "first worker did not publish review: {}",
+            fs::read_to_string(&worker_log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     let review = position.pending_session_id.as_ref().unwrap().as_str();
     let before = command(&installation.cli, &["session", "open", review, "--json"])
         .output()
@@ -926,7 +961,6 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         serde_json::to_vec(&active).unwrap(),
     )
     .unwrap();
-    let stale = tempfile::tempdir().unwrap();
     let obsolete = stale.path().join("lf");
     fs::write(
         &obsolete,
@@ -947,14 +981,6 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         command(&later_cli, args)
             .env("LF_BIN", &obsolete)
             .env("LF_CONTROL_BIN", &obsolete)
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    stale.path().display(),
-                    std::env::var("PATH").unwrap()
-                ),
-            )
             .output()
             .unwrap()
     };
@@ -1015,6 +1041,14 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     );
     let original_db = home.path().join("loopflow.db");
     let original = Connection::open(&original_db).unwrap();
+    original
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS development_migrations (
+                position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
     original.execute("INSERT INTO development_migrations SELECT COALESCE(MAX(position), -1) + 1, 'future-proof', 'future-proof', 'unknown', 1 FROM development_migrations", []).unwrap();
     let bytes = || {
         [original_db.clone(), home.path().join("loopflow.db-wal")].map(|path| fs::read(path).ok())
@@ -1046,13 +1080,6 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
             [],
         )
         .unwrap();
-    let worker_log = later.path().join("worker.log");
-    let tmux = stale.path().join("tmux");
-    fs::write(&tmux, format!(
-        "#!/bin/sh\ncase \"$1\" in\nnew-session) for argument do last=$argument; done; sh -c \"$last\" >'{}' 2>&1 & ;;\nhas-session) exit 1 ;;\nesac\n",
-        worker_log.display(),
-    )).unwrap();
-    fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
     let step = position.current();
     let loopflow::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
         panic!("review")
@@ -1070,7 +1097,10 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     )
     .env("LF_HOME", home.path())
     .env("LF_DB_PATH", home.path().join("loopflow.db"))
-    .env("LF_RUN_ID", review)
+    .env(
+        "LF_RUN_ID",
+        position.review_artifact_key().expect("published review"),
+    )
     .env("LF_HUMAN_SESSION", token.to_string())
     .output()
     .unwrap();
@@ -1109,21 +1139,24 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     )
     .unwrap();
     let commands: Vec<String> = conn
-        .prepare("SELECT DISTINCT command FROM run_events WHERE command LIKE '%__worker%'")
+        .prepare("SELECT command FROM execs WHERE command LIKE '%__worker%' ORDER BY started_at,id")
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(
-        !commands.is_empty(),
-        "actual worker must publish execution evidence"
+    assert_eq!(
+        commands.len(),
+        2,
+        "one worker per installation: {commands:?}"
     );
     assert!(
-        commands
-            .iter()
-            .all(|command| command.contains(later_cli.to_str().unwrap())),
-        "wrong worker executable: {commands:?}"
+        commands[0].contains(installation.cli.to_str().unwrap()),
+        "wrong first worker executable: {commands:?}"
+    );
+    assert!(
+        commands[1].contains(later_cli.to_str().unwrap()),
+        "wrong resumed worker executable: {commands:?}"
     );
     assert!(runtime
         .block_on(later_store.get_task(&task.task.id))
@@ -1138,7 +1171,13 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .join(&interactive[4..6])
         .join(&interactive);
     fs::create_dir_all(&interactive_dir).unwrap();
-    let review_dir = home.path().join("runs").join(&review[4..6]).join(review);
+    let artifact = position.review_artifact_key().expect("published review");
+    let artifact_prefix = &artifact.strip_prefix("run_").unwrap_or(artifact)[..2];
+    let review_dir = home
+        .path()
+        .join("runs")
+        .join(artifact_prefix)
+        .join(artifact);
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(review_dir.join("manifest.json")).unwrap()).unwrap();
     manifest["run_id"] = serde_json::json!(interactive);
@@ -1150,6 +1189,25 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         r#"{"schema_version":1,"provider_session_id":"ses_retained","account_id":null}"#,
     )
     .unwrap();
+    // Historical files enter the indexed owner once, before ordinary discovery.
+    let imported = command(&installation.cli, &["session", "import", "--json"])
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", &original_db)
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(
+        runtime
+            .block_on(task.store.session(&interactive))
+            .unwrap()
+            .is_some(),
+        "retained conversation was not imported: {}",
+        String::from_utf8_lossy(&imported.stdout)
+    );
     let input_record = later.path().join("received-input");
     let provider = stale.path().join("opencode");
     fs::write(&provider, format!(
@@ -1214,11 +1272,18 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
     conflicting_position.pending_session_id = None;
     conflicting_position.ready_summary = None;
+    conflicting_position.current_attempt = None;
+    conflicting_position.version = 0;
+    conflicting_position.worker_generation = 0;
     conflicting_position.cursor = Default::default();
     assert_ne!(conflicting_position.invocation.id, position.invocation.id);
     runtime
         .block_on(later_store.start_task_flow(&task.task.id, conflicting_position.clone()))
         .unwrap();
+    let conflicting_position = runtime
+        .block_on(later_store.task_flow(&task.task.id))
+        .unwrap()
+        .expect("independent Flow persisted");
     let ambiguous = invoke(&["task", "run", "INF-123", "--json"]);
     assert!(!ambiguous.status.success());
     assert!(

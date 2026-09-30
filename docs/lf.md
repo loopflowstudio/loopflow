@@ -74,9 +74,10 @@ Context does not grant permission to advance the managed Flow. Unattended comman
 worktree confinement and account selection. Every assembled agent prompt resolves
 the participant name through `LF_USER_NAME`, global `user.name`, then Git.
 
-Flow steps resolve `lf` through PATH, including an explicit lock's leading
-directory. If PATH has no `lf`, they use the selected installation, then the
-driver executable as a last resort. Each child's Exec command records its
+Flow steps use the verified selected installation. On machines without an
+installation, they resolve `lf` through PATH, then use the driver executable as
+a last resort. Ambient PATH and inherited `LF_BIN` do not pin an installed
+worker. Each child's Exec command records its
 executable path. If a newer child advances the database
 schema beyond its driver's support, the driver preserves the selected result
 and exits with a compatibility diagnostic. Resume through a compatible `lf`;

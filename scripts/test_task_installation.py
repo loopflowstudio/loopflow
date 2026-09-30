@@ -26,7 +26,7 @@ PROOFS = {
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="rust:1.89-bookworm")
-    parser.add_argument("--test", choices=PROOFS, help="run one named proof")
+    parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
@@ -73,7 +73,7 @@ def main() -> None:
             copy.stdin.close()
             if copy.wait() != 0:
                 raise RuntimeError("copy disposable source snapshot")
-        selected = {args.test: PROOFS[args.test]} if args.test else PROOFS
+        selected = {name: PROOFS[name] for name in args.test} if args.test else PROOFS
         targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
         checks = "\n".join(
             f"timeout 180 cargo test -p loopflow --test {target} {name} "

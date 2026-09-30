@@ -876,7 +876,7 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         );
     }
     let status = command.status().await;
-    // PATH can select a newer child. Never settle its result through an older
+    // A new installation can select a newer child. Never settle its result through an older
     // schema, including recording a failure which would discard that selection.
     store.sqlite.validate_current_schema().map_err(|error| {
         StepEnd::StoreChanged(format!(

@@ -276,3 +276,16 @@ required before implementing continuation; no boundary has been weakened.
 The attempted durable `lf ask` failed before opening a Session with
 `Error: Task "LOO-334" is not registered`. No replacement attribution or
 database override was attempted; the existing relationship-repair Ask is separate.
+
+### Installation decision reopened after Home reassignment — 2026-09-30
+
+The ordinary installed `lf ask` now opens Session
+`ask_883713ce782642b8adf9b73e07d4daa5` in this checkout. It asks Jack Heart to
+choose between selected installed development bytes opening an explicitly routed
+compatible production store without migration, a retained released runtime, or
+an explicit transfer to the installation copy. The recommendation preserves the
+original execution directory and arbitrary branch-binary isolation, permitting
+only verified selected installation bytes and a compatible no-migration open.
+The waiting command has not returned feedback. Opening the Session establishes
+neither a decision nor authorization to change the production-store boundary.
+The earlier failed Ask and the separate relationship-repair Ask remain distinct.

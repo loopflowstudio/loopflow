@@ -1,37 +1,52 @@
-# v0.12.26
+# v0.12.27
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.27 keeps long-running Task work moving with fewer repeated conflicts, less replayed context, and account choices that survive Flow recovery. Branch updates now merge upstream changes while preserving authored commits, and agent launches distinguish current direction from progress reports and historical references. Upgrade for more reliable delivery continuity, with command migrations and the removal of the resident Wave service and chat surfaces to account for.
 
-v0.12.26 makes it easier to inspect what Loopflow will run and which managed login it will use. Local command, skill, and flow discovery explains available invocations before execution, while account identity checks catch mismatched logins before connecting or routing Codex work. Upgrade for clearer command selection and more reliable managed-account status, with two changes required for existing scripts and custom flows.
+## Update Task branches without replaying their history
 
-## Find the invocation before starting work
+Long Task branches could repeatedly reopen conflicts as updates replayed commits. `lf sync` now merges main or the live stack parent into the branch, preserving authored commit IDs and resolved conflicts through synchronization and landing preparation.
 
-Discovery now exposes command ownership and definition sources without launching agents, connecting accounts, or fetching definitions. Selection follows the same rules in CLI execution and flow composition.
+- Use `lf sync --manual` for local synchronization; after resolving conflicts, run `lf sync --continue`. Manual synchronization does not push. GitHub still performs the final squash onto main.
+- Stacked children retain their edits after a parent lands by squash. New children clear inherited scratch in a dedicated commit, while later parent updates preserve the child's own notes and deletions.
+- Interrupted or unowned merges can be resolved without a live foreign operation owner losing protection. Publication and landing recognize externally completed merges and reconcile the Task's recorded base.
+- Acknowledged PR identity is saved before follow-up reads or draft promotion. Failed follow-up operations retain the Task association and reviewer copy; Linear linkage remains retryable, and existing PRs can be adopted without prior local publication.
 
-- Use `lf list`, `lf help NAME`, and `lf help --all` to find definitions, inspect their sources, and see usable invocations.
-- Unique shortcuts resolve to canonical commands: `lf land` selects `lf pr land`. Ambiguous names report the available canonical choices; commands retain precedence over definitions.
-- `lf run NAME` runs a definition. Untyped lookup prefers flows over same-named skills; `lf skill NAME` and `lf flow NAME` select only the requested kind. A malformed flow reports an error instead of silently falling back to a skill.
-- Saved execution retains captured instructions and the existing saved-plan encoding for resume.
+## Keep account status current and choices durable
 
-## Keep managed work on the intended login
+Managed account status now refreshes identity and usage by default. Per-provider choices belong to the saved invocation, so local Flow work no longer depends on the launching CLI staying alive to retain them.
 
-A configured email could previously appear verified while its credential belonged to another login. Managed-account checks now compare observed identity before connecting, accepting verified usage, or routing Codex work, and provide recovery commands when identities disagree.
+- `lf auth status` refreshes managed accounts; `--cached` provides offline, read-only inspection. Failed refreshes retain dated evidence, and expired usage displays as unknown.
+- Flow and Task invocations save Claude and Codex `--account` or `--only-account` selections for autonomous steps, review children, and resumes. Restart an invocation to change its saved choices. SSH forwarding still requires the origin broker.
+- Managed Codex authorization opens through the saved Chrome profile using app-server. Failed or canceled login preserves existing credentials. Claude identity checks bind observations to the verified credentials and reject mismatched or duplicate identities during status and routing.
+- Live Codex status shows available banked resets. Only `lf auth redeem-reset codex <email>` spends one, reporting before/after usage and an idempotency key for retrying a lost reply. A failed follow-up refresh preserves the confirmed redemption outcome.
 
-- Codex identity checks compare the reported email with its native credential and per-user identity. Claude connect/import and explicit verification use the provider profile’s email and UUID.
-- Duplicate managed logins and misleading email changes are rejected. Different people sharing a workspace remain valid, and staged reconnect keeps the installed credential while authorization waits.
-- Observed identity and plan persist without resetting configuration or cooldowns. Temporary verification outages preserve cached credential health; provider rejection marks credentials missing.
-- Automatic Codex routing prefers observed Pro plans over Plus among healthy candidates while preserving explicit preferences and Session pins.
-- `lf auth status codex` stays read-only and shows observed login and recovery guidance. Add `--verify` to request current identity and usage. Usage displays as used/left, and expired windows display as unknown.
+## Give each agent step relevant direction
+
+Long threads and accumulated notes could overwhelm launches or send routine progress back as new instructions. Launch context is now bounded, complete overflow sources remain available locally, and successful steps acknowledge the direction already delivered to them.
+
+- Wave memory is budgeted at 8,000 tokens, scratch notes collectively at 16,000, and launch messages at 16,000. Oversized sources become marked excerpts pointing to complete local snapshots.
+- Launch input is capped at 64,000 cl100k tokens and 512 KiB, including structured-reply guidance. Remaining oversized input produces an actionable error before contacting the provider. Provider-native instructions, tools, later reads, and conversation history are outside this limit.
+- Successful visits acknowledge delivered direction per structural step and invocation. Failed or interrupted attempts acknowledge nothing; undelivered late comments remain eligible.
+- `lf task comment` inside a Run defaults to progress, excluded from steering. Use `--steer` to send direction explicitly. Historical unmarked comments remain eligible because their authorship cannot safely be inferred.
+- Submitted references neutralize dollar-prefixed skill mentions while direct requests remain active. Scratch warnings identify session-specific instructions and historical mentions by path and line; warnings are advisory and source files remain unchanged.
+
+## Operate Waves without a resident service
+
+Wave planning and Task delivery no longer carry the resident listener, daemon, or chat stack. Bounded `lf --wave <name> wave/operate` runs, Tasks, chapters, and metrics remain available; this removal does not replace the Task/Flow/chapter/Run model.
+
+- Remove `lfd`, Wave chat/reply/thread commands, webhook reception, and provider-delivery handling.
+- Remove app chat views, streaming clients, and resident liveness controls, along with daemon packaging and installation requirements.
+- PR landing retains its foreground supervisor. Historical daemon installation receipts remain readable, and this removal changes no database tables or migrations.
 
 ## Operational notes
 
-- **Script and flow migration:** replace `lf catalog` with `lf list`, and replace authored YAML `op:` steps with `cmd:`. Bundled flows are migrated. Review same-named skills and flows because untyped lookup now selects the flow.
-- **Account status scope:** state remains local to each Home. Ordinary status does not refresh provider observations; JSON retains dated usage observations, so consumers must check reset timestamps. Shared account state, current status by default, sole browser ownership, and Claude cached identity/routing remain follow-up work. Native provider credential writers do not participate in Loopflow’s installation lock.
-- **Validation limits:** account identity proofs use synthetic fixtures; live OAuth and deployed acceptance remain unverified. The supplied account-change record reports passing isolated Rust and website suites, formatting, Clippy, architecture, migration-history, and fresh-Home JSON checks. An earlier gate failed after inherited executable selection launched real Claude; that group was stopped and isolated checks subsequently passed. `TESTING.md` records the required isolation.
-- **Documentation previews:** proposed command-owner moves and overview commands are labeled designs, not shipped functionality.
+- **Command migration:** replace `lf rebase` with `lf sync`; there is no CLI alias. Saved Flow commands migrate automatically with their arguments and structure preserved. Replace `lf auth status --verify` with ordinary status; use `--cached` where read-only behavior is required.
+- **Account storage:** state remains in the existing Home database. A forward migration adds Claude credential binding. Cached status reports reset credits as unknown.
+- **Hosted CI:** PRs containing scratch artifacts defer the full matrix and skip `tests-result`. Scratch-free PRs run all checks regardless of draft status. Merge-queue and main runs reject scratch artifacts; a skipped checkpoint is not passing proof, and pre-merge enforcement depends on the required merge queue. Rust tests collect failures with `--no-fail-fast`.
+- **Validation limits:** branch and account recovery proofs used local fixtures or fake providers. Hosted acceptance, real browser OAuth, native Session resume, and real reset redemption remain unverified. The saved-reference change reports added regressions but no test or lint run; the failed-search fix has focused passing evidence, but its later full gate was blocked by the disk reserve.
 
 ## Small changes
 
-- The new `pr-review` skill produces HTML code walkthroughs.
-- CLI documentation separates the workflow guide from the command reference.
-- External skills use consistent frontmatter parsing when fetched and when read from cache.
+- Resource recovery limits busy uv cache pruning to 15 seconds, retains the busy cache, and continues eligible build-artifact cleanup.
+- Failed searches containing quoted denial text no longer falsely block Task handoff in the recorded cases. Blockers require a failed command and a recognized diagnostic line; existing blocked Tasks are not automatically recovered.
+- Design and kickoff skills mark planned removals as **Delete — do not maintain**. Implement and compress handle those removals before polishing surviving code, keeping required cutovers, migrations, and behavioral coverage together.

@@ -454,20 +454,17 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             };
             lines.push(format!("{:<12} {identity}", row.provider.as_str()));
             let evidence = match row.verification {
-                Verification::Accepted => "active (verified)",
-                Verification::Rejected => "needs login (identity or credential rejected)",
-                Verification::Unavailable => "verification unavailable",
-                Verification::NotChecked => "not checked",
-            };
-            match row.verification {
-                Verification::Accepted | Verification::Rejected => {
-                    lines.push(format!("  auth: {evidence}"))
-                }
-                _ => lines.push(format!(
-                    "  auth: cached {} · {evidence}",
+                Verification::Accepted => "active (verified)".into(),
+                Verification::Rejected => "needs login (identity or credential rejected)".into(),
+                Verification::Unavailable => format!(
+                    "cached {} · verification unavailable",
                     row.cached_credential_state
-                )),
-            }
+                ),
+                Verification::NotChecked => {
+                    format!("cached {} · not checked", row.cached_credential_state)
+                }
+            };
+            lines.push(format!("  auth: {evidence}"));
             if row.scope == Scope::Forwarded {
                 lines.push("  forwarded from origin · remote usage unknown".into());
             }
@@ -492,8 +489,7 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
             }
             if let Some(recovery) = &row.recovery {
                 lines.push(format!("  recover: {recovery}"));
-            }
-            if row.recovery.is_none() {
+            } else {
                 lines.push(format!("  next: {}", next_action(row, now)));
             }
             if row.windows.is_empty() {

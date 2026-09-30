@@ -355,3 +355,9 @@ LOO-298 must precede Monitor identity readers. Monitor, local Wave/unlinked-work
 discovery, destination readiness preserving restrictions and a real disposable
 first-provider-result walkthrough remain required before Jack Heart's demo.
 No publication, landing, Task completion or Flow navigation is implied.
+
+Compression after `b13c57d93` routes the overview through Status dispatch,
+removes duplicate settings validation and rendering branches (14 net Rust lines),
+and deletes the orphaned direction golden whose YAML case was already retired.
+Proof passed: `auth_tests` (5), `account_report_fixture` (1), `golden_prompt` (1),
+formatting, all-target Clippy (four jobs), and diff checks. Remaining scope is unchanged.

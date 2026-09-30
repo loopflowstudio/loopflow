@@ -60,13 +60,14 @@ struct AccountLifecycleUpdate<'a> {
 }
 
 pub fn run(cmd: Option<&AccountCommand>, json: bool) -> Result<()> {
+    let overview = AccountCommand::Status {
+        provider: None,
+        verify: false,
+        details: false,
+        json,
+    };
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(async {
-        match cmd {
-            Some(cmd) => run_async(cmd).await,
-            None => account_status::run(None, false, false, json).await,
-        }
-    })
+    rt.block_on(run_async(cmd.unwrap_or(&overview)))
 }
 
 async fn run_async(cmd: &AccountCommand) -> Result<()> {
@@ -907,17 +908,6 @@ async fn set_account_lifecycle(
     raw_email: &str,
     update: AccountLifecycleUpdate<'_>,
 ) -> Result<()> {
-    if update.login_email.is_none()
-        && update.routing.is_none()
-        && update.plan.is_none()
-        && !update.clear_plan
-        && update.paid_through.is_none()
-        && !update.clear_paid_through
-    {
-        return Err(anyhow!(
-            "lf account set needs --login-email, --routing, --plan, or --paid-through"
-        ));
-    }
     let provider = parse_managed_provider(raw_provider)?;
     let login_email = update
         .login_email

@@ -687,3 +687,52 @@ retains typed provider errors and removes redundant async dispatch (19 net Rust
 lines removed). Isolated `auth_tests` (8) and Account-first tests (12), formatting,
 all-target Clippy (four jobs) and diff checks passed. CLI counts and remaining
 scope are unchanged; providers and browsers in these proofs are fixtures.
+
+### Account integration slice review · 2026-09-30
+
+Reviewed the active branch against `a6b1bc3df`, reusing the preceding slice
+reviews and focusing on `365142efe..1d7d5aba3`, its imported identity/browser
+paths, and the complete Account consumer cut. **Pass for this slice; gap for
+whole-Task readiness.** No bounded production defect found. Bare Account owns
+live/default and explicit cached inspection; bare route owns route inspection.
+`AccountCommand::Status`, `RouteCommand::Show`, their dispatch and current
+callers are removed. Searches found no surviving predecessor Account calls;
+native provider auth commands and historical migration text remain legitimate.
+Shared provider parsing replaces the duplicate parser without a new domain
+owner, fallback reader or storage writer. Existing identity, credential and
+window writers retain their separate evidence responsibilities.
+
+Fresh executed proof, with inherited `LF_*` removed and `LF_BIN` pinned to this
+checkout's `target/debug/lf`:
+
+- `cargo test -p loopflow --test auth_tests status_refreshes_by_default_and_cached_preserves_evidence --jobs 4`:
+  1 passed. Public CLI text/JSON refresh, cached reads without provider access,
+  missing/expired/omitted capacity, unavailable observation and read-only route
+  inspection preserve their evidence and stored state.
+- `cargo test -p loopflow --test cli_discovery removed_options_and_aliases_report_usage_errors_without_effects --jobs 4`:
+  1 passed. Removed status/show/verify inputs and mixed inspection/mutation
+  arguments reject with exit 2 before effects.
+- `git diff --check`: passed. Reuse the recorded unchanged-source identity,
+  browser/cancellation, absent-Home, broker, discovery, documentation, formatting
+  and all-target Clippy passes. No broader suite was rerun.
+
+These proofs use disposable Homes and synthetic providers/browsers, not live
+OAuth, installed acceptance or a first local provider result. Measured
+`365142efe..1d7d5aba3`: **+94 / −108 production Rust and builtin instruction
+lines**, using physical-line difflib comparison after excluding test modules.
+Compression alone (`7285df603..1d7d5aba3`) is **+14 / −33**. Excludes integration
+tests, test-only files, examples, scripts, generated files, docs, memory and
+scratch; imported work already present at `365142efe` is outside this count.
+Retained compiled counts remain 137 commands below root, 433 flags, 92
+positionals and zero aliases; this review changes no parser metadata.
+
+Convergence holds: the preceding short-command cut switched wt and guidance
+consumers; `7285df603` replaces two Account reader leaves; `1d7d5aba3` compresses
+their implementation. These are not two implementation passes replacing nothing.
+Next integrate the outstanding LOO-298/334/340 destinations and extract their
+actual Clap additions before the dependent concept cuts. Monitor, authored
+Wave/unlinked-work discovery, destination child readiness with inherited account
+restrictions, the real first-provider-result walkthrough, remaining catalog and
+R01–R10 requirements, final documentation and Jack Heart's demo remain required.
+Open Monitor view choices remain for Jack. Whole-design Done when claims do not
+hold; this review does not publish, land, complete the Task or choose navigation.

@@ -1835,7 +1835,7 @@ fi"#;
             fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
             fs::write(
                 worktree.join(".lf/flows/repair-proof.yaml"),
-                "- op: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+                "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
         }

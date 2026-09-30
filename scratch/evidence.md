@@ -567,3 +567,14 @@ removes redundant actor aliases, and corrects the obsolete caller-Exec ownership
 comment. All 13 focused Flow/Task checks pass (`caller-compress-focused.log`);
 all-target Clippy with warnings denied, formatting and diff checks pass. Runtime
 and migration bytes are unchanged; no full suite or configured acceptance ran.
+
+## Landing fixture repair · 2026-09-30
+
+Jack Heart requested the hosted failure at `f07dcb6b8` be repaired before the
+separate naming commit. The repair-proof Flow now uses main's `cmd:` syntax.
+`naming-land.log` passes all 24 `land_tests` with `--no-fail-fast`, including
+`lf_pr_land_waits_for_authoritative_merged_observation`. These use real local lf
+processes with simulated GitHub/provider effects and isolated data; no hosted or
+configured acceptance follows. All-target Clippy with warnings denied
+(`naming-land-clippy.log`), formatting and diff checks pass. Production delta is
+zero; the one-line fixture change preserves the authoritative-merge assertions.

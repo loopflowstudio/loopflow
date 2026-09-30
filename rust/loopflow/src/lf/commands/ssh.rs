@@ -22,12 +22,12 @@
 //! Agent forwarding (`ssh -A`) is off by default — git pushes ride the
 //! forwarded `GH_TOKEN` over HTTPS, so the caller's SSH identity stays home.
 
+use clap::Parser;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
-use clap::Parser;
 
 use crate::durable::HomeId;
 use crate::pm::PmProviderKind;
@@ -138,9 +138,8 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let target = resolve_target(target)?;
-    let lf_args = bind_chat_wave_ids(&target, lf_args)?;
     let cmd = std::iter::once("lf".to_string())
-        .chain(lf_args)
+        .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
     let mut extra_env = vec![(crate::engine::process::SSH_TARGET_ENV, target.dest.as_str())];
     if let Some(home_id) = target.home_id.as_ref().map(HomeId::as_str) {
@@ -156,66 +155,6 @@ pub fn run(
         &cmd,
         &extra_env,
     )
-}
-
-fn bind_chat_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::Result<Vec<String>> {
-    if target.home_id.is_none() {
-        return Ok(lf_args.to_vec());
-    }
-    let parsed = crate::lf::Cli::try_parse_from(
-        std::iter::once("lf".to_string()).chain(lf_args.iter().cloned()),
-    );
-    let Ok(crate::lf::Cli {
-        command: Some(crate::lf::Commands::ChatConnect {
-            waves, wave_ids, ..
-        }),
-        ..
-    }) = parsed
-    else {
-        return Ok(lf_args.to_vec());
-    };
-    if waves.is_empty() {
-        return Ok(lf_args.to_vec());
-    }
-    let existing = wave_ids
-        .iter()
-        .filter_map(|binding| binding.split_once('=').map(|(name, _)| name.to_string()))
-        .collect::<std::collections::HashSet<_>>();
-    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let repo = crate::repo::find_repo_root().ok();
-    let bindings = runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
-            return Ok::<_, anyhow::Error>(Vec::new());
-        };
-        let mut bindings = Vec::new();
-        for raw_name in waves {
-            let Some(name) = crate::ops::util::normalize_wave_name(&raw_name) else {
-                continue;
-            };
-            if existing.contains(&name) {
-                continue;
-            }
-            match crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                repo.as_deref(),
-                Some(&name),
-                None,
-            )
-            .await
-            {
-                Ok(wave) => bindings.push(format!("{}={}", wave.name(), wave.id())),
-                Err(crate::work::wave::context::WaveResolveError::UnknownExplicit(_)) => {}
-                Err(error) => return Err(anyhow!(error)),
-            }
-        }
-        Ok(bindings)
-    })?;
-    let mut bound = lf_args.to_vec();
-    for binding in bindings {
-        bound.push("--wave-id".to_string());
-        bound.push(binding);
-    }
-    Ok(bound)
 }
 
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {

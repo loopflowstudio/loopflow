@@ -33,8 +33,6 @@ enum WaveForm {
     Flag,
     /// `<name>` positional on the subcommand.
     Positional,
-    /// `WaveTargetArgs` flattened: `--wave <name>`.
-    Target,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -128,22 +126,6 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "chat history",
-        path: &["chat"],
-        base_args: &["chat", "--history", "--json"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "wave probe",
-        path: &["wave", "probe"],
-        base_args: &["wave", "probe", "--json"],
-        wave_form: WaveForm::Positional,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "wave history",
         path: &["wave", "history"],
         base_args: &["wave", "history", "--json"],
@@ -152,20 +134,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     // ── Mutations ────────────────────────────────────────────────────────
-    // `chat post` uses stdin for text: its `trailing_var_arg` would swallow
-    // `--wave` if text were on the command line.
-    Cmd {
-        id: "chat post",
-        path: &["chat"],
-        base_args: &["chat"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            stdin: Some("matrix-test-message\n"),
-            ..Special::NONE
-        },
-    },
     Cmd {
         id: "wave connect",
         path: &["wave", "connect"],
@@ -445,7 +413,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
     args.extend(cmd.base_args.iter().map(|s| s.to_string()));
     if let Some(w) = explicit {
         match cmd.wave_form {
-            WaveForm::Flag | WaveForm::Target => {
+            WaveForm::Flag => {
                 args.push("--wave".to_string());
                 args.push(w.to_string());
             }

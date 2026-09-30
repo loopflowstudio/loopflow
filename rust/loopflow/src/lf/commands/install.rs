@@ -29,7 +29,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{OpenFlags, OptionalExtension};
+use rusqlite::OpenFlags;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -213,8 +213,6 @@ struct PromotionPreviewWire<'a> {
 pub struct PreparedArtifacts {
     pub cli_binary: PathBuf,
     pub cli_target: PathBuf,
-    pub daemon_binary: PathBuf,
-    pub daemon_target: PathBuf,
     pub app_source: Option<PathBuf>,
     pub app_target: Option<PathBuf>,
     pub app_superseded: Option<PathBuf>,
@@ -224,18 +222,9 @@ pub struct PreparedArtifacts {
 #[derive(Debug, Clone, Copy)]
 pub struct PromotionArtifacts<'a> {
     pub cli_target: &'a Path,
-    pub daemon_source: &'a Path,
-    pub daemon_target: &'a Path,
     pub app_source: Option<&'a Path>,
     pub app_target: Option<&'a Path>,
     pub legacy_app_target: Option<&'a Path>,
-}
-
-#[derive(Debug)]
-struct PausedHome {
-    keeper_mode: crate::lfd::service::KeeperMode,
-    home_id: Option<crate::durable::HomeId>,
-    repo: Option<PathBuf>,
 }
 
 /// The pure promotion decision. Given the candidate's authority, its
@@ -715,10 +704,10 @@ fn serde_authority(authority: MigrationAuthority) -> &'static str {
     }
 }
 
-/// Run `lf install preflight`. Read-only: opens the store only through the
-/// read-only preview and emits no journal event, so a frontier-incompatible
-/// candidate reaches the refusal here rather than failing in trace/store
-/// capture. Exits non-zero on a refusal so a caller can gate on it.
+/// Validate through a read-only preview. The CLI may append its Exec to an
+/// existing compatible process ledger, but observation never initializes or
+/// migrates it. A frontier-incompatible candidate still reaches this refusal.
+/// Exits non-zero on refusal so a caller can gate on it.
 pub fn preflight(json: bool) -> Result<()> {
     let preview = build_preview(&crate::store::production_database_path());
     if json {
@@ -916,8 +905,8 @@ fn tree_digest(path: &Path) -> Result<String> {
     crate::machine_install::tree_sha256(path)
 }
 
-fn artifact_set_digest(cli: &Path, daemon: &Path, app: Option<&Path>) -> Result<String> {
-    crate::machine_install::artifact_set_sha256(cli, daemon, app)
+fn artifact_set_digest(cli: &Path, app: Option<&Path>) -> Result<String> {
+    crate::machine_install::artifact_set_sha256(cli, None, app)
 }
 
 /// Copy `source` into `bin_dir` under its byte digest and return the path.
@@ -968,10 +957,6 @@ fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     stage_binary_as(source, bin_dir, "lf")
 }
 
-fn stage_daemon_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
-    stage_binary_as(source, bin_dir, "lfd")
-}
-
 fn prepare_artifacts(
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
@@ -989,9 +974,6 @@ fn prepare_artifacts(
             preview.candidate.source_revision
         ));
     }
-    validate_daemon_candidate(artifacts.daemon_source, &preview.candidate)?;
-    let daemon_binary = stage_daemon_binary(artifacts.daemon_source, &bin_dir)?;
-    validate_daemon_candidate(&daemon_binary, &preview.candidate)?;
     let app_source = match (artifacts.app_source, artifacts.app_target) {
         (Some(source), Some(target)) => Some(stage_app_bundle(&AppPromotion {
             source,
@@ -1020,8 +1002,6 @@ fn prepare_artifacts(
     Ok(PreparedArtifacts {
         cli_binary,
         cli_target: artifacts.cli_target.to_path_buf(),
-        daemon_binary,
-        daemon_target: artifacts.daemon_target.to_path_buf(),
         app_source,
         app_target: artifacts.app_target.map(Path::to_path_buf),
         app_superseded,
@@ -1035,10 +1015,6 @@ fn prepare_artifacts(
 /// mutable worktree or a target that is about to be replaced.
 fn preserve_prior_binary(cli_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
     preserve_prior_binary_as(cli_target, bin_dir, "lf")
-}
-
-fn preserve_prior_daemon(daemon_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
-    preserve_prior_binary_as(daemon_target, bin_dir, "lfd")
 }
 
 fn preserve_prior_binary_as(target: &Path, bin_dir: &Path, name: &str) -> Result<Option<PathBuf>> {
@@ -1105,7 +1081,6 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
 fn entry_gate_targets(
     root: &Path,
     cli_source: &Path,
-    daemon_source: &Path,
     activation: &crate::machine_install::ActivationTargets,
 ) -> Result<()> {
     let cli_gate = crate::machine_install::install_entry_gate(
@@ -1113,13 +1088,7 @@ fn entry_gate_targets(
         &crate::machine_install::ArtifactRole::Cli,
         cli_source,
     )?;
-    let daemon_gate = crate::machine_install::install_entry_gate(
-        root,
-        &crate::machine_install::ArtifactRole::Daemon,
-        daemon_source,
-    )?;
     commit_cli_symlink(&activation.cli, &cli_gate)?;
-    commit_cli_symlink(&activation.daemon, &daemon_gate)?;
     verify_entry_gate_targets(root, activation)
 }
 
@@ -1127,32 +1096,17 @@ fn verify_entry_gate_targets(
     root: &Path,
     activation: &crate::machine_install::ActivationTargets,
 ) -> Result<()> {
-    for (role, target) in [
-        (
-            crate::machine_install::ArtifactRole::Cli,
-            activation.cli.as_path(),
-        ),
-        (
-            crate::machine_install::ArtifactRole::Daemon,
-            activation.daemon.as_path(),
-        ),
-    ] {
-        let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
-        let actual = fs::canonicalize(target).with_context(|| {
-            format!(
-                "resolve {:?} public entry target {}",
-                role,
-                target.display()
-            )
-        })?;
-        if actual != expected {
-            return Err(anyhow!(
-                "public {:?} target {} bypasses machine entry gate {}",
-                role,
-                target.display(),
-                expected.display()
-            ));
-        }
+    let role = crate::machine_install::ArtifactRole::Cli;
+    let target = &activation.cli;
+    let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
+    let actual = fs::canonicalize(target)
+        .with_context(|| format!("resolve public CLI target {}", target.display()))?;
+    if actual != expected {
+        return Err(anyhow!(
+            "public CLI target {} bypasses machine entry gate {}",
+            target.display(),
+            expected.display()
+        ));
     }
     Ok(())
 }
@@ -1211,17 +1165,7 @@ fn activate_prepared_machine_switch(
             },
         )?;
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &receipt
-            .target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Daemon)
-            .ok_or_else(|| anyhow!("install switch {} target has no daemon", receipt.id))?
-            .path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app, &receipt.target.artifact_set)?;
     }
@@ -1483,29 +1427,6 @@ fn validate_staged_app_helper(
             preflight.verdict
         ));
     }
-    validate_daemon_candidate(&staged_app.join("Contents/MacOS/lfd"), expected_candidate)
-}
-
-fn validate_daemon_candidate(daemon: &Path, expected_candidate: &CandidateIdentity) -> Result<()> {
-    let output = Command::new(daemon)
-        .arg("--version")
-        .output()
-        .with_context(|| format!("run daemon candidate {}", daemon.display()))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "daemon candidate {} did not report its version: {}",
-            daemon.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let actual = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let expected = format!("lfd {}", expected_candidate.display_version());
-    if actual != expected {
-        return Err(anyhow!(
-            "daemon candidate {} is not the promoted candidate: expected {expected:?}, got {actual:?}",
-            daemon.display()
-        ));
-    }
     Ok(())
 }
 
@@ -1554,39 +1475,6 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     retained_binary_path_as(candidate, bin_dir, "lf")
 }
 
-fn retained_daemon_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
-    retained_binary_path_as(candidate, bin_dir, "lfd")
-}
-
-fn read_home_context(
-    store_path: &Path,
-) -> Result<(Option<crate::durable::HomeId>, Option<PathBuf>)> {
-    if !store_path.exists() {
-        return Ok((None, None));
-    }
-    let connection = rusqlite::Connection::open_with_flags(
-        store_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    let home_id = connection
-        .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
-            row.get::<_, String>(0)
-        })
-        .optional()?;
-    let home_id = home_id
-        .map(|id| crate::durable::HomeId::parse(&id).map_err(anyhow::Error::from))
-        .transpose()?;
-    let repo = connection
-        .query_row(
-            "SELECT repo FROM waves ORDER BY created_at LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .map(PathBuf::from);
-    Ok((home_id, repo))
-}
-
 fn app_executable_paths(
     selection: &crate::machine_install::InstallSelection,
     app_target: Option<&Path>,
@@ -1605,8 +1493,7 @@ fn app_executable_paths(
         .map(|artifact| artifact.path.clone())
         .collect::<Vec<_>>();
     if let Some(bundle) = app_target {
-        paths
-            .extend(["Loopflow", "lf", "lfd"].map(|name| bundle.join("Contents/MacOS").join(name)));
+        paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
     }
     paths.sort();
     paths.dedup();
@@ -1807,158 +1694,12 @@ fn resume_switch_app(_receipt: &crate::machine_install::SwitchReceipt) -> Result
     Ok(())
 }
 
-fn pause_home(store_path: &Path) -> Result<PausedHome> {
-    let (home_id, repo) = read_home_context(store_path)?;
-    let runtime = tokio::runtime::Runtime::new().context("create Home quiesce runtime")?;
-    let keeper_mode = crate::lfd::service::pause().context("pause the installed Home keeper")?;
-    let fallback_session = home_id.as_ref().map(|home_id| {
-        format!(
-            "lfd-{}",
-            crate::engine::process::tmux_session_slug(home_id.as_str())
-        )
-    });
-    if let Some(session) = fallback_session.as_deref() {
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", session])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
-    if let Some(home_id) = home_id.as_ref() {
-        let lf_home = store_path
-            .parent()
-            .expect("Home store has a parent directory");
-        let stopped = runtime.block_on(async {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-            while tokio::time::Instant::now() < deadline {
-                if !crate::lfd::home_is_live_at(home_id, lf_home).await {
-                    return Ok(());
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            Err(anyhow!("the old Home keeper remained live after stop"))
-        });
-        if let Err(error) = stopped {
-            let _ = crate::lfd::service::resume(keeper_mode);
-            return Err(error);
-        }
-    }
-    Ok(PausedHome {
-        keeper_mode,
-        home_id,
-        repo,
-    })
-}
-
-fn resume_home_for_switch(
-    home: &PausedHome,
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    resume_home_with_selection(home, Some(&receipt.target), Some(&receipt.id))
-}
-
-fn resume_home_for_install_selection(
-    home: &PausedHome,
-    selection: &crate::machine_install::InstallSelection,
-) -> Result<()> {
-    resume_home_with_selection(home, Some(selection), None)
-}
-
-fn reload_home_for_install_selection(
-    home: &PausedHome,
-    selection: &crate::machine_install::InstallSelection,
-) -> Result<()> {
-    crate::lfd::service::pause()?;
-    resume_home_for_install_selection(home, selection)
-}
-
-fn resume_home_with_selection(
-    home: &PausedHome,
-    selection: Option<&crate::machine_install::InstallSelection>,
-    switch_id: Option<&str>,
-) -> Result<()> {
-    crate::lfd::service::resume(home.keeper_mode).context("restart the installed Home keeper")?;
-    let (Some(home_id), Some(repo)) = (home.home_id.as_ref(), home.repo.as_deref()) else {
-        return Ok(());
-    };
-    let runtime = tokio::runtime::Runtime::new().context("create Home restart runtime")?;
-    runtime.block_on(async {
-        if home.keeper_mode != crate::lfd::service::KeeperMode::None {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-            while tokio::time::Instant::now() < deadline {
-                let live = match selection.and_then(|selection| selection.store.parent()) {
-                    Some(lf_home) => crate::lfd::home_is_live_at(home_id, lf_home).await,
-                    None => crate::lfd::home_is_live(home_id).await,
-                };
-                if live {
-                    return Ok(());
-                }
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            return Err(anyhow!(
-                "installed Home keeper did not become healthy within 10s"
-            ));
-        }
-        match (selection, switch_id) {
-            (_, Some(switch_id)) => crate::lfd::ensure_for_switch(home_id, repo, switch_id).await,
-            (Some(selection), None) => {
-                crate::lfd::ensure_install_selection(home_id, repo, selection).await
-            }
-            (None, None) => crate::lfd::ensure(home_id, repo).await,
-        }
-    })
-}
-
-fn verify_switch_home(
-    home: &PausedHome,
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    let Some(home_id) = home.home_id.as_ref() else {
-        return Ok(());
-    };
-    let lf_home = receipt
-        .target
-        .store
-        .parent()
-        .expect("install target store has a Home directory");
-    let runtime = tokio::runtime::Runtime::new().context("create install identity runtime")?;
-    let identity = runtime.block_on(async {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while tokio::time::Instant::now() < deadline {
-            if let Some(identity) = crate::lfd::home_health_identity_at(home_id, lf_home).await {
-                return Some(identity);
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        None
-    });
-    let identity = identity.ok_or_else(|| anyhow!("installed Home did not report its identity"))?;
-    let store = crate::store::canonicalize_with_missing_tail(&identity.store)
-        .with_context(|| format!("resolve keeper store {}", identity.store.display()))?;
-    if store != receipt.target.store
-        || identity.source_revision != receipt.target.artifact_set.source_revision
-    {
-        return Err(anyhow!(
-            "installed Home identity mismatch: expected revision {} store {}, got revision {} store {}",
-            receipt.target.artifact_set.source_revision,
-            receipt.target.store.display(),
-            identity.source_revision,
-            store.display()
-        ));
-    }
-    Ok(())
-}
-
 fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::machine_install::ArtifactRole> {
-    let mut roles = vec![
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ];
+    let mut roles = vec![crate::machine_install::ArtifactRole::Cli];
     if has_app {
         roles.extend([
             crate::machine_install::ArtifactRole::App,
             crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-            crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
         ]);
     }
     roles
@@ -2013,7 +1754,6 @@ fn capture_bundle_artifacts(
 ) -> Result<Vec<crate::machine_install::ArtifactIdentity>> {
     let app = bundle.join("Contents/MacOS/Loopflow");
     let cli = bundle.join("Contents/MacOS/lf");
-    let daemon = bundle.join("Contents/MacOS/lfd");
     let helper = read_binary_preflight(&cli)
         .with_context(|| format!("validate retained app helper {}", cli.display()))?;
     if helper.candidate != *candidate {
@@ -2023,7 +1763,6 @@ fn capture_bundle_artifacts(
             candidate.source_revision
         ));
     }
-    validate_daemon_candidate(&daemon, candidate)?;
     Ok(vec![
         crate::machine_install::ArtifactIdentity::capture(
             crate::machine_install::ArtifactRole::App,
@@ -2032,10 +1771,6 @@ fn capture_bundle_artifacts(
         crate::machine_install::ArtifactIdentity::capture(
             crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
             &cli,
-        )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
-            &daemon,
         )?,
     ])
 }
@@ -2058,25 +1793,18 @@ fn machine_artifact_set(
     source: crate::machine_install::InstallSource,
     candidate: &CandidateIdentity,
     cli: &Path,
-    daemon: &Path,
     app: Option<&Path>,
 ) -> Result<crate::machine_install::ArtifactSet> {
-    let digest = artifact_set_digest(cli, daemon, app)?;
+    let digest = artifact_set_digest(cli, app)?;
     let label = match source {
         crate::machine_install::InstallSource::Published => "published",
         crate::machine_install::InstallSource::Development => "development",
     };
     let id = format!("{label}-{digest}");
-    let mut artifacts = vec![
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::Cli,
-            cli,
-        )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::Daemon,
-            daemon,
-        )?,
-    ];
+    let mut artifacts = vec![crate::machine_install::ArtifactIdentity::capture(
+        crate::machine_install::ArtifactRole::Cli,
+        cli,
+    )?];
     artifacts.extend(retain_bundle_artifacts(app, root, &id, candidate)?);
     let set = crate::machine_install::ArtifactSet {
         id,
@@ -2104,8 +1832,6 @@ fn bootstrap_published_install(
     }
     let cli = preserve_prior_binary(artifacts.cli_target, &lf_bin_dir())?
         .ok_or_else(|| anyhow!("the published CLI fallback is missing; {repair}"))?;
-    let daemon = preserve_prior_daemon(artifacts.daemon_target, &lf_bin_dir())?
-        .ok_or_else(|| anyhow!("the published daemon fallback is missing; {repair}"))?;
     let preflight = read_binary_preflight(&cli)
         .with_context(|| format!("validate published CLI fallback; {repair}"))?;
     if preflight.candidate.authority != MigrationAuthority::Published {
@@ -2116,14 +1842,11 @@ fn bootstrap_published_install(
     validate_rollback_verdict(&preflight.verdict).with_context(|| {
         format!("the published fallback does not recognize its store; {repair}")
     })?;
-    validate_daemon_candidate(&daemon, &preflight.candidate)
-        .with_context(|| format!("validate published daemon fallback; {repair}"))?;
     let fallback = machine_artifact_set(
         root,
         crate::machine_install::InstallSource::Published,
         &preflight.candidate,
         &cli,
-        &daemon,
         artifacts.app_target,
     )
     .with_context(|| format!("retain the complete published fallback; {repair}"))?;
@@ -2198,10 +1921,10 @@ fn active_install_for_local_promotion(
             ))
         }
     };
-    active.selection.artifact_set.verify(&[
-        crate::machine_install::ArtifactRole::Cli,
-        crate::machine_install::ArtifactRole::Daemon,
-    ])?;
+    active
+        .selection
+        .artifact_set
+        .verify(&[crate::machine_install::ArtifactRole::Cli])?;
     active
         .published_fallback
         .verify(&required_machine_artifact_roles(
@@ -2209,33 +1932,6 @@ fn active_install_for_local_promotion(
         ))
         .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
     Ok(active)
-}
-
-fn active_keeper_matches(
-    selection: &crate::machine_install::InstallSelection,
-    candidate: &CandidateIdentity,
-) -> Result<bool> {
-    if crate::lfd::service::configured_mode()? == crate::lfd::service::KeeperMode::None {
-        return Ok(true);
-    }
-    let (Some(home_id), _) = read_home_context(&selection.store)? else {
-        return Ok(false);
-    };
-    let lf_home = selection
-        .store
-        .parent()
-        .expect("validated install store has a Home directory");
-    let runtime = tokio::runtime::Runtime::new().context("create install identity runtime")?;
-    let Some(identity) = runtime.block_on(crate::lfd::home_health_identity_at(&home_id, lf_home))
-    else {
-        return Ok(false);
-    };
-    let store = crate::store::canonicalize_with_missing_tail(&identity.store)
-        .with_context(|| format!("resolve keeper store {}", identity.store.display()))?;
-    Ok(store == selection.store
-        && identity.build_version == candidate.display_version()
-        && identity.source_revision == candidate.source_revision
-        && identity.migration_frontier == candidate.latest_known_migration)
 }
 
 fn active_selection_has_settled_receipt(
@@ -2292,7 +1988,6 @@ fn active_install_matches_candidate(
     {
         return Ok(false);
     }
-    validate_daemon_candidate(artifacts.daemon_source, candidate)?;
     match (artifacts.app_source, artifacts.app_target) {
         (Some(app_source), Some(_)) => {
             validate_staged_app_helper(app_source, candidate, helper_verdict)?;
@@ -2304,11 +1999,7 @@ fn active_install_matches_candidate(
             ))
         }
     }
-    let digest = artifact_set_digest(
-        candidate_binary,
-        artifacts.daemon_source,
-        artifacts.app_source,
-    )?;
+    let digest = artifact_set_digest(candidate_binary, artifacts.app_source)?;
     if set.content_sha256 != digest {
         return Ok(false);
     }
@@ -2317,7 +2008,7 @@ fn active_install_matches_candidate(
     ))?;
     let activation = crate::machine_install::ActivationTargets {
         cli: artifacts.cli_target.to_path_buf(),
-        daemon: artifacts.daemon_target.to_path_buf(),
+        daemon: None,
         app: artifacts.app_target.map(Path::to_path_buf),
         legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
     };
@@ -2339,7 +2030,7 @@ fn active_install_matches_candidate(
             }
         }
     }
-    active_keeper_matches(&active.selection, candidate)
+    Ok(true)
 }
 
 fn discard_unadvanced_disposable_store(
@@ -2373,7 +2064,6 @@ fn discard_unadvanced_disposable_store(
 fn restore_before_local_advance(
     root: &Path,
     receipt: &crate::machine_install::SwitchReceipt,
-    paused: &PausedHome,
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
@@ -2384,21 +2074,16 @@ fn restore_before_local_advance(
         Err(anyhow!("disposable target cleanup failed"))
     };
     drop(lock);
-    let resume = resume_home_with_selection(paused, receipt.prior.as_ref(), None);
     let app = resume_switch_app(receipt);
-    match (cleanup, clear, resume, app) {
-        (Ok(()), Ok(()), Ok(()), Ok(())) => error,
-        (cleanup, clear, resume, app) => anyhow!(
-            "{error}; restoring the prior install also failed (target: {}, receipt: {}, keeper: {}, app: {})",
+    match (cleanup, clear, app) {
+        (Ok(()), Ok(()), Ok(())) => error,
+        (cleanup, clear, app) => anyhow!(
+            "{error}; restoring the prior install also failed (target: {}, receipt: {}, app: {})",
             cleanup
                 .err()
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string()),
             clear
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
-            resume
                 .err()
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string()),
@@ -2513,7 +2198,6 @@ fn promote_local_candidate(
         crate::machine_install::InstallSource::Development,
         &preview.candidate,
         &prepared.cli_binary,
-        &prepared.daemon_binary,
         artifacts.app_source,
     )?;
     let reused_home = retained.as_ref().or_else(|| {
@@ -2570,7 +2254,7 @@ fn promote_local_candidate(
             .clone(),
         activation: crate::machine_install::ActivationTargets {
             cli: artifacts.cli_target.to_path_buf(),
-            daemon: artifacts.daemon_target.to_path_buf(),
+            daemon: None,
             app: artifacts.app_target.map(Path::to_path_buf),
             legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
         },
@@ -2579,17 +2263,8 @@ fn promote_local_candidate(
     };
     crate::machine_install::write_switch(&root, &switch)?;
 
-    let paused = match pause_home(&prior.selection.store) {
-        Ok(paused) => paused,
-        Err(error) => {
-            crate::machine_install::clear_switch(&root, &switch.id)?;
-            return Err(error);
-        }
-    };
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     let repair = (|| {
         if let Some(app) = switch.activation.app.as_deref() {
@@ -2603,32 +2278,18 @@ fn promote_local_candidate(
                 )?;
             }
         }
-        let target_daemon = switch
-            .target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Daemon)
-            .expect("validated local candidate has a daemon");
-        entry_gate_targets(
-            &root,
-            &switch.candidate.path,
-            &target_daemon.path,
-            &switch.activation,
-        )?;
+        entry_gate_targets(&root, &switch.candidate.path, &switch.activation)?;
         if let Some(app) = switch.activation.app.as_deref() {
             verify_selected_app_bundle(app, &prior.selection.artifact_set)?;
         }
         Ok(())
     })();
     if let Err(error) = repair {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
 
     if !reuse {
@@ -2642,7 +2303,6 @@ fn promote_local_candidate(
             return Err(restore_before_local_advance(
                 &root,
                 &switch,
-                &paused,
                 lock,
                 error.into(),
             ));
@@ -2651,7 +2311,6 @@ fn promote_local_candidate(
             return Err(restore_before_local_advance(
                 &root,
                 &switch,
-                &paused,
                 lock,
                 anyhow!(
                     "new disposable store directory {} already exists",
@@ -2663,30 +2322,23 @@ fn promote_local_candidate(
             return Err(restore_before_local_advance(
                 &root,
                 &switch,
-                &paused,
                 lock,
                 error.into(),
             ));
         }
         switch.disposable_store_owned = true;
         if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-            return Err(restore_before_local_advance(
-                &root, &switch, &paused, lock, error,
-            ));
+            return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
         if let Err(error) =
             _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
         {
-            return Err(restore_before_local_advance(
-                &root, &switch, &paused, lock, error,
-            ));
+            return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
 
@@ -2712,19 +2364,9 @@ fn promote_local_candidate(
         published_fallback: prior.published_fallback,
         retained_published_sets: retained,
     };
-    crate::lfd::service::prepare_install_switch(
-        paused.keeper_mode,
-        &switch.activation.daemon,
-        &switch.id,
-    )?;
-    resume_home_for_switch(&paused, &switch)?;
-    verify_switch_home(&paused, &switch)?;
     settle_app_artifacts(&prepared)?;
     resume_switch_app(&switch)?;
-    crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
     settle_switch(&root, &mut switch, &active)?;
-    reload_home_for_install_selection(&paused, &active.selection)?;
-    verify_switch_home(&paused, &switch)?;
     println!(
         "promoted local {}: {} -> {} (store {})",
         preview.candidate.display_version(),
@@ -2756,11 +2398,7 @@ fn delegate_local_promotion(
         .args(["install", "promote", "--from-build"])
         .arg(build)
         .arg("--cli-target")
-        .arg(artifacts.cli_target)
-        .arg("--daemon-source")
-        .arg(artifacts.daemon_source)
-        .arg("--daemon-target")
-        .arg(artifacts.daemon_target);
+        .arg(artifacts.cli_target);
     if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
         command
             .arg("--app-source")
@@ -2810,11 +2448,7 @@ fn delegate_to_active_coordinator(
         .arg("--from-build")
         .arg(candidate)
         .arg("--cli-target")
-        .arg(artifacts.cli_target)
-        .arg("--daemon-source")
-        .arg(artifacts.daemon_source)
-        .arg("--daemon-target")
-        .arg(artifacts.daemon_target);
+        .arg(artifacts.cli_target);
     if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
         command
             .arg("--app-source")
@@ -2863,35 +2497,12 @@ fn bundle_for_app_artifact(path: &Path) -> Result<&Path> {
         })
 }
 
-fn resume_store_home(
-    selection: &crate::machine_install::InstallSelection,
-    switch: Option<&crate::machine_install::SwitchReceipt>,
-) -> Result<PausedHome> {
-    let (home_id, repo) = read_home_context(&selection.store)?;
-    let home = PausedHome {
-        keeper_mode: crate::lfd::service::configured_mode()?,
-        home_id,
-        repo,
-    };
-    match switch {
-        Some(receipt) => resume_home_for_switch(&home, receipt),
-        None => resume_home_for_install_selection(&home, selection),
-    }?;
-    Ok(home)
-}
-
 fn activate_switch_targets(
     root: &Path,
     receipt: &mut crate::machine_install::SwitchReceipt,
     candidate: &CandidateIdentity,
 ) -> Result<()> {
     let mut superseded_app = None;
-    let daemon = receipt
-        .target
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Daemon)
-        .ok_or_else(|| anyhow!("install switch {} target has no daemon", receipt.id))?;
-    daemon.verify()?;
     receipt.candidate.verify()?;
 
     if let Some(app_target) = receipt.activation.app.as_deref() {
@@ -2920,12 +2531,7 @@ fn activate_switch_targets(
             superseded_app = commit_app_bundle(&staged, &plan)?;
         }
     }
-    entry_gate_targets(
-        root,
-        &receipt.candidate.path,
-        &daemon.path,
-        &receipt.activation,
-    )?;
+    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app_target) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
@@ -3214,9 +2820,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         discard_unadvanced_disposable_store(&receipt)?;
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
-        if let Some(prior) = &receipt.prior {
-            resume_store_home(prior, None)?;
-        }
         resume_switch_app(&receipt)?;
         return Ok(());
     }
@@ -3265,7 +2868,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     paths.sort();
     paths.dedup();
     quiesce_app_processes(&paths)?;
-    let exact_recovery = exact_candidate.is_some();
     let candidate = exact_candidate.unwrap_or_else(CandidateIdentity::current);
     activate_switch_targets(&root, &mut receipt, &candidate)?;
     if activation_phase {
@@ -3274,31 +2876,8 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
 
     let active = active_install_from_switch(&receipt);
-    if exact_recovery {
-        let keeper_mode = crate::lfd::service::pause()?;
-        crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
-        settle_switch(&root, &mut receipt, &active)?;
-        resume_store_home(&active.selection, None)?;
-        resume_switch_app(&receipt)?;
-        if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
-            remove_path(legacy)?;
-        }
-        drop(lock);
-        return Ok(());
-    }
-    let keeper_mode = crate::lfd::service::configured_mode()?;
-    crate::lfd::service::prepare_install_switch(
-        keeper_mode,
-        &receipt.activation.daemon,
-        &receipt.id,
-    )?;
-    let home = resume_store_home(&active.selection, Some(&receipt))?;
-    verify_switch_home(&home, &receipt)?;
-    resume_switch_app(&receipt)?;
-    crate::lfd::service::finish_install_switch(keeper_mode, &receipt.activation.daemon)?;
     settle_switch(&root, &mut receipt, &active)?;
-    reload_home_for_install_selection(&home, &active.selection)?;
-    verify_switch_home(&home, &receipt)?;
+    resume_switch_app(&receipt)?;
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
         remove_path(legacy)?;
     }
@@ -3326,14 +2905,13 @@ fn promote_published_from_machine_install(
         crate::machine_install::MachineInstallState::Legacy => None,
     };
     if let Some(prior) = &prior {
-        prior.selection.artifact_set.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-            crate::machine_install::ArtifactRole::Daemon,
-        ])?;
-        prior.published_fallback.verify(&[
-            crate::machine_install::ArtifactRole::Cli,
-            crate::machine_install::ArtifactRole::Daemon,
-        ])?;
+        prior
+            .selection
+            .artifact_set
+            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
+        prior
+            .published_fallback
+            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
     }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
@@ -3394,7 +2972,6 @@ fn promote_published_from_machine_install(
         crate::machine_install::InstallSource::Published,
         &preview.candidate,
         &prepared.cli_binary,
-        &prepared.daemon_binary,
         artifacts.app_source,
     )?;
     let target_published_fallback = target_set.clone();
@@ -3431,7 +3008,7 @@ fn promote_published_from_machine_install(
             .clone(),
         activation: crate::machine_install::ActivationTargets {
             cli: artifacts.cli_target.to_path_buf(),
-            daemon: artifacts.daemon_target.to_path_buf(),
+            daemon: None,
             app: artifacts.app_target.map(Path::to_path_buf),
             legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
         },
@@ -3439,34 +3016,16 @@ fn promote_published_from_machine_install(
         disposable_store_owned: false,
     };
     crate::machine_install::write_switch(&root, &switch)?;
-    let paused = match pause_home(
-        prior
-            .as_ref()
-            .map(|prior| prior.selection.store.as_path())
-            .unwrap_or(&store_path),
-    ) {
-        Ok(paused) => paused,
-        Err(error) => {
-            crate::machine_install::clear_switch(&root, &switch.id)?;
-            return Err(error);
-        }
-    };
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(
-            &root, &switch, &paused, lock, error,
-        ));
+        return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
     activate_prepared_machine_switch(
@@ -3491,23 +3050,7 @@ fn promote_published_from_machine_install(
         retained_published_sets: retained,
     };
     settle_app_artifacts(&prepared)?;
-    if store_is_exact(&preview.verdict) {
-        crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        settle_switch(&root, &mut switch, &active)?;
-        resume_home_for_install_selection(&paused, &active.selection)?;
-    } else {
-        crate::lfd::service::prepare_install_switch(
-            paused.keeper_mode,
-            &switch.activation.daemon,
-            &switch.id,
-        )?;
-        resume_home_for_switch(&paused, &switch)?;
-        verify_switch_home(&paused, &switch)?;
-        crate::lfd::service::finish_install_switch(paused.keeper_mode, &switch.activation.daemon)?;
-        settle_switch(&root, &mut switch, &active)?;
-        reload_home_for_install_selection(&paused, &active.selection)?;
-        verify_switch_home(&paused, &switch)?;
-    }
+    settle_switch(&root, &mut switch, &active)?;
     resume_switch_app(&switch)?;
     println!(
         "promoted published {}: {} -> {} (store {})",
@@ -3693,12 +3236,7 @@ pub fn promote(
 /// Activate retained immutable bytes only when that binary's own preflight
 /// recognizes the current store exactly. The exclusive lock keeps artifact and
 /// store selection serialized through the symlink commit.
-pub fn rollback(
-    cli_target: &Path,
-    candidate: &Path,
-    daemon_target: &Path,
-    daemon_candidate: &Path,
-) -> Result<()> {
+pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
     guard_task_origin()?;
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
@@ -3717,54 +3255,21 @@ pub fn rollback(
             ))
         }
     }
-    let (candidate, daemon_candidate) = rollback_from_store(
-        cli_target,
-        candidate,
-        daemon_target,
-        daemon_candidate,
-        &lf_bin_dir(),
-    )?;
+    let candidate = rollback_from_store(cli_target, candidate, &lf_bin_dir())?;
     println!(
         "rolled back: {} -> {}",
         cli_target.display(),
         candidate.display()
     );
-    println!(
-        "rolled back lfd: {} -> {}",
-        daemon_target.display(),
-        daemon_candidate.display()
-    );
     Ok(())
 }
 
-fn rollback_from_store(
-    cli_target: &Path,
-    candidate: &Path,
-    daemon_target: &Path,
-    daemon_candidate: &Path,
-    bin_dir: &Path,
-) -> Result<(PathBuf, PathBuf)> {
+fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     let candidate = retained_binary_path(candidate, bin_dir)?;
-    let daemon_candidate = retained_daemon_path(daemon_candidate, bin_dir)?;
     let preflight = read_binary_preflight(&candidate)?;
     validate_rollback_verdict(&preflight.verdict)?;
-    validate_daemon_candidate(&daemon_candidate, &preflight.candidate)?;
-
-    let current_daemon = preserve_prior_daemon(daemon_target, bin_dir)?;
-    commit_cli_symlink(daemon_target, &daemon_candidate)?;
-    if let Err(error) = activate_rollback(cli_target, &candidate, &preflight.verdict) {
-        let restored = match current_daemon.as_deref() {
-            Some(current) => commit_cli_symlink(daemon_target, current),
-            None => remove_path(daemon_target),
-        };
-        if let Err(restore_error) = restored {
-            return Err(anyhow!(
-                "{error}; restoring current lfd target also failed: {restore_error}"
-            ));
-        }
-        return Err(error);
-    }
-    Ok((candidate, daemon_candidate))
+    activate_rollback(cli_target, &candidate, &preflight.verdict)?;
+    Ok(candidate)
 }
 
 #[cfg(test)]

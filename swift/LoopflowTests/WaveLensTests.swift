@@ -6,11 +6,14 @@ import Testing
 struct WaveLensTests {
     // MARK: - Wave row (list runtime projection)
 
-    @Test("chat connects on demand without a Wave enablement state")
-    func chatAvailability() {
-        #expect(WaveLens.forWave(live: true).reason == "Chat connected")
-        #expect(WaveLens.forWave(live: false).color == .black)
-        #expect(WaveLens.forWave(live: false).reason == "Chat connects when opened")
+    @Test("Wave counts do not claim Task health or process liveness")
+    func countsPreserveUnknownHealth() {
+        let idle = WaveLens.forWave(activeTasks: 0)
+        #expect(idle.color == .black)
+        #expect(idle.reason == "No active Tasks")
+        let active = WaveLens.forWave(activeTasks: 2)
+        #expect(active.color == .unknown)
+        #expect(active.reason == "2 active Tasks")
     }
 
     @Test("retired Wave renders history rather than disabled current state")
@@ -147,10 +150,11 @@ struct WaveLensTests {
     func everyLensHasReason() throws {
         let lenses = [
             WaveLens.forWave(
-                live: true
+
+                activeTasks: 0
             ),
-            WaveLens.forWave(live: false),
-            WaveLens.forWave(live: false),
+            WaveLens.forWave(activeTasks: 1),
+            WaveLens.forWave(activeTasks: 0),
             WaveLens.forTask(try makeCondition(state: "unknown", reason: "unread")),
             WaveLens.forTasks(tasks: []),
         ]

@@ -68,11 +68,10 @@ public struct WaveLens: Sendable, Hashable {
         return WaveLens(color: .black, reason: "Off · no active work")
     }
 
-    /// Chat availability does not decide whether a Wave's Tasks can advance.
-    public static func forWave(live: Bool) -> WaveLens {
-        live
-            ? WaveLens(color: .green, reason: "Chat connected")
-            : WaveLens(color: .black, reason: "Chat connects when opened")
+    /// Counts do not establish Task health. Detailed conditions come from status.
+    public static func forWave(activeTasks: Int) -> WaveLens {
+        return WaveLens(color: activeTasks > 0 ? .unknown : .black,
+                        reason: activeTasks > 0 ? "\(activeTasks) active Tasks" : "No active Tasks")
     }
 
     /// Fold Task conditions into the parent's single reading. Priority is

@@ -88,7 +88,7 @@ fn install_dir() -> Result<PathBuf> {
 
 fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
-    if !["lf", "lfd"].iter().all(|name| {
+    if !["lf"].iter().all(|name| {
         inspect(&directory.join(name), &["--version"]).is_some_and(|output| {
             output.status.success()
                 && String::from_utf8_lossy(&output.stdout).trim() == format!("{name} {version}")
@@ -142,7 +142,7 @@ fn has_release_app(applications: &Path, version: &str) -> bool {
     .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok());
     info.is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
-    }) && ["Loopflow", "lf", "lfd"].iter().all(|name| {
+    }) && ["Loopflow", "lf"].iter().all(|name| {
         fs::metadata(contents.join("MacOS").join(name))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     })
@@ -297,11 +297,9 @@ mod tests {
     }
 
     #[test]
-    fn installed_release_must_have_both_published_binaries() {
+    fn installed_release_needs_only_the_verified_cli() {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf", "published");
-        assert!(!is_current(temp.path(), "v9.9.9", None));
-        binary(&temp.path().join("lfd"), "lfd", "published");
         assert!(is_current(temp.path(), "v9.9.9", None));
         assert!(!is_current(temp.path(), "v9.9.10", None));
         binary(&temp.path().join("lf"), "lf", "validation_only");
@@ -351,13 +349,12 @@ mod tests {
     fn current_cli_does_not_hide_a_missing_stale_or_incomplete_app() {
         let temp = tempfile::tempdir().unwrap();
         binary(&temp.path().join("lf"), "lf", "published");
-        binary(&temp.path().join("lfd"), "lfd", "published");
         let applications = temp.path().join("Applications");
         let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
         assert!(!current());
         let contents = applications.join("Loopflow.app/Contents");
         fs::create_dir_all(contents.join("MacOS")).unwrap();
-        for name in ["Loopflow", "lf", "lfd"] {
+        for name in ["Loopflow", "lf"] {
             binary(&contents.join("MacOS").join(name), name, "published");
         }
         for (version, expected) in [("9.9.8", false), ("9.9.9", true)] {

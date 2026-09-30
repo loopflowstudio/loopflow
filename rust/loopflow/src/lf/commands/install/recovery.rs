@@ -61,21 +61,15 @@ fn recovery_route(root: &Path) -> Result<String> {
                 shell_escape(&cli.path.to_string_lossy())
             ));
         }
-        let daemon = selection
-            .artifact_set
-            .artifact(&ArtifactRole::Daemon)
-            .expect("verified daemon");
         let activation = receipt
             .expect("inactive pair has a settled receipt")
             .activation;
         let mut command = format!(
-            "{} install promote --from-build {} --reuse-home {} --daemon-source {} --cli-target {} --daemon-target {} --preview",
+            "{} install promote --from-build {} --reuse-home {} --cli-target {} --preview",
             shell_escape(&cli.path.to_string_lossy()),
             shell_escape(&cli.path.to_string_lossy()),
             shell_escape(&selection.installation_id),
-            shell_escape(&daemon.path.to_string_lossy()),
             shell_escape(&activation.cli.to_string_lossy()),
-            shell_escape(&activation.daemon.to_string_lossy()),
         );
         if let Some(target) = activation.app {
             let Some(app) = selection.artifact_set.artifact(&ArtifactRole::App) else {
@@ -106,9 +100,7 @@ fn recovery_route(root: &Path) -> Result<String> {
 }
 
 fn verify_pair(selection: &InstallSelection, deadline: Instant) -> Result<()> {
-    selection
-        .artifact_set
-        .verify(&[ArtifactRole::Cli, ArtifactRole::Daemon])?;
+    selection.artifact_set.verify(&[ArtifactRole::Cli])?;
     let cli = selection
         .artifact_set
         .artifact(&ArtifactRole::Cli)
@@ -121,7 +113,6 @@ fn verify_pair(selection: &InstallSelection, deadline: Instant) -> Result<()> {
             command.env_remove(name);
         }
     }
-    command.env(crate::run_record::TASK_ORIGIN_ENV, "1");
     let mut child = command
         .args(["install", "local-preflight", "--store"])
         .arg(&selection.store)
@@ -160,7 +151,5 @@ fn verify_pair(selection: &InstallSelection, deadline: Instant) -> Result<()> {
             "retained executable did not verify its recorded identity and exact store"
         ));
     }
-    selection
-        .artifact_set
-        .verify(&[ArtifactRole::Cli, ArtifactRole::Daemon])
+    selection.artifact_set.verify(&[ArtifactRole::Cli])
 }

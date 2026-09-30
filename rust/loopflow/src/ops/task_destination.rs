@@ -309,8 +309,6 @@ mod tests {
         )
         .unwrap();
         let cli = root.join("installed-lf");
-        let daemon = root.join("installed-lfd");
-        fs::write(&daemon, "fixture daemon").unwrap();
         fs::write(&cli, format!("#!/bin/sh\nexport TASK_DESTINATION_CASE=installed\nexport TASK_DESTINATION_OPERATION=\"$2\"\n{} --exact {} --nocapture 1>&2 || exit 99\nif [ -n \"$TASK_DESTINATION_FAIL\" ]; then exit 19; fi\ncat \"$LF_HOME/task.json\"\n", shell_escape(&std::env::current_exe().unwrap().to_string_lossy()), TEST)).unwrap();
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
         let artifacts = ArtifactSet {
@@ -318,11 +316,8 @@ mod tests {
             source: InstallSource::Development,
             source_revision: "fixture".into(),
             source_identity: "fixture".into(),
-            content_sha256: artifact_set_sha256(&cli, &daemon, None).unwrap(),
-            artifacts: vec![
-                ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
-            ],
+            content_sha256: artifact_set_sha256(&cli, None, None).unwrap(),
+            artifacts: vec![ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap()],
         };
         let mut published = artifacts.clone();
         published.source = InstallSource::Published;

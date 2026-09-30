@@ -137,16 +137,16 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple[Path, Path]:
+def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if sorted(member.name for member in members) != ["lf", "lfd"] or not all(
+        if sorted(member.name for member in members) != ["lf"] or not all(
             member.isfile() for member in members
         ):
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
         binaries = []
-        for name in ("lf", "lfd"):
+        for name in ("lf",):
             member = next(member for member in members if member.name == name)
             source = package.extractfile(member)
             if source is None:
@@ -156,7 +156,7 @@ def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple
                 shutil.copyfileobj(source, destination)
             binary.chmod(0o755)
             binaries.append(binary)
-    return binaries[0], binaries[1]
+    return binaries[0]
 
 
 def _validate_release_candidate(binary: Path, scratch: Path) -> None:
@@ -314,7 +314,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> Candidate
     stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
+        arm_binary = _extract_arm_binary(archives, scratch)
         _validate_release_candidate(arm_binary, scratch)
         _run(["sh", "-n", str(installer)])
         stages.append(CANDIDATE_STAGES[1])

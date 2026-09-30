@@ -27,8 +27,8 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf chat --follow -w <name>` / `lf wave status` |
-| Run on another machine | `lf ssh <home-id> chat --follow -w <name>` ([Go Remote](#go-remote)) |
+| Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
+| Run on another machine | `lf ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -177,28 +177,6 @@ branch and Task PR record when present; they do not require a live Task worker.
 ---
 
 ## Scale with Waves
-
-Ready to automate? Waves remain available continuously and choose another
-bounded pass when chat, child observations, crons, or a heartbeat wake them.
-
-`lf` skills are manual building blocks. A Wave is a durable operating context
-whose optional resident handles chat and recurring selection. Project
-operations and Task workers run independently of that resident.
-
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
-frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`), then open it in
-**Loopflow** (macOS) — the home for running waves. Select the repository and
-the Wave to get its persistent conversation beside the Linear-backed
-Project → Task work map; the app starts the Wave's resident process when
-needed. From the CLI, `lf chat --follow -w shipper` opens the conversation.
-
-The Wave creates or selects a Linear task, starts it with `lf task run
-<issue-id>`, and stays steerable while the Task runs in its stable
-worktree. `lf pr land` keeps the PR under one durable watcher through CI repair
-and merge; review feedback returns to the same Task and linked events land in
-the Wave thread.
-
-Inspect running work through Loopflow:
 
 ```bash
 lf ps --json          # live processes and their ownership evidence

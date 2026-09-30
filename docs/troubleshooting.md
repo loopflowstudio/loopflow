@@ -10,8 +10,8 @@ and inspect the assigned Home:
 
 ```bash
 lf wave status <wave> --json
-lf wave probe <wave>
-lf chat --follow -w <wave>
+lf --wave <wave> wave/operate
+lf cron list
 ```
 
 For a remote placement, run chat through `lf ssh <home-id>`. Task execution and

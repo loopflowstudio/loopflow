@@ -82,16 +82,7 @@ fn task_origin_prevents_promotion_but_allows_read_only_candidate_preflight() {
     let output = command(
         home.path(),
         home.path(),
-        &[
-            "install",
-            "promote",
-            "--cli-target",
-            "/unused/lf",
-            "--daemon-target",
-            "/unused/lfd",
-            "--daemon-source",
-            "/unused/candidate",
-        ],
+        &["install", "promote", "--cli-target", "/unused/lf"],
     )
     .env("LF_TASK_ORIGIN", "1")
     // A broken origin check must still stop before any machine effects.

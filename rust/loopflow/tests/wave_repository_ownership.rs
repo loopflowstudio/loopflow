@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::controller::wave::journal;
 use loopflow::controller::wave::relocate::relocate_wave;
 use loopflow::durable::{HomeId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
@@ -45,9 +44,6 @@ fn author_wave(repo: &Path, slug: &str, marker: &str) {
     let wave = repo.join("wave").join(slug);
     std::fs::create_dir_all(&wave).unwrap();
     std::fs::write(wave.join("GOAL.md"), format!("# {marker}\n")).unwrap();
-    let journal = journal::journal_path(repo, slug);
-    std::fs::create_dir_all(journal.parent().unwrap()).unwrap();
-    std::fs::write(journal, format!("{{\"repository\":\"{marker}\"}}\n")).unwrap();
     commit(repo, &format!("author {slug}"));
 }
 
@@ -417,7 +413,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(divergence.to_string().contains("diverges"));
     assert!(repo_a.join("wave/infrastructure").is_dir());
     std::fs::remove_dir_all(repo_a.join("wave/platform")).unwrap();
-    std::fs::remove_dir_all(repo_a.join(".lf/journal/waves/platform")).unwrap();
     commit(&repo_a, "remove divergent target");
 
     rusqlite::Connection::open(&database)
@@ -534,7 +529,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let preserved_task = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(preserved_task.wave_id, alpha.id().clone());
     assert_eq!(preserved_task.project_id, project.id);
-    assert!(journal::journal_path(&repo_d, "platform").is_file());
 
     let status = lf(&home, &repo_d, &["wave", "status", "platform", "--json"]);
     assert_eq!(status["wave"]["id"], alpha.id().as_str());

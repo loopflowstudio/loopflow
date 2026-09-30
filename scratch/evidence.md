@@ -561,3 +561,9 @@ installed-Home conversion, merge or Task completion is claimed.
 The disposable fallback attempt (`caller-install.log`) stopped at Docker's
 ten-second probe, before creating a container. It did not reach the corrected
 assertions. No host service restart or installed-Home access was attempted.
+
+Compression after `974f1dfd5` shares the test-only native-turn event lookup,
+removes redundant actor aliases, and corrects the obsolete caller-Exec ownership
+comment. All 13 focused Flow/Task checks pass (`caller-compress-focused.log`);
+all-target Clippy with warnings denied, formatting and diff checks pass. Runtime
+and migration bytes are unchanged; no full suite or configured acceptance ran.

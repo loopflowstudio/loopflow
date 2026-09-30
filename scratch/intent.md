@@ -39,7 +39,7 @@ Jack Heart, verbatim during the design conversation. Later corrections govern ea
 
 > repo will also need an even more general prompt should be assumed to be the onboarding experience for loopflow, as well as an agent of last resort.
 
-> $kickoff
+> (Jack invoked the kickoff skill here.)
 > actually maybe make this a task and run a flow with kickoff in it? idk
 
 > ok just run kickoff here then

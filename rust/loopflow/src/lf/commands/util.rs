@@ -1802,12 +1802,13 @@ mod tests {
         .await
         .unwrap();
         let account_home = temp.path().join("accounts/claude/jackstah");
-        let account = new_account(
+        let mut account = new_account(
             Provider::Claude,
             ProviderAccountId::parse("jackstah").unwrap(),
             account_home.clone(),
             Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
         );
+        crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
         launch_session(LaunchTarget::Tui, "claude", None, temp.path(), "review it").unwrap();

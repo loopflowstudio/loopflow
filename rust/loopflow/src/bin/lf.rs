@@ -712,28 +712,6 @@ impl Drop for EnvGuard {
     }
 }
 
-/// Build a local, in-process account-lease broker for a non-`ssh` command that
-/// carries `--account`/`--only-account`, exporting the opaque `LF_ACCOUNT_LEASE`
-/// handle so this process and its children resolve one credential through it.
-/// Returns `None` when the selection resolves to no grant. The returned broker
-/// and env guard must outlive the command.
-fn build_local_account_lease(
-    selection: &loopflow::provider_account::lease::AccountSelection,
-) -> anyhow::Result<
-    Option<(
-        loopflow::provider_account::lease::AccountLeaseBroker,
-        EnvGuard,
-    )>,
-> {
-    use loopflow::provider_account::lease;
-    let runtime = tokio::runtime::Runtime::new()?;
-    let Some(broker) = runtime.block_on(lease::AccountLeaseBroker::start_root(selection))? else {
-        return Ok(None);
-    };
-    let guard = EnvGuard::set(lease::ACCOUNT_LEASE_ENV, broker.local_env_value()?);
-    Ok(Some((broker, guard)))
-}
-
 fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
     let value = value.trim();
     let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
@@ -1399,9 +1377,7 @@ fn main() -> anyhow::Result<()> {
         &preferred_accounts,
         &restricted_accounts,
     )?;
-    let inherited_account_lease = loopflow::provider_account::lease::account_lease_active();
-    let _forwarded_account_selection = if inherited_account_lease && !account_selection.is_default()
-    {
+    let _account_selection = if !account_selection.is_default() {
         Some(EnvGuard::set(
             loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
             account_selection.env_value()?,
@@ -1476,16 +1452,6 @@ fn main() -> anyhow::Result<()> {
     // before reads or mutations dispatch. Raw-host bootstrap carries no
     // expectation and falls through.
     loopflow::lf::commands::home::validate_expected_home_process()?;
-
-    // SSH commands build and forward their broker in the transport path. Every
-    // local command with a selection gets an in-process broker here.
-    let is_ssh = matches!(cli.command, Some(loopflow::lf::Commands::Ssh { .. }));
-    let _local_account_lease =
-        if is_ssh || inherited_account_lease || account_selection.is_default() {
-            None
-        } else {
-            build_local_account_lease(&account_selection)?
-        };
 
     let mut direct_binding = None;
     let mut _bound_cwd = None;

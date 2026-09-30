@@ -1028,7 +1028,16 @@ async fn serve_flow_locked(
             &message,
         ])
         .current_dir(&task.worktree)
-        .env(HUMAN_SESSION_ENV, serialized);
+        .env(HUMAN_SESSION_ENV, serialized)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            position
+                .invocation
+                .accounts
+                .clone()
+                .unwrap_or_default()
+                .env_value()?,
+        );
     let run_id = session_run_id(&flow_token_id(&token), position.session_run_id.as_ref())?;
     let mut child = spawn_session_run(&mut command, &run_id).await?;
     let position = store
@@ -1294,6 +1303,12 @@ async fn open_boundary(store: &SharedStore, session_id: &str) -> Result<RunId> {
     }
     loop {
         let (task, mut position) = find_flow_session(store, session_id).await?;
+        let _accounts = position
+            .invocation
+            .accounts
+            .clone()
+            .unwrap_or_default()
+            .activate()?;
         let previous = position.session_run_id.clone();
         let token = flow_token(&task, &position)?;
         if let Some(run_id) = &previous {

@@ -73,15 +73,18 @@ will not run that proof.
    `LF_AS`. Current-state migration checks and configured-acceptance limits remain
    explicit. Website copies and architecture HTML were regenerated; prompt goldens
    were regenerated from the changed shared surface. Verification is recorded below.
-3. **Measurements and behavioral checks.** Measure cold/warm CLI list and detail
-   on a representative disposable dense store, separating startup, SQL and
-   payload costs; record dataset size and production-code delta against main.
-   Preserve one proof per final behavior: Session bind/rename/headless discovery,
-   retry/review and exact completion, typed decisions, driver/provider fencing,
-   Exec ancestry across handoff, cancellation and Chapter convergence. Keep the
-   populated current-review and Project-default migration checks, Rust/Swift DTO
-   agreement and retained-terminal tests. Synthetic two-Home Chapter tests remain
-   useful race coverage even though only this machine is a deployed client.
+3. **Measurements and behavioral checks — complete locally.**
+   [Density measurements and retained proof map](density/README.md) record the
+   20,000-Session / 5,000-Flow / 100,000-Exec disposable store, first/warm CLI
+   timings, independent SQL and payload controls, raw samples and reproducible
+   source. Warm bounded reads measured 291–313 ms against a 300 ms empty-store
+   baseline; the Exec search miss measured 362 ms, including a 64 ms SQL control.
+   OS caches were uncontrolled and the candidate was a debug build. The estimated
+   production delta against recorded main `12013dae4` is +5,287 lines, not a net
+   reduction. The map retains one owner per behavior and complementary race tests;
+   no tests were added and no further redundant case was established. All 14
+   focused Rust and 18 Swift DTO checks passed, with formatting, Clippy and Ruff;
+   the integrated gate and configured acceptance remain separate.
 4. **Integrated gate.** After remaining repairs and any merge from main, build
    `lf`, run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
    `uv run python scripts/check_migrations.py` and
@@ -188,9 +191,9 @@ ignored output; architecture HTML remained byte-identical after regeneration.
 Review caught two additional contract errors: the short guide documented nonexistent
 `task list`, and the architecture owner table still named deleted `run_events`.
 Both are corrected. This completes item 2 only; dense-store measurements and the
-consolidated behavior-proof set remain item 3. Main integration, the integrated
-gate and shipping stay with the supervisor. No installed-store write, provider
-acceptance or rendered Desktop proof is claimed.
+consolidated behavior-proof set were subsequently completed in item 3 above.
+Main integration, the integrated gate and shipping stay with the supervisor.
+No installed-store write, provider acceptance or rendered Desktop proof is claimed.
 
 ## Before a release migrates ~/.lf
 

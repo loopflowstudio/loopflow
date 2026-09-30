@@ -1601,6 +1601,11 @@ mod tests {
             .await
             .unwrap();
         let claimed = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        let claimed = store
+            .reserve_attempt(claimed.id(), claimed.version, claimed.claim.as_ref(), None)
+            .await
+            .unwrap();
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
         assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
         let mut successor = make_project(&wave);

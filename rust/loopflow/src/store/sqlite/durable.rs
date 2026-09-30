@@ -933,14 +933,14 @@ mod durable_store_tests {
         }
     }
 
-    /// The Run the claim reserved for the current step.
+    /// Reserve the input explicitly when the fixture starts work.
     fn reserved_run(store: &SqliteStore, task: &TaskId) -> String {
+        let flow = store.task_flow(task).unwrap().unwrap();
         store
-            .task_flow(task)
-            .unwrap()
+            .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
             .unwrap()
             .current_attempt
-            .expect("the claim reserved the step's Run")
+            .unwrap()
             .run_id
     }
 
@@ -2754,12 +2754,20 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn a_claim_reserves_conversation_input_before_its_launch() {
+    fn the_step_reserves_conversation_input_after_its_driver_claim() {
         let (_dir, store, work) = store_with_task();
         let position = store
             .start_task_flow(&work, &autonomous_position(&work))
             .unwrap();
         claim(&store, &work, &position, 77);
+        assert!(!store.task_started(&work).unwrap());
+        assert!(store
+            .task_flow(&work)
+            .unwrap()
+            .unwrap()
+            .current_attempt
+            .is_none());
+        reserved_run(&store, &work);
         let conn = store.conn.lock().unwrap();
         let reserved: i64 = conn
             .query_row(
@@ -2770,7 +2778,7 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(
             reserved, 1,
-            "the claim reserves the conversation's input before publication"
+            "the step reserves the conversation's input before publication"
         );
         drop(conn);
         assert!(store.task_started(&work).unwrap());
@@ -2962,6 +2970,7 @@ mod durable_store_tests {
             .start_task_flow(&work, &autonomous_position(&work))
             .unwrap();
         let held = claim(&store, &work, &position, 111);
+        reserved_run(&store, &work);
         let final_position = store.task_flow(&work).unwrap().unwrap();
 
         assert!(store

@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["cryptography>=44"]
+# dependencies = ["cryptography>=44", "websockets>=15,<16"]
 # ///
 """Prove Chapter CLI adoption/default launch in a disposable Linux OS account.
 
@@ -30,6 +30,8 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from linear_oauth import _encrypt, _tls_context
 from task_deletion import Handler as ProxyHandler
+from websockets.exceptions import ConnectionClosed
+from websockets.sync.server import unix_serve
 
 FLOW = "chapter-proof"
 MARKER = "CHAPTER_PROJECT_DEFAULT_REACHED"
@@ -115,9 +117,23 @@ def _graphql(state: dict, query: str, variables: dict) -> dict:
                 **issue,
                 "project": projects[issue["project"]["id"]],
                 "updatedAt": "2026-09-28T00:00:00Z",
-                "comments": _page([]),
+                "comments": _page(state.get("comments", [])),
             }
         }
+    if operation == "CreateComment":
+        comment = {
+            "id": str(uuid.uuid4()),
+            "body": variables["body"],
+            "createdAt": "2026-09-29T00:00:00Z",
+            "updatedAt": "2026-09-29T00:00:00Z",
+            "user": {
+                "id": "fixture-operator",
+                "displayName": "Fixture Operator",
+                "name": "Fixture Operator",
+            },
+        }
+        state.setdefault("comments", []).append(comment)
+        return {"commentCreate": {"comment": {"id": comment["id"]}}}
     if operation == "ProjectStatuses":
         return {
             "projectStatuses": _page(
@@ -144,83 +160,135 @@ def _provider() -> None:
     if "--version" in sys.argv:
         print("codex-cli chapter-fixture")
         return
-    if "--listen" in sys.argv and not os.environ.get("LF_TEST_CODEX_STDIO"):
-        pid = os.getpid()
-        stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
-        Path(os.environ["CHAPTER_ENGINE_RECEIPT"]).write_text(json.dumps([pid, stamp]))
-        bridge = Path(__file__).resolve().parents[2] / "rust/loopflow/tests/support/codex_socket.py"
-        os.execv(sys.executable, [sys.executable, str(bridge), sys.argv[0], *sys.argv[1:]])
+    if "--listen" not in sys.argv:
+        for line in sys.stdin:
+            request = json.loads(line)
+            if "id" not in request:
+                continue
+            assert request["method"] in ("initialize", "account/read"), request["method"]
+            result = (
+                {"account": {"type": "chatgpt", "email": "fixture@example.test"}}
+                if request["method"] == "account/read"
+                else {}
+            )
+            print(json.dumps({"id": request["id"], "result": result}), flush=True)
+        return
+    pid = os.getpid()
+    stamp = subprocess.check_output(["ps", "-p", str(pid), "-o", "lstart="], text=True).strip()
+    Path(os.environ["CHAPTER_ENGINE_RECEIPT"]).write_text(json.dumps([pid, stamp]))
+    endpoint = sys.argv[sys.argv.index("--listen") + 1].removeprefix("unix://")
     thread_id = "chapter-thread"
-    for line in sys.stdin:
-        request = json.loads(line)
-        method = request["method"]
-        if "id" not in request:
-            assert method == "initialized", method
-            continue
-        result = {}
-        if method == "account/read":
-            result = {"account": {"type": "chatgpt", "email": "fixture@example.test"}}
-        elif method in ("thread/start", "thread/resume"):
-            result = {"thread": {"id": thread_id}}
-        elif method == "turn/start":
-            prompt = json.dumps(request["params"])
-            assert MARKER in prompt, "Project-authored skill was not sent to the provider"
-            receipt = Path(os.environ["CHAPTER_PROVIDER_RECEIPT"])
-            assert not receipt.exists(), "unexpected second provider turn"
-            receipt.write_text(
-                json.dumps(
-                    {
-                        "pid": os.getpid(),
-                        "cwd": str(Path.cwd()),
-                        "request": request,
-                        "database": os.environ["LF_DB_PATH"],
-                    }
-                )
-            )
-            result = {"turn": {"id": "chapter-turn"}}
-        else:
-            assert method == "initialize", f"Unsupported Codex method: {method}"
-        print(json.dumps({"id": request["id"], "result": result}), flush=True)
-        if method == "turn/start":
-            print(
-                json.dumps(
-                    {
-                        "method": "turn/started",
-                        "params": {
-                            "threadId": thread_id,
-                            "turn": {"id": "chapter-turn", "status": "inProgress"},
-                        },
-                    }
-                ),
-                flush=True,
-            )
-            print(
-                json.dumps(
-                    {
-                        "method": "item/agentMessage/delta",
-                        "params": {
+    controls = os.environ.get("CHAPTER_STEP_CONTROLS") == "1"
+    receipt = Path(os.environ["CHAPTER_PROVIDER_RECEIPT"])
+    proof_root = receipt.parent
+    state = {"status": "inProgress"}
+    lock = threading.Lock()
+
+    def _connection(socket) -> None:
+        def _complete() -> None:
+            if controls:
+                while not (proof_root / "release-step").exists():
+                    time.sleep(0.05)
+            with lock:
+                state["status"] = "completed"
+            try:
+                for method, params in (
+                    (
+                        "item/agentMessage/delta",
+                        {
                             "threadId": thread_id,
                             "turnId": "chapter-turn",
                             "itemId": "chapter-message",
                             "delta": "Chapter fixture complete.",
                         },
-                    }
-                ),
-                flush=True,
-            )
-            print(
-                json.dumps(
-                    {
-                        "method": "turn/completed",
-                        "params": {
+                    ),
+                    (
+                        "turn/completed",
+                        {
                             "threadId": thread_id,
                             "turn": {"id": "chapter-turn", "status": "completed"},
                         },
-                    }
-                ),
-                flush=True,
-            )
-            return
+                    ),
+                ):
+                    socket.send(json.dumps({"method": method, "params": params}))
+            except ConnectionClosed:
+                pass  # Native completion survives the departed client.
+
+        try:
+            for line in socket:
+                request = json.loads(line)
+                method = request["method"]
+                if "id" not in request:
+                    assert method == "initialized", method
+                    continue
+                result = {}
+                if method == "account/read":
+                    result = {"account": {"type": "chatgpt", "email": "fixture@example.test"}}
+                elif method in ("thread/start", "thread/resume"):
+                    result = {"thread": {"id": thread_id}}
+                elif method == "turn/start":
+                    assert MARKER in json.dumps(request["params"]), "Project skill missing"
+                    with lock:
+                        assert not receipt.exists(), "unexpected second provider turn"
+                        receipt.write_text(
+                            json.dumps(
+                                {
+                                    "pid": pid,
+                                    "cwd": str(Path.cwd()),
+                                    "request": request,
+                                    "database": os.environ["LF_DB_PATH"],
+                                }
+                            )
+                        )
+                    result = {"turn": {"id": "chapter-turn"}}
+                elif method == "turn/steer":
+                    with (proof_root / "steers.jsonl").open("a") as output:
+                        output.write(json.dumps(request) + "\n")
+                    result = {"turnId": "chapter-turn"}
+                elif method == "turn/interrupt":
+                    with lock:
+                        state["status"] = "interrupted"
+                elif method == "thread/turns/list":
+                    with lock:
+                        result = {
+                            "data": [
+                                {"id": "chapter-turn", "status": state["status"], "items": []}
+                            ],
+                            "nextCursor": None,
+                        }
+                else:
+                    assert method == "initialize", f"Unsupported Codex method: {method}"
+                socket.send(json.dumps({"id": request["id"], "result": result}))
+                if method == "turn/interrupt":
+                    socket.send(
+                        json.dumps(
+                            {
+                                "method": "turn/completed",
+                                "params": {
+                                    "threadId": thread_id,
+                                    "turn": {"id": "chapter-turn", "status": "interrupted"},
+                                },
+                            }
+                        )
+                    )
+                if method == "turn/start":
+                    socket.send(
+                        json.dumps(
+                            {
+                                "method": "turn/started",
+                                "params": {
+                                    "threadId": thread_id,
+                                    "turn": {"id": "chapter-turn", "status": "inProgress"},
+                                },
+                            }
+                        )
+                    )
+                    threading.Thread(target=_complete, daemon=True).start()
+        except ConnectionClosed:
+            pass
+
+    with unix_serve(_connection, endpoint) as server:
+        server.serve_forever()
 
 
 def _stop_provider(root: Path) -> None:
@@ -331,6 +399,91 @@ def _planning(database: Path, task_project: str) -> None:
         )
 
 
+def _exercise_step_controls(
+    lf: Path, repo: Path, root: Path, env: dict[str, str], logs: Path
+) -> str:
+    deadline = time.monotonic() + 45
+    while not (root / "provider.json").exists():
+        assert time.monotonic() < deadline, "Task skill did not start"
+        time.sleep(0.1)
+    saved = _snapshot(Path(env["LF_DB_PATH"]))
+    claim = json.loads(saved["flow"]["claim_json"])
+    owner = claim["owner"]
+    panes = _run(
+        ["tmux", "list-panes", "-a", "-F", "#{pane_id}"], repo, env, logs
+    ).stdout.splitlines()
+    assert len(panes) == 1, panes
+    instruction = "Attached direction reached the ordinary skill child."
+    _run(["tmux", "send-keys", "-t", panes[0], "-l", instruction], repo, env, logs)
+    _run(["tmux", "send-keys", "-t", panes[0], "Enter"], repo, env, logs)
+    while not (root / "steers.jsonl").exists():
+        assert time.monotonic() < deadline, "Attached instruction did not reach the provider"
+        time.sleep(0.1)
+    steers = (root / "steers.jsonl").read_text().splitlines()
+    assert len(steers) == 1 and instruction in steers[0], steers
+    assert "Fixture Operator" in steers[0], steers
+    if env["CHAPTER_STEP_INTERRUPT"] == "1":
+        _run(["tmux", "send-keys", "-t", panes[0], "-l", "/interrupt"], repo, env, logs)
+        _run(["tmux", "send-keys", "-t", panes[0], "Enter"], repo, env, logs)
+        deadline = time.monotonic() + 15
+        while True:
+            stopped = _snapshot(Path(env["LF_DB_PATH"]))
+            if stopped["flow"]["claim_json"] is None:
+                break
+            assert time.monotonic() < deadline, "Task interruption did not release its driver"
+            time.sleep(0.1)
+        for field in ("step_index", "iteration", "invocation_json"):
+            assert stopped["flow"][field] == saved["flow"][field], field
+        assert stopped["flow"]["failure_json"] is None, stopped["flow"]
+        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+            assert (
+                db.execute("SELECT COUNT(*) FROM flow_events WHERE kind='consumed'").fetchone()[0]
+                == 0
+            )
+            outcomes = [
+                json.loads(row[0])["status"]
+                for row in db.execute("SELECT payload FROM session_events WHERE kind='completed'")
+            ]
+            assert outcomes == ["interrupted"], outcomes
+        (root / "step-interrupt.json").write_text(
+            json.dumps({"before": saved, "after": stopped, "native_outcomes": outcomes}, indent=2)
+        )
+        return "interrupted"
+    pid = owner["pid"]
+    assert Path(f"/proc/{pid}/exe").resolve() == lf.resolve(), owner
+    age = subprocess.check_output(["ps", "-p", str(pid), "-o", "etimes="], text=True)
+    assert abs(int(time.time()) - int(age) - owner["started_at"]) <= 3, owner
+    os.kill(pid, signal.SIGKILL)
+    output = root / "resume-command.log"
+    with output.open("w") as log:
+        with subprocess.Popen(
+            [str(lf), "task", "run", "FIX-1", "--json"], cwd=repo, env=env, stdout=log, stderr=log
+        ) as resume:
+            try:
+                time.sleep(1)
+                assert resume.poll() in (None, 0), output.read_text()
+                waiting = _snapshot(Path(env["LF_DB_PATH"]))
+                assert waiting["flow"]["failure_json"] is None, waiting["flow"]
+                assert waiting["flow"]["selected_start"] == saved["flow"]["selected_start"]
+                # tmux closes the worker's terminal on death. If that also ends
+                # the skill client, resume observes the same surviving engine.
+                os.kill(json.loads((root / "engine.json").read_text())[0], 0)
+                assert waiting["flow"]["current_capture"] == saved["flow"]["current_capture"]
+                (root / "release-step").touch()
+                assert resume.wait(timeout=45) == 0, output.read_text()
+            finally:
+                if resume.poll() is None:
+                    resume.terminate()
+                    resume.wait(timeout=5)
+    (root / "step-controls.json").write_text(
+        json.dumps(
+            {"worker": owner, "steers": steers, "saved_capture": saved["flow"]["current_capture"]},
+            indent=2,
+        )
+    )
+    return owner["exec_id"]
+
+
 def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPServer) -> dict:
     repo, first, second = root / "repo", root / "home-a", root / "home-b"
     repo.mkdir()
@@ -359,14 +512,18 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         "- chapter-marker\n- step:\n    id: review\n    name: chapter-review\n    human: true\n"
     )
     (repo / ".lf/flows/successor-proof.yaml").write_text("- chapter-marker\n")
-    (repo / ".lf/skills/chapter-marker.md").write_text(f"Record {MARKER}.\n")
+    (repo / ".lf/skills/chapter-marker.md").write_text(
+        f"---\ndefault_agent: claude:haiku\n---\nRecord {MARKER}.\n"
+    )
     (repo / ".lf/skills/chapter-review.md").write_text("Review the retained Chapter proof.\n")
     for wave in ("a", "b"):
         path = repo / f"wave/{wave}"
         path.mkdir(parents=True)
         (path / "GOAL.md").write_text(
-            f"---\npm:\n  linear_initiative: initiative-{wave}\n---\nPreserve work.\n"
+            f"---\npm:\n  linear_initiative: initiative-{wave}\n---\n"
+            f"Preserve work. Wave context proof {wave}.\n"
         )
+    (repo / "extra.md").write_text("Forwarded Task context flag proof.\n")
     _git("add", ".")
     _git("commit", "-qm", "Chapter fixture")
     remote = root / "remotes/loopflowstudio/fixture.git"
@@ -422,7 +579,15 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     _cli("task", "checkout", "FIX-1", "--name", "chapter-task", "--json")
     with sqlite3.connect(env["LF_DB_PATH"]) as db:
         assert db.execute("SELECT started_at FROM tasks").fetchall() == [(None,)]
-    _cli("task", "run", "FIX-1", "--json")  # Deliberately no --flow, even on checkout.
+    _cli(
+        "--docs", "extra.md", "task", "run", "FIX-1", "--json"
+    )  # Deliberately no --flow, even on checkout.
+    dead_worker = None
+    if env["CHAPTER_STEP_CONTROLS"] == "1":
+        dead_worker = _exercise_step_controls(lf, repo, root, env, logs)
+        if dead_worker == "interrupted":
+            assert not server.errors, server.errors
+            return {"attached_steer": "passed", "interrupt_without_advance": "passed"}
     deadline = time.monotonic() + 45
     while True:
         with sqlite3.connect(env["LF_DB_PATH"]) as db:
@@ -431,7 +596,8 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
                 "FROM flow_sessions f JOIN tasks t ON t.current_invocation_id=f.id"
             ).fetchone()
             workers = db.execute(
-                "SELECT outcome FROM execs WHERE command LIKE '%__worker%'"
+                "SELECT outcome FROM execs WHERE command LIKE '%__worker%' AND id IS NOT ?",
+                (dead_worker,),
             ).fetchall()
         assert not (flow and flow[2]), f"Task worker failed: {flow[2]}"
         if flow and flow[0] and flow[1] is None and workers and all(row[0] for row in workers):
@@ -443,7 +609,11 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     before = _snapshot(first / "loopflow.db")
     assert receipt["cwd"] == before["task"]["worktree"]
     assert receipt["database"] == str(first / "loopflow.db")
-    assert MARKER in json.dumps(receipt["request"])
+    prompt = json.dumps(receipt["request"])
+    assert MARKER in prompt
+    assert "Wave context proof a" in prompt, "Step lost its Wave context"
+    assert "Fixture Operator" in prompt, "Step lost the direct command's user name"
+    assert "Forwarded Task context flag proof" in prompt, "Step lost --docs"
     assert json.loads(before["flow"]["invocation_json"])["flow"] == FLOW
     assert before["task"]["started_at"] is not None
     with sqlite3.connect(first / "loopflow.db") as db:
@@ -459,7 +629,17 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         ).fetchall()
         assert len(consumed) == 1, consumed
         assert json.loads(consumed[0][0])["status"] == "completed", consumed
-        assert "__worker" in consumed[0][1] and consumed[0][2] == "succeeded", consumed
+        assert json.loads(consumed[0][1])[-2:] == ["skill", "chapter-marker"], consumed
+        outcomes = {"succeeded", "interrupted"} if dead_worker else {"succeeded"}
+        assert consumed[0][2] in outcomes, consumed
+        child = db.execute(
+            "SELECT step.id,driver.id,driver.command,capture.exec_id FROM execs step "
+            "JOIN execs driver ON driver.id=step.parent_exec_id "
+            "JOIN session_events capture ON capture.exec_id=step.id AND capture.kind='captured' "
+            "WHERE step.command LIKE '%chapter-marker%'"
+        ).fetchall()
+        assert len(child) == 1 and child[0][0] != child[0][1], child
+        assert "__worker" in child[0][2] and child[0][3] == child[0][0], child
         (root / "default-launch.json").write_text(
             json.dumps(
                 {
@@ -530,6 +710,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lf", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--step-controls", action="store_true")
+    parser.add_argument("--interrupt-step", action="store_true")
     args = parser.parse_args()
     assert sys.platform == "linux", "SSL_CERT_FILE proof requires Linux"
     # Task destination ignores HOME. Never execute this against a host installation.
@@ -572,12 +754,15 @@ def main() -> None:
         "LANG": "C.UTF-8",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "LF_USER_NAME": "Fixture Operator",
         "LF_BIN": str(binary),
         "LF_CONTROL_BIN": str(binary),
         "SSL_CERT_FILE": str(root / "certificate.pem"),
         "SSL_CERT_DIR": str(root / "empty-certs"),
         "CHAPTER_PROVIDER_RECEIPT": str(root / "provider.json"),
         "CHAPTER_ENGINE_RECEIPT": str(root / "engine.json"),
+        "CHAPTER_STEP_CONTROLS": "1" if args.step_controls or args.interrupt_step else "0",
+        "CHAPTER_STEP_INTERRUPT": "1" if args.interrupt_step else "0",
     }
     result = {
         "status": "failed",

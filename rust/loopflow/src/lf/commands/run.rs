@@ -23,6 +23,9 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+    if let Some(flow) = saved_flow(cli)? {
+        return run_flow_skill(flow, skill, cli);
+    }
     if let Some(binding) = checkout_binding(cli)? {
         let mut bound = cli.launch_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -54,30 +57,139 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     launch_prompt(&built, cli).map(|_| ())
 }
 
-pub(crate) fn run_saved(
-    skill: &Skill,
-    message: Option<&str>,
-    cli: &Cli,
-    repo: &Path,
-    work: Option<crate::session::RunWork>,
-) -> Result<()> {
+/// Read a Flow command's captured definition; ordinary skill commands have none.
+pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
+    let Some(value) = &cli.flow_step else {
+        return Ok(None);
+    };
+    let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
+    let store =
+        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let flow = store
+        .flow(&token.invocation)?
+        .ok_or_else(|| anyhow!("Flow disappeared"))?;
+    anyhow::ensure!(
+        flow.version == token.version && !flow.finished && !flow.is_human(),
+        "Flow boundary changed before skill execution"
+    );
+    Ok(Some(flow))
+}
+
+fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &Cli) -> Result<()> {
+    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<crate::durable::TaskWorkerClaim>(&value))
+        .transpose()?;
+    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
+    anyhow::ensure!(
+        flow.claim == claim,
+        "Flow claim changed before skill execution"
+    );
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
+    let store =
+        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let flow = store.reserve_attempt(flow.id(), flow.version, claim.as_ref(), Some(&exec))?;
+    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
+        .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
+    anyhow::ensure!(
+        name == Some(skill.skill.name.as_str()),
+        "command does not name the selected Flow skill"
+    );
+    let mut launch = cli.launch_options();
+    launch.batch = true;
+    launch.task = flow.task_id.as_ref().map(ToString::to_string);
+    launch.wave = flow
+        .wave_id
+        .as_ref()
+        .map(|id| {
+            store
+                .get_wave(id)?
+                .map(|wave| wave.name().to_owned())
+                .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
+        })
+        .transpose()?;
+    launch.bound_cwd = Some(flow.cwd.clone());
+    launch.model = launch.model.or_else(|| flow.model.clone());
+    let _token = super::flow::EnvVarGuard::set(
+        crate::ops::flow_run::FLOW_STEP_ENV,
+        &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
+    );
+    let task_input = if claim.is_some() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        Some(runtime.block_on(async {
+            let shared = std::sync::Arc::new(
+                crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
+            );
+            let id = flow
+                .task_id
+                .as_ref()
+                .ok_or_else(|| anyhow!("claimed Flow has no Task"))?;
+            let task = shared
+                .get_task(id)
+                .await?
+                .ok_or_else(|| anyhow!("Task {id} is missing"))?;
+            crate::ops::linear_observe::refresh_task_comments(&shared, &task).await?;
+            let seed = crate::ops::task_input::prepare(
+                &shared,
+                &task,
+                launch.wave.as_deref().unwrap_or_default(),
+                &flow,
+            )
+            .await?;
+            Ok::<_, anyhow::Error>((shared, seed))
+        })?)
+    } else {
+        None
+    };
+    if let Some((_, seed)) = &task_input {
+        launch.model = seed.task.agent.clone().or(launch.model);
+    }
+    let mut message = task_input
+        .as_ref()
+        .map(|(_, seed)| seed.message.clone())
+        .or_else(|| flow.message.clone())
+        .unwrap_or_default();
+    if let Some(direction) = &flow.cursor.leaf().progress.direction {
+        message.push_str(&format!(
+            "\n\nPrevious step feedback or iteration direction:\n{direction}"
+        ));
+    }
+    if let Some(output) = flow
+        .current_step()
+        .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
+    {
+        message.push_str(&output);
+    }
     let mut built = build_prompt_at(
-        Some(&skill.name),
-        message,
-        cli,
-        repo.to_path_buf(),
+        Some(&skill.skill.name),
+        Some(&message),
+        &launch,
+        flow.cwd.clone(),
         false,
         None,
         PromptLaunchContext {
-            skill: Some(skill.clone()),
+            skill: Some(skill.skill.clone()),
             user_name: crate::engine::config::launch_user_name()?,
             ..Default::default()
         },
     )?;
-    built.subjects = cli.work_subject_selector().into_iter().collect();
-    built.work = work;
-    print_context_header(&built, cli);
-    launch_prompt(&built, cli).map(|_| ())
+    built.subjects = launch.work_subject_selector().into_iter().collect();
+    built.work = flow.declared_work();
+    built.claim = claim;
+    if let Some((store, seed)) = task_input {
+        built.agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+        built.agent_config.execution_boundary = Some(crate::ops::task::task_execution_boundary(
+            &flow.cwd,
+            built.agent_config.agent(),
+        )?);
+        built.agent_config.skip_permissions = true;
+        built.process.task_input = Some(crate::ops::task_input::TaskInput::new(store, seed));
+    }
+    print_context_header(&built, &launch);
+    launch_prompt(&built, &launch).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -200,6 +312,7 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::RunWork>,
+    claim: Option<crate::durable::TaskWorkerClaim>,
 }
 
 #[derive(Debug, Default)]
@@ -207,77 +320,6 @@ struct PromptLaunchContext {
     surface: Option<Surface>,
     skill: Option<Skill>,
     user_name: Option<String>,
-}
-
-/// A skill turn ready for a runner-owned provider surface.
-#[derive(Debug)]
-pub(crate) struct PreparedHarnessTurn {
-    pub config: AgentConfig,
-    pub input: String,
-    pub context: crate::trace::PreparedTurnContext,
-    pub harness: String,
-    pub model: Option<String>,
-}
-
-pub(crate) fn prepare_harness_turn_from_skill_at(
-    skill: &Skill,
-    message: &str,
-    wave: &str,
-    max_turns: Option<u32>,
-    repo_root: &Path,
-    agent: Option<&str>,
-) -> Result<PreparedHarnessTurn> {
-    let cli = Cli {
-        model: agent.map(str::to_string),
-        batch: true,
-        wave: Some(wave.to_string()),
-        max_turns,
-        ..Cli::default()
-    };
-    prepare_runner_turn_at(
-        &skill.name,
-        message,
-        &cli,
-        repo_root.to_path_buf(),
-        true,
-        None,
-        Some(skill.clone()),
-    )
-}
-
-fn prepare_runner_turn_at(
-    skill: &str,
-    message: &str,
-    cli: &Cli,
-    repo_root: PathBuf,
-    use_native_skill_launch: bool,
-    surface_override: Option<Surface>,
-    resolved_skill: Option<Skill>,
-) -> Result<PreparedHarnessTurn> {
-    let mut built = build_prompt_at(
-        Some(skill),
-        Some(message),
-        cli,
-        repo_root,
-        use_native_skill_launch,
-        Some((
-            crate::trace::ContextAssetKind::Goal,
-            crate::trace::ContextScope::Step,
-        )),
-        PromptLaunchContext {
-            surface: surface_override,
-            skill: resolved_skill,
-            user_name: None,
-        },
-    )?;
-    let input = std::mem::take(&mut built.agent_config.task_prompt);
-    Ok(PreparedHarnessTurn {
-        config: built.agent_config,
-        input,
-        context: built.context,
-        harness: built.harness,
-        model: built.model,
-    })
 }
 
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
@@ -517,6 +559,7 @@ fn build_prompt_at(
         log_name,
         subjects: Vec::new(),
         work: None,
+        claim: None,
     })
 }
 
@@ -824,7 +867,12 @@ fn begin_run_capture(
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
             run_id,
-            None,
+            (surface == "headless").then(|| {
+                crate::run_record::RunLaunchRequest::from_prepared(
+                    prepared_config,
+                    &built.capabilities,
+                )
+            }),
             &built.context,
             |_artifact| {
                 let path = crate::store::observability_database_path()
@@ -833,7 +881,7 @@ fn begin_run_capture(
                     &token.invocation,
                     token.version,
                     captured,
-                    None,
+                    built.claim.as_ref(),
                     &provider,
                     model.as_deref(),
                 )
@@ -1173,8 +1221,8 @@ mod tests {
     use super::{
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
-        prepare_harness_turn_from_skill_at, should_launch_via_skill, skill_launch_seed,
-        split_skill_args, PromptBuild, PromptLaunchContext,
+        should_launch_via_skill, skill_launch_seed, split_skill_args, PromptBuild,
+        PromptLaunchContext,
     };
 
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1299,24 +1347,6 @@ mod tests {
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
         }
         std::env::set_var("LF_USER_NAME", "Jack");
-        let skill = Skill {
-            name: "proof".into(),
-            content: Some("Work from the Task directive.".into()),
-            agent: None,
-            default_agent: None,
-            action_style: None,
-        };
-        let background = prepare_harness_turn_from_skill_at(
-            &skill,
-            "anonymous Task",
-            "proof",
-            None,
-            repo.path(),
-            None,
-        )
-        .unwrap();
-        assert!(!background.input.contains("<lf:user>"));
-        assert_eq!(background.config.env["LF_USER_NAME"], "");
     }
 
     #[test]
@@ -1435,6 +1465,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
+            claim: None,
         };
         let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
         let run_id = capture.run_id();
@@ -1561,6 +1592,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
+                claim: None,
             }
         }
 
@@ -1835,18 +1867,27 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ),
         };
 
-        let prepared = prepare_harness_turn_from_skill_at(
-            &skill,
-            "prove it",
-            "proof-wave",
+        let built = build_prompt_at(
+            Some("proof"),
+            Some("prove it"),
+            &Cli::default(),
+            repo.path().to_path_buf(),
+            false,
             None,
-            repo.path(),
-            None,
+            PromptLaunchContext {
+                skill: Some(skill),
+                ..Default::default()
+            },
         )
         .unwrap();
-
-        assert!(prepared.input.contains("captured at Flow start"));
-        assert!(!prepared.input.contains("edited after the Flow started"));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("captured at Flow start"));
+        assert!(!built
+            .agent_config
+            .task_prompt
+            .contains("edited after the Flow started"));
     }
 
     #[test]

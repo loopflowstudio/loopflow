@@ -519,7 +519,23 @@ fn end_flow_in(
 /// Store the step's Run before anything launches it. An attempt already at
 /// this position is kept: a reservation the launcher has not published, or a
 /// completed candidate the driver is about to settle.
-fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<()> {
+fn reserve_attempt_in(
+    tx: &Transaction<'_>,
+    flow: &FlowSession,
+    exec: Option<&crate::id::ExecId>,
+) -> StoreResult<()> {
+    if let (Some(attempt), Some(exec)) = (&flow.current_attempt, exec) {
+        let owner: Option<String> = tx.query_row(
+            "SELECT exec_id FROM session_events WHERE seq=?1",
+            [attempt.captured],
+            |row| row.get(0),
+        )?;
+        if owner.as_deref() != Some(exec.as_str()) {
+            return Err(invalid(
+                "Flow capture belongs to another or unknown step Exec",
+            ));
+        }
+    }
     if flow.current_attempt.is_some() || matches!(flow.current_step(), Some(ConcreteStep::Op(_))) {
         return Ok(());
     }
@@ -534,7 +550,8 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
         let mut session = super::sessions::session_in(tx, &id)?.ok_or(StoreError::NotFound)?;
         session.artifact_key = crate::run_record::new_artifact_key();
         session.input_published = false;
-        super::sessions::replace_input_in(tx, &mut session)?;
+        let exec = exec.cloned().or_else(crate::journal::current_exec_id);
+        super::sessions::replace_input_in(tx, &mut session, exec.as_ref())?;
         session
     } else {
         super::sessions::reserve_flow_conversation_in(
@@ -543,6 +560,7 @@ fn reserve_attempt_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<(
             format!("session_{}", uuid::Uuid::new_v4().simple()),
             crate::session::SessionKind::Conversation,
             flow.current().step,
+            exec,
         )?
     };
     super::sessions::select_input_in(tx, flow, &session)
@@ -905,8 +923,6 @@ fn claim_task_worker_in(
             _ => {}
         }
     }
-    let flow = task_flow_in(tx, task_id)?.ok_or(StoreError::NotFound)?;
-    reserve_attempt_in(tx, &flow)?;
     Ok(TaskWorkerClaimOutcome::Claimed(claim))
 }
 
@@ -1145,6 +1161,25 @@ impl SqliteStore {
             .transpose()
     }
 
+    /// The selected agent process remains owned until it exits, even after its
+    /// provider has returned. Mechanical steps retain their existing result gate.
+    pub(crate) fn pending_flow_step_exec(
+        &self,
+        id: &str,
+    ) -> StoreResult<Option<crate::id::ExecId>> {
+        if let Some(exec) = self.pending_flow_operation_exec(id)? {
+            return Ok(Some(exec));
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let exec: Option<String> = conn.query_row(
+            "SELECT captured.exec_id FROM flow_sessions f JOIN session_events captured ON captured.seq=f.current_capture
+             WHERE f.id=?1 AND f.state='current'",
+            [id], |row| row.get(0),
+        ).optional()?.flatten();
+        exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
+            .transpose()
+    }
+
     pub(crate) fn flow_operation_completed(&self, id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(operation_in(&conn, id)?
@@ -1261,6 +1296,7 @@ impl SqliteStore {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
+        exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<FlowSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1268,7 +1304,7 @@ impl SqliteStore {
         if flow.version != version || flow.claim.as_ref() != claim {
             return Err(stale(id));
         }
-        reserve_attempt_in(&tx, &flow)?;
+        reserve_attempt_in(&tx, &flow, exec)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
@@ -1415,8 +1451,6 @@ impl SqliteStore {
         cursor.leaf_mut().progress.direction = Some(format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work."));
         write_cursor_in(&tx, (id, version), &cursor, None, true, claim, false)?;
         let flow = current_flow_in(&tx, id)?;
-        reserve_attempt_in(&tx, &flow)?;
-        let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
     }
@@ -1435,7 +1469,8 @@ impl SqliteStore {
         if conn.execute(
             "UPDATE agent_sessions SET input_published=1, provider=?5, model=?6 WHERE current_capture=?2 AND input_published=0
              AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?1 AND current_capture=?2
-                AND position_version=?3 AND state='current' AND claim_json IS ?4)",
+                AND position_version=?3 AND state='current' AND claim_json IS ?4)
+             AND EXISTS(SELECT 1 FROM session_events capture WHERE capture.seq=?2 AND (capture.exec_id IS NULL OR capture.exec_id=?7))",
             params![
                 id,
                 captured,
@@ -1443,6 +1478,7 @@ impl SqliteStore {
                 claim.map(serde_json::to_string).transpose()?,
                 provider,
                 model,
+                crate::journal::current_exec_id(),
             ],
         )? != 1
         {
@@ -2015,7 +2051,7 @@ mod tests {
     ) -> crate::session::AgentSession {
         let flow = store.flow(invocation).unwrap().unwrap();
         let flow = store
-            .reserve_attempt(invocation, flow.version, None)
+            .reserve_attempt(invocation, flow.version, None, None)
             .unwrap();
         let run = flow.current_attempt.unwrap().run_id;
         store
@@ -2068,7 +2104,7 @@ mod tests {
             1,
         );
         let flow = store
-            .reserve_attempt(flow.id(), flow.version, None)
+            .reserve_attempt(flow.id(), flow.version, None, None)
             .unwrap();
         let run = &flow.current_attempt.as_ref().unwrap().run_id;
         let session = store.session_for_artifact(run).unwrap().unwrap();
@@ -2234,7 +2270,7 @@ mod tests {
             .is_some());
         let retry = store.retry_flow(flow.id(), None).unwrap();
         let retry = store
-            .reserve_attempt(flow.id(), retry.version, None)
+            .reserve_attempt(flow.id(), retry.version, None, None)
             .unwrap();
         let retry_run = &retry.current_attempt.as_ref().unwrap().run_id;
         assert_eq!(
@@ -2376,7 +2412,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let flow = launched(&store, vec![step("work", None)], 0);
         let reserved = store
-            .reserve_attempt(flow.id(), flow.version, None)
+            .reserve_attempt(flow.id(), flow.version, None, None)
             .unwrap();
         let first = reserved.current_attempt.as_ref().unwrap();
         let session = store
@@ -2414,7 +2450,7 @@ mod tests {
         store.recover_flow(flow.id(), None).unwrap();
         let retry = store.retry_flow(flow.id(), None).unwrap();
         let retry = store
-            .reserve_attempt(flow.id(), retry.version, None)
+            .reserve_attempt(flow.id(), retry.version, None, None)
             .unwrap();
         let second = retry.current_attempt.unwrap();
         let same = store.session_for_artifact(&second.run_id).unwrap().unwrap();
@@ -2450,7 +2486,9 @@ mod tests {
             })],
             0,
         );
-        let reserved = store.reserve_attempt(op.id(), op.version, None).unwrap();
+        let reserved = store
+            .reserve_attempt(op.id(), op.version, None, None)
+            .unwrap();
         assert!(reserved.current_attempt.is_none());
         assert_eq!(
             store
@@ -2635,12 +2673,10 @@ mod tests {
             let corrected = store
                 .correct_flow_output(flow.id(), flow.version, None)
                 .unwrap();
-            let selected = store
-                .session_for_artifact(&corrected.current_attempt.as_ref().unwrap().run_id)
-                .unwrap()
-                .unwrap();
-            assert_eq!(selected.id, original.id);
-            assert_ne!(selected.artifact_key, original.artifact_key);
+            assert!(
+                corrected.current_attempt.is_none(),
+                "correction does not capture in the driver"
+            );
             assert_eq!(corrected.invocation, flow.invocation);
             assert_eq!(corrected.cursor.index, flow.cursor.index);
             assert!(store
@@ -2649,6 +2685,8 @@ mod tests {
             drop(store);
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             let second = attempt(&store, flow.id(), None, "proof");
+            assert_eq!(second.id, original.id);
+            assert_ne!(second.artifact_key, original.artifact_key);
             let actor = store.test_flow_turn(&second.artifact_key);
             if valid_retry {
                 store
@@ -2723,7 +2761,7 @@ mod tests {
         assert_eq!((child.cursor.index, child.cursor.iteration), (0, 1));
         assert_eq!((child.task_id.clone(), child.wave_id.clone()), (None, None));
         assert!(store
-            .reserve_attempt(root.id(), root.version, None)
+            .reserve_attempt(root.id(), root.version, None, None)
             .is_err());
         assert!(store
             .checkpoint_flow(root.id(), root.version, &child.cursor, None, None)

@@ -28,6 +28,8 @@ pub mod task_actions;
 pub(crate) mod task_destination;
 pub mod task_execution;
 pub mod task_flow;
+#[doc(hidden)]
+pub mod task_input;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -47,6 +49,8 @@ pub use cron::{
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
+#[doc(hidden)]
+pub use human_session::active_flow_skill;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_rebase, finish_submit_after_rebase};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
@@ -65,7 +69,7 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
+pub(crate) use run::{launch_task_worker, TaskWorkerLaunch};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
@@ -73,6 +77,3 @@ pub use run::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
-
-#[cfg(test)]
-pub(crate) use run::TEST_TASK_LAUNCH;

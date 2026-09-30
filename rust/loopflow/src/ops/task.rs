@@ -561,7 +561,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
         });
         let step_may_live = store
             .sqlite
-            .pending_flow_operation_exec(position.id())
+            .pending_flow_step_exec(position.id())
             .map_err(task_error)?
             .is_some_and(|exec| {
                 crate::journal::exec_process_evidence(&store.sqlite, &exec)
@@ -1116,12 +1116,7 @@ pub(crate) fn resolve_task_agent(
     agent: Option<&str>,
     skill: Option<&crate::engine::Skill>,
 ) -> String {
-    agent
-        .map(str::to_string)
-        .or_else(|| {
-            skill.and_then(|skill| skill.agent.clone().or_else(|| skill.default_agent.clone()))
-        })
-        .unwrap_or_else(|| load_config_or_default(Some(worktree)).agent().to_string())
+    crate::engine::launch::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
 }
 
 async fn select_task_agent(
@@ -2477,7 +2472,7 @@ async fn task_worker_live(store: &SharedStore, task: &Task) -> OpsResult<bool> {
         .map_err(|error| task_error(error.to_string()))?;
     if let Some(exec) = position
         .as_ref()
-        .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+        .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
         .transpose()
         .map_err(task_error)?
         .flatten()
@@ -2512,7 +2507,7 @@ async fn stop_task_worker(
     };
     let step_live = position
         .as_ref()
-        .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+        .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
         .transpose()
         .map_err(task_error)?
         .flatten()
@@ -2555,7 +2550,7 @@ async fn stop_task_worker(
         }
         let step = current
             .as_ref()
-            .map(|flow| store.sqlite.pending_flow_operation_exec(flow.id()))
+            .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
             .transpose()
             .map_err(task_error)?
             .flatten();
@@ -2734,43 +2729,31 @@ pub(crate) async fn launch_task_process(
             ))
         }
     };
-    let account_id = if requires_provider {
-        match preflight_task_execution(&task.worktree, &agent).await {
-            Ok(account_id) => Some(account_id),
-            Err(error) => {
-                let reason = error.to_string();
-                let failure = crate::durable::TaskFlowBlocker {
-                    captured: None,
-                    reason: reason.clone(),
-                    restart_required: false,
-                    observed_at: time::OffsetDateTime::now_utc(),
-                };
-                store
-                    .fail_flow(
-                        &position.invocation.id,
-                        position.version,
-                        Some(&claim),
-                        &failure,
-                    )
-                    .await
-                    .map_err(task_error)?;
-                return Err(task_error(reason));
-            }
+    if requires_provider {
+        if let Err(error) = preflight_task_execution(&task.worktree, &agent).await {
+            let reason = error.to_string();
+            let failure = crate::durable::TaskFlowBlocker {
+                captured: None,
+                reason: reason.clone(),
+                restart_required: false,
+                observed_at: time::OffsetDateTime::now_utc(),
+            };
+            store
+                .fail_flow(
+                    &position.invocation.id,
+                    position.version,
+                    Some(&claim),
+                    &failure,
+                )
+                .await
+                .map_err(task_error)?;
+            return Err(task_error(reason));
         }
-    } else {
-        None
-    };
-    let mut environment = Vec::new();
-    if let Some(account_id) = account_id {
-        environment.push((
-            crate::ops::TASK_ACCOUNT_ID_ENV.to_string(),
-            account_id.to_string(),
-        ));
     }
-    environment.push((
+    let environment = vec![(
         crate::durable::TASK_WORKER_CLAIM_ENV.to_string(),
         serde_json::to_string(&claim).map_err(task_error)?,
-    ));
+    )];
     if let Err(error) = crate::ops::launch_task_worker(crate::ops::TaskWorkerLaunch {
         task_id: task.id.clone(),
         wave_id: task.wave_id.clone(),

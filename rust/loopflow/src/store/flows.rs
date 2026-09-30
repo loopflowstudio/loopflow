@@ -78,11 +78,13 @@ impl Store {
         id: &str,
         version: u64,
         claim: Option<&TaskWorkerClaim>,
+        exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<FlowSession> {
         let id = id.to_string();
         let claim = claim.cloned();
+        let exec = exec.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_attempt(&id, version, claim.as_ref())
+            store.reserve_attempt(&id, version, claim.as_ref(), exec.as_ref())
         })
         .await
     }

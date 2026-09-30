@@ -6,11 +6,13 @@ sections that follow.
 
 ## Order, deepest first
 
-1. **A launch is an Exec.** Each Flow step runs as its own `lf` process; one
-   launcher for Flow steps and terminal launches; delete the separate Task,
-   saved-Flow and direct launchers. Decide in design whether the launch event in
-   Session history collapses into the Exec. Keep launch-once, driver and
-   provider generations, and imported launches without an Exec.
+1. **Every step uses its ordinary lf command.** Skill, Task skill, router and
+   review run `lf skill`; ops use child command dispatch. The Task and saved-Flow
+   launchers are deleted locally. Close the remaining control/review/account
+   proofs and Task preflight policy exception in the
+   [before/after inventory](exec-per-step.md#direct-skill-command-cut--2026-09-29).
+   Definitions compile fully before execution; authored subflows are display
+   provenance only. Captured input remains Session history, not another process.
 2. **Simplify attribution and the parent tree.** Jack: "make sure that we
    simplify and clarify attribution and the parent tree after this." Once a step
    is an Exec, list every parent pointer and every Task/Wave attribution field,

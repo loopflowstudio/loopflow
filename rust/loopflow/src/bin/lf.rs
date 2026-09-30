@@ -519,8 +519,23 @@ fn run_target(
     use loopflow::lf::discovery::{discover_skill, discover_target, Target};
 
     let repo_root = loopflow::repo::working_directory()?;
+    let saved_flow = loopflow::lf::commands::run::saved_flow(cli)?;
     let target = match kind {
-        Some(TargetKind::Skill) => Target::Skill(discover_skill(&repo_root, name)?),
+        Some(TargetKind::Skill) if saved_flow.is_some() => {
+            let flow = saved_flow.as_ref().expect("saved Flow was just checked");
+            let skill = loopflow::engine::current_skill(&flow.invocation.steps, &flow.cursor)
+                .ok_or_else(|| anyhow::anyhow!("saved boundary has no skill"))?;
+            anyhow::ensure!(
+                skill.skill.name == name,
+                "command does not name the selected Flow skill"
+            );
+            Target::Skill(skill.skill.clone())
+        }
+        Some(TargetKind::Skill) => Target::Skill(
+            loopflow::ops::active_flow_skill(name)?
+                .map(Ok)
+                .unwrap_or_else(|| discover_skill(&repo_root, name))?,
+        ),
         Some(TargetKind::Flow) => Target::Flow(loopflow::engine::load_flow(name, &repo_root)?),
         None => discover_target(&repo_root, name)?,
     };
@@ -533,7 +548,12 @@ fn run_target(
                 None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
             }
             // Shared contributions leave checkpoint composition to the caller.
-            if binding.is_none() && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
+            if binding.is_none()
+                && saved_flow
+                    .as_ref()
+                    .is_none_or(|flow| flow.task_id.is_none() && flow.wave_id.is_none())
+                && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none()
+            {
                 let options = loopflow::ops::CommitOptions {
                     add: true,
                     message: Some(format!("lf commit: {name}")),
@@ -897,7 +917,12 @@ fn read_task_draft() -> anyhow::Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> anyhow::Result<()> {
+fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Result<()> {
+    let agent = cli.model.as_deref();
+    let _skill_options = EnvGuard::set(
+        loopflow::lf::TASK_SKILL_OPTIONS_ENV,
+        serde_json::to_string(&cli.step_args())?,
+    );
     match command {
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
         TaskCommand::Checkout {
@@ -1595,10 +1620,10 @@ fn dispatch(
                     | TaskCommand::Diff { .. }
                     | TaskCommand::File { .. }
                     | TaskCommand::Save { .. }),
-            }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
-            Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
-                run_task_command(repo, cmd, cli.model.as_deref())
-            }),
+            }) => run_task_command(&std::env::current_dir()?, cmd, &cli),
+            Some(Commands::Task { cmd }) => {
+                in_repo_runtime(args, |repo| run_task_command(repo, cmd, &cli))
+            }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
             }

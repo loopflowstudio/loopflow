@@ -50,19 +50,16 @@ No competing model migration belongs here.
 
 ## This slice
 
-Move Task PR/worktree/commit/rebase ownership end to end. The catalog prerequisite
-is complete at `ad023a72c`; this pass starts at `590541b9a`. Replace root parser
-variants, move typed Flow dispatch and Desktop argv, migrate current scripts,
-skills and docs, delete commit publication flags and the retired `op` shim, and
-replace worktree `--format` with `--json`. Task delivery must still operate on an
-ordinary repository branch without creating a Task. Unique tree-derived shorthand
-continues to work; no predecessor alias is introduced. Retained command bytes
-remain historical evidence, resolved by the existing navigation path.
+Move Account ownership and its overview end to end from `f46efdfc6`.
+Replace the auth parser/dispatch owner, migrate current caller argv, recovery
+commands, skills and docs, and expose bare `lf account` through the existing
+cached status reader. Preserve the JSON schema and credential/capacity
+missingness; add actionable text without refreshing credentials. No account
+alias, store, credential reader or launch authority is introduced.
 
-The complete target above remains required. Next owner slices still include
-Account, Repo release, Home, Wave and Session. Integrate LOO-298 before Monitor's
-Exec/Session reader cut. Overviews, local Wave/unlinked work discovery, child
-readiness, a real first provider result and Jack's demo remain required; this
+The complete target remains required. Repo, Home, Wave and Session moves,
+LOO-298 integration before Monitor, local discovery, child readiness, a real
+first-provider-result walkthrough and Jack's demo remain unfinished. This
 slice cannot establish whole-Task readiness or authorize landing.
 
 ## Slice ledger
@@ -287,3 +284,74 @@ Wave/unlinked-work discovery, child readiness and the real first-provider-result
 walkthrough remain required before Jack Heart's demo. Full Done when claims do
 not hold: no publication, landing, Task completion or Flow navigation follows
 from this review.
+
+### Account owner and cached overview · 2026-09-30
+
+Starting revision: `f46efdfc6`. Replaced root `Auth`/`AuthCommand` and its
+command module with Account; no predecessor alias or short account name.
+Bare `lf account` now runs the same cached reader as `account status`;
+`account --json` emits its existing report schema. Text retains credential
+presence versus verification, routing/cooldown, window age/reset and unknown
+capacity, and adds next actions. It does not contact providers or the inherited
+broker, decrypt local credentials, or create an absent Home. No account store,
+readiness ledger or execution authority was added.
+
+Switched the CLI caller, script argv, builtin guidance, reconnect diagnostics,
+current docs and test consumers together. Searches found no Desktop Account
+argv to migrate. Auth was not a supported typed Flow mechanical operation;
+this slice adds no Flow authentication operation. Provider-native `gh auth` and
+`claude auth` remain their providers' commands. Historical Wave/release/migration
+records and baseline catalog rows remain dated evidence. Growth memory keeps
+Jack Heart's account correction and records the branch's partial progress.
+
+Review changed the work: a mechanical type replacement also renamed the
+provider's `AuthCommandInput`; restored that unrelated provider helper. The
+initial check failed on an accidental `provider_account_account_status` import;
+restored `provider_account_auth_status` before proof. The initial test command
+with the superseded filter `cached_auth_leaves_an_absent_home_absent` ran zero
+tests and is not counted. The two `account_overview` tests below supply the
+required proof. Cached inspection never declares current server acceptance;
+unknown local/managed capacity remains unknown rather than zero or unlimited.
+
+Executed proofs (all passed on final production code):
+
+- `cargo test -p loopflow --test auth_tests account_overview --jobs 4`: 2 passed.
+  Public CLI, disposable Homes, no tools on PATH. Bare overview and cached
+  status JSON agree; missing credential and retained 73% window/reset survive;
+  no account mutation or credential directory creation; absent Home stays absent.
+- `cargo test -p loopflow --test cli_discovery --jobs 4`: 11 passed, including
+  canonical account help, nested shorthand and predecessor-name rejection.
+- `cargo test -p loopflow --lib lf::tests --jobs 4`: 52 passed.
+- `cargo test -p loopflow --lib account_report_fixture --jobs 4`: 1 passed;
+  fixture JSON round-trip, capacity missingness, next actions and readable widths.
+- `cargo test -p loopflow --test auth_tests cached_status_keeps_local_evidence --jobs 4`:
+  1 passed; synthetic broker socket receives no cached-inspection connection.
+- `cargo test -p loopflow --test auth_tests headless_connect_without_a_saved_profile --jobs 4`:
+  1 passed; canonical repair command, no registration and no stdin wait.
+- `uv run pytest python/tests/test_loopflow_skill_alignment.py -q`: 4 passed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`,
+  `uv run python scripts/check_architecture.py`,
+  `uv run ruff check scripts/demo_profile_routing.py tests/e2e/linear_oauth.py`,
+  `bash -n scripts/bootstrap-cron-host.sh` and `git diff --check`: passed.
+- `uv run python website/dev.py sync-docs --source docs` and
+  `uv run --project website python scripts/render_architecture_html.py`:
+  regenerated website docs and tracked architecture HTML.
+- `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-current.json`:
+  regenerated compiled metadata. **139 commands below root, 17 hidden, 436 flags,
+  92 positionals, zero extra aliases.** Account adds one overview JSON flag;
+  renaming its family removes no leaf operation. Baseline remains
+  141 / 18 / 440 / 95 / 10.
+
+Measured `f46efdfc6` to this working implementation: **+104 / −62 production
+Rust and builtin instruction lines**. The comparison pairs renamed files and
+excludes test modules, test-only source files/helpers, integration tests,
+examples/catalog tooling, scripts, generated artifacts, docs, memory and scratch.
+Moving the two command files is not counted as wholesale deletion/addition.
+
+These are local public-CLI and fixture proofs, not live authentication,
+provider execution, installed acceptance or full-design completion. No affected
+suite or full gate ran. Remaining owner cuts are Repo/Home/Wave/Session;
+LOO-298 must precede Monitor identity readers. Monitor, local Wave/unlinked-work
+discovery, destination readiness preserving restrictions and a real disposable
+first-provider-result walkthrough remain required before Jack Heart's demo.
+No publication, landing, Task completion or Flow navigation is implied.

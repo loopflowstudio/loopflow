@@ -199,11 +199,11 @@ Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
-Inspect `lf auth status --cached` before proposing an account repair. It is offline;
-use `lf auth status --json` for managed provider acceptance. Local
+Inspect `lf account status --cached` before proposing an account repair. It is offline;
+use `lf account status --json` for managed provider acceptance. Local
 service state and managed logins are separate evidence. OAuth client
 credentials resolve from environment first, then Doppler when configured. For
-a repository using Doppler, give `doppler run -- lf auth connect <provider>` when those
+a repository using Doppler, give `doppler run -- lf account connect <provider>` when those
 credentials are missing. Otherwise name the missing credential variables and
 follow the customer's secret manager. Never print values or run a secret getter
 bare. Do not change accounts or placement merely to make an inspection pass.

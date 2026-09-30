@@ -33,9 +33,9 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
-lf auth route show
+lf account status --cached          # cached; no provider request
+lf account status --json            # inspect accepted managed evidence
+lf account route show
 lf home id --json
 lf wave list --json
 command -v claude
@@ -130,20 +130,20 @@ Ask the user what they want to make operational now:
 This answer determines the minimum accounts and files. Do not turn init into a
 questionnaire.
 
-For durable planning and delivery, inspect `lf auth status` and offer only the
+For durable planning and delivery, inspect `lf account status` and offer only the
 missing connections:
 
 ```bash
-lf auth connect github
-lf auth connect linear
-lf auth connect claude
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
+lf account connect github
+lf account connect linear
+lf account connect claude
+lf account status --cached          # cached; no provider request
+lf account status --json            # inspect accepted managed evidence
 ```
 
 OAuth client credentials resolve from environment first, with a Doppler fallback
 when configured. If this repository uses Doppler and credentials are missing,
-use `doppler run -- lf auth connect linear`. Otherwise follow the customer's secret
+use `doppler run -- lf account connect linear`. Otherwise follow the customer's secret
 manager and the exact missing variable names. Never print credential values.
 
 Account connection is an external side effect. The user must choose it and
@@ -275,9 +275,9 @@ changing placement, or starting a Wave; each changes durable execution state.
 Run the smallest checks that prove the selected path:
 
 ```bash
-lf auth status --cached          # cached; no provider request
-lf auth status --json            # inspect accepted managed evidence
-lf auth route show
+lf account status --cached          # cached; no provider request
+lf account status --json            # inspect accepted managed evidence
+lf account route show
 lf home id --json
 lf wave list --json
 ```

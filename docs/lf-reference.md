@@ -1048,9 +1048,11 @@ target error remain the actionable evidence.
 
 ## Account: connections, capacity, and routing
 
-The [proposed readiness overview](lf.md#accounts-and-access), `lf account`,
-explains usable connections and what needs attention. Ordinary launches also
-check the access they need; the commands below provide explicit control.
+Run `lf account` to inspect cached credential state, routing, observed capacity
+and next actions per provider and managed login. It shares the `account status`
+reader; `lf account --json` emits the same single JSON document. Cached presence
+is not proof of current server acceptance. Ordinary launches check required
+access; explicit verification refreshes supported observations.
 
 ```bash
 lf account status

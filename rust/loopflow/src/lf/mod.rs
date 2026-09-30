@@ -318,10 +318,14 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Provider authentication for local lf skills and ops
-    Auth {
+    /// Inspect cached account access and capacity, or manage logins and routing
+    #[command(args_conflicts_with_subcommands = true)]
+    Account {
         #[command(subcommand)]
-        cmd: AuthCommand,
+        cmd: Option<AccountCommand>,
+        /// Emit the cached account overview as one JSON document
+        #[arg(long)]
+        json: bool,
     },
     /// Release operations (run, check, notes, bump, tag, status)
     Release {
@@ -1418,7 +1422,7 @@ pub enum HomeCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum AuthCommand {
+pub enum AccountCommand {
     /// Refresh managed account status and subscription windows
     Status {
         provider: Option<String>,
@@ -1881,28 +1885,29 @@ mod tests {
     #[test]
     fn auth_has_six_leaves_and_rejects_retired_paths() {
         let command = Cli::command();
-        let auth = command.find_subcommand("auth").unwrap();
+        let auth = command.find_subcommand("account").unwrap();
         for name in ["status", "connect", "disconnect", "set", "route"] {
             assert!(auth.find_subcommand(name).is_some());
         }
         for args in [
-            vec!["auth", "accounts"],
-            vec!["auth", "import", "claude"],
-            vec!["auth", "configure", "codex"],
-            vec!["auth", "reset", "claude", "a"],
-            vec!["auth", "access", "set"],
-            vec!["auth", "linear"],
+            vec!["account", "accounts"],
+            vec!["account", "import", "claude"],
+            vec!["account", "configure", "codex"],
+            vec!["account", "reset", "claude", "a"],
+            vec!["account", "access", "set"],
+            vec!["account", "linear"],
         ] {
             assert!(Cli::try_parse_from(std::iter::once("lf").chain(args)).is_err());
         }
         assert!(command.find_subcommand("profile").is_none());
         assert!(command.find_subcommand("route").is_none());
         assert!(
-            Cli::try_parse_from(["lf", "auth", "route", "set", "claude", "a", "--default"]).is_ok()
+            Cli::try_parse_from(["lf", "account", "route", "set", "claude", "a", "--default"])
+                .is_ok()
         );
         assert!(Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "route",
             "set",
             "claude",
@@ -2026,7 +2031,7 @@ mod tests {
     fn auth_set_accepts_ordered_service_profiles() {
         let cli = Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "set",
             "linear",
             "--chrome-profile",
@@ -2035,17 +2040,19 @@ mod tests {
             "Personal",
         ])
         .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Auth {
-            cmd: AuthCommand::Set { email: None, chrome_profile, .. }
+        assert!(matches!(cli.command, Some(Commands::Account {
+            cmd: Some(AccountCommand::Set { email: None, chrome_profile, .. }), ..
         }) if chrome_profile == ["Work", "Personal"]));
-        assert!(Cli::try_parse_from(["lf", "auth", "set", "linear", "--clear-cooldown"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "account", "set", "linear", "--clear-cooldown"]).is_err()
+        );
     }
 
     #[test]
     fn auth_connect_addresses_an_account_and_optional_bootstrap_venue() {
         let cli = Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "connect",
             "claude",
             "operator@",
@@ -2057,13 +2064,13 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Connect {
+            Some(Commands::Account {
+                cmd: Some(AccountCommand::Connect {
                     provider,
                     email: Some(email),
                     chrome_profile: Some(chrome_profile),
                     ..
-                }
+                }), ..
             }) if provider == "claude"
                 && email == "operator@"
                 && chrome_profile == "Profile 9"
@@ -2074,7 +2081,7 @@ mod tests {
     fn service_auth_accepts_a_remembered_chrome_profile() {
         let cli = Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "connect",
             "linear",
             "--chrome-profile",
@@ -2082,9 +2089,9 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Auth { cmd: AuthCommand::Connect {
+            matches!(cli.command, Some(Commands::Account { cmd: Some(AccountCommand::Connect {
             provider, email: None, chrome_profile: Some(profile), ..
-        } }) if provider == "linear" && profile == "Work")
+        }), .. }) if provider == "linear" && profile == "Work")
         );
     }
 
@@ -2092,20 +2099,20 @@ mod tests {
     fn auth_connect_sources_are_exclusive() {
         assert!(Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "connect",
             "claude",
             "a@example.com",
             "--import"
         ])
         .is_ok());
-        assert!(Cli::try_parse_from(["lf", "auth", "connect", "codex", "--api-key"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "account", "connect", "codex", "--api-key"]).is_ok());
         for flags in [
             vec!["--import", "--api-key"],
             vec!["--import", "--chrome-profile", "Work"],
         ] {
             assert!(Cli::try_parse_from(
-                ["lf", "auth", "connect", "claude", "a@example.com"]
+                ["lf", "account", "connect", "claude", "a@example.com"]
                     .into_iter()
                     .chain(flags)
             )
@@ -2117,7 +2124,7 @@ mod tests {
     fn auth_set_accepts_provider_specific_billing_and_routing_state() {
         let cli = Cli::try_parse_from([
             "lf",
-            "auth",
+            "account",
             "set",
             "codex",
             "loopflow-eng@",
@@ -2135,8 +2142,8 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Auth {
-                cmd: AuthCommand::Set {
+            Some(Commands::Account {
+                cmd: Some(AccountCommand::Set {
                     provider,
                     email: Some(email),
                     login_email: Some(login_email),
@@ -2146,7 +2153,7 @@ mod tests {
                     clear_plan: false,
                     clear_paid_through: false,
                     ..
-                }
+                }), ..
             }) if provider == "codex"
                 && email == "loopflow-eng@"
                 && login_email == "engineering@example.com"

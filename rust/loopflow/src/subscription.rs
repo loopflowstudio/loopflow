@@ -28,7 +28,7 @@ const CODEX_READ_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Why an account's subscription state could not be read. `NeedsLogin` is an
 /// answer, not a failure: the account exists but its credential was revoked
-/// or expired beyond refresh, and only `lf auth connect` fixes that.
+/// or expired beyond refresh, and only `lf account connect` fixes that.
 #[derive(Debug, thiserror::Error)]
 pub enum SubscriptionError {
     #[error("needs re-login: {0}")]

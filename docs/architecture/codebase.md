@@ -80,7 +80,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf runs`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
 | `lf home`, `lf ssh` | Home identity, placement, command routing |
-| `lf auth` | provider credential and account authority |
+| `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf.md). Wire DTOs

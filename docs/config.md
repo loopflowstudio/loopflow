@@ -434,8 +434,8 @@ Account state and repository routes are managed through CLI commands rather
 than `config.yaml`:
 
 ```bash
-lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf auth route set claude primary@ engineering@
+lf account connect claude primary@example.com --chrome-profile primary@example.com
+lf account route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 

@@ -72,8 +72,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["pr", "land", "--help"],
         ],
         vec![
-            vec!["help", "auth", "show"],
-            vec!["auth", "route", "show", "--help"],
+            vec!["help", "account", "show"],
+            vec!["account", "route", "show", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -90,11 +90,15 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             );
         }
     }
-    let unknown = run(repo.path(), home.path(), &["help", "auth", "absent-child"]);
+    let unknown = run(
+        repo.path(),
+        home.path(),
+        &["help", "account", "absent-child"],
+    );
     let unknown_flag = run(
         repo.path(),
         home.path(),
-        &["auth", "absent-child", "--help"],
+        &["account", "absent-child", "--help"],
     );
     assert_eq!(unknown.status.code(), Some(2));
     assert_eq!(unknown_flag.status.code(), Some(2));
@@ -342,8 +346,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "auth", "show"]),
-        ["lf", "auth", "route", "show"]
+        normalized(&["lf", "account", "show"]),
+        ["lf", "account", "route", "show"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--next", "show"]),
@@ -386,4 +390,24 @@ fn transitive_lookup_counts_canonical_targets_and_respects_exact_aliases() {
     assert_eq!(resolve("pull-request").unwrap().unwrap(), ["task", "pr"]);
     assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
     assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+}
+
+#[test]
+fn account_has_one_owner_without_predecessor_aliases() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for retired in ["auth", "identity", "id"] {
+        let output = run(repo.path(), home.path(), &["help", retired, "status"]);
+        assert_eq!(output.status.code(), Some(2), "{retired}");
+        assert!(output.stdout.is_empty());
+    }
+    let help = String::from_utf8(success(run(
+        repo.path(),
+        home.path(),
+        &["account", "--help"],
+    )))
+    .unwrap();
+    assert!(help.contains("lf account"));
+    assert!(help.contains("--json"));
+    assert!(!home.path().join(".lf").exists());
 }

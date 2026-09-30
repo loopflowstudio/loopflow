@@ -96,7 +96,8 @@ reference and capabilities in scope. Existing page addresses remain valid.
 The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
 are design previews. Local discovery now supports help without launching,
 flow-first untyped selection, strict typed definitions, and unique command
-shorthand. Owner moves and required monitor/account overviews remain future
+shorthand. LOO-338 now implements Task delivery ownership and the cached
+Account overview on its branch; remaining owner moves and Monitor remain future
 work. Fixture and read-only CLI evidence does not demonstrate the first local
 result, a live app walkthrough, or a complete autonomous lifecycle. Keep those
 proof obligations before publishing a walkthrough; compact help alone does not

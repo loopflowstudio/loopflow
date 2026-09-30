@@ -21,7 +21,7 @@ pub(super) async fn run_route_async(cmd: &RouteCommand) -> Result<()> {
                 RouteScope::Default
             } else {
                 RouteScope::Repo(resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
-                    "Run lf auth route set in a repository with an origin, or pass --repo owner/name or --default."
+                    "Run lf account route set in a repository with an origin, or pass --repo owner/name or --default."
                 ))?)
             };
             let store = open_account_store().await?;

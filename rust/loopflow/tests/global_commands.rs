@@ -141,10 +141,10 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["list"],
         vec!["flow", "show", "code"],
         vec!["flow", "validate", "code"],
-        vec!["auth", "status"],
-        vec!["auth", "status", "--details"],
-        vec!["auth", "route", "show"],
-        vec!["auth", "route", "show", "--repo", "example/project"],
+        vec!["account", "status"],
+        vec!["account", "status", "--details"],
+        vec!["account", "route", "show"],
+        vec!["account", "route", "show", "--repo", "example/project"],
         vec!["wave", "list", "--json"],
         vec!["ps", "--json"],
     ] {
@@ -193,7 +193,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["auth", "route", "set", "claude", "person@example.com"],
+        &["account", "route", "set", "claude", "person@example.com"],
     )
     .output()
     .unwrap();

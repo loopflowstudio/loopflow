@@ -37,7 +37,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     let inspect = |json: bool, verify: bool| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
-            .args(["auth", "status", "codex"])
+            .args(["account", "status", "codex"])
             .env("LF_ACCOUNT_LEASE", &handle)
             .env("PATH", "/nonexistent");
         if json {
@@ -171,7 +171,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
 
     for target in [vec!["codex", "fresh@example.com"], vec!["linear"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["auth", "connect"])
+            .args(["account", "connect"])
             .args(&target)
             .stdin(std::process::Stdio::null())
             .output()
@@ -180,7 +180,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
         let diagnostic = String::from_utf8_lossy(&output.stderr);
         assert!(
             diagnostic.contains(&format!(
-                "No saved Chrome profile. Run lf auth connect {} --chrome-profile <profile>",
+                "No saved Chrome profile. Run lf account connect {} --chrome-profile <profile>",
                 target.join(" ")
             )),
             "{diagnostic}"
@@ -299,7 +299,7 @@ esac
         .find(|window| window.window == "weekly")
         .unwrap();
     let cached_output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--cached"])
+        .args(["account", "status", "codex", "--cached"])
         .output()
         .expect("read cached auth accounts");
     assert!(cached_output.status.success());
@@ -319,7 +319,7 @@ esac
         ),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["auth", "status", "codex"])
+            .args(["account", "status", "codex"])
             .env(key, value)
             .output()
             .unwrap();
@@ -339,7 +339,7 @@ esac
 
     // The live report includes persisted credential state and fresh usage.
     let verified_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--json"])
+        .args(["account", "status", "codex", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -357,7 +357,7 @@ esac
     assert_eq!(revoked_row["verification"], "rejected");
     assert_eq!(
         revoked_row["recovery"],
-        "lf auth connect codex revoked@example.com"
+        "lf account connect codex revoked@example.com"
     );
     let active_row = verified_rows
         .iter()
@@ -373,19 +373,19 @@ esac
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["account", "status", "codex"])
         .output()
         .expect("refresh auth status");
 
     assert!(
         output.status.success(),
-        "lf auth status failed: {}",
+        "lf account status failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("auth: active (verified)"));
     assert!(stdout.contains("auth: needs login (identity or credential rejected)"));
-    assert!(stdout.contains("recover: lf auth connect codex revoked@example.com"));
+    assert!(stdout.contains("recover: lf account connect codex revoked@example.com"));
     let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
     let revoked = runtime
         .block_on(store.get_provider_account("codex", &revoked_id))
@@ -416,7 +416,7 @@ esac
         .unwrap();
     // A second process must read stored observations with the provider unavailable.
     let cached = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--cached"])
+        .args(["account", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -429,7 +429,7 @@ esac
     assert!(cached_text.contains("session: 12%"));
     assert!(cached_text.contains("cached"));
     assert!(
-        cached_text.contains("recover: lf auth connect codex revoked@example.com"),
+        cached_text.contains("recover: lf account connect codex revoked@example.com"),
         "cached rejection must retain its recovery command: {cached_text}"
     );
     assert_eq!(
@@ -448,7 +448,7 @@ esac
     let credential_path = home.path().join("accounts/codex/active/auth.json");
     let credentials_before = std::fs::read(&credential_path).unwrap();
     let cached_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--cached", "--json"])
+        .args(["account", "status", "codex", "--cached", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -494,7 +494,7 @@ esac
 
     std::fs::remove_file(home.path().join("accounts/codex/active/auth.json")).unwrap();
     let missing = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--cached"])
+        .args(["account", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -503,7 +503,7 @@ esac
     assert!(missing_text.contains("auth: cached missing"));
     assert!(!missing_text.contains("cached connected"));
     assert!(missing_text.contains("session: 12%"));
-    assert!(missing_text.contains("recover: lf auth connect codex active@example.com"));
+    assert!(missing_text.contains("recover: lf account connect codex active@example.com"));
     assert_eq!(
         runtime
             .block_on(store.provider_account_limits(None))
@@ -527,7 +527,7 @@ esac
         .unwrap();
     fs2::FileExt::lock_exclusive(&lock).unwrap();
     let busy = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["account", "status", "codex"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -556,14 +556,14 @@ esac
         ))
         .unwrap();
     let unknown = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["account", "status", "codex"])
         .env("LF_TEST_EMPTY_USAGE", "1")
         .output()
         .unwrap();
     assert!(unknown.status.success());
     let unknown_text = String::from_utf8_lossy(&unknown.stdout);
     assert!(unknown_text.contains("active (verified)"));
-    assert!(!unknown_text.contains("recover: lf auth connect codex active@example.com"));
+    assert!(!unknown_text.contains("recover: lf account connect codex active@example.com"));
     assert!(unknown_text.contains("observed plan: team"));
     assert!(unknown_text.contains("usage response has no recognized percentage windows"));
     let window_line = unknown_text
@@ -583,7 +583,7 @@ esac
         .unwrap()
         .unwrap();
     let cleared = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "set", "codex", "active@", "--clear-cooldown"])
+        .args(["account", "set", "codex", "active@", "--clear-cooldown"])
         .output()
         .unwrap();
     assert!(
@@ -613,8 +613,8 @@ esac
         observed
     );
     for args in [
-        vec!["auth", "set", "codex", "active@", "--routing", "automatic"],
-        vec!["auth", "route", "set", "codex", "active@", "--default"],
+        vec!["account", "set", "codex", "active@", "--routing", "automatic"],
+        vec!["account", "route", "set", "codex", "active@", "--default"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .current_dir(home.path())
@@ -632,7 +632,7 @@ esac
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["auth", "route", "show", "--default", "--json"])
+        .args(["account", "route", "show", "--default", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -659,7 +659,7 @@ esac
     );
     let unscoped = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["auth", "route", "set", "codex", "active@"])
+        .args(["account", "route", "set", "codex", "active@"])
         .output()
         .unwrap();
     assert!(!unscoped.status.success());
@@ -667,7 +667,7 @@ esac
 }
 
 #[test]
-fn cached_auth_records_its_exec_without_creating_account_state() {
+fn cached_account_records_its_exec_without_creating_account_state() {
     let temp = tempfile::tempdir().unwrap();
     let lf_home = temp.path().join("absent");
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -676,7 +676,7 @@ fn cached_auth_records_its_exec_without_creating_account_state() {
         .env("LF_HOME", &lf_home)
         .env("LF_DB_PATH", lf_home.join("loopflow.db"))
         .env("PATH", "/nonexistent")
-        .args(["auth", "status", "--cached", "--json"])
+        .args(["account", "status", "--cached", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -756,7 +756,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     }
     let status = |verify: bool, server_email: &str| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
-        cmd.args(["auth", "status", "codex", "--json"]);
+        cmd.args(["account", "status", "codex", "--json"]);
         if !verify {
             cmd.arg("--cached");
             cmd.env("PATH", "/nonexistent");
@@ -820,7 +820,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
 
     let relabel = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "auth",
+            "account",
             "set",
             "codex",
             "engineering@",
@@ -841,7 +841,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     let before = std::fs::read(engineering.home.as_ref().unwrap().join("auth.json")).unwrap();
     let imported = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "auth",
+            "account",
             "connect",
             "codex",
             "engineering@example.com",
@@ -866,7 +866,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     );
     let duplicate = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "auth",
+            "account",
             "connect",
             "codex",
             "engineering@example.com",
@@ -921,7 +921,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         (401, "rejected", CredentialState::Missing),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["auth", "status", "codex", "--json"])
+            .args(["account", "status", "codex", "--json"])
             .env("LF_TEST_ACCOUNT_ERROR", code.to_string())
             .output()
             .unwrap();
@@ -965,7 +965,7 @@ fn managed_connect_requires_email_before_starting_browser() {
         .block_on(store.upsert_provider_account(&unlabeled))
         .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "connect", "codex", "legacy"])
+        .args(["account", "connect", "codex", "legacy"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -977,4 +977,74 @@ fn managed_connect_requires_email_before_starting_browser() {
             .unwrap(),
         Some(unlabeled)
     );
+}
+
+#[test]
+fn account_overview_reuses_cached_evidence_without_credentials_or_tools() {
+    let home = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(database.clone()),
+        ))
+        .unwrap();
+    let seeded = account("missing", home.path().join("absent-credential"));
+    runtime
+        .block_on(store.upsert_provider_account(&seeded))
+        .unwrap();
+    runtime
+        .block_on(store.upsert_provider_account_limits(
+            "codex",
+            &seeded.account_id,
+            &[loopflow::store::AccountLimitWindow {
+                window: "weekly".into(),
+                used_percent: 73,
+                resets_at: Some(1),
+                plan: None,
+            }],
+            "stream",
+        ))
+        .unwrap();
+    let inspect = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_DB_PATH", &database)
+            .env("PATH", "/nonexistent")
+            .current_dir(home.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        output.stdout
+    };
+    let overview = inspect(&["account", "--json"]);
+    assert_eq!(overview, inspect(&["account", "status", "--json"]));
+    let report: serde_json::Value = serde_json::from_slice(&overview).unwrap();
+    let row = &report["accounts"][0];
+    assert_eq!(row["cached_credential_state"], "missing");
+    assert_eq!(row["verification"], "not_checked");
+    assert_eq!(row["windows"][0]["used_percent"], 73);
+    assert_eq!(row["windows"][0]["resets_at"], 1);
+    let text = String::from_utf8(inspect(&["account"])).unwrap();
+    assert!(text.contains("recover: lf account connect codex missing@example.com"));
+    assert!(text.contains("weekly: 73% · cached"));
+    assert!(text.contains("reset passed; refresh needed"));
+    assert!(text.contains("usage: unknown"));
+    assert!(text.contains("next: lf account connect"));
+    assert!(!text.contains("unlimited"));
+    assert_eq!(
+        runtime
+            .block_on(store.list_provider_accounts(None))
+            .unwrap(),
+        vec![seeded]
+    );
+    assert!(!home.path().join("absent-credential").exists());
 }

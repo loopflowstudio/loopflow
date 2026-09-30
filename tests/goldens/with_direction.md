@@ -261,13 +261,13 @@ not start idle work or inject into independent `--as` Runs. Guide Waves through 
 Provider credentials and secrets resolve through Doppler — Loopflow reads a
 named secret from the environment first, else falls back to
 `doppler secrets get <NAME> --plain` in the repo. A command that needs one (a
-provider OAuth like `lf auth <provider>`, or any tool wanting an API key)
+provider OAuth like `lf account <provider>`, or any tool wanting an API key)
 therefore runs under `doppler run -- <cmd>` whenever the value is not already in
 the environment.
 
 So when you tell a User how to clear a missing-secret or auth error, give the
-Doppler-aware form, not the bare command: if `lf auth linear` reports its client
-id/secret are unset, the fix is `doppler run -- lf auth linear`. Discover names
+Doppler-aware form, not the bare command: if `lf account linear` reports its client
+id/secret are unset, the fix is `doppler run -- lf account linear`. Discover names
 with `doppler secrets --only-names`; never print a secret value to a terminal,
 log, or chat.
 

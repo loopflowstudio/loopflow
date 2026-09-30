@@ -1597,7 +1597,9 @@ fn execute_command(
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
         Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
-        Some(Commands::Auth { cmd }) => loopflow::lf::commands::auth::run(cmd),
+        Some(Commands::Account { cmd, json }) => {
+            loopflow::lf::commands::account::run(cmd.as_ref(), *json)
+        }
         Some(Commands::Release { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
         }
@@ -1997,7 +1999,7 @@ mod tests {
             ":",
             "desktop",
             "screenshot",
-            "auth",
+            "account",
             "release",
             "repo",
             "task",

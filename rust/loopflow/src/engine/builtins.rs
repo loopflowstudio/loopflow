@@ -304,8 +304,8 @@ mod tests {
         let init = get_builtin_skill("init").expect("init skill");
 
         for command in [
-            "lf auth status",
-            "lf auth route show",
+            "lf account status",
+            "lf account route show",
             "lf home id --json",
             "lf wave list --json",
             "lf wave status <wave> --json",

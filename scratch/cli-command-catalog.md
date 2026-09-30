@@ -5,7 +5,7 @@ Jack Heart requested this catalog before implementation on 2026-09-30. Baseline:
 ## Counts and reproduction
 
 - Before: **141 commands below the root**, 18 hidden; 142 rows including the root. **440 flag entries** (including automatic help/version), **95 positional arguments**, **10 extra aliases** (one command alias, nine flag aliases).
-- Current slice: **139 commands below root**, 17 hidden; **435 flag entries**, **92 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
+- Current slice: **139 commands below root**, 17 hidden; **436 flag entries**, **92 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
 - `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-before.json` — passed against the unchanged parser.
 - `target/debug/lf help --all` in a disposable Home — exit 0, 125 lines, no Home state created; public help omits hidden commands and options by design.
 - Raw [Clap metadata](cli-catalog-before.json) and [public help](cli-help-before.txt) accompany this catalog. Stable C/A identifiers below link research to rows.
@@ -1122,7 +1122,7 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 
 ## Required additions and cross-cutting work
 
-- `monitor` overview and `account` overview reuse existing evidence readers; include missingness and next action. Neither creates a second scheduler or credential store.
+- `monitor` overview and `account` overview reuse existing evidence readers; include missingness and next action. Neither creates a second scheduler or credential store. Account now uses its cached status reader; its added `--json` overview flag emits the existing report schema. Monitor remains required.
 - `monitor show ID` and `monitor active` replace the multiplexed `runs` path using LOO-298 Exec/Session owners. History filters, parent identity and DTOs follow that model.
 - `task list` adds unlinked checkout/PR evidence; `wave list` includes locally authored goals without requiring planning credentials. These carry earlier omitted recommendations forward.
 - First local result uses existing direct execution in a fresh directory before planning connection. Verify a real provider result; fix actual setup obstacles rather than introduce synthetic Tasks.

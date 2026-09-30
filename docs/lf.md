@@ -2,7 +2,8 @@
 
 > Design draft. Discovery (`run`, `help`, `list`, typed definitions, and unique
 > command shorthand) and Task delivery owners are implemented on this branch.
-> The other owner moves and proposed overviews below remain unimplemented.
+> Account and its cached overview are implemented. The other owner moves and
+> Monitor overview below remain unimplemented.
 
 ## Run a workflow
 
@@ -91,7 +92,7 @@ on ordinary branches without creating a Task. Bare `land` keeps a Task open.
 ## Accounts and access
 
 ```bash
-lf account                         # proposed readiness and account overview
+lf account                         # cached access, capacity, and next actions
 lf account status codex --verify          # refresh supported account observations
 lf account connect codex work@example.com --chrome-profile Work
 lf --account work@ run code          # prefer an account for this launch

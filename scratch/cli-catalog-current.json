@@ -2245,14 +2245,34 @@
     "short_aliases": []
   },
   {
-    "about": "Provider authentication for local lf skills and ops",
+    "about": "Inspect cached account access and capacity, or manage logins and routing",
     "aliases": [],
     "hidden": false,
     "kind": "command",
     "path": [
       "lf",
-      "auth"
+      "account"
     ]
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": "Emit the cached account overview as one JSON document",
+    "hidden": false,
+    "id": "json",
+    "kind": "argument",
+    "long": "json",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "account"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
   },
   {
     "action": "Help",
@@ -2266,7 +2286,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth"
+      "account"
     ],
     "required": false,
     "short": "h",
@@ -2279,7 +2299,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ]
   },
@@ -2295,7 +2315,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ],
     "required": false,
@@ -2316,7 +2336,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ],
     "required": false,
@@ -2337,7 +2357,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ],
     "required": false,
@@ -2358,7 +2378,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ],
     "required": false,
@@ -2377,7 +2397,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "status"
     ],
     "required": false,
@@ -2391,7 +2411,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "disconnect"
     ]
   },
@@ -2407,7 +2427,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "disconnect"
     ],
     "required": true,
@@ -2426,7 +2446,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "disconnect"
     ],
     "required": false,
@@ -2445,7 +2465,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "disconnect"
     ],
     "required": false,
@@ -2459,7 +2479,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ]
   },
@@ -2475,7 +2495,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": true,
@@ -2494,7 +2514,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": false,
@@ -2513,7 +2533,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": false,
@@ -2534,7 +2554,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": false,
@@ -2555,7 +2575,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": false,
@@ -2574,7 +2594,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "connect"
     ],
     "required": false,
@@ -2588,7 +2608,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ]
   },
@@ -2604,7 +2624,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": true,
@@ -2623,7 +2643,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2642,7 +2662,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2661,7 +2681,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2680,7 +2700,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2701,7 +2721,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2720,7 +2740,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2741,7 +2761,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2762,7 +2782,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2781,7 +2801,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2802,7 +2822,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2821,7 +2841,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "set"
     ],
     "required": false,
@@ -2835,7 +2855,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "route"
     ]
   },
@@ -2851,7 +2871,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route"
     ],
     "required": false,
@@ -2865,7 +2885,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ]
@@ -2882,7 +2902,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ],
@@ -2902,7 +2922,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ],
@@ -2922,7 +2942,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ],
@@ -2944,7 +2964,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ],
@@ -2964,7 +2984,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "set"
     ],
@@ -2979,7 +2999,7 @@
     "kind": "command",
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "show"
     ]
@@ -2996,7 +3016,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "show"
     ],
@@ -3018,7 +3038,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "show"
     ],
@@ -3040,7 +3060,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "show"
     ],
@@ -3060,7 +3080,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "auth",
+      "account",
       "route",
       "show"
     ],

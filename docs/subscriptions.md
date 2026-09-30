@@ -8,30 +8,36 @@ title: Subscription Management
 Connect Claude and Codex logins once, then route each repository through them:
 
 ```bash
-lf auth connect claude personal@example.com --chrome-profile personal@example.com
-lf auth connect codex work@example.com --chrome-profile work@example.com
-lf auth status
+lf account connect claude personal@example.com --chrome-profile personal@example.com
+lf account connect codex work@example.com --chrome-profile work@example.com
+lf account
 
-lf auth route set claude personal@
-lf auth route set codex work@ personal@
-lf auth route show
+lf account route set claude personal@
+lf account route set codex work@ personal@
+lf account route show
 ```
 
 Loopflow manages Claude and Codex subscription logins as separate identities.
 OpenCode Zen, GitHub, and Linear each use one effective credential instead of a
 routable subscription catalog.
 
+`lf account` reads cached access, routing and capacity with next actions. It
+never launches providers or contacts a forwarded account broker. Unknown
+capacity stays unknown; retained percentages keep their observation age and
+reset time. `lf account --json` and `lf account status --json` share one schema.
+Use `lf account status PROVIDER --verify` for fresh supported evidence.
+
 ## Connect an identity
 
-`lf auth connect` registers an existing provider login. It does not create a
+`lf account connect` registers an existing provider login. It does not create a
 Claude or Codex account.
 
 ```bash
-lf auth connect claude personal@example.com --chrome-profile personal@example.com
-lf auth connect codex work@example.com --chrome-profile work@example.com
+lf account connect claude personal@example.com --chrome-profile personal@example.com
+lf account connect codex work@example.com --chrome-profile work@example.com
 
-lf auth connect claude personal@example.com --import  # adopt the ambient Claude login
-lf auth disconnect claude personal@
+lf account connect claude personal@example.com --import  # adopt the ambient Claude login
+lf account disconnect claude personal@
 ```
 
 Connect creates a **local managed identity**, not a new Claude or Codex account:
@@ -65,9 +71,9 @@ connect never consumes stdin as an authorization code.
 Select a Chrome profile once for each target:
 
 ```bash
-lf auth connect linear --chrome-profile Work
-lf auth connect linear                          # reuse Work
-lf auth connect claude personal@                # reuse this account's profile
+lf account connect linear --chrome-profile Work
+lf account connect linear                          # reuse Work
+lf account connect claude personal@                # reuse this account's profile
 ```
 
 Saved names and ordered profile choices remain reusable. A first interactive
@@ -77,7 +83,7 @@ login. Existing expected-login constraints remain enforced. Browser selection is
 remembered only after successful authorization, independently for each target.
 
 If verification fails, the staging login is discarded and an existing identity
-is left unchanged. `lf auth connect claude <email> --import` is the explicit
+is left unchanged. `lf account connect claude <email> --import` is the explicit
 exception: it copies
 the ambient Claude login from `~/.claude` or the macOS Keychain into a new
 isolated account home, then performs the same login verification.
@@ -97,9 +103,9 @@ credential whose observed email disagrees.
 An access profile records which Chrome profile can authenticate an identity:
 
 ```bash
-lf auth set claude personal@ --chrome-profile Personal --chrome-profile Work
-lf auth set linear --chrome-profile Work
-lf auth status --details
+lf account set claude personal@ --chrome-profile Personal --chrome-profile Work
+lf account set linear --chrome-profile Work
+lf account status --details
 ```
 
 The profile is an authentication venue, not the identity that spends provider
@@ -113,10 +119,10 @@ same account ID so fallback and resume do not silently change identities.
 ## Inspect account state
 
 ```bash
-lf auth status                       # refresh managed identity and usage
-lf auth status claude                # refresh one provider
-lf auth status --cached              # offline managed and local evidence
-lf auth status --details --json      # sources, saved browsers, full timestamps
+lf account status                       # refresh managed identity and usage
+lf account status claude                # refresh one provider
+lf account status --cached              # offline managed and local evidence
+lf account status --details --json      # sources, saved browsers, full timestamps
 ```
 
 Status lists stable account IDs beside full usable logins. Codex rows show the
@@ -155,7 +161,7 @@ does not imply successful authentication. Cron-host requires accepted managed
 evidence:
 
 ```bash
-lf auth status --json |
+lf account status --json |
   jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")'
 ```
 
@@ -167,7 +173,7 @@ observed Pro plan, then Plus; explicit preferences and Session pins take priorit
 A plan does not establish remaining capacity.
 
 Cached account inspection starts no provider and changes no stored state. Missing
-credentials remain visible with older usage and the `lf auth connect` recovery
+credentials remain visible with older usage and the `lf account connect` recovery
 command. Unreadable credentials are distinguished from missing files. Verification
 records provider rejection as missing; locally detected identity mismatches are
 reported without changing cached state. Unavailable usage leaves credential state
@@ -195,9 +201,9 @@ Flow account bundles, and reset credits.
 Control automatic routing per account:
 
 ```bash
-lf auth set claude personal@ --paid-through 2026-08-14
-lf auth set claude personal@ --routing explicit-only
-lf auth set claude personal@ --clear-cooldown
+lf account set claude personal@ --paid-through 2026-08-14
+lf account set claude personal@ --routing explicit-only
+lf account set claude personal@ --clear-cooldown
 ```
 
 Clearing cooldown retains credential state, aggregate utilization and every
@@ -213,10 +219,10 @@ A repository account route is an ordered list of subscription logins to try for
 one provider in one repository:
 
 ```bash
-lf auth route set claude personal@ work@
-lf auth route set codex work@ personal@
-lf auth route set codex work@ --default
-lf auth route show --json
+lf account route set claude personal@ work@
+lf account route set codex work@ personal@
+lf account route set codex work@ --default
+lf account route show --json
 ```
 
 Show lists eligible launch candidates in order without selecting one. Explicit
@@ -329,8 +335,8 @@ for the broker, process-lifetime, and remote trust boundary.
 OpenCode Zen uses one credential rather than the managed subscription route:
 
 ```bash
-lf auth connect opencode
-lf auth connect opencode --api-key
+lf account connect opencode
+lf account connect opencode --api-key
 ```
 
 Its stored credential applies to local OpenCode launches and foreground SSH.

@@ -2317,10 +2317,10 @@ fn format_timeout(timeout: Option<Duration>) -> String {
 pub fn missing_agent_message(cli: &str) -> String {
     let hint = match cli {
         "claude" => {
-            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf auth connect claude`."
+            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf account connect claude`."
         }
         "codex" => {
-            "Install it with `npm install -g @openai/codex`, then sign in with `lf auth connect codex`."
+            "Install it with `npm install -g @openai/codex`, then sign in with `lf account connect codex`."
         }
         "opencode" => "Install it with `npm install -g opencode-ai`.",
         _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",

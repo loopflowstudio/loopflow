@@ -434,7 +434,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
 
 fn missing_linear_credential() -> OpsError {
     OpsError::Message(
-        "No Linear credential found. Run `doppler run -- lf auth connect linear`.".into(),
+        "No Linear credential found. Run `doppler run -- lf account connect linear`.".into(),
     )
 }
 
@@ -573,7 +573,7 @@ async fn resolve_pm_token_from_store(
                     return Ok(Some(access));
                 }
                 return Err(if reason.requires_reconnect() {
-                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf auth connect linear` to reconnect."))
+                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf account connect linear` to reconnect."))
                 } else {
                     credential_retry(&format!(
                         "Linear refresh failed: {reason}; prior credential preserved"

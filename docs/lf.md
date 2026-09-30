@@ -64,8 +64,13 @@ checkpoint a coherent result with `lf commit`.
 
 Inside a Task checkout, ordinary skills and Flows receive the same Task seed,
 workspace details and live steers as managed steps, including after its PR lands.
-Use `--as task:DES-123` from elsewhere. Context does not grant permission to
-advance the managed Flow. Unattended commands in that checkout share the same
+Use `--as task:DES-123` from elsewhere. Work resolves in this order: this
+command's explicit selection, the Task checkout, then an ancestor's explicit
+selection carried in `LF_AS`. Checkout inference never changes that variable.
+`lf task run DES-123` declares the same Work as `--as task:DES-123` and drives
+the Task's selected Flow. An agent declared for X can enter Y's checkout and
+start work for Y; the Exec parent still records X's agent as its caller.
+Context does not grant permission to advance the managed Flow. Unattended commands in that checkout share the same
 worktree confinement and account selection. Every assembled agent prompt resolves
 the participant name through `LF_USER_NAME`, global `user.name`, then Git.
 
@@ -800,7 +805,7 @@ can remain unbound. CLI states the permanent bind target and writes; Desktop con
 Existing Wave ancestry must agree. Done/landed Tasks remain valid without being
 reopened. Flow membership cannot be changed to make an incompatible bind work.
 
-Binding affects subsequent work under the conservative attribution assumption;
+Jack Heart selected prospective attribution: binding affects subsequent work;
 prior usage retains its recorded owner. First assignment, including bind, sets
 Task Started once without rewriting earlier work or usage.
 Inspection commands are still visible in Exec history but do not start Tasks.
@@ -1230,7 +1235,7 @@ Inside a Task's worktree, a launch without `--task`/`--wave`/`--as` belongs to
 that Task: its Session lists the Task as Work and `lf runs --task` finds it.
 The checked-out branch identifies the Task; tracking `origin/main` or a stack
 parent does not change ownership. An explicit selection still wins, and an
-unregistered branch stays unbound.
+unregistered branch uses an inherited explicit selection when present, otherwise stays unbound.
 
 ### External skills
 

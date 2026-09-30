@@ -122,58 +122,14 @@ fn make_registry_inaccessible(path: &std::path::Path) {
         .expect("make registry inaccessible");
 }
 
-/// A Task entry point (ambient id set) whose registry file is gone must refuse
-/// before any push or `gh pr` — the missing registry cannot be proven away, so
-/// the PR must not degrade to generic behavior. `submit` is the gate.
+/// A caller's captured input does not identify this checkout as Task work.
 #[test]
-fn submit_refuses_when_registry_missing_before_any_push() {
-    let home = tempfile::TempDir::new().expect("temp home");
+fn missing_registry_and_ambient_input_leave_checkout_unmanaged() {
+    let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
-    let base = repo.head_sha();
-
-    let log_path = home.path().join("gh.log");
-    let script = gh_record_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-
-    let branch = "jack/authority-missing";
-    repo.create_branch(branch);
-    repo.create_file("task.txt", "task work\n");
-    repo.stage_all();
-    repo.commit("task commit");
-    // Deliberately NOT pushed: the refusal must precede the first push.
-
-    let _task = register_task(home.path(), repo.path(), branch, &base);
-
-    // The registry vanishes. Ambient Run identity still marks this as an agent entry
-    // point, so the missing registry is missing authority — not "no tasks here."
-    std::fs::remove_file(home.path().join("loopflow.db")).expect("remove registry");
-    let run_id = uuid::Uuid::new_v4().simple().to_string();
-    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_ID_ENV, run_id.as_str());
-
-    let err = submit(
-        repo.path(),
-        &land_options(true, "authority missing"),
-        &NullProgress,
-    )
-    .expect_err("missing registry must refuse before any push");
-    let message = err.to_string();
-    assert!(
-        message.contains("authority refused"),
-        "expected an authority refusal, got: {message}"
-    );
-    assert!(
-        message.contains("missing"),
-        "refusal must name the missing registry, got: {message}"
-    );
-
-    assert!(
-        !remote_branch_exists(&repo, branch),
-        "the branch must never reach the remote when authority is refused"
-    );
-    assert_no_gh_pr_mutation(&log_path);
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_ID_ENV, "unrelated-input");
+    assert!(task_stack(repo.path()).unwrap().is_none());
 }
 
 /// A Task worktree whose registry exists but cannot be opened (inaccessible)

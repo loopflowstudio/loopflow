@@ -261,3 +261,53 @@ No materialized full matrix, publication, installation or Task completion follow
 Final slice checks passed: formatting, all-target Clippy with warnings denied
 (`blocked-clippy-final.log`), Ruff on both touched public fixtures, and diff
 whitespace validation. The Chapter fixture change in this slice is formatting only.
+
+## Explicit Task declaration and checkout precedence · 2026-09-30
+
+Jack Heart selected command `--as` → Task checkout → ancestor's explicit `--as`.
+`LF_AS` carries only that declaration; the Task execution shortcut sets it to its
+selected Task. Provider, tmux and SSH forwarding preserve it. Parent Session,
+claim, manifest and `LF_TASK_ORIGIN` no longer assign Work. Exec causal ancestry
+is unchanged. The audit table is in [Task command equivalence](task-command-equivalence.md).
+
+- `attribution-proof-5.log`: five focused public proofs passed. X's scripted
+  provider invokes real lf in Y's checkout; the child belongs to Y and retains
+  X's provider Exec as parent. Both provider environments retain declaration X.
+  Other cases cover outside-checkout declaration, explicit override, unbound
+  caller ancestry, Ask ownership and installation/PR restrictions.
+- `attribution-regressions.log`: 44 of 52 affected cases passed; eight failed.
+  Seven reached installed lf via the fixture PATH after the earlier PATH change.
+  The fixture now pins its real candidate. The remaining case used headless
+  OpenCode inside a confined Task checkout, which the common provider boundary
+  rejects. This is not managed OpenCode acceptance.
+- `attribution-regression-remainder.log`: six of the exact eight failed cases
+  pass after PATH repair. The two remaining fixtures are being corrected: one
+  now counts interactive conversations introduced by its adaptation; the other
+  fails before Task Flow capture with a child exit. Their latest fixture edits
+  are not yet behaviorally verified. Do not count either as a pass.
+- `declared_agent_can_start_another_tasks_flow` is authored as an ignored public
+  Linux proof: X's provider invokes `lf task run Y`; real driver/mechanical child
+  must name Y while retaining the causal chain to X. The disposable attempt
+  produced no test output, and a separate `docker info` timed out after ten
+  seconds. Forced removal also timed out after fifteen seconds. Cleanup of
+  container `06f84fc3f5efbc9e55b0ba861e88779068821fa4bb3d8ee486349046859bda35`
+  remains unconfirmed. Only the two verified local fixture-client processes were
+  stopped; shared Docker was not restarted. No passing shortcut proof follows.
+
+Review removed stale claims that absent registry files prove no historical Tasks
+exist. Without a registry or explicit declaration, ordinary commands remain
+unbound; ancestry cannot reconstruct missing ownership. A replaced provider can
+issue a new unbound command with its original causal parent, but gains no old
+Session/Flow settlement authority. Missing registry with an explicit declaration
+and present incompatible registries still refuse mutation.
+
+Jack's operator steer explicitly requested checkpoint/publication before these
+remaining proofs to preserve work and obtain hosted Rust/Swift feedback. This
+supersedes the earlier pre-publication full-matrix boundary for this partial
+checkpoint only. Publication establishes no acceptance, installation, merge or
+Task completion; full integrated materialized coverage remains required.
+
+At this checkpoint, `cargo fmt`, all-target Clippy with warnings denied
+(`attribution-clippy-final.log`), Ruff on the changed provider fixture, and
+`git diff --check` pass. The fixture's final formatting changes do not replace
+the two outstanding behavioral reruns.

@@ -113,7 +113,6 @@ fn verify_pair(selection: &InstallSelection, deadline: Instant) -> Result<()> {
             command.env_remove(name);
         }
     }
-    command.env(crate::run_record::TASK_ORIGIN_ENV, "1");
     let mut child = command
         .args(["install", "local-preflight", "--store"])
         .arg(&selection.store)

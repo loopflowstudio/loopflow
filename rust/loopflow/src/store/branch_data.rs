@@ -162,7 +162,6 @@ fn private_data_paths() -> io::Result<(PathBuf, PathBuf, Option<PathBuf>)> {
 }
 
 fn clear_inherited_execution() {
-    crate::run_record::preserve_task_origin();
     // The snapshot does not inherit the launching Session's execution authority
     // or permission to append to its Run bundle. Clear executable pins too:
     // discovery selects this CLI or the daemon's sibling CLI, never lfd itself.
@@ -293,8 +292,6 @@ mod tests {
             assert!(std::env::var_os("LF_RUN_DIR").is_none());
             assert!(std::env::var_os("LF_WORK_ADVANCE_CLAIM").is_none());
             assert!(std::env::var_os("LF_AGENT_CALLER").is_none());
-            assert!(crate::run_record::task_origin());
-            assert!(crate::lf::commands::install::guard_task_origin().is_err());
 
             let store = SqliteStore::new(&expected_db).unwrap();
             let wave = Wave::new(WaveId::new(), "private-proof".into(), "/repo".into());

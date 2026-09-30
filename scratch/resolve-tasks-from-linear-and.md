@@ -80,16 +80,18 @@ has been counted as a pass.
   `loo334-canonical-installed_development_.log`, `loo334-clippy.log`, and
   `loo334-materialize.log`, all under `.lf/tmp/`.
 
-**Required proof blocked:** `uv run python scripts/test_task_installation.py`
-returned `Docker did not respond within 10 seconds; no proof container was created.`
-Log: `.lf/tmp/loo334-installation-migration.log`. No promotion or worker test ran.
-The harness now checks the full materialized migration path before installation.
-Its normal-promotion case is extended through exact review readiness/completion,
-a second actual worker, one Flow completion, retained predecessor-store state,
-and command paths tied to verified selected-runtime SHA-256 evidence. This
-extension compiles under all-target Clippy but remains **authored, not executed**.
-The terminal transport is simulated; even a future pass does not prove configured
-provider or Desktop acceptance.
+**Required proof blocked:** the earlier Docker timeout remains recorded in
+`.lf/tmp/loo334-installation-migration.log`. The compression retry reached Docker
+29.4.0, materialized all 43 drafts, passed the three populated migration tests and
+the normalized planning test, and built both executable variants. It then failed
+at the first published promotion in `normal_promotion_preserves_pending_task_review`:
+`Task PR authority refused: the shared Loopflow registry path is not usable:
+first installation is unfinished`. Preflight permitted promotion, but its recovery
+child exited 1. Log: `.lf/tmp/loo334-compress-installation.log`; container cleanup
+completed. No successful promotion, exact review completion, two-worker or selected
+runtime digest proof follows; later harness cases did not run. Those assertions
+remain authored. Terminal transport is simulated, so even a future pass does not
+prove configured provider or Desktop acceptance.
 
 **Review and measurement:** relative to incoming-notes checkpoint `08e70e45c`,
 **+142 / −29 production Rust lines**, excluding tests/test helpers, scripts,
@@ -100,8 +102,16 @@ prefix traversal for these known histories. No parallel runtime store is added.
 Review caught and fixed the archived-body conversion/late-list interaction; the
 import's explicit retirement boundary is documented in `store/MIGRATIONS.md`.
 
-Next run the required harness when Docker responds, inspect any next public-path
-counterexample, and establish case 15 through both worker boundaries. Session-owner
+Compression resolves recorded migration names once to candidate positions for both
+draft append and canonical adoption, and returns the original unknown-prefix error
+without validating twice (12 fewer production Rust lines). Three source and eight
+canonical tests, Clippy, formatting and the shipped-migration check passed; logs
+are `.lf/tmp/loo334-compress-*`. The first canonical attempt failed two tests because
+the shared Cargo target retained the source build's generated schema; rebuilding
+the disposable copy's build script regenerated normalized tables and passed.
+
+Next resolve the first-install recovery child's Task-authority failure, rerun the
+required harness, and establish case 15 through both worker boundaries. Session-owner
 discovery, genuine divergent-copy handling, chapter completion/archive integration,
 recursive runtime/decoy PATH and the remaining full-design obligations are not
 settled by these migration checks. Keep the pending relationship decision separate.

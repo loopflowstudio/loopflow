@@ -322,19 +322,13 @@ fn adopt_released_development_drafts(
             .collect::<StoreResult<Vec<_>>>()?;
         let names: Vec<_> = blocks.iter().map(|(name, _, _)| *name).collect();
         let integration = _planning_integration_order(&development[consumed..], &names);
-        let order = integration
-            .clone()
-            .unwrap_or_else(|| names.iter().map(|name| (*name).to_string()).collect());
-        let ordered = order
-            .iter()
-            .map(|name| {
-                blocks
-                    .iter()
-                    .find(|(candidate, _, _)| candidate == name)
-                    .expect("integration order contains only release blocks")
-            })
+        let historical_order = integration.is_some();
+        let ordered = integration
+            .unwrap_or_else(|| (0..blocks.len()).collect())
+            .into_iter()
+            .map(|index| &blocks[index])
             .collect::<Vec<_>>();
-        if integration.is_some() {
+        if historical_order {
             // Verify the actual old schema before effects, using its original
             // SQL order rather than the newly combined release order.
             let count = (development.len() - consumed).min(ordered.len());
@@ -474,7 +468,7 @@ fn _applied_development_migrations(
 fn _planning_integration_order(
     applied: &[AppliedDevelopmentMigration],
     names: &[&str],
-) -> Option<Vec<String>> {
+) -> Option<Vec<usize>> {
     if !names.contains(&"finish_planning_integration") {
         return None;
     }
@@ -491,23 +485,23 @@ fn _planning_integration_order(
         if count == 0 || applied[..count] != history.drafts[..count] {
             continue;
         }
-        let mut order: Vec<String> = history
+        let Some(mut order) = history
             .drafts
             .iter()
-            .map(|draft| draft.name.clone())
-            .collect();
-        if !order.iter().all(|name| names.contains(&name.as_str())) {
+            .map(|draft| names.iter().position(|name| *name == draft.name))
+            .collect::<Option<Vec<_>>>()
+        else {
             continue;
-        }
-        for name in names {
-            if !order.iter().any(|existing| existing == name) {
-                order.push((*name).to_string());
+        };
+        for index in 0..names.len() {
+            if !order.contains(&index) {
+                order.push(index);
             }
         }
         if applied
             .iter()
             .zip(&order)
-            .any(|(draft, name)| &draft.name != name)
+            .any(|(draft, index)| draft.name != names[*index])
         {
             continue;
         }
@@ -520,26 +514,20 @@ fn _ordered_development_drafts(
     applied: &[AppliedDevelopmentMigration],
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<Vec<crate::build_info::MigrationDraft>> {
-    if _validate_applied_draft_prefix(applied, drafts).is_ok() {
-        return Ok(drafts.to_vec());
-    }
+    let prefix_error = match _validate_applied_draft_prefix(applied, drafts) {
+        Ok(()) => return Ok(drafts.to_vec()),
+        Err(error) => error,
+    };
     let names: Vec<_> = drafts.iter().map(|draft| draft.name).collect();
-    if let Some(order) = _planning_integration_order(applied, &names) {
-        let ordered: Vec<_> = order
-            .iter()
-            .map(|name| {
-                drafts
-                    .iter()
-                    .find(|draft| draft.name == name)
-                    .expect("integration order contains only candidate drafts")
-                    .clone()
-            })
-            .collect();
-        _validate_applied_draft_prefix(applied, &ordered)?;
-        return Ok(ordered);
-    }
-    _validate_applied_draft_prefix(applied, drafts)?;
-    Ok(drafts.to_vec())
+    let Some(order) = _planning_integration_order(applied, &names) else {
+        return Err(prefix_error);
+    };
+    let ordered: Vec<_> = order
+        .into_iter()
+        .map(|index| drafts[index].clone())
+        .collect();
+    _validate_applied_draft_prefix(applied, &ordered)?;
+    Ok(ordered)
 }
 
 fn _validate_applied_draft_prefix(

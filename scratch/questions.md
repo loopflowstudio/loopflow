@@ -58,3 +58,13 @@ commit, push without force and stop. Subsequent autonomous landing belongs to
 the supervising session. [Remaining work](remaining-work.md) separates merge
 requirements from release conversion of `~/.lf`; neither installed migration
 nor promotion is part of this pass.
+
+## LOO-354 branch scope (2026-09-30)
+
+This checkout now belongs to Jack Heart's subwave Task LOO-354. The LOO-298
+entries above remain parent context. LOO-354 follows the restored
+[accepted subwave design](define-durable-subwave-identity-and.md) and
+[its assumptions](subwave-questions.md): no design review, interactive demo
+before delivery, merge parent changes rather than rebase. This implementation
+pass has no push/landing instruction. Final read-slice verification is blocked
+by TESTING.md's 32 GiB emergency reserve after approved cleanup failed.

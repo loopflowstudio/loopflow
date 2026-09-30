@@ -46,7 +46,7 @@ unbound Run with its exact name and boundary. Children propose, return agree or
 challenge, and never mutate live planning. Do not launch Project planning Runs.
 
 Keep each complete proposal and exact JSON plan in scratch. Preview the whole
-repository with `lf repo new-chapter <name> --dry-run --json`; there is no
+repository with `lf new-chapter <name> --dry-run --json`; there is no
 per-Wave rotation or plan-file argument. A preview classifies current provider
 facts, not unapplied proposal content. Reconcile challenges and show the user
 Wave objectives, proposed KRs and metric targets, retained successor content,
@@ -75,8 +75,8 @@ Flow or competing current Projects require explicit resolution in Linear.
 Refresh the repository preview after preparation, then apply the accepted name:
 
 ```bash
-lf repo new-chapter <name> --dry-run --json
-lf repo new-chapter <name> --json
+lf new-chapter <name> --dry-run --json
+lf new-chapter <name> --json
 ```
 
 Retain dated command output and exit status as evidence. Retry an interrupted
@@ -92,7 +92,7 @@ delete predecessor Projects, or count canceled backlog as completed work.
 To apply an accepted plan after its Project becomes current, use:
 
 ```bash
-lf wave update-plan --wave <wave> --plan <plan.json>
+lf update-plan --wave <wave> --plan <plan.json>
 ```
 
 The file replaces the complete current Project content:
@@ -118,7 +118,7 @@ Curate durable lessons into Wave memory and retain useful decisions and evidence
 in existing durable records before scratch cleanup. Linear retains Project
 plans and history; do not create a second local chapter owner. Checkpoint
 coherent repository edits with `lf commit`. Obtain push authority unless already
-given, then use the selected PR workflow; default to `lf pr submit` for a manual
+given, then use the selected PR workflow; default to `lf submit` for a manual
 merge. Until merged, explicitly report that operational application is complete
 but repository publication is pending. Corrections append dated observations;
 never rewrite earlier evidence.

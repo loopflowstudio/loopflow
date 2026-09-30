@@ -474,3 +474,71 @@ newer existence direction; no private DB is accepted as current Task truth here.
 This pass changes design/tooling only after checkpoint 23c588154 (+0/−0 production
 Rust). No behavioral runtime pass or completed cull is claimed. No further owner
 move, publication, landing, Task completion or Flow navigation occurred.
+
+### Short commands and wt correction · 2026-09-30
+
+Compared with cull checkpoint `91ed67b9c`. Jack Heart's selected correction is
+implemented: canonical `task wt` replaces `task worktree`, no alias; `lf wt`
+resolves through owner omission. Parser, CLI/Flow dispatch, operation hints,
+fixtures and current reference use that spelling. Guides, README, skills and
+operating instructions now omit unnecessary owners. `lf pr publish` keeps pr
+because release also publishes; `lf land`, `lf rebase` and `lf wt create` work
+without prefixes. Reference/help retain the owner tree. Removed README's stale
+Approve/Iterate command examples in favor of returning review feedback.
+
+Unique command prefixes now use the same Clap resolver after exact command
+lookup. Hidden callbacks require exact names and never become shortcuts. `mon`
+is a derived prefix when Monitor is integrated, demonstrated on the resolver's
+synthetic tree; this correction does not introduce the Monitor group. A public
+CLI `reb --help` proof exercises real prefix lookup without provider access.
+
+`documented_commands` scans Markdown in docs, builtin skills, exported skills,
+README and STYLE through the actual normalizer, including help paths. A deliberate
+ambiguous reference example is explicitly marked and must remain ambiguous;
+a competing-command fixture proves a formerly unique shortcut fails. This is
+an ambiguity guarantee, not execution of every example or proof that pending
+preview commands and arbitrary authored definitions exist. The existing public
+docs still label the unimplemented target; their full runtime reconciliation
+remains required after the cull. STYLE owns the short-command convention.
+
+Focused checks on final production code:
+
+- `cargo test -p loopflow --test documented_commands --test cli_discovery --jobs 4`:
+  2 + 12 passed, including reference ambiguity, derived-prefix collision,
+  wt/rebase public help, preserved canonical paths and absent-Home inspection.
+- `cargo test -p loopflow --test worktree_tests wt_list_ --jobs 4`: 2 passed;
+  normal listing preserves canonical checkout, explicit sync owns its update.
+- `cargo test -p loopflow --lib consolidated_commands_parse_without_old_namespaces --jobs 4`:
+  1 passed; root wt is derived, canonical task wt parses, worktree is absent.
+- `cargo test -p loopflow --test golden_prompt --jobs 4`: 1 passed across goldens.
+- `uv run pytest python/tests/test_loopflow_skill_alignment.py -q`: 4 passed.
+- All-target Clippy (four jobs), formatting and diff checks passed. Catalog
+  renderer Ruff passed after splitting overlong literals; the first Ruff attempt
+  failed and its shell still checkpointed the design. That failed check was not
+  a pass. The initial discovery build overlapped the prefix edit and returned
+  None for mon; rerunning after source edits settled passed 12/12. A premature
+  catalog read while its generator was compiling saw an empty redirected file;
+  the completed generation is valid JSON. These were verification sequencing
+  errors, not passing evidence or reasons to weaken resolver expectations.
+- Website docs and architecture HTML regenerated. Completed compiled extraction
+  remains **139 commands below root, 17 hidden, 436 flags, 92 positionals,
+  zero registered aliases**. No count reduction is claimed for restoring wt or
+  adding derived-prefix lookup.
+
+Measured production Rust and builtin instructions: **+96 / −86 lines** versus
+`91ed67b9c`, excluding cfg/test functions, integration tests, scripts, generated
+files, docs/style, external skills and scratch. No domain writer, persistence,
+process authority or additional owner move changed in this correction.
+
+Review corrected the old fixed-mon prose, caught the impossible “land resolves
+to land” explanation after mechanical shortening, and retained pr on publish
+because of the release collision. LOO-340's newly available sibling plan was
+also read: live/default and cached proof now exist there; one per-provider
+selection covers the whole launch, with no individual step overrides. Source
+proof remains separate from live authentication and installed acceptance.
+
+Remaining: integrate destination work and catalog its added/removed Clap nodes;
+implement the concept cull with consumer preservation; complete Monitor,
+local discovery, child readiness and real first-provider-result proof; reconcile
+all preview docs; demonstrate counts and open choices for Jack. No publication,
+landing, completed Task or chosen Flow navigation follows from this correction.

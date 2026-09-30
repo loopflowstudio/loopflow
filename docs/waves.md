@@ -61,8 +61,8 @@ track remaining implementation and acceptance.
 
 ```bash
 lf roadmap --json
-lf repo new-chapter 2026-10 --dry-run
-lf repo new-chapter 2026-10
+lf new-chapter 2026-10 --dry-run
+lf new-chapter 2026-10
 ```
 
 A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
@@ -184,7 +184,7 @@ Set targets in the chapter plan, not the instrument contract:
 ```
 
 Apply this complete Wave plan with
-`lf wave update-plan --wave <wave> --plan plan.json`. For the next chapter,
+`lf update-plan --wave <wave> --plan plan.json`. For the next chapter,
 edit the Planned Project in Linear.
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
@@ -193,9 +193,9 @@ remain owned by the Wave; rotation does not freeze another copy of those reading
 The Wave objective stays in `GOAL.md`; Project plans have no second objective.
 
 ```bash
-lf wave status <wave>            # owner, value, target, window, freshness, reason
-lf wave status <wave> --json     # the shared metric_portfolio DTO
-lf roadmap --json           # the same DTO on every Wave row
+lf wave status <wave>                  # owner, value, target, window, freshness, reason
+lf wave status <wave> --json           # the shared metric_portfolio DTO
+lf roadmap --json                      # the same DTO on every Wave row
 ```
 
 `installed` metrics appear under Instrumenting. Promote a contract to
@@ -264,8 +264,8 @@ New Project or Task Work inherits its parent's recorded Home once. Readers
 operate on the selected Home; they never silently aggregate other Homes.
 
 ```bash
-lf wave relocate <wave-id> --name platform
-lf wave relocate <wave-id> --repo ../moved-repository
+lf relocate <wave-id> --name platform
+lf relocate <wave-id> --repo ../moved-repository
 ```
 
 Relocation preserves the Wave UUID, Linear projection, authored files, Work and
@@ -285,7 +285,7 @@ See [Get Started → Go Remote](getting-started.md#go-remote) and
 
 ```bash
 lf wave status infra --json
-lf wave update-plan --wave infra --plan plan.json
+lf update-plan --wave infra --plan plan.json
 ```
 
 `plan.json` contains the complete current plan:
@@ -308,10 +308,10 @@ repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
 ```bash
-lf wave connect --wave infra --team-key LOO     # first Wave establishes the repo Team
-lf wave connect --all                           # all nested Waves reuse it
-lf wave sync --wave infra                    # refresh the local SQLite snapshot
-lf wave status infra          # deterministic cache-only read
+lf wave connect --wave infra --team-key LOO # first Wave establishes the repo Team
+lf wave connect --all                  # all nested Waves reuse it
+lf wave sync --wave infra              # refresh the local SQLite snapshot
+lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"
 ```
@@ -329,10 +329,10 @@ durable Task Work in its own stable sibling worktree:
 ```bash
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
-lf task checkout INF-123
+lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
-lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 --flow incident
 ```
 
@@ -365,9 +365,9 @@ steering, resume and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf task pr land --next parser-proof   # merge this PR, then rotate to the next
-lf task pr land -c                    # merge this PR, then complete the Task
-lf task complete INF-124 --summary "investigation recorded"   # no PR needed
+lf land --next parser-proof            # merge this PR, then rotate to the next
+lf land -c                             # merge this PR, then complete the Task
+lf task complete INF-124 --summary "investigation recorded" # no PR needed
 ```
 
 `task complete` also finishes planning-only Tasks without creating a checkout.

@@ -693,10 +693,10 @@ async fn prepare_new_task(
     };
     let workspace_slug = segment.as_str().to_string();
     let mut plan = plan_placement(main_repo, segment)
-        .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
+        .map_err(|error| task_error(format!("failed to plan task wt: {error}")))?;
     if plan.strategy != PlacementStrategy::Create || plan.worktree_path.exists() {
         return Err(task_error(format!(
-            "task worktree or branch already exists without a Task: {} ({})",
+            "task wt or branch already exists without a Task: {} ({})",
             plan.worktree_path.display(),
             plan.branch
         )));
@@ -908,9 +908,7 @@ fn create_prepared_task(
             {
                 tracing::warn!(task = %task.id, %event_error, "worktree creation failed after Task planning state committed; failure event did not persist");
             }
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
+            return Err(task_error(format!("failed to create task wt: {error}")));
         }
 
         if let Err(error) = store

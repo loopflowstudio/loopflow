@@ -57,7 +57,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain
      future and historical content. Preserve existing Project identities.
-   - If a current Project exists, `lf wave update-plan --wave <child> --plan <plan.json>`
+   - If a current Project exists, `lf update-plan --wave <child> --plan <plan.json>`
      replaces its complete content: `{"metric_targets":[],"flow":"feature","krs":[]}`.
      Supply the intended nonempty `flow` string and all KRs and targets.
    - If no current Project exists, arrange its plan through the accepted
@@ -70,9 +70,9 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 
 5. Retire the parent's future planning
    - A split does not authorize a chapter rotation. If a repository boundary is
-     also accepted, preview `lf repo new-chapter <name> --dry-run --json` for all
+     also accepted, preview `lf new-chapter <name> --dry-run --json` for all
      Waves, including the parent and children. There is no per-Wave or plan-file
-     option. Apply with `lf repo new-chapter <name> --json` only after the
+     option. Apply with `lf new-chapter <name> --json` only after the
      direction and Task-disposition review gates; retain prior authorization.
    - Rotation moves started unfinished Tasks within their owning Wave, retaining
      worktrees, PRs and captured execution. Proven untouched backlog is canceled,

@@ -19,6 +19,7 @@
   the newer instruction; reconcile integration without inventing Task records.
 - LOO-329/330 sibling drafts disagree on rename-preserved Wave identity. Retain
   the rename operation's concept but do not decide their identity contract here.
-- LOO-340 has no checkout in the current roadmap. Its live-default account,
-  machine-store, provider-bundle and explicit banked-reset requirements are
-  known from its Task directive; implementation availability is not established.
+- LOO-340 had no checkout in the first roadmap read. A later read found
+  loopflow.keep-account-status-live-and; its plan now implements live status,
+  replaces --verify with --cached, and explicitly forbids per-step overrides.
+  One per-provider selection is captured for the whole launch and its children.

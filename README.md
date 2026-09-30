@@ -17,11 +17,11 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 
 ```bash
 lf install                  # update to the latest published release, from any directory
-lf install schedule         # check at login and weekly (macOS)
-lf install schedule daily   # also accepts weekly, hourly, 5min
+lf schedule         # check at login and weekly (macOS)
+lf schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf task rebase` inside a repository to update its checkout.
+Use `lf rebase` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -95,15 +95,15 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task checkout INF-123                               # durable Task Work + worktree, no controller
+lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf task run INF-123                                   # start end-to-end Task automation
-lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
-lf task interrupt INF-123                             # end this turn so fresh direction is read now
+lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
+lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
+lf restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
-lf task pr arm -c                                          # request exact-head auto-merge and return
-lf task pr land -c                                         # watch, repair CI, merge, then complete the Task
+lf arm -c                                          # request exact-head auto-merge and return
+lf land -c                                         # watch, repair CI, merge, then complete the Task
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
@@ -120,7 +120,7 @@ Watch this repository and the current Home:
 
 ```bash
 lf wave list                  # every durable Wave and its Home/runtime evidence
-lf user name           # display name from Git or a personal Loopflow override
+lf name           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
@@ -203,8 +203,8 @@ each `.md` URL, use the curated
 
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
-lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf task rebase                                    # refresh main and integrate it into this worktree
+lf schedule                          # update Loopflow at login and weekly (macOS)
+lf rebase                                    # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
 lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/

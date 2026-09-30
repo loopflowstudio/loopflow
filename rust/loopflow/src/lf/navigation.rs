@@ -17,17 +17,23 @@ fn named(command: &Command, name: &str) -> bool {
     command.get_name() == name || command.get_all_aliases().any(|alias| alias == name)
 }
 
-fn descendants(command: &Command, name: &str, prefix: &[String], matches: &mut Vec<Vec<String>>) {
+fn descendants(
+    command: &Command,
+    name: &str,
+    prefix: &[String],
+    matches: &mut Vec<Vec<String>>,
+    abbreviated: bool,
+) {
     for child in command
         .get_subcommands()
         .filter(|child| !child.is_hide_set())
     {
         let mut path = prefix.to_vec();
         path.push(child.get_name().to_string());
-        if named(child, name) {
+        if named(child, name) || (abbreviated && child.get_name().starts_with(name)) {
             matches.push(path.clone());
         }
-        descendants(child, name, &path, matches);
+        descendants(child, name, &path, matches, abbreviated);
     }
 }
 
@@ -41,7 +47,11 @@ pub fn resolve_child(
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    descendants(command, name, &[], &mut matches);
+    descendants(command, name, &[], &mut matches, false);
+    // Exact descendant names win over abbreviations, just as exact owners do.
+    if matches.is_empty() {
+        descendants(command, name, &[], &mut matches, true);
+    }
     match matches.len() {
         0 => Ok(None),
         1 => Ok(matches.pop()),

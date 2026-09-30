@@ -26,11 +26,11 @@ print, and keeps no separate copy.
 ## From the command line
 
 ```bash
-lf roadmap                 # tasks in this project, sorted by what they need
-lf roadmap --all           # every project on this computer
-lf top                     # what is running right now
-lf runs --wave infra       # the record of each time the AI was started
-lf ssh <home-id> roadmap   # ask another computer the same question
+lf roadmap                             # tasks in this project, sorted by what they need
+lf roadmap --all                       # every project on this computer
+lf top                                 # what is running right now
+lf runs --wave infra                   # the record of each time the AI was started
+lf ssh <home-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine
@@ -108,7 +108,7 @@ Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
 `lf prune --dry-run` before cleanup. Plain `lf prune` removes stale Exec
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
-`lf repo ci` reads the local ledger, not GitHub: it reports how
+`lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 
 ## Steer
@@ -118,8 +118,8 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
 lf --wave <wave> : "Review this plan"          # start a conversation
-lf task comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
-lf task interrupt INF-123                     # end this turn and re-read direction
+lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
+lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions
 lf session open <session-id> --json           # recover one exact conversation
 ```
@@ -143,9 +143,9 @@ through its authored edge. Pane close and provider exit choose nothing.
 ## Inspect and resume
 
 ```bash
-lf top                      # live Loopflow process activity
-lf wave status shipper           # work and its current conditions
-lf session open <id>        # start or resume the selected conversation
+lf top                                 # live Loopflow process activity
+lf wave status shipper                 # work and its current conditions
+lf session open <id>                   # start or resume the selected conversation
 ```
 
 Open a Session in the app or CLI to return to its provider-native conversation.
@@ -153,7 +153,7 @@ Task workspace shells run directly in the app's terminal.
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
-Use `lf task comment` for durable Task direction,
+Use `lf comment` for durable Task direction,
 `lf --as` for another agent perspective, and `lf ask` for a new review boundary.
 
 ## Next

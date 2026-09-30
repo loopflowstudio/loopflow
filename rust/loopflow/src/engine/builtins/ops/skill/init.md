@@ -36,7 +36,7 @@ lf --version
 lf account status --cached          # cached; no provider request
 lf account status --json            # inspect accepted managed evidence
 lf account route show
-lf home id --json
+lf id --json
 lf wave list --json
 command -v claude
 command -v codex
@@ -48,7 +48,7 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
-If `lf home id` says the local store is not initialized, record that plainly
+If `lf id` says the local store is not initialized, record that plainly
 and continue; do not invent a Home identity.
 
 Present one compact topology:
@@ -69,7 +69,7 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
-Read `lf user name --json`: a personal Loopflow `user.name` override wins,
+Read `lf name --json`: a personal Loopflow `user.name` override wins,
 otherwise Git's configured `user.name` supplies the baseline. An available name
 needs no additional setup. Agents may also use a name already known in the session.
 In an interactive session, if neither source supplies a name, ask what name to
@@ -199,8 +199,8 @@ Tasks use the current Project and its required `flow:` default.
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
-`lf repo new-chapter <name> --dry-run --json`, then apply with
-`lf repo new-chapter <name> --json` only under that authorization. Every Wave
+`lf new-chapter <name> --dry-run --json`, then apply with
+`lf new-chapter <name> --json` only under that authorization. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
 with no Projects receives an empty plan with `flow: feature`, unless an authored
 Planned successor supplies its content. Existing successors and predecessors
@@ -208,7 +208,7 @@ retain identity; rotation completes predecessors rather than deleting them.
 
 Author future content in the Planned Linear Project through an available
 authorized provider interface. For an existing current Project,
-`lf wave update-plan --wave <wave> --plan <plan.json>` replaces its complete
+`lf update-plan --wave <wave> --plan <plan.json>` replaces its complete
 content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
 There is no future-plan writer or historical chapter selector in these commands.
 Missing access or competing current Projects stays an explicit next action;
@@ -250,7 +250,7 @@ actual ids observed from the commands:
 
 ```bash
 lf ssh <host> home id --json
-lf home observe <home-id> ssh://<user>@<host>
+lf observe <home-id> ssh://<user>@<host>
 lf ssh <home-id> auth status
 lf ssh <home-id> route show
 lf wave list --json
@@ -264,7 +264,7 @@ commands. The remote process can select from subscription accounts forwarded
 for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
-required accounts, and the intended route. `lf home observe` records the
+required accounts, and the intended route. `lf observe` records the
 mutable SSH route for the stable HomeId. Placement is allowed only while no Run
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
 `lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
@@ -278,7 +278,7 @@ Run the smallest checks that prove the selected path:
 lf account status --cached          # cached; no provider request
 lf account status --json            # inspect accepted managed evidence
 lf account route show
-lf home id --json
+lf id --json
 lf wave list --json
 ```
 

@@ -60,9 +60,9 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run the skill
-lf audit: focus on auth       # pass arguments
-lf : "fix the typo in README" # or skip the file entirely
+lf audit                               # run the skill
+lf audit: focus on auth                # pass arguments
+lf : "fix the typo in README"          # or skip the file entirely
 ```
 
 A flow chains skills with commits between them:
@@ -90,10 +90,10 @@ Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md`), `LOOPFLOW.md`,
 explicitly:
 
 ```bash
-lf gate --docs VISUAL_DESIGN.md      # one doc
-lf gate --docs 'docs/*.md'           # a glob
-lf gate --diff-files                 # bodies of files changed on the branch
-lf debug -c                          # the clipboard
+lf gate --docs VISUAL_DESIGN.md        # one doc
+lf gate --docs 'docs/*.md'             # a glob
+lf gate --diff-files                   # bodies of files changed on the branch
+lf debug -c                            # the clipboard
 lf token-compress --docs RELEASE_NOTES.md: fit this history into 2,000 tokens
 ```
 

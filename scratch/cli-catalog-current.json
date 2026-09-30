@@ -7483,7 +7483,7 @@
     "path": [
       "lf",
       "task",
-      "worktree"
+      "wt"
     ]
   },
   {
@@ -7499,7 +7499,7 @@
     "path": [
       "lf",
       "task",
-      "worktree"
+      "wt"
     ],
     "required": false,
     "short": "h",
@@ -7513,7 +7513,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "create"
     ]
   },
@@ -7530,7 +7530,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "create"
     ],
     "required": true,
@@ -7552,7 +7552,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "create"
     ],
     "required": false,
@@ -7572,7 +7572,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "create"
     ],
     "required": false,
@@ -7587,7 +7587,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "switch"
     ]
   },
@@ -7604,7 +7604,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "switch"
     ],
     "required": true,
@@ -7624,7 +7624,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "switch"
     ],
     "required": false,
@@ -7639,7 +7639,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "list"
     ]
   },
@@ -7658,7 +7658,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "list"
     ],
     "required": false,
@@ -7680,7 +7680,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "list"
     ],
     "required": false,
@@ -7700,7 +7700,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "list"
     ],
     "required": false,
@@ -7715,7 +7715,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "prune"
     ]
   },
@@ -7734,7 +7734,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "prune"
     ],
     "required": false,
@@ -7754,7 +7754,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "prune"
     ],
     "required": false,
@@ -7769,7 +7769,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "remove"
     ]
   },
@@ -7786,7 +7786,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "remove"
     ],
     "required": true,
@@ -7808,7 +7808,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "remove"
     ],
     "required": false,
@@ -7828,7 +7828,7 @@
     "path": [
       "lf",
       "task",
-      "worktree",
+      "wt",
       "remove"
     ],
     "required": false,

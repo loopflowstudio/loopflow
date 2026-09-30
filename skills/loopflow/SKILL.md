@@ -36,19 +36,19 @@ authority, and never impersonates the User in chat.
 ## Git, Worktrees, GitHub → `lf`
 
 ```bash
-lf task commit -m "message" # commit locally
-lf task pr open # push, prepare a draft, and open its review page
-lf task pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
-lf task pr submit                         # done; the user clicks merge
-lf task pr land                           # done; loopflow lands it hands-off
-lf task pr land -c                        # land and complete the owning Task
-lf task rebase --plan                     # show strategy; bare `lf task rebase` applies it
-lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
+lf commit -m "message"                 # commit locally
+lf pr open                             # push, prepare a draft, and open its review page
+lf pr publish --title "..."            # push + create/update PR, print state+URL (no browser)
+lf submit                              # done; the user clicks merge
+lf land                                # done; loopflow lands it hands-off
+lf land -c                             # land and complete the owning Task
+lf rebase --plan                       # show strategy; bare `lf rebase` applies it
+lf task run CHILD --stack-on PARENT    # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
 prepares it for the user's merge click; **arm/land** request auto-merge.
-`lf task pr open` creates or updates a draft and opens its page when a person asks
+`lf pr open` creates or updates a draft and opens its page when a person asks
 to see it. Existing ready PRs stay ready; opening a draft does not publish it.
 Publish/submit/arm/land make drafts ready.
 
@@ -71,10 +71,10 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                       # durable Task Work, own worktree
-lf task comment <issue-id> "smaller approach" # post direction for the Task advancer
-lf task status <issue-id> --json             # inspect durable state
-lf task wait <issue-id> --until terminal
+lf task run <issue-id>                 # durable Task Work, own worktree
+lf comment <issue-id> "smaller approach" # post direction for the Task advancer
+lf task status <issue-id> --json       # inspect durable state
+lf wait <issue-id> --until terminal
 ```
 
 When work feels slow or stuck, run `lf top` before guessing — it shows
@@ -86,9 +86,9 @@ When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf wave list --json              # every durable Wave and its Home/runtime evidence
-lf wave status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
-lf roadmap --json         # current plan across Waves joined to runtime truth
+lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json           # one Wave's Work hierarchy, Runs, and Task conditions
+lf roadmap --json                      # current plan across Waves joined to runtime truth
 ```
 
 These are read surfaces. `lf wave status` is the focused operational view;
@@ -138,7 +138,7 @@ is required.
 ## Checkpoint And Proceed
 
 Do not ask permission for reversible work: editing files, sketching code,
-running local builds and tests. Tree dirty? `lf task commit -m "checkpoint: <state>"`
+running local builds and tests. Tree dirty? `lf commit -m "checkpoint: <state>"`
 first. Still ask before pushing, opening or closing PRs, sending messages,
 calling external APIs with side effects, or destructive operations.
 

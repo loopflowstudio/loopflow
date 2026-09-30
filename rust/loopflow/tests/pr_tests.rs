@@ -115,7 +115,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
     run(&["task", "rebase", "--plan"]);
     assert_eq!(repo.head_sha(), committed);
     let worktrees: serde_json::Value =
-        serde_json::from_slice(&run(&["task", "worktree", "list", "--json"])).unwrap();
+        serde_json::from_slice(&run(&["task", "wt", "list", "--json"])).unwrap();
     assert_eq!(worktrees.as_array().unwrap().len(), 1);
     for (verb, expected) in [("open", "draft"), ("publish", "open")] {
         run(&[

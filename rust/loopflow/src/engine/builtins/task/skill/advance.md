@@ -39,7 +39,7 @@ alone is not a request to run it again.
 Use the owning repository, not whichever repository hosted the conversation.
 Inspect `lf wave list --json` and the relevant Wave status to place the work. Reuse an
 existing matching Task when there is one. Otherwise create and prepare a Task
-through `lf task create` and `lf task checkout`, carrying the complete approved
+through `lf task create` and `lf checkout`, carrying the complete approved
 scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed

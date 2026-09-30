@@ -50,9 +50,9 @@ Steer, or resume a stopped process through the same Task Work:
 
 ```bash
 lf session open <session-id>
-lf session complete <session-id>    # return saved review or Ask feedback
-lf task comment INF-123 "address the latest feedback"
-lf task interrupt INF-123
+lf session complete <session-id>       # return saved review or Ask feedback
+lf comment INF-123 "address the latest feedback"
+lf interrupt INF-123
 lf task run INF-123
 lf task run INF-123 --reason "provider credentials repaired"
 ```
@@ -103,20 +103,20 @@ Other options:
 List all worktrees, then clean up stale entries:
 
 ```bash
-lf task worktree list
-lf task worktree prune --dry-run    # show clean terminal or week-stale worktrees
-lf task worktree prune              # remove those worktrees and their branches
+lf wt list
+lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
+lf wt prune                            # remove those worktrees and their branches
 ```
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf task worktree remove NAME --force` only when intentionally discarding a worktree.
+`lf wt remove NAME --force` only when intentionally discarding a worktree.
 
 Feature-worktree integration fetches and pins `origin/<default>` without
 moving the default-branch checkout:
 
 ```bash
-lf task rebase
+lf rebase
 ```
 
 The feature branch uses the current remote base even when the sibling default
@@ -148,8 +148,8 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
-lf qa --no-loopflow         # skip LOOPFLOW.md
-lf qa --docs src/small/     # limit --docs to a narrower path or glob
+lf qa --no-loopflow                    # skip LOOPFLOW.md
+lf qa --docs src/small/                # limit --docs to a narrower path or glob
 ```
 
 `--docs` only adds what you pass—drop paths or narrow globs to shrink it further.

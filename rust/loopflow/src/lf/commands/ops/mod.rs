@@ -1943,7 +1943,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
 
     // A development binary owns an isolated `.lf-dev` registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf task worktree prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

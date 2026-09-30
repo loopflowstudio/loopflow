@@ -66,6 +66,11 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
         vec![
+            vec!["task", "wt", "create", "--help"],
+            vec!["wt", "create", "--help"],
+        ],
+        vec![vec!["task", "rebase", "--help"], vec!["reb", "--help"]],
+        vec![
             vec!["help", "land"],
             vec!["land", "--help"],
             vec!["task", "pr", "land", "--help"],
@@ -190,11 +195,11 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
-        &["task", "worktree", "list", "--full"][..],
+        &["task", "wt", "list", "--full"][..],
         &["wave", "status", "--no-sync"],
-        &["task", "worktree", "list", "--format", "json"],
+        &["task", "wt", "list", "--format", "json"],
         &["task", "commit", "--push"],
-        &["task", "worktree", "rm", "unused"],
+        &["task", "wt", "rm", "unused"],
         &["-M", "unused", "run", "solo"],
         &["-C", "run", "solo"],
     ] {
@@ -372,7 +377,7 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
-fn transitive_lookup_counts_canonical_targets_and_respects_exact_aliases() {
+fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     let tree = clap::Command::new("lf")
         .subcommand(
             clap::Command::new("task").subcommand(
@@ -382,13 +387,22 @@ fn transitive_lookup_counts_canonical_targets_and_respects_exact_aliases() {
             ),
         )
         .subcommand(clap::Command::new("repo").subcommand(clap::Command::new("pr")))
-        .subcommand(clap::Command::new("monitor").visible_alias("mon"))
+        .subcommand(clap::Command::new("monitor"))
         .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());
     assert_eq!(resolve("pull-request").unwrap().unwrap(), ["task", "pr"]);
     assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
+    assert!(tree
+        .find_subcommand("monitor")
+        .unwrap()
+        .get_all_aliases()
+        .next()
+        .is_none());
+    assert!(resolve("p").is_err());
+    let collision = tree.clone().subcommand(clap::Command::new("money"));
+    assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
     assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
 }
 

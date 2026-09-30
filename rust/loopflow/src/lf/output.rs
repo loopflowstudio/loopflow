@@ -105,7 +105,7 @@ fn format_row(label: &str, tokens: usize, detail: &str) -> String {
 
 // -- Table cells --------------------------------------------------------------
 // Keep reader output aligned from the visible cell contents. This is the same
-// shape used by tree readers such as `lf task worktree list`: one record per line, enough
+// shape used by tree readers such as `lf task wt list`: one record per line, enough
 // spacing to scan it, and no syntax that an agent has to strip first.
 
 /// Measure a left-aligned column from its header and visible cell contents.

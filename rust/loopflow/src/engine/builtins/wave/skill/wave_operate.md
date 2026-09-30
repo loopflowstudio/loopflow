@@ -81,7 +81,7 @@ worktrees, placement and execution history.
   only when current evidence supports it. Unknown liveness is not idle.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
-- Update an authorized plan through `lf wave update-plan --wave <wave> --plan
+- Update an authorized plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
   with `metric_targets`, required nonempty `flow` and `krs`; for example
@@ -96,8 +96,8 @@ reconcile uncertain effects before retry. Keep planning at its existing owners
 without introducing a resident or another execution cursor.
 
 A chapter boundary previews the whole repository with
-`lf repo new-chapter <name> --dry-run --json`. Apply with
-`lf repo new-chapter <name> --json` only after repository direction and disposition
+`lf new-chapter <name> --dry-run --json`. Apply with
+`lf new-chapter <name> --json` only after repository direction and disposition
 review gates are satisfied; existing authorization remains valid. An ordinary
 Wave pass does not authorize rotation. The operation has no per-Wave selector
 or plan input. Started work moves intact, proven untouched backlog is canceled

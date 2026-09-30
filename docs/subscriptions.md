@@ -14,7 +14,7 @@ lf account
 
 lf account route set claude personal@
 lf account route set codex work@ personal@
-lf account route show
+lf account show
 ```
 
 Loopflow manages Claude and Codex subscription logins as separate identities.
@@ -36,8 +36,8 @@ Claude or Codex account.
 lf account connect claude personal@example.com --chrome-profile personal@example.com
 lf account connect codex work@example.com --chrome-profile work@example.com
 
-lf account connect claude personal@example.com --import  # adopt the ambient Claude login
-lf account disconnect claude personal@
+lf account connect claude personal@example.com --import # adopt the ambient Claude login
+lf disconnect claude personal@
 ```
 
 Connect creates a **local managed identity**, not a new Claude or Codex account:
@@ -72,8 +72,8 @@ Select a Chrome profile once for each target:
 
 ```bash
 lf account connect linear --chrome-profile Work
-lf account connect linear                          # reuse Work
-lf account connect claude personal@                # reuse this account's profile
+lf account connect linear              # reuse Work
+lf account connect claude personal@    # reuse this account's profile
 ```
 
 Saved names and ordered profile choices remain reusable. A first interactive
@@ -222,7 +222,7 @@ one provider in one repository:
 lf account route set claude personal@ work@
 lf account route set codex work@ personal@
 lf account route set codex work@ --default
-lf account route show --json
+lf account show --json
 ```
 
 Show lists eligible launch candidates in order without selecting one. Explicit

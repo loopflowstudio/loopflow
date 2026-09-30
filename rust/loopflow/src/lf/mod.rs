@@ -885,7 +885,7 @@ pub enum TaskCommand {
         cmd: Option<PrCommand>,
     },
     /// Worktree operations
-    Worktree {
+    Wt {
         #[command(subcommand)]
         cmd: WtCommand,
     },
@@ -1632,6 +1632,19 @@ mod tests {
                 "removed root {name}"
             );
         }
+        let shorthand = crate::lf::navigation::normalize_args(
+            ["lf", "wt", "create", "csv-export"]
+                .map(String::from)
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(shorthand, ["lf", "task", "wt", "create", "csv-export"]);
+        assert!(Cli::try_parse_from(shorthand).is_ok());
+        assert!(command
+            .find_subcommand("task")
+            .unwrap()
+            .find_subcommand("worktree")
+            .is_none());
         for verb in ["enable", "disable", "serve"] {
             assert!(Cli::try_parse_from(["lf", "wave", verb, "product"]).is_err());
         }
@@ -1674,7 +1687,7 @@ mod tests {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "worktree", "list", "--full"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "list", "--full"]).is_err());
     }
 
     #[test]
@@ -1749,7 +1762,7 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "pr", "checks", "--logs"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "worktree", "ci"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "ci"]).is_err());
     }
 
     #[test]
@@ -2726,14 +2739,10 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(
-            Cli::try_parse_from(["lf", "task", "worktree", "create", "child", "--stack"]).is_err()
-        );
-        assert!(
-            Cli::try_parse_from(["lf", "task", "worktree", "create", "child", "--child"]).is_err()
-        );
-        assert!(Cli::try_parse_from(["lf", "task", "worktree", "up"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "worktree", "down"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "create", "child", "--stack"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "create", "child", "--child"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "up"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "wt", "down"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "pr", "stack"]).is_err());
     }
 

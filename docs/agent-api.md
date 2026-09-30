@@ -31,12 +31,12 @@ while `lf ask` blocks its caller on a durable AgentSession in its own checkout.
 A Wave directing a task is the internal case:
 
 ```bash
-lf task checkout INF-123                              # tracked Work, no execution
+lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
-lf task comment INF-123 "take the smaller approach"    # post a Linear Task comment
+lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
-lf task wait INF-123 --until terminal                # block until it settles
+lf wait INF-123 --until terminal                # block until it settles
 ```
 
 ## The owners
@@ -61,11 +61,11 @@ for the remaining reader, wire and lifecycle conversion.
 ## Delegate
 
 ```bash
-lf task checkout INF-123                      # ensure Work and worktree only
-lf task run INF-123                          # run an existing Linear issue
-lf task create --run --wave <wave> --title "add passkeys"    # create the issue, then run it
+lf checkout INF-123                    # ensure Work and worktree only
+lf task run INF-123                    # run an existing Linear issue
+lf task create --run --wave <wave> --title "add passkeys" # create the issue, then run it
 pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -81,7 +81,7 @@ merge, then replays only child-authored commits onto `main`.
 ## Steer
 
 ```bash
-lf task comment INF-123 "keep the public API"          # post a Linear Task comment
+lf comment INF-123 "keep the public API" # post a Linear Task comment
 lf --wave <wave> wave/operate "prioritize the parser"
 lf --wave <wave> wave/operate "reassess Project priorities"
 ```
@@ -98,7 +98,7 @@ in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
-`lf task interrupt INF-123` appends a durable interrupt comment;
+`lf interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
@@ -125,7 +125,7 @@ skills. Edit their definition or goal when the guidance should persist.
 the ordinary repository workflow; the file is truth, running Wave or not, and
 there is no separate CLI or server surface for it.
 
-Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
+Remove registered or planning-only Tasks with `lf delete ISSUE`. Repeat the same command
 after an incomplete operation, even after planning refresh or chapter replacement.
 Missing provider data does not confirm deletion.
 Deletion preserves authored files and retained PRs; it does not certify process termination.
@@ -136,13 +136,13 @@ Four commitment levels, all headless — pick by how done the work is and who
 lands it:
 
 ```bash
-lf task pr publish    # make work visible mid-stream; the agent's default verb
-lf task pr submit     # done, a person clicks merge
-lf task pr arm        # request exact-head auto-merge and return
-lf task pr land       # watch, repair CI, and return only after merge
+lf pr publish                          # make work visible mid-stream; the agent's default verb
+lf submit                              # done, a person clicks merge
+lf arm                                 # request exact-head auto-merge and return
+lf land                                # watch, repair CI, and return only after merge
 ```
 
-`lf task pr open` is the one presenting verb — it opens a browser. Agents reach for
+`lf pr open` is the one presenting verb — it opens a browser. Agents reach for
 it only when a person asked to see the PR.
 
 ## Observe
@@ -150,9 +150,9 @@ it only when a person asked to see the PR.
 Every read the conducting surfaces offer is `--json`:
 
 ```bash
-lf wave list --json                # every durable Wave and its Home/runtime evidence
-lf wave status <wave> --json     # hierarchy plus one Rust-derived metric_portfolio
-lf roadmap --json           # every Wave repeats that required portfolio envelope
+lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
+lf roadmap --json                      # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
 lf runs --project parser --json
 lf runs --task INF-123 --json

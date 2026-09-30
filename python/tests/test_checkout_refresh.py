@@ -131,7 +131,7 @@ def test_main_preserves_unpublished_commits_and_index(checkout: Checkout) -> Non
     # The next command must retain main's unpublished history too, including
     # when upstream advances between the rebase and sibling creation.
     upstream = _advance(author, "after-rebase.txt")
-    _run(main, str(LF), "task", "worktree", "create", "next", env=env)
+    _run(main, str(LF), "task", "wt", "create", "next", env=env)
     sibling = main.with_name("repo.next")
     for repo in [main, sibling]:
         for sha in [local, upstream]:
@@ -155,7 +155,7 @@ def test_worktree_refresh_preserves_local_main(
     (main / "local.txt").write_text("working\n")
     (main / "notes.txt").write_text("untracked\n")
     upstream = _advance(author, "upstream.txt")
-    output = _run(main, str(LF), "task", "worktree", *command, env=env)
+    output = _run(main, str(LF), "task", "wt", *command, env=env)
     if command[0] == "list":
         assert isinstance(json.loads(output), list)
     for sha in [local, upstream]:
@@ -176,7 +176,7 @@ def test_worktree_refresh_reports_fetch_failure_then_recovers(
     remote = _run(main, "git", "remote", "get-url", "origin")
     _run(main, "git", "remote", "set-url", "origin", str(main / "unavailable"))
     result = subprocess.run(
-        [str(LF), "task", "worktree", *command], cwd=main, env=env, capture_output=True, text=True
+        [str(LF), "task", "wt", *command], cwd=main, env=env, capture_output=True, text=True
     )
     assert result.returncode != 0
     assert "fetch" in result.stderr
@@ -184,7 +184,7 @@ def test_worktree_refresh_reports_fetch_failure_then_recovers(
     assert (main / "base.txt").read_text() == "caller edit\n"
     assert not main.with_name("repo.next").exists()
     _run(main, "git", "remote", "set-url", "origin", remote)
-    _run(main, str(LF), "task", "worktree", *command, env=env)
+    _run(main, str(LF), "task", "wt", *command, env=env)
     for sha in [before, upstream]:
         _run(main, "git", "merge-base", "--is-ancestor", sha, "HEAD")
     assert (main / "base.txt").read_text() == "caller edit\n"
@@ -204,7 +204,7 @@ def test_worktree_plans_leave_checkout_and_remote_refs_unchanged(
     (main / "notes.txt").write_text("untracked\n")
     refs = _run(main, "git", "show-ref")
     for command in [("create", "next", "--plan"), ("prune", "--dry-run")]:
-        _run(main, str(LF), "task", "worktree", *command, env=env)
+        _run(main, str(LF), "task", "wt", *command, env=env)
         assert _run(main, "git", "show-ref") == refs
         assert _run(main, "git", "branch", "--show-current") == "main"
         assert _run(main, "git", "show", ":base.txt") == "staged"
@@ -223,7 +223,7 @@ def test_worktree_refresh_conflict_preserves_main_and_stops(
     _run(author, "git", "push", "origin", "main")
     (main / "notes.txt").write_text("caller notes\n")
     result = subprocess.run(
-        [str(LF), "task", "worktree", *command], cwd=main, env=env, capture_output=True, text=True
+        [str(LF), "task", "wt", *command], cwd=main, env=env, capture_output=True, text=True
     )
     assert result.returncode != 0
     assert "could not update main" in result.stderr
@@ -236,7 +236,7 @@ def test_worktree_refresh_conflict_preserves_main_and_stops(
 
 def test_feature_refreshes_main_then_integrates_and_creates_sibling(checkout: Checkout) -> None:
     main, author, env = checkout
-    _run(main, str(LF), "task", "worktree", "create", "feature", env=env)
+    _run(main, str(LF), "task", "wt", "create", "feature", env=env)
     feature = main.with_name("repo.feature")
     _commit(feature, "feature.txt", "feature\n")
     (feature / "feature.txt").write_text("staged\n")
@@ -254,7 +254,7 @@ def test_feature_refreshes_main_then_integrates_and_creates_sibling(checkout: Ch
     _run(main, str(LF), "task", "rebase", env=env)
     _run(feature, str(LF), "task", "rebase", env=env)
     _run(feature, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
-    _run(main, str(LF), "task", "worktree", "create", "next", env=env)
+    _run(main, str(LF), "task", "wt", "create", "next", env=env)
     sibling = main.with_name("repo.next")
     assert _run(sibling, "git", "rev-parse", "HEAD") == upstream
     _run(feature, str(LF), "task", "rebase", env=env)
@@ -296,7 +296,7 @@ def test_worktree_background_push_survives_cli_exit(checkout: Checkout, tmp_path
     gate_fd = os.open(gate, os.O_RDWR)
     done_fd = os.open(done, os.O_RDWR)
     process = subprocess.Popen(
-        [str(LF), "task", "worktree", "create", "delayed"],
+        [str(LF), "task", "wt", "create", "delayed"],
         cwd=main,
         env=delayed_env,
         stdout=subprocess.PIPE,
@@ -386,7 +386,7 @@ def test_sibling_rebases_share_main_update_without_rejecting_each_other(checkout
     main, author, env = checkout
     callers = []
     for name in ["one", "two"]:
-        _run(main, str(LF), "task", "worktree", "create", name, env=env)
+        _run(main, str(LF), "task", "wt", "create", name, env=env)
         caller = main.with_name(f"repo.{name}")
         _commit(caller, f"{name}.txt", name)
         (caller / f"{name}.txt").write_text(f"{name} staged")

@@ -1,8 +1,8 @@
 # Configuration
 
 ```bash
-lf user name          # show the resolved display name
-lf user name --json   # name as a JSON string, or null when unavailable
+lf name                                # show the resolved display name
+lf name --json                         # name as a JSON string, or null when unavailable
 ```
 
 Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
@@ -175,15 +175,15 @@ release:
       completion: github-release
 ```
 
-`lf repo release run patch --target cli` selects changes from the exact
+`lf repo run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf repo release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf repo release check`
+`verify` runs during `lf repo run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
@@ -451,8 +451,8 @@ Loopflow has one external skill channel plus one compatibility shim. No config n
 - **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
-lf npx/vercel-labs/deep-research      # live fetch, cached on first run
-lf rams/rams                          # legacy compatibility alias, if installed
+lf npx/vercel-labs/deep-research       # live fetch, cached on first run
+lf rams/rams                           # legacy compatibility alias, if installed
 ```
 
 The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/skills/<namespace>/<skill>.md` (repo-local) or `~/.lf/skills/<namespace>/<skill>.md` (user-global) and invoke them as `lf <namespace>/<skill>`. Namespaced skills use `/`, not `:`.

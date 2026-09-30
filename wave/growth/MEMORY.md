@@ -83,6 +83,17 @@ Clap-derived command and option catalog, including internal surfaces, with
 caller evidence and keep/rename/merge/delete verdicts before implementation.
 The catalog and before/after counts belong to LOO-338's demo review.
 
+Jack's later September 30 review rejects prefix-only reorganization. Guides,
+examples and agent instructions use the shortest uniquely resolving commands;
+canonical ownership stays in reference/help. Keep `wt`, `top` and `ps`.
+`mon` derives from unique-prefix resolution, not a fixed alias. Each retained
+command must own a real concept; callers alone do not justify retention. The
+catalog must follow LOO-298's Exec/AgentSession/FlowSession model, LOO-334's
+Linear/Git Task existence and LOO-339/340's account work. `runs` merges into
+Monitor, with view-by-view cuts left for Jack at demo. Current cached Account
+behavior does not replace LOO-340's live-default requirement.
+
+
 ## CLI guide decisions (2026-09-29)
 
 Jack asked the CLI guide to lead with complete workflows and the outcomes

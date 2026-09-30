@@ -15,7 +15,7 @@ GitHub and completes the Task only after an authoritative merge.
 ## Workflow
 
 1. **Rebase first**
-   - Preserve existing work with `lf task commit` when needed, then run `lf task rebase`.
+   - Preserve existing work with `lf commit` when needed, then run `lf rebase`.
    - Resolve conflicts and continue the rebase before investigating CI. Keep
      the watched failed SHA as evidence even when the local head changes.
 
@@ -46,12 +46,12 @@ GitHub and completes the Task only after an authoritative merge.
 
 4. **Publish and enable auto-merge**
    - Inspect the complete diff and keep unrelated work out of the repair.
-   - Commit with `lf task commit -m "ci-fix: <what failed and why>"`, then run
-     `lf task pr arm`. Arm prepares the exact head, pushes it, enables auto-merge,
+   - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
+     `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
-   - Use the supervisor's supplied arm command verbatim: `lf task pr arm -c`
-     preserves Task completion, and `lf task pr arm --next <slug>` preserves rotation.
-     Outside a watched landing, use bare `lf task pr arm` unless the user requested
+   - Use the supervisor's supplied arm command verbatim: `lf arm -c`
+     preserves Task completion, and `lf arm --next <slug>` preserves rotation.
+     Outside a watched landing, use bare `lf arm` unless the user requested
      a Task disposition.
    - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
      auto-merge enabled (or already merged). Local edits or a local commit
@@ -72,6 +72,6 @@ GitHub and completes the Task only after an authoritative merge.
 - Invoking this skill authorizes rebase, commit, push, and auto-merge for the
   watched PR. Route mutations through `lf`.
 - Stay scoped to the CI failures and their prevention; prefer targeted fixes.
-- Do not call `lf task pr land`, spawn another watcher, or wait for merge. Return
+- Do not call `lf land`, spawn another watcher, or wait for merge. Return
   after the repaired head is published and armed; the existing watcher resumes.
 - If the repair cannot be verified or published, report the blocker and stop.

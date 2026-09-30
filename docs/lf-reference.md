@@ -9,11 +9,11 @@ For examples ordered by workflow, see [lf CLI](lf.md). This page lists
 individual controls, arguments, and effects.
 
 ```bash
-lf debug -c                         # investigate an error from the clipboard
-lf run feature                      # run a named flow or skill
-lf : "fix the broken link"           # run an inline prompt
-lf list                             # discover commands, skills, and flows
-lf help task pr                      # inspect pull-request operations
+lf debug -c                            # investigate an error from the clipboard
+lf run feature                         # run a named flow or skill
+lf : "fix the broken link"             # run an inline prompt
+lf list                                # discover commands, skills, and flows
+lf help task pr                        # inspect pull-request operations
 ```
 
 Run a skill or flow by name. Use the command tree to manage work, inspect
@@ -22,20 +22,20 @@ execution, and operate the machine.
 ## Find a command
 
 ```bash
-lf help                             # brief overview
-lf help --all                       # the complete command tree
-lf help task                        # concrete work and delivery
-lf help task pr land                 # explain one operation
-lf task pr land --help               # the same page
-lf help debug                       # explain a definition without running it
-lf debug --help                     # the same definition page
-lf run debug --help                  # the same definition page
+lf help                                # brief overview
+lf help --all                          # the complete command tree
+lf help task                           # concrete work and delivery
+lf help task pr land                   # explain one operation
+lf task pr land --help                 # the same page
+lf help debug                          # explain a definition without running it
+lf debug --help                        # the same definition page
+lf run debug --help                    # the same definition page
 
-lf list                             # commands, skills, and flows
-lf list --json                      # stable, structured entries
-lf skill list                       # skills and namespaces
-lf skill list team                  # skills inside a namespace
-lf flow list                        # authored flows and their steps
+lf list                                # commands, skills, and flows
+lf list --json                         # stable, structured entries
+lf skill list                          # skills and namespaces
+lf skill list team                     # skills inside a namespace
+lf flow list                           # authored flows and their steps
 ```
 
 Help shows the canonical command path, arguments, and effects. Definition help
@@ -62,22 +62,24 @@ stable ordering rather than usage rankings.
 ## Omit an unambiguous owner
 
 ```bash
-lf task pr land                     # canonical path
-lf pr land                          # omit task
-lf land                             # omit task and pr
+lf task pr land                        # canonical path
+lf pr land                             # omit task
+lf land                                # omit task and pr
 
-lf task publish                     # task pr publish
-lf repo publish                     # repo release publish
+lf task publish                        # task pr publish
+lf repo publish                        # repo release publish
 ```
 
 An exact command wins first. Otherwise, Loopflow searches beneath the owner
-already entered. One match expands to its full path. At the root, the search
+already entered. One exact match expands to its full path. If no exact name matches, a unique
+command-name prefix expands the same way (for example `mon` for `monitor` once
+that group is available). Multiple matches execute nothing. At the root, the search
 covers the whole command tree. Any number of leading owners can be omitted.
 
 Multiple matches print the choices and execute nothing:
 
 ```text
-$ lf publish
+$ lf publish  # lf-doc: ambiguous
 "publish" matches multiple commands:
   lf task pr publish
   lf repo release publish
@@ -93,13 +95,14 @@ owner is visible; omitted-owner shortcuts are derived from that tree.
 ### Long and short names
 
 ```bash
-lf monitor top                      # full name
-lf mon top                          # fixed short name
+lf monitor top                         # full name
+lf mon top                             # unique command prefix
 lf account status
 ```
 
 Commands have one canonical name. `monitor` also has the selected short spelling
-`mon`; no arbitrary prefix matching or additional aliases are supported.
+`mon`, derived by unique-prefix resolution. Ambiguous prefixes fail; no extra
+registered aliases are added.
 Already-short names such as `pr`, `task`, and `land` use that one spelling.
 Print the machine identifier with `lf home id`. The account family has no
 short alias.
@@ -107,9 +110,9 @@ short alias.
 ### Commands take precedence over definitions
 
 ```bash
-lf land                             # the built-in PR operation
-lf run land                         # an authored flow or skill named land, if installed
-lf skill pr-land                    # the bundled landing skill
+lf land                                # the built-in PR operation
+lf run land                            # an authored flow or skill named land, if installed
+lf skill pr-land                       # the bundled landing skill
 ```
 
 Installed skills do not participate in command-shortcut matching. Adding a
@@ -123,10 +126,10 @@ flow takes precedence over a same-named skill.
 ## Run a skill or flow
 
 ```bash
-lf debug -c                         # shorthand when no command matches debug
-lf run debug -c                     # explicitly select a definition
-lf skill debug -c                   # explicitly select the skill
-lf flow feature                     # select a flow
+lf debug -c                            # shorthand when no command matches debug
+lf run debug -c                        # explicitly select a definition
+lf skill debug -c                      # explicitly select the skill
+lf flow feature                        # select a flow
 lf run team/review "Check the API"
 lf : "Explain why this test fails"
 ```
@@ -136,9 +139,9 @@ name intentionally changes what an untyped definition reference runs. Select
 the skill explicitly to keep running its prompt directly:
 
 ```bash
-lf run release-run                  # repository flow, when present
-lf skill release-run                # the skill with the same name
-lf help release-run                 # selected definition and the other typed choice
+lf run release-run                     # repository flow, when present
+lf skill release-run                   # the skill with the same name
+lf help release-run                    # selected definition and the other typed choice
 ```
 
 Names use `/` for namespaces and `-` within words: `wave/operate`,
@@ -148,10 +151,10 @@ Command words remain available as definition names. Use the explicit kind;
 if the name is also a verb within that family, put `--` before it:
 
 ```bash
-lf skill commit                     # a skill named commit
-lf flow -- list                     # a flow named list
-lf skill -- show                    # a skill named show
-lf help skill -- list               # inspect a skill named list without running it
+lf skill commit                        # a skill named commit
+lf flow -- list                        # a flow named list
+lf skill -- show                       # a skill named show
+lf help skill -- list                  # inspect a skill named list without running it
 ```
 
 ### Skills
@@ -183,10 +186,10 @@ for skill files and [Configuration](config.md) for defaults.
 ```bash
 lf flow show feature
 lf flow validate feature
-lf run code                         # implement and simplify
-lf run queue                        # prepare and verify without publishing
-lf run pursue                       # iterate, publish, and review the demo
-lf run feature                      # design review through delivery
+lf run code                            # implement and simplify
+lf run queue                           # prepare and verify without publishing
+lf run pursue                          # iterate, publish, and review the demo
+lf run feature                         # design review through delivery
 ```
 
 A flow composes skills and operations. Repository flows live in `.lf/flows/`.
@@ -412,11 +415,11 @@ FlowSession; their node and iteration positions distinguish their history.
 ## Task: concrete work and delivery
 
 ```bash
-lf task list                        # work in this repository
+lf task list                           # work in this repository
 lf task list --wave designer
-lf task list --all                   # work across this Home's repositories
-lf task status                      # Task bound to this checkout
-lf task pr status                   # current branch's PR, with or without a Task
+lf task list --all                     # work across this Home's repositories
+lf task status                         # Task bound to this checkout
+lf task pr status                      # current branch's PR, with or without a Task
 ```
 
 Task commands manage concrete work. Commit, rebase, worktree, and PR operations
@@ -431,8 +434,8 @@ issue links shown. Discovering that work does not create Task records.
 ```bash
 lf task create --wave designer --title "Repair keyboard navigation" \
   --notes "Tab order should follow the visible controls"
-lf task checkout DES-123             # prepare its worktree without launching a worker
-lf task run DES-123                  # start or continue the saved workflow
+lf task checkout DES-123               # prepare its worktree without launching a worker
+lf task run DES-123                    # start or continue the saved workflow
 lf task run DES-124 --stack-on DES-123
 lf task create --run --wave designer --title "Repair keyboard navigation"
 ```
@@ -451,9 +454,9 @@ can move to the default branch after the parent merges.
 ```bash
 lf task edit DES-123 --title "Repair dialog keyboard navigation"
 lf task comment DES-123 "Keep this change inside the dialog"
-lf task comment DES-123 --json       # read the thread
-lf task interrupt DES-123            # interrupt the active provider turn
-lf task run DES-123                  # continue after interruption
+lf task comment DES-123 --json         # read the thread
+lf task interrupt DES-123              # interrupt the active provider turn
+lf task run DES-123                    # continue after interruption
 lf task restart DES-123 --flow feature
 lf task run DES-123 --reason "Repository credentials repaired"
 lf task wait DES-123 --until terminal --timeout 15m
@@ -501,12 +504,12 @@ operations require UTF-8 files within 1 MB and exclude symlinks and Git metadata
 ### Worktrees
 
 ```bash
-lf task worktree create parser
-lf task worktree create parser --plan
-lf task worktree switch parser
-lf task worktree list --json
-lf task worktree prune --dry-run
-lf task worktree remove parser
+lf task wt create parser
+lf task wt create parser --plan
+lf task wt switch parser
+lf task wt list --json
+lf task wt prune --dry-run
+lf task wt remove parser
 ```
 
 Create a worktree for ordinary local work, or use `task checkout ISSUE` for a
@@ -522,9 +525,9 @@ separate destructive choice.
 
 ```bash
 lf task commit -m "Fix keyboard navigation in dialogs"
-lf task commit --no-add              # commit only the existing index
-lf task rebase --plan                # inspect the integration strategy
-lf task rebase                      # integrate and publish the branch with a lease
+lf task commit --no-add                # commit only the existing index
+lf task rebase --plan                  # inspect the integration strategy
+lf task rebase                         # integrate and publish the branch with a lease
 ```
 
 Commit stages changes and generates a message unless given explicit options.
@@ -549,12 +552,12 @@ taking over an operation started outside Loopflow.
 ### Pull requests
 
 ```bash
-lf task pr open                     # push a draft and open its page
-lf task pr publish                  # push and mark ready, without opening a browser
+lf task pr open                        # push a draft and open its page
+lf task pr publish                     # push and mark ready, without opening a browser
 lf task pr checks --watch
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # request auto-merge and return
-lf task pr land                     # watch, repair CI, and finish merged
+lf task pr submit                      # prepare for a reviewer's merge click
+lf task pr arm                         # request auto-merge and return
+lf task pr land                        # watch, repair CI, and finish merged
 ```
 
 These operations use the selected Task or checkout. An unbound branch uses
@@ -582,9 +585,9 @@ valid reviewer-facing copy and update Task merge consequences.
 ```bash
 lf task pr publish --title "Make dialog navigation follow tab order" \
   --body "Keyboard focus now follows the visible controls."
-lf task pr land -c                   # merge, then complete the owning Task
-lf task pr land --next focus-ring    # merge, then continue the same Task
-lf task pr next focus-ring           # reconcile a merge performed elsewhere
+lf task pr land -c                     # merge, then complete the owning Task
+lf task pr land --next focus-ring      # merge, then continue the same Task
+lf task pr next focus-ring             # reconcile a merge performed elsewhere
 ```
 
 Bare land keeps the Task open. `-c` requests completion after authoritative
@@ -1146,8 +1149,8 @@ credentials remotely; durable descendants must have the authority they need.
 ### Install and diagnose
 
 ```bash
-lf home install                     # latest published release
-lf home install schedule            # login and weekly checks on macOS
+lf home install                        # latest published release
+lf home install schedule               # login and weekly checks on macOS
 lf home doctor --planning
 lf home doctor --json
 ```
@@ -1227,7 +1230,7 @@ in configuration. Release evidence combines the exact shipped range with
 ### Planning integrations
 
 ```bash
-lf repo reteam                      # preview the repository Team migration
+lf repo reteam                         # preview the repository Team migration
 lf repo reteam --apply
 doppler run -- lf repo webhook register --url https://example.com/linear
 doppler run -- lf repo webhook serve

@@ -271,12 +271,12 @@ record, return.
 ### Direct Task work
 
 ```bash
-lf task checkout INF-123
+lf checkout INF-123
 lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
-lf task commit -m "Reconcile Task research"
-lf task pr publish
-lf task pr submit
+lf commit -m "Reconcile Task research"
+lf pr publish
+lf submit
 lf task status INF-123 --json
 ```
 

@@ -70,7 +70,7 @@ Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
-Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
+Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
 The complete content object has `metric_targets`, a nonempty `flow` string and
 `krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
@@ -78,8 +78,8 @@ future plans; Completed Projects retain history. Future plan edits require an
 available authorized Linear writer, not a current-plan update.
 
 Chapter rotation is repository-wide: preview with
-`lf repo new-chapter <name> --dry-run --json`, then apply the accepted name with
-`lf repo new-chapter <name> --json`. It takes no plan file or per-Wave selector.
+`lf new-chapter <name> --dry-run --json`, then apply the accepted name with
+`lf new-chapter <name> --json`. It takes no plan file or per-Wave selector.
 Respect the start-chapter direction and plan-review gates; prior authorization
 still applies. Retry interruptions with the same name against fresh Linear
 state. Started unfinished Tasks retain identity and execution; proven untouched
@@ -107,7 +107,7 @@ saved feedback to the next step. The following loop-decide owns navigation.
 The `advance` skill resolves the next action from a review, Task, or unbound
 design. State what actually started after checking status.
 
-Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
+Use `lf delete ISSUE` to remove a Task from Linear and reconcile its local
 record. Read any partial-outcome report and retry the same command. Authored files
 and retained PRs survive; deletion does not certify process termination.
 
@@ -126,7 +126,7 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task checkout <issue> --json
+lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
 lf task run <issue> --flow <chosen-flow>
 ```
@@ -167,7 +167,7 @@ Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf task checkout <issue> --json`.
+Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
 selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
@@ -183,7 +183,7 @@ work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, update the Task and wait for required
-contributions, then `lf task restart <issue> "<changed direction>"`. Restart
+contributions, then `lf restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
 Task worker; independent bounded Runs remain independent. Reconcile prior

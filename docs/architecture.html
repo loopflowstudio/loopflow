@@ -2365,12 +2365,12 @@ lf gate --diff-files
 <p>These commands need the execution area only: discover, prompt, route, launch,
 record, return.</p>
 <h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf task checkout INF-123
+<pre tabindex="0"><code class="language-bash">lf checkout INF-123
 lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
-lf task commit -m &quot;Reconcile Task research&quot;
-lf task pr publish
-lf task pr submit
+lf commit -m &quot;Reconcile Task research&quot;
+lf pr publish
+lf submit
 lf task status INF-123 --json
 </code></pre>
 <p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active

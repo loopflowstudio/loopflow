@@ -2,10 +2,10 @@
 
 ```bash
 lf --wave product wave/operate
-lf task checkout INF-124
+lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf repo new-chapter 2026-10 --dry-run
+lf new-chapter 2026-10 --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
@@ -18,7 +18,7 @@ records the remaining implementation and proof gaps.
 ## Rotate the plan, preserve the work
 
 ```bash
-lf repo new-chapter 2026-10
+lf new-chapter 2026-10
 lf wave sync --wave product
 ```
 
@@ -141,7 +141,7 @@ live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
-lf task comment INF-124 "keep the public name"
+lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 

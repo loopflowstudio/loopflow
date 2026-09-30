@@ -1786,7 +1786,7 @@ mod tests {
     fn main_placement_creates_flat_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
-        let plan = plan_placement(repo.path(), segment).expect("plan task worktree");
+        let plan = plan_placement(repo.path(), segment).expect("plan task wt");
 
         assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");

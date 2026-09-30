@@ -8,7 +8,7 @@ consistent. Read-only inspection and ordinary edits/tests run directly here.
 
 Stay in the worktree supplied for this run. Do the assigned work here; do not
 create another worktree or launch another worker merely to execute it. When
-worktree management is the task, use `lf task worktree`, never raw `git worktree`.
+worktree management is the task, use `lf wt`, never raw `git worktree`.
 
 Use orchestration only when the user or selected skill calls for it. Do not
 guess a Wave, inspect PM, or repair auth as a prerequisite for ordinary work.
@@ -18,24 +18,24 @@ and continue whatever can be completed locally.
 ## Git and delivery
 
 ```bash
-lf task commit -m "<what changed and why>"  # local checkpoint
-lf task rebase --plan                     # inspect integration strategy
-lf task rebase                            # apply it
-lf task pr publish --title "..."          # push and create/update PR
-lf task pr submit                         # prepare for the user's merge click
-lf task pr arm                            # prepare and request auto-merge; return
-lf task pr land                           # watch CI, repair, and finish merged
+lf commit -m "<what changed and why>"  # local checkpoint
+lf rebase --plan                       # inspect integration strategy
+lf rebase                              # apply it
+lf pr publish --title "..."            # push and create/update PR
+lf submit                              # prepare for the user's merge click
+lf arm                                 # prepare and request auto-merge; return
+lf land                                # watch CI, repair, and finish merged
 ```
 
 Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf task pr open` creates or
+selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
-`lf task commit`; never include another active contribution just because it is dirty.
+`lf commit`; never include another active contribution just because it is dirty.
 Do not ask permission for reversible edits or local tests. Ask before pushing,
 PR mutations, external messages or other external side effects, and destructive
 operations unless already authorized by the user or selected workflow.

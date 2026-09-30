@@ -8,10 +8,10 @@
 ## Run a workflow
 
 ```bash
-lf run feature "Add CSV export"     # design, review, implement, check, and merge
-lf run code                         # implement and simplify the current plan locally
-lf run incident "Export times out"  # restore the workflow, investigate, plan prevention
-lf run ship                         # verify, merge, and complete the Task
+lf run feature "Add CSV export"        # design, review, implement, check, and merge
+lf run code                            # implement and simplify the current plan locally
+lf run incident "Export times out"     # restore the workflow, investigate, plan prevention
+lf run ship                            # verify, merge, and complete the Task
 ```
 
 Flows combine agent work, deterministic operations, and review points.
@@ -22,10 +22,10 @@ Use `lf help feature` to inspect a flow before running it.
 
 ```bash
 lf task create --run --wave exports --title "Add CSV export"
-lf task run EXP-12                   # start or continue the saved workflow
-lf task run EXP-13 --stack-on EXP-12 # start dependent work on the parent's PR
-lf task status EXP-12                # progress, blockers, and delivery state
-lf task wait EXP-12 --until terminal --timeout 15m
+lf task run EXP-12                     # start or continue the saved workflow
+lf task run EXP-13 --stack-on EXP-12   # start dependent work on the parent's PR
+lf task status EXP-12                  # progress, blockers, and delivery state
+lf wait EXP-12 --until terminal --timeout 15m
 ```
 
 Task execution prepares its worktree and retains its workflow position.
@@ -35,13 +35,13 @@ Task creation requires the Wave's planning service; direct workflows do not.
 ## Direct work and review results
 
 ```bash
-lf task comment EXP-12 "Keep this version to CSV; leave PDF out"
-lf task interrupt EXP-12             # end the current provider turn
-lf task run EXP-12                   # continue with retained direction
+lf comment EXP-12 "Keep this version to CSV; leave PDF out"
+lf interrupt EXP-12                    # end the current provider turn
+lf task run EXP-12                     # continue with retained direction
 
-lf session list                     # find open conversations and reviews
-lf session open SESSION_ID           # join or resume one
-lf session complete SESSION_ID       # return feedback to its caller
+lf session list                        # find open conversations and reviews
+lf session open SESSION_ID             # join or resume one
+lf session complete SESSION_ID         # return feedback to its caller
 ```
 
 Comments reach the Task's advancing worker; idle Tasks retain them without
@@ -77,12 +77,12 @@ lf roadmap --json                   # current plans across Waves
 ## Publish and finish
 
 ```bash
-lf task pr publish                  # push and create/update a ready PR
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # prepare, request auto-merge, and return
-lf task pr land                     # prepare, watch, repair CI, and finish merged
-lf task pr land -c                  # also complete the owning Task
-lf repo release run patch           # verify, prepare notes, tag, and publish a release
+lf pr publish                          # push and create/update a ready PR
+lf submit                              # prepare for a reviewer's merge click
+lf arm                                 # prepare, request auto-merge, and return
+lf land                                # prepare, watch, repair CI, and finish merged
+lf land -c                             # also complete the owning Task
+lf repo run patch                      # verify, prepare notes, tag, and publish a release
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
@@ -92,10 +92,10 @@ on ordinary branches without creating a Task. Bare `land` keeps a Task open.
 ## Accounts and access
 
 ```bash
-lf account                         # cached access, capacity, and next actions
-lf account status codex --verify          # refresh supported account observations
+lf account                             # cached access, capacity, and next actions
+lf account status codex --verify       # refresh supported account observations
 lf account connect codex work@example.com --chrome-profile Work
-lf --account work@ run code          # prefer an account for this launch
+lf --account work@ run code            # prefer an account for this launch
 lf --only-account codex=work@ run code # restrict this launch and its children
 lf account route set codex work@ personal@ # set account selection order
 ```
@@ -110,9 +110,9 @@ Readiness inheritance for background and remote children remains under design.
 ### Skills
 
 ```bash
-lf skill design "Add CSV export"    # write and review the plan
-lf skill debug -c                    # investigate an error from the clipboard
-lf : "Include the author column"   # run an inline request
+lf skill design "Add CSV export"       # write and review the plan
+lf skill debug -c                      # investigate an error from the clipboard
+lf : "Include the author column"       # run an inline request
 lf -m codex --docs src/export/ run code
 ```
 
@@ -123,11 +123,11 @@ explicitly. See [Authoring](authoring.md) to define either.
 ### Checkout and delivery controls
 
 ```bash
-lf task checkout EXP-12              # prepare a Task's worktree without starting it
-lf task worktree create csv-export   # create a worktree without a tracked Task
-lf task commit -m "Add CSV export"  # save local changes
-lf task rebase --plan                # inspect the integration strategy
-lf task pr checks --watch            # follow the PR's checks
+lf checkout EXP-12                     # prepare a Task's worktree without starting it
+lf wt create csv-export                # create a worktree without a tracked Task
+lf commit -m "Add CSV export"          # save local changes
+lf rebase --plan                       # inspect the integration strategy
+lf checks --watch                      # follow the PR's checks
 ```
 
 These controls operate on the same work as the higher-level workflows.
@@ -137,9 +137,9 @@ setup, remote execution, and release operations.
 ### Flow decisions and recovery
 
 ```bash
-lf flow resume INVOCATION            # continue a direct flow at its saved position
-lf task run EXP-12                   # continue a Task's saved flow
-lf task restart EXP-12 --flow feature # deliberately replace its workflow
+lf resume INVOCATION                   # continue a direct flow at its saved position
+lf task run EXP-12                     # continue a Task's saved flow
+lf restart EXP-12 --flow feature       # deliberately replace its workflow
 ```
 
 Invoking a flow by name starts a new FlowSession. Resuming retains the captured
@@ -148,14 +148,14 @@ definition and feedback. See [decision and retry controls](lf-reference.md#flow-
 ## Discover commands
 
 ```bash
-lf help                             # overview
-lf help task pr land                 # arguments and effects of one operation
-lf help feature                     # inspect a workflow without starting it
-lf list                             # commands, skills, and flows
-lf help --all                       # full command tree
+lf help                                # overview
+lf help land                           # arguments and effects of one operation
+lf help feature                        # inspect a workflow without starting it
+lf list                                # commands, skills, and flows
+lf help --all                          # full command tree
 ```
 
-Omit unambiguous owners: `lf land` resolves to `lf task pr land`. Multiple
+Omit unambiguous owners: `lf land` resolves to the PR landing command. Multiple
 matches list the canonical choices and execute nothing. Exact commands win;
 installed skills do not change command resolution. Use `lf run land` to
 select an authored definition instead.

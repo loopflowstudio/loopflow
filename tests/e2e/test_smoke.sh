@@ -47,7 +47,7 @@
     --diff false \
     | grep -q "Test"
 
-  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- task worktree create smoke-test >/dev/null
+  cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p loopflow --bin lf -- task wt create smoke-test >/dev/null
 
   repo_name=$(basename "$repo_dir")
   wt_path="$(dirname "$repo_dir")/${repo_name}.smoke-test"

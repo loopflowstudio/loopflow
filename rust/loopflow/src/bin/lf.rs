@@ -971,7 +971,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
     );
     match command {
         TaskCommand::Pr { cmd } => loopflow::lf::commands::ops::run_pr(cmd.as_ref(), agent),
-        TaskCommand::Worktree { cmd } => loopflow::lf::commands::ops::run_wt(cmd),
+        TaskCommand::Wt { cmd } => loopflow::lf::commands::ops::run_wt(cmd),
         TaskCommand::Rebase(args) => loopflow::lf::commands::ops::run_rebase(args),
         TaskCommand::Commit { message, no_add } => {
             loopflow::lf::commands::ops::run_commit(message.as_deref(), *no_add, agent)
@@ -2382,12 +2382,12 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "task", "worktree", "--force", "remove", "old-tree"]
+        let args: Vec<String> = ["lf", "task", "wt", "--force", "remove", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "task", "worktree", "remove", "--force", "old-tree"]
+            vec!["lf", "task", "wt", "remove", "--force", "old-tree"]
         );
     }
 

@@ -65,7 +65,7 @@ git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
 python -m pytest test_calc.py    # see the bug
 # copy error to clipboard
-lf debug -c                       # fix it
+lf debug -c                            # fix it
 ```
 
 ### Inline prompts
@@ -95,8 +95,8 @@ Start from a Linear task; Loopflow creates and retains its worktree.
 ```bash
 lf task create --run --wave <wave> --title "add OAuth login"
 lf task status <issue-id>
-lf task comment <issue-id> "support passkeys too"
-lf task wait <issue-id> --until terminal
+lf comment <issue-id> "support passkeys too"
+lf wait <issue-id> --until terminal
 ```
 
 ### Skills chain
@@ -124,10 +124,10 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf incident                              # unbreak → 5whys → launch-plan
-lf code                                  # implement → compress; local changes
-lf feature                               # kickoff → design review → pursue → queue → land
-lf ship                                  # gate → land and complete the Task
+lf incident                            # unbreak → 5whys → launch-plan
+lf code                                # implement → compress; local changes
+lf feature                             # kickoff → design review → pursue → queue → land
+lf ship                                # gate → land and complete the Task
 ```
 
 Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
@@ -155,7 +155,7 @@ Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit    # runs your custom skill
+lf audit                               # runs your custom skill
 ```
 
 The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
@@ -164,11 +164,11 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf task pr open      # push + create or update a draft, then open its page
-lf task pr publish   # push + create or update PR and mark ready (no browser)
-lf task pr submit    # prepare the exact head; you click merge
-lf task pr arm       # arm exact-head auto-merge and return
-lf task pr land      # watch, repair CI, and return after GitHub merges
+lf pr open                             # push + create or update a draft, then open its page
+lf pr publish                          # push + create or update PR and mark ready (no browser)
+lf submit                              # prepare the exact head; you click merge
+lf arm                                 # arm exact-head auto-merge and return
+lf land                                # watch, repair CI, and return after GitHub merges
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -204,7 +204,7 @@ Bootstrap the remote identity once:
 
 ```bash
 lf ssh jack@mini.local home id --json
-lf home observe <home-id> ssh://jack@mini.local
+lf observe <home-id> ssh://jack@mini.local
 lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> --wave shipper wave/operate

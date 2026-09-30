@@ -13,9 +13,9 @@ lf ssh <home-id> --wave product wave/operate
 ## Local by default
 
 ```bash
-lf runs                  # runs recorded on this Home
-lf ps --json             # OS-live processes on this Home
-lf wave status product        # planning and runtime view resolved here
+lf runs                                # runs recorded on this Home
+lf ps --json                           # OS-live processes on this Home
+lf wave status product                 # planning and runtime view resolved here
 
 lf ssh build-home runs   # run the same reader on build-home
 lf ssh build-home --wave product wave/operate
@@ -90,7 +90,7 @@ Wave identity is a UUID. The readable Wave locator is `(canonical repository, sl
 A bare slug may be ambiguous across repositories and is not mutation authority.
 
 ```bash
-lf wave relocate <wave-id> --repo <target> --name <slug>
+lf relocate <wave-id> --repo <target> --name <slug>
 ```
 
 Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Home

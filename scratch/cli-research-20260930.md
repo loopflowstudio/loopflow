@@ -34,7 +34,7 @@ dimension; it uses the primary sources that directly support each conclusion.
 | ID | Rows | Concrete change | Acceptance |
 |---|---|---|---|
 | R01 | C026–C059, C065–C078, C122, C129 and their argument rows | Apply object owners; account replaces auth, without identity/id. PR delivery works without Task registration. Move Home/Wave controls and update all consumers. | Canonical parser paths, derived shorthand, Desktop argv and typed Flow dispatch agree. No predecessor aliases. |
-| R02 | C120–C121, C139–C141; all extra aliases | Merge `skill show` into typed help. Delete extra uppercase flag aliases and worktree `rm`; retain the selected monitor/mon exception. Help names exact canonical paths and effects. | Equivalent help forms, reserved definition names, unknown commands and ambiguous shorthand execute no effects. |
+| R02 | C120–C121, C139–C141; all extra aliases | Merge `skill show` into typed help. Delete extra uppercase flag aliases and worktree `rm`; derive monitor/mon from unique-prefix resolution. Help names exact canonical paths and effects. | Equivalent help forms, reserved definition names, unknown commands and ambiguous shorthand execute no effects. |
 | R03 | C039 `--format`, all `--json`, C124 `--watch` | Replace worktree's permissive `--format` with `--json`. Preserve existing DTO fields through ownership moves; migrate Exec/Session fixtures with LOO-298. Explicitly distinguish one JSON document from NDJSON streams. | Parse complete stdout as the promised shape; progress/errors on stderr; no inferred zero for missing evidence. |
 | R04 | Root `--account`, `--only-account`, `--model`, `--as`; C044–C051, C097–C099, C129 | Account overview and launch-owned readiness use the same account facts. Destination children recheck required access while retaining inherited restrictions; preference remains distinct from restriction. | Foreground/background/remote behavior tests and a real local provider result; no credential-copy shortcut. |
 | R05 | C039 `--full`, C080 `--no-sync`, C128 | Delete proven ignored flags and retired `op` rejection namespace. Remove callers, parser fields and tests for those spellings. | Old flags reject; cached status and worktree listing retain behavior; no phantom compatibility branch. |
@@ -61,7 +61,8 @@ an implementation dependency, not permission to defer the accepted outcome.
 - **Read versus mutation semantics before renaming:** retained as R03/R07/R08.
   No gh-style reinterpretation of PR open without the demo decision.
 - **Fixed aliases and account naming follow-ups:** account is now selected.
-  Retain monitor/mon only; further aliases contradict the newer culling rule.
+  Jack’s September 30 steer replaces the fixed monitor/mon exception with
+  unique-prefix resolution. No registered aliases remain.
   Primary lowercase short flags and their long form remain one option.
 - **Local-first Wave/Task discovery, first entry and account inheritance:**
   retained as R04/R06, including authored Wave discovery and unlinked work.

@@ -22,8 +22,8 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run it
-lf audit: focus on auth       # {args} in the file receives "focus on auth"
+lf audit                               # run it
+lf audit: focus on auth                # {args} in the file receives "focus on auth"
 ```
 
 Write skills direct and imperative — state what to do, not what the skill
@@ -85,7 +85,7 @@ its expanded Flow so the conversation can be reopened:
 ```
 
 The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf session ready "feedback and remaining work"`; the human ends
+feedback with `lf ready "feedback and remaining work"`; the human ends
 the review with `lf session complete <session-id>`. The Flow carries that
 feedback to its next step. Provider exit or readiness alone leaves it waiting.
 Human steps have no navigation verdict or backward edge. Put a deciding step
@@ -121,7 +121,7 @@ available across steps, regardless of which skill wrote them or runs next.
 A review's ready summary points to that material:
 
 ```sh
-lf session ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
+lf ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
 ```
 
 Loop-decide starts at those paths, then reconciles the current design and other

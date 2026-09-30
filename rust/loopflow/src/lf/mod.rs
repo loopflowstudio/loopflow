@@ -1367,11 +1367,12 @@ pub enum HomeCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Inspect cached credentials and subscription windows; verify explicitly
+    /// Refresh managed account status and subscription windows
     Status {
         provider: Option<String>,
+        /// Inspect cached evidence without contacting providers or the origin broker
         #[arg(long)]
-        verify: bool,
+        cached: bool,
         #[arg(long)]
         details: bool,
         #[arg(long)]
@@ -1418,6 +1419,19 @@ pub enum AuthCommand {
         chrome_profile: Vec<String>,
         #[arg(long)]
         clear_chrome_profiles: bool,
+    },
+    /// Spend one banked Codex reset for this named login
+    RedeemReset {
+        provider: String,
+        email: String,
+        /// Reuse this key when retrying the same redemption
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        /// Opaque credit ID returned by live status (otherwise the service chooses)
+        #[arg(long)]
+        credit_id: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Configure and inspect managed account routing
     Route {
@@ -1851,10 +1865,17 @@ mod tests {
     }
 
     #[test]
-    fn auth_has_six_leaves_and_rejects_retired_paths() {
+    fn auth_commands_reject_retired_paths() {
         let command = Cli::command();
         let auth = command.find_subcommand("auth").unwrap();
-        for name in ["status", "connect", "disconnect", "set", "route"] {
+        for name in [
+            "status",
+            "connect",
+            "disconnect",
+            "set",
+            "route",
+            "redeem-reset",
+        ] {
             assert!(auth.find_subcommand(name).is_some());
         }
         for args in [

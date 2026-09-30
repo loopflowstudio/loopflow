@@ -2672,6 +2672,8 @@ pub(crate) async fn launch_task_process(
             ))
         }
     };
+    let accounts = position.invocation.accounts.clone().unwrap_or_default();
+    let _accounts = accounts.activate().map_err(task_error)?;
     let account_id = if requires_provider {
         match preflight_task_execution(&task.worktree, &agent).await {
             Ok(account_id) => Some(account_id),
@@ -2693,7 +2695,10 @@ pub(crate) async fn launch_task_process(
     } else {
         None
     };
-    let mut environment = Vec::new();
+    let mut environment = vec![(
+        crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
+        accounts.env_value().map_err(task_error)?,
+    )];
     if let Some(account_id) = account_id {
         environment.push((
             crate::ops::TASK_ACCOUNT_ID_ENV.to_string(),

@@ -1772,7 +1772,7 @@ fn dispatch(
                     inventory.is_empty(),
                     "saved Flow filters require --sessions"
                 );
-                if matches!(name.as_str(), "blocked" | "resume") {
+                if name == "resume" {
                     return loopflow::lf::commands::flow::control(name, rest, &cli);
                 }
                 if name == "list" {

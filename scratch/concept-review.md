@@ -140,3 +140,7 @@ prospective-usage binding assumption for Jack's review; it is not a decision to
 rewrite historical ownership. The cancellation/live-child incident and prepared
 real-Home conversion procedure remain obligations in the existing plan. This
 review establishes no installation, promotion, shipment or Task completion.
+
+Prospective attribution was subsequently resolved by Jack Heart on 2026-09-30:
+bind affects future usage, through one read-time choice. A separate Intelligence-Wave
+Task will re-evaluate it. This supersedes the open assumption recorded above.

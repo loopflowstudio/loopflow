@@ -1159,7 +1159,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                 for entry in entries {
                     println!(
                         "{} / {}: {} — {}",
-                        entry.wave, entry.project, entry.issue, entry.outcome
+                        entry.wave,
+                        entry.project,
+                        entry.issue.as_deref().unwrap_or("Project"),
+                        entry.outcome
                     );
                 }
             }

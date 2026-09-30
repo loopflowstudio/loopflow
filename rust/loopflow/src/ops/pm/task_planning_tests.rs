@@ -53,6 +53,8 @@ impl PlanningEnvironment {
 #[derive(Default)]
 struct PlanningState {
     issues: Vec<serde_json::Value>,
+    extra_projects: Vec<serde_json::Value>,
+    project_name: Option<String>,
     fail_confirmation: bool,
     fail_snapshot: bool,
     fail_completion: bool,
@@ -92,18 +94,38 @@ async fn planning_graphql(
     } else {
         "Next chapter"
     };
+    let project_name = state
+        .lock()
+        .await
+        .project_name
+        .clone()
+        .unwrap_or_else(|| project_name.into());
     let project = json!({"id":project_id, "name":project_name, "description":"", "content":"flow: feature", "status":{"type":"started"},
         "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("query ListInitiatives") {
+        json!({"initiatives":page(vec![json!({"id":"initiative-1", "name":"Product", "description":""})])})
+    } else if query.contains("mutation RenameProject") {
+        let mut state = state.lock().await;
+        if let Some(project) = state
+            .extra_projects
+            .iter_mut()
+            .find(|project| project["id"] == vars["id"])
+        {
+            project["name"] = vars["name"].clone();
+        } else {
+            state.project_name = Some(vars["name"].as_str().unwrap().into());
+        }
+        json!({"projectUpdate":{"success":true}})
     } else if query.contains("query ListInitiativeProjects") {
         let mut state = state.lock().await;
         if !state.issues.is_empty() && state.fail_snapshot {
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
-        let projects = if project_id == "prior-project" {
+        let mut projects = if project_id == "prior-project" {
             let mut previous = project.clone();
             previous["status"] = json!({"type":"completed"});
             let mut current = project.clone();
@@ -113,9 +135,19 @@ async fn planning_graphql(
         } else {
             vec![project]
         };
+        projects.extend(state.extra_projects.clone());
         json!({"initiative":{"projects":page(projects)}})
     } else if query.contains("query ListProjectIssues") {
         let mut state = state.lock().await;
+        if state
+            .extra_projects
+            .iter()
+            .any(|project| project["id"] == vars["projectId"])
+        {
+            return axum::Json(
+                json!({"errors":[{"message":"foreign Project issues are unavailable"}]}),
+            );
+        }
         if !state.issues.is_empty() && state.fail_confirmation {
             state.fail_confirmation = false;
             return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
@@ -1525,6 +1557,123 @@ esac
         server.abort();
         std::env::set_var("PATH", path);
     }
+}
+
+#[test]
+fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    std::env::set_var("LF_DB_PATH", &fixture.database);
+    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let foreign = json!({
+        "id":"foreign-project", "name":"Other Repository — Technical Architecture",
+        "description":"", "content":"", "status":{"type":"started"},
+        "initiatives":{"nodes":[{"id":"initiative-1"},{"id":"other-initiative"}]},
+        "teams":{"nodes":[{"id":"other-team"}]}
+    });
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
+        extra_projects: vec![foreign.clone()],
+        ..PlanningState::default()
+    }));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        // Creation refreshes planning and must still find the repository chapter.
+        crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Eligible work".into()),
+            Some("Cancel only repository work".into()),
+            None,
+        )
+        .unwrap();
+        for plan in [true, false] {
+            let result = super::pm_sync(
+                &repo,
+                &super::PmSyncOptions {
+                    wave: Some("product".into()),
+                    plan,
+                },
+                &NullProgress,
+            )
+            .unwrap();
+            assert_eq!(
+                result
+                    .diagnostics
+                    .iter()
+                    .filter(|message| message.contains("foreign-project"))
+                    .count(),
+                1
+            );
+            assert!(!result
+                .actions
+                .iter()
+                .any(|action| action.contains("Technical Architecture")));
+        }
+        runtime.block_on(async {
+            let provider = state.lock().await;
+            assert_eq!(provider.extra_projects, vec![foreign.clone()]);
+            assert_eq!(provider.project_name.as_deref(), Some("Product — Chapter"));
+            let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+            let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+            assert_eq!(snapshot.projects.len(), 1);
+            assert_eq!(snapshot.projects[0].id, "project-1");
+        });
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.current_project_id = Some("prior-project".into());
+            provider.issues[0]["project"]["id"] = json!("prior-project");
+            // Duplicate foreign membership still yields one preview entry.
+            provider.project_name = None;
+            provider.extra_projects.push(foreign.clone());
+        });
+        let preview = crate::ops::task::task_sweep(&repo, false).unwrap();
+        assert_eq!(preview.len(), 2);
+        assert_eq!(preview[0].issue, None);
+        assert_eq!(preview[0].project, foreign["name"].as_str().unwrap());
+        assert!(preview[0].outcome.contains("foreign-project"));
+        assert_eq!(
+            serde_json::to_value(&preview).unwrap()[0]["issue"],
+            json!(null)
+        );
+        assert_eq!(preview[1].issue.as_deref(), Some("FIX-1"));
+        assert!(preview[1].outcome.starts_with("would cancel"));
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("unstarted")
+        );
+        let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[1].outcome, "canceled");
+        assert_eq!(
+            runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
+            json!("canceled")
+        );
+        let repeated = crate::ops::task::task_sweep(&repo, true).unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(repeated[0].issue, None);
+        // Missing or shared ownership must not silently disappear from reads.
+        for teams in [json!([]), json!([{"id":"team-1"}, {"id":"other-team"}])] {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                let mut ambiguous = foreign.clone();
+                ambiguous["initiatives"]["nodes"] = json!([{"id":"initiative-1"}]);
+                ambiguous["teams"]["nodes"] = teams;
+                provider.extra_projects = vec![ambiguous];
+            });
+            let error = crate::ops::task::task_sweep(&repo, false)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expected exactly one repository Team"),
+                "{error}"
+            );
+        }
+    });
+    server.abort();
 }
 
 #[test]

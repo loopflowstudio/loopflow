@@ -279,9 +279,9 @@ Test skill body.
                 .collect::<String>()
         );
         assert!(message.len() > 1_048_576);
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &default_test_config(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".into()),
                 wave: Some("infrastructure".into()),
@@ -339,9 +339,9 @@ Test skill body.
     #[test]
     fn oversized_explicit_instructions_report_local_input_budget() {
         let tmp = create_repo_fixture();
-        let error = prepare_launch_prompt(
+        let error = prepare_exec_prompt(
             &default_test_config(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 resolved_skill: Some(Skill {
                     content: Some("Follow this instruction. ".repeat(100_000)),
@@ -358,7 +358,7 @@ Test skill body.
     fn structured_reply_guidance_counts_toward_the_launch_budget() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let input = |content: String, has_ui| LaunchPromptInput {
+        let input = |content: String, has_ui| ExecPromptInput {
             repo_root: tmp.path().to_path_buf(),
             resolved_skill: Some(Skill {
                 content: Some(content),
@@ -370,12 +370,12 @@ Test skill body.
             },
             ..Default::default()
         };
-        let baseline = prepare_launch_prompt(&config, input(String::new(), false)).unwrap();
+        let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
         let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
             + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
         let content = " x".repeat(crate::engine::context_budget::INPUT_TOKENS - overhead - 32);
-        prepare_launch_prompt(&config, input(content.clone(), false)).unwrap();
-        let Err(error) = prepare_launch_prompt(&config, input(content, true)) else {
+        prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
+        let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
             panic!("structured reply guidance exceeded the launch budget without rejection");
         };
         assert!(error.to_string().contains("exceeds the input budget"));
@@ -389,9 +389,9 @@ Test skill body.
         let intent = "> $kickoff\n> ok just run kickoff here then";
         fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
         fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &default_test_config(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
                 agent: Some("codex".into()),

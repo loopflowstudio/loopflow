@@ -1780,6 +1780,57 @@ mod tests {
     }
 
     #[test]
+    fn repeated_node_acknowledges_only_consumed_successful_steers() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        for status in ["failed", "interrupted", "completed"] {
+            let flow = launched(&store, vec![step("work", None), step("next", None)], 0);
+            let session = attempt(&store, flow.id(), None, "codex");
+            for (seq, evidence) in [
+                serde_json::json!({"type":"user_input","op":"steer_seed_through","text":"10"}),
+                serde_json::json!({"type":"user_input","op":"steer_transport_accepted:11","text":"live direction"}),
+            ].into_iter().enumerate() {
+                let source = format!("events.jsonl:{seq}");
+                store.retain_session_observation(&session, &crate::session::SessionObservation {
+                    artifact_key: session.artifact_key.clone(), source: source.clone(),
+                    observed_at: 1, task_id: None, wave_id: None,
+                    payload: serde_json::json!({"input_id":session.artifact_key,"source":source,"evidence":evidence}),
+                }).unwrap();
+            }
+            let turn = store.test_flow_turn(&session.artifact_key);
+            store.test_finish_flow_turn(&turn, status);
+            assert_eq!(store.completed_step_steer_id(&flow).unwrap(), 0);
+            let recovered = store.recover_flow(flow.id(), None).unwrap();
+            if status != "completed" {
+                assert!(recovered.failure.is_some());
+                assert_eq!(store.completed_step_steer_id(&flow).unwrap(), 0);
+                continue;
+            }
+            let mut cursor = recovered.cursor.clone();
+            cursor.finish(&recovered.invocation.steps).unwrap();
+            let next = store
+                .checkpoint_flow(flow.id(), recovered.version, &cursor, None, None)
+                .unwrap();
+            assert_eq!(store.completed_step_steer_id(&next).unwrap(), 0);
+            let mut repeated = flow.clone();
+            repeated.cursor.iteration = 1;
+            assert_eq!(store.completed_step_steer_id(&repeated).unwrap(), 11);
+            let other = launched(&store, vec![step("work", None)], 0);
+            assert_eq!(store.completed_step_steer_id(&other).unwrap(), 0);
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM session_events WHERE kind='observed' AND captured_event=?1",
+                    [session.captured],
+                )
+                .unwrap();
+            assert_eq!(store.completed_step_steer_id(&repeated).unwrap(), 0);
+        }
+    }
+
+    #[test]
     fn a_native_completion_settles_only_its_selected_flow_turn_without_a_run_outcome() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();

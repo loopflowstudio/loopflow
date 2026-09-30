@@ -60,8 +60,10 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
    The public cross-checkout proof passes. The Task-shortcut public proof failed
    on hosted `36cbb3d4b`: its inherited OpenCode selection cannot enforce the
    checkout boundary. The fixture now selects Claude for Y's mechanical Flow;
-   confinement is unchanged. Re-execution remains pending on the disposable
-   runner because local Docker is unavailable. Post-CI repairs pass the complete
+   confinement is unchanged. The subsequent
+   [slice review](review-task-command-slice.md) executed the corrected public
+   proof successfully in disposable Linux after Docker recovered, plus three
+   public attribution checks. Post-CI repairs pass the complete
    materialized Rust matrix (2,024 passed, 17 skipped); see the retained failures
    and final source receipt in evidence. Keep the dead per-turn token and Flow membership
    provenance audit open. See [evidence](evidence.md).

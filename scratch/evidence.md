@@ -415,3 +415,15 @@ container (`task-shortcut-fixture-docker.log`). The repair is authored pending
 hosted execution; the prior Rust/Swift passes are not proof of this correction.
 Formatting, diff checks and all-target Clippy with `-D warnings` pass
 (`task-shortcut-fixture-clippy.log`), including compilation of the repaired test.
+
+### Task command slice review · 2026-09-30
+
+[Review matrix and next action](review-task-command-slice.md) covers
+`36cbb3d4b..b341ed3c5`. Docker recovered: the corrected public cross-Task proof
+passed in disposable Linux, and its container was removed on exit
+(`review-slice-task-shortcut.log`). Three fresh public CLI attribution tests
+passed (`review-slice-public-attribution.log`). Both logs are under
+`.lf/tmp/cut-i/`. The fixture's prior execution gap is closed; the rest of the
+installation suite was not rerun. These are scripted provider/terminal proofs,
+not configured acceptance. No production edit was needed during review; the
+one-FlowSession migration and the other remaining-work obligations stay open.

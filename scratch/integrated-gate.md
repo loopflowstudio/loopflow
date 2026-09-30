@@ -102,3 +102,10 @@ Rust changes repair tests; the Swift fixture repair passed eight transport tests
 Review retained one runtime fix (cursor ordering), repaired current-model fixtures,
 and aligned the local runner with CI's no-fail-fast behavior. No extra execution
 owner, compatibility decoder, migration rewrite or restart API was added.
+
+Final integrated production-prefix estimate at `5dee46ca8`, against main
+`12013dae4`: **+22,792 / −16,590 = +6,202 lines**, including SQL, excluding tests,
+docs and scratch, and using the original approximate trailing-test-module method.
+[Per-file counts](integrated-code-delta.json) retain exact refs and method.
+This supersedes the earlier tip-to-tip delta for the integrated candidate; it
+does not rerun or relabel the earlier debug density timings.

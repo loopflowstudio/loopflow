@@ -193,7 +193,8 @@ to the exact PR. See [metric definitions and coverage limits](performance/README
 Desktop's `swift` suite builds the app through the test-target dependency and
 runs model and production-view tests through `scripts/test_desktop.sh`, which
 denies WindowServer connections even on a logged-in host. No Automation
-permission is needed. `DesktopHeadlessTests` checks the four Work states and
+permission is needed. Only macOS's setuid `/bin/ps` leaves the sandbox so CLI
+process observation still works. `DesktopHeadlessTests` checks the four Work states and
 selection through the real button action. Gate and CI use this same suite.
 
 Window/Metal/PTY integration tests are optional display-session diagnostics:

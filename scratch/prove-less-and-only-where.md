@@ -2,7 +2,8 @@
 
 Jack Heart's 2026-09-30 directive (LOO-357) sets the scope: sanity checks during
 implementation; affected verification once at gate; no automated Flow blocked
-on a display session or a person's judgment. One PR; no delivery requested here.
+on a display session or a person's judgment. One PR; Jack's supervising session
+subsequently approved shipping.
 
 ## Approach
 
@@ -57,10 +58,17 @@ headless selection check invokes the workspace navigator's own action; hosted
 diagnostics share one opt-in trait. Runner coverage checks Xcode's compile-only
 command instead of matching a sentence in its summary.
 
-Remaining: affected-suite gate/CI, normal Flow adoption, and a later completed
+Gate found that macOS refuses to launch setuid `/bin/ps` inside the display
+sandbox, breaking real CLI observation. Only that executable now leaves the
+sandbox; the app and tests retain WindowServer denial. The full headless suite
+passes, including real CLI observation. An inherited Run context also broke the
+ambient-Wave Rust test; clearing `LF_*` and pinning the built `LF_BIN` as
+TESTING.md requires resolved it, and the full Rust suite passed.
+
+Remaining: CI, normal Flow adoption, and a later completed
 implement cohort for runtime comparison. No later cohort is manufactured by
 rerunning implementation. The seven selected skills have almost identical word
 counts; changed obligations and smaller future scratch, not source-size savings,
 are the intended improvement.
 
-Checks: `uv run pytest python/tests/test_check_cost.py python/tests/test_gate_bounded.py -q` — 49 passed; `scripts/test_desktop.sh -Xswiftc -gnone --jobs 4 --filter 'DesktopHeadlessTests|AppAppearanceTests|TaskFilesTests|TaskMonitorTests'` — build and 16 tests passed, 4 native diagnostics skipped with WindowServer denied; Ruff, `cargo fmt --check`, and all-target Clippy passed; prior prompt-contract/golden results remain applicable; affected suites belong to gate/CI.
+Checks: `uv run python scripts/test.py --base 12013dae4fadc4946b885309ebcc22f1061e6493 --reuse-passing` — Python 296 passed/19 skipped; after the sandbox repair, `uv run python scripts/test.py --base HEAD --rust --loopflow --reuse-passing` with clean `LF_*` and checkout `LF_BIN` — architecture, Rust (1,959 passed/12 skipped), headless Swift, multiplatform boundaries and Xcode compile passed; Ruff, formatting and all-target Clippy passed; CI owns the remaining matrix.

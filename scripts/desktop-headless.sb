@@ -1,3 +1,6 @@
 (version 1)
 (allow default)
+; macOS refuses setuid ps inside a sandbox. CLI observation needs this reader;
+; only ps leaves the sandbox, while the app and tests retain the display denial.
+(allow process-exec (literal "/bin/ps") (with no-sandbox))
 (deny mach-lookup (global-name-regex ".*[Ww]indow[Ss]erver.*"))

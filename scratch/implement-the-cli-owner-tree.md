@@ -51,21 +51,21 @@ No competing model migration belongs here.
 
 ## This slice
 
-Merge C101 into C102: `task diff --files` owns changed-path inspection, while
-ordinary diff retains patches and stdin drafts. Remove the Changes parser leaf;
-migrate Desktop and documentation. Preserve the existing TaskChangesSnapshot
-and TaskDiffSnapshot wire shapes, exact base/head and rename evidence, and file
-revision/save behavior. Files mode excludes path/draft inputs, which select patch
-content. Prove real disposable Git comparisons through the public CLI and the
-native consumer's decoding, with retired input rejected before effects.
+Merge C140 into C120: `list skill [namespace] [--json]` owns skill discovery.
+Delete SkillCommand::List and its inspection dispatch; change emitted namespace
+invocations and current docs together. Keep explicit skill execution, including
+skills named list, and read-only typed help. With no list definition, the former
+`skill list` input must fail lookup without launching or writing runtime state;
+with one, it selects that definition under ordinary explicit-skill semantics.
+No rejection shim should reserve a retired catalog verb.
 
-Dependency refresh at `1735f4e94`: LOO-298 `c7fcd31ec` records its independent
-fixes landed but retains the architectural cutover and acceptance on #1296.
-LOO-334 `2d63d6488` still records the copied-Flow failure: resolving original
-execution under selected development bytes conflicts with the production-store
-boundary. Do not weaken isolation or import that unfinished cut here. LOO-340
-remains `32b6eef00`, already integrated; no new account slice is available.
-The independent changed-file merge follows the supplied iteration direction.
+Dependency refresh at `3dd912634`: LOO-298 remains `c7fcd31ec`; LOO-340 remains
+already-integrated `32b6eef00`. LOO-334 advanced to `9fea0552f`, whose recorded
+installation-copy provenance still fails the public continuation proof at the
+production-database guard. Its design explicitly stops dependent implementation
+for contract review. Preserve that counterexample and isolation; integrate no
+unfinished execution cut merely to rename its readers. This pass takes the
+independent C140 merge explicitly selected by the preceding iteration direction.
 
 ## Slice ledger
 
@@ -852,3 +852,68 @@ the real first-provider-result walkthrough, final docs/counts and Jack Heart's
 demo remain required. Preserve open Monitor choices. Whole-design Done when
 does not hold; this review does not publish, land, complete the Task or select
 Flow navigation.
+
+### Skill catalog concept merge · 2026-09-30
+
+Starting revision `3dd912634`. Refreshed committed dependency evidence without
+editing sibling worktrees: LOO-298 remains `c7fcd31ec` and LOO-340 remains the
+integrated `32b6eef00`. LOO-334 advanced to `9fea0552f`; its copy-provenance
+slice still records public continuation failing at `guard_development_database`
+when selected development bytes reach the original production directory. Its
+required proof and succession policy remain unresolved. No model integration,
+installed-store access, provider request or isolation change was attempted.
+
+Implemented the preceding direction's independent C140 merge. `list skill
+[namespace] [--json]` is the single skill inventory. Removed SkillCommand::List
+and its inspection dispatch; namespace entries now advertise List, and current
+reference examples follow that invocation. Searches found no concrete Desktop,
+script, builtin-skill or typed Flow caller of the retired catalog leaf. Existing
+Entry JSON, ordering, namespace membership and source precedence use the same
+reader. Saved Flow inspection and definition execution retain their owners.
+
+Removing the verb also makes list an ordinary explicit skill name. Without that
+skill, `skill list` fails lookup; with it, explicit selection and typed help use
+the authored skill despite the same-named Flow. The delimiter still works. No
+retired-name guard or alias was added. Review caught stale documentation showing
+unnecessary skill escapes; the example now demonstrates Flow's actual collision.
+This is definition selection/inspection proof, not a provider execution claim.
+
+Focused proof used inherited LF_* removal and LF_BIN pinned to this checkout's
+source binary. The first `cargo test -p loopflow --test cli_discovery --test
+documented_commands --jobs 4` passed 13 discovery tests and failed the new test's
+assumed exit 1; the actual missing-skill lookup exits 2. A disposable public CLI
+reproduction confirmed `skill not found: list`, empty stdout and no Home created.
+Corrected the assertion, preserving production exit behavior. Cargo did not run
+the documentation target after the initial discovery failure.
+
+Final checks:
+
+- `cargo test -p loopflow --test cli_discovery --test documented_commands --jobs 4`:
+  **14 + 3 passed**. Real CLI with disposable definitions and no providers on
+  PATH; scoped JSON equals the corresponding mixed-catalog entries, text retains
+  names/invocations, nested skills remain visible, retired lookup and reserved
+  skill selection preserve their boundaries, and inspection writes no Home.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`
+  and `git diff --check`: passed. No affected-suite or full gate ran.
+- `uv run python website/dev.py sync-docs --source docs`: regenerated 21 copies.
+- `cargo run -p loopflow --example cli_catalog --jobs 4`: validated JSON before
+  replacing the retained extraction. **136 → 135 commands below root,
+  431 → 429 flags, 91 → 90 positionals, zero aliases**, 17 hidden commands.
+  The removed flags are duplicate JSON/help; namespace uses List's path input.
+  Updated C140/A530–532 in the existing verdict source and rendered catalog.
+
+Measured against `3dd912634`: **+3 / −19 production Rust lines**, using physical
+line difflib comparison of the three changed source files before cfg(test).
+Excludes integration tests, docs, generated copies and scratch. The switched
+consumer is the emitted namespace invocation plus public catalog documentation;
+its predecessor parser and duplicate dispatch are gone. No persistence writer,
+credential authority or execution model changed.
+
+Whole-design Done when remains unmet. LOO-298/334 integration, remaining LOO-340
+account ownership/provider selection, Monitor, discovery, destination child
+readiness, remaining catalog/R01–R10 requirements and a real first-provider
+result still precede final documentation/counts and Jack Heart's demo. C134
+requires typed help to prove invalid Flow/review compilation fails nonzero before
+its validation leaf can be removed; saved FlowSession inventory/detail remain
+distinct. Keep the copied-Flow counterexample and all open demo choices. This
+slice does not publish, land, complete the Task or choose Flow navigation.

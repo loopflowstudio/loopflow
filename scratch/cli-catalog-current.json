@@ -11537,7 +11537,7 @@
     "short_aliases": []
   },
   {
-    "about": "Run or inspect skills",
+    "about": "Run a skill explicitly",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -11559,76 +11559,6 @@
     "path": [
       "lf",
       "skill"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "List skills, optionally inside a namespace",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "skill",
-      "list"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "namespace",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "skill",
-      "list"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "skill",
-      "list"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "skill",
-      "list"
     ],
     "required": false,
     "short": "h",

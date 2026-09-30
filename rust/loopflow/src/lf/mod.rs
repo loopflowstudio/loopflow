@@ -579,7 +579,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: FlowCommand,
     },
-    /// Run or inspect skills
+    /// Run a skill explicitly
     Skill {
         #[command(subcommand)]
         cmd: SkillCommand,
@@ -591,12 +591,6 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// List skills, optionally inside a namespace
-    List {
-        namespace: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }

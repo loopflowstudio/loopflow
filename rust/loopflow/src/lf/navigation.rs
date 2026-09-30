@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Command, CommandFactory};
 
 use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
-use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
+use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {
     let mut command = Cli::command();
@@ -209,9 +209,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         command,
         Commands::Help { .. }
             | Commands::List { .. }
-            | Commands::Skill {
-                cmd: SkillCommand::List { .. }
-            }
             | Commands::Flow {
                 cmd: FlowCommand::List { .. }
                     | FlowCommand::Show { .. }
@@ -226,13 +223,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         match command {
             Commands::Help { path, all } => print!("{}", render_help(path, &repo, *all)?),
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
-            Commands::Skill {
-                cmd: SkillCommand::List { namespace, json },
-            } => {
-                let mut path = vec!["skill".to_string()];
-                path.extend(namespace.iter().cloned());
-                crate::lf::commands::list::show(&path, &repo, *json)?;
-            }
             Commands::Flow {
                 cmd: FlowCommand::List { json, inventory },
             } => {

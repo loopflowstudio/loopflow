@@ -4180,7 +4180,7 @@
       "target": "lf list skill",
       "concept": "Authored skill inventory",
       "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in skill catalog merge; public CLI discovery proof; full Task incomplete"
     },
     {
       "row_id": "C141",
@@ -28060,7 +28060,7 @@
       "target": "lf list skill <namespace>",
       "concept": "Authored skill inventory: skill namespace selected for discovery.",
       "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in skill catalog merge; public CLI discovery proof; full Task incomplete"
     },
     {
       "action": "SetTrue",
@@ -28104,7 +28104,7 @@
       "target": "lf list skill --json",
       "concept": "Shared json protocol applied to authored skill inventory.",
       "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in skill catalog merge; public CLI discovery proof; full Task incomplete"
     },
     {
       "action": "Help",
@@ -28146,7 +28146,7 @@
       "target": "lf list skill --help",
       "concept": "Shared help protocol applied to authored skill inventory.",
       "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in skill catalog merge; public CLI discovery proof; full Task incomplete"
     },
     {
       "action": "Set",

@@ -32,8 +32,8 @@ lf run debug --help                    # the same definition page
 
 lf list                                # commands, skills, and flows
 lf list --json                         # stable, structured entries
-lf skill list                          # skills and namespaces
-lf skill list team                     # skills inside a namespace
+lf list skill                          # skills and namespaces
+lf list skill team                     # skills inside a namespace
 lf flow list                           # authored flows and their steps
 ```
 
@@ -152,8 +152,7 @@ if the name is also a verb within that family, put `--` before it:
 ```bash
 lf skill commit                        # a skill named commit
 lf flow -- list                        # a flow named list
-lf skill -- show                       # a skill named show
-lf help skill -- list                  # inspect a skill named list without running it
+lf help flow -- list                   # inspect a flow named list without running it
 ```
 
 ### Skills
@@ -177,7 +176,7 @@ definitions. Lookup checks:
 3. Bundled skills, including a unique short name within a namespace.
 4. Available external skill sources and cached Agent Skills.
 
-Use `lf skill list` for the current catalog. See [Authoring](authoring.md)
+Use `lf list skill` for the current catalog. See [Authoring](authoring.md)
 for skill files and [Configuration](config.md) for defaults.
 
 ### Flows

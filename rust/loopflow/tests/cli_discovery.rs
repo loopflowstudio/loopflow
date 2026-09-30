@@ -6,7 +6,7 @@ use clap::{CommandFactory, Parser};
 use loopflow::engine::target::{resolve_definition, DefinitionKind, Target};
 use loopflow::engine::{compile_flow, load_flow, ConcreteStep};
 use loopflow::lf::navigation::normalize_args;
-use loopflow::lf::{Cli, Commands, FlowCommand};
+use loopflow::lf::{Cli, Commands, FlowCommand, SkillCommand};
 use tempfile::TempDir;
 
 fn fixture() -> TempDir {
@@ -168,7 +168,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     ));
     let skill = String::from_utf8(skill).unwrap();
     assert!(skill.contains("Reserved skill body."), "{skill}");
-    assert!(skill.contains("lf skill -- list"), "{skill}");
+    assert!(skill.contains("lf skill list"), "{skill}");
     for owner in ["flow", "run"] {
         let flow = success(run(
             repo.path(),
@@ -178,8 +178,8 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         let flow = String::from_utf8(flow).unwrap();
         assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
     }
-    let collection = success(run(repo.path(), home.path(), &["help", "skill", "list"]));
-    assert!(String::from_utf8_lossy(&collection).contains("List skills"));
+    let unescaped = success(run(repo.path(), home.path(), &["help", "skill", "list"]));
+    assert_eq!(unescaped, skill.as_bytes());
     assert_eq!(
         success(run(repo.path(), home.path(), &["help", "--", "task"])),
         success(run(repo.path(), home.path(), &["help", "task"]))
@@ -261,6 +261,72 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
     assert!(!entries
         .iter()
         .any(|row| row["name"] == "solo" && row["kind"] == "flow"));
+}
+
+#[test]
+fn skill_catalog_owns_namespace_discovery_and_leaves_list_available_as_a_skill() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".lf/skills/team/nested")).unwrap();
+    for name in ["team/review", "team/nested/check"] {
+        fs::write(
+            repo.path().join(format!(".lf/skills/{name}.md")),
+            format!("Skill {name} body."),
+        )
+        .unwrap();
+    }
+
+    let catalog = success(run(repo.path(), home.path(), &["list", "skill", "--json"]));
+    let catalog: Vec<serde_json::Value> = serde_json::from_slice(&catalog).unwrap();
+    let namespace = catalog.iter().find(|row| row["name"] == "team").unwrap();
+    assert_eq!(namespace["kind"], "namespace");
+    assert_eq!(namespace["invocation"], "lf list skill team");
+    assert!(!catalog.iter().any(|row| row["kind"] == "flow"));
+    let scoped = success(run(
+        repo.path(),
+        home.path(),
+        &["list", "skill", "team", "--json"],
+    ));
+    let scoped: Vec<serde_json::Value> = serde_json::from_slice(&scoped).unwrap();
+    let all = success(run(repo.path(), home.path(), &["list", "--json"]));
+    let all: Vec<serde_json::Value> = serde_json::from_slice(&all).unwrap();
+    let expected: Vec<_> = all
+        .into_iter()
+        .filter(|row| row["kind"] == "skill" && row["name"].as_str().unwrap().starts_with("team/"))
+        .collect();
+    assert_eq!(scoped, expected);
+    assert_eq!(scoped.len(), 2);
+    let text = success(run(repo.path(), home.path(), &["list", "skill", "team"]));
+    let text = String::from_utf8(text).unwrap();
+    for row in &scoped {
+        assert!(text.contains(row["name"].as_str().unwrap()));
+        assert!(text.contains(row["invocation"].as_str().unwrap()));
+    }
+
+    // The removed verb no longer lists anything or falls back to the list Flow.
+    let retired = run(repo.path(), home.path(), &["skill", "list"]);
+    assert_eq!(retired.status.code(), Some(2));
+    assert!(retired.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
+    assert!(!home.path().join(".lf").exists());
+
+    fs::write(
+        repo.path().join(".lf/skills/list.md"),
+        "Authored list skill.",
+    )
+    .unwrap();
+    for args in [
+        vec!["lf", "skill", "list"],
+        vec!["lf", "skill", "--", "list"],
+    ] {
+        let args = normalize_args(args.into_iter().map(str::to_string).collect()).unwrap();
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Skill { cmd: SkillCommand::External(args) }) if args == ["list"]));
+    }
+    let help = success(run(repo.path(), home.path(), &["skill", "list", "--help"]));
+    assert!(String::from_utf8_lossy(&help).contains("Authored list skill."));
+    assert!(!home.path().join(".lf").exists());
 }
 
 #[test]

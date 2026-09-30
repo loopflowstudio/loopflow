@@ -5,7 +5,7 @@ Jack Heart requested this catalog before implementation on 2026-09-30. Baseline:
 ## Counts and reproduction
 
 - Before: **141 commands below the root**, 18 hidden; 142 rows including the root. **440 flag entries** (including automatic help/version), **95 positional arguments**, **10 extra aliases** (one command alias, nine flag aliases).
-- Current slice: **136 commands below root**, 17 hidden; **431 flag entries**, **91 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
+- Current slice: **135 commands below root**, 17 hidden; **429 flag entries**, **90 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
 - `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-before.json` — passed against the unchanged parser.
 - `target/debug/lf help --all` in a disposable Home — exit 0, 125 lines, no Home state created; public help omits hidden commands and options by design.
 - Raw [Clap metadata](cli-catalog-before.json) and [public help](cli-help-before.txt) accompany this catalog. Stable C/A identifiers below link research to rows.
@@ -193,6 +193,28 @@ The new `diff --files` input replaces the Changes leaf's help, base and JSON
 flag entries; its issue positional is shared with Diff. This is an implemented
 concept merge, not completion of the remaining catalog or destination work.
 
+## Skill catalog merge · 2026-09-30
+
+C140 is implemented: `list skill [namespace] [--json]` owns skill discovery.
+The Skill List parser leaf and duplicate inspection dispatch are deleted;
+emitted namespace invocations and current reference examples use List. Existing
+catalog Entry fields and ordering remain unchanged. Public CLI proof compares
+scoped entries to the same skills in the mixed catalog and checks text, nested
+namespace membership, reserved definitions and absence of runtime writes.
+
+Retiring the verb frees `list` as an explicit skill name: absent definitions fail
+with exit 2 and `skill not found: list`; authored list skills remain selectable,
+including through the delimiter. No rejection shim, alias or provider launch is
+added. Flow inventory/inspection and the dependent execution model are unchanged.
+
+Compiled counts: **136 → 135 commands below root**, **431 → 429 flags**,
+**91 → 90 positionals**, **zero aliases**, with 17 hidden commands. The removed
+entries are List's duplicate JSON/help flags and namespace positional. Baseline
+totals are now **141 → 135**, **440 → 429**, **95 → 90**, **10 → 0**.
+These are intermediate counts; Monitor, dependent integrations and full acceptance
+remain open. LOO-334 `9fea0552f` still records its failed production-store
+continuation proof; no unfinished model was imported for this independent cut.
+
 ## Commands
 
 P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.
@@ -339,7 +361,7 @@ P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstu
 | C137 | lf flow blocked | lf flow | Retired command-side blocked verdict | runtime/source reference: [E285]; runtime/source reference: [E298]; documented public use: [E299]; P:701 | N137 | delete → — | LOO-298; adopted target; implementation not implied |
 | C138 | lf flow resume | lf flow | Continuation of a captured ordinary workflow invocation | runtime/source reference: [E300]; runtime/source reference: [E301]; documented public use: [E302]; P:706 | N138 | keep → lf flow resume | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C139 | lf skill | lf | Explicit execution of a named skill despite kind or command collisions | runtime/source reference: [E303]; runtime/source reference: [E304]; runtime/source reference: [E262]; P:657 | N139 | keep → lf skill | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
-| C140 | lf skill list | lf skill | Authored skill inventory | runtime/source reference: [E304]; documented public use: [E305]; P:669 | N140 | merge into → lf list skill | LOO-338; adopted target; implementation not implied |
+| C140 | lf skill list | lf skill | Authored skill inventory | runtime/source reference: [E304]; documented public use: [E305]; P:669 | N140 | merge into → lf list skill | LOO-338; implemented in skill catalog merge; public CLI discovery proof; full Task incomplete |
 | C141 | lf skill show | lf help | Read-only skill definition inspection | documented public use: [E306]; test: [E307]; P:675 | N141 | merge into → lf help skill | LOO-338; adopted target; implementation not implied |
 
 ## Merge and deletion checklist
@@ -911,9 +933,9 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 | A527 | lf flow resume --retry | C138 | Continuation of a captured ordinary workflow invocation: explicit retry of a failed captured boundary. | N314; P:709 | keep → --retry | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A528 | lf flow resume --help / -h | C138 | Shared help protocol applied to continuation of a captured ordinary workflow invocation. | N164; P:706 | keep → --help | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A529 | lf skill --help / -h | C139 | Shared help protocol applied to explicit execution of a named skill despite kind or command collisions. | N164; P:657 | keep → --help | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
-| A530 | lf skill list <namespace> | C140 | Authored skill inventory: skill namespace selected for discovery. | N315; P:670 | merge into → lf list skill <namespace> | LOO-338; adopted target; implementation not implied |
-| A531 | lf skill list --json | C140 | Shared json protocol applied to authored skill inventory. | N315; P:672 | merge into → lf list skill --json | LOO-338; adopted target; implementation not implied |
-| A532 | lf skill list --help / -h | C140 | Shared help protocol applied to authored skill inventory. | N315; P:669 | merge into → lf list skill --help | LOO-338; adopted target; implementation not implied |
+| A530 | lf skill list <namespace> | C140 | Authored skill inventory: skill namespace selected for discovery. | N315; P:670 | merge into → lf list skill <namespace> | LOO-338; implemented in skill catalog merge; public CLI discovery proof; full Task incomplete |
+| A531 | lf skill list --json | C140 | Shared json protocol applied to authored skill inventory. | N315; P:672 | merge into → lf list skill --json | LOO-338; implemented in skill catalog merge; public CLI discovery proof; full Task incomplete |
+| A532 | lf skill list --help / -h | C140 | Shared help protocol applied to authored skill inventory. | N315; P:669 | merge into → lf list skill --help | LOO-338; implemented in skill catalog merge; public CLI discovery proof; full Task incomplete |
 | A533 | lf skill show <name> | C141 | Read-only skill definition inspection: owner name or local checkout/slug identity. | N316; P:675 | merge into → lf help skill <name> | LOO-338; adopted target; implementation not implied |
 | A534 | lf skill show --help / -h | C141 | Shared help protocol applied to read-only skill definition inspection. | N316; P:675 | merge into → lf help skill --help | LOO-338; adopted target; implementation not implied |
 

@@ -76,7 +76,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                             kind: "namespace".to_string(),
                             source: "skills".to_string(),
                             description: "List skills in this namespace".to_string(),
-                            invocation: format!("lf skill list {namespace}"),
+                            invocation: format!("lf list skill {namespace}"),
                         });
                     }
                     continue;

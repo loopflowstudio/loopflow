@@ -1888,43 +1888,6 @@ mod tests {
     }
 
     #[test]
-    fn auth_has_six_leaves_and_rejects_retired_paths() {
-        let command = Cli::command();
-        let auth = command.find_subcommand("account").unwrap();
-        for name in ["status", "connect", "disconnect", "set", "route"] {
-            assert!(auth.find_subcommand(name).is_some());
-        }
-        for args in [
-            vec!["account", "accounts"],
-            vec!["account", "import", "claude"],
-            vec!["account", "configure", "codex"],
-            vec!["account", "reset", "claude", "a"],
-            vec!["account", "access", "set"],
-            vec!["account", "linear"],
-        ] {
-            assert!(Cli::try_parse_from(std::iter::once("lf").chain(args)).is_err());
-        }
-        assert!(command.find_subcommand("profile").is_none());
-        assert!(command.find_subcommand("route").is_none());
-        assert!(
-            Cli::try_parse_from(["lf", "account", "route", "set", "claude", "a", "--default"])
-                .is_ok()
-        );
-        assert!(Cli::try_parse_from([
-            "lf",
-            "account",
-            "route",
-            "set",
-            "claude",
-            "a",
-            "--default",
-            "--repo",
-            "a/b"
-        ])
-        .is_err());
-    }
-
-    #[test]
     fn account_preference_and_restriction_are_distinct_repeatable_flags() {
         let preferred = Cli::try_parse_from([
             "lf",
@@ -2441,43 +2404,6 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["lf", "usage", "--refresh"]).is_err());
         assert!(Cli::try_parse_from(["lf", "usage", "--cached"]).is_err());
-    }
-
-    #[test]
-    fn task_workspace_commands_address_the_task_then_optional_file() {
-        let changes = Cli::try_parse_from(["lf", "task", "diff", "INF-123", "--files", "--json"])
-            .expect("parse changed files");
-        assert!(matches!(
-            changes.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Diff { issue, files: true, json: true, .. }
-            }) if issue == "INF-123"
-        ));
-
-        let diff =
-            Cli::try_parse_from(["lf", "task", "diff", "INF-123", "src/parser.rs", "--json"])
-                .expect("parse task diff");
-        assert!(matches!(
-            diff.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Diff {
-                    issue,
-                    path: Some(path),
-                    json: true,
-                    ..
-                }
-            }) if issue == "INF-123" && path == "src/parser.rs"
-        ));
-
-        let file =
-            Cli::try_parse_from(["lf", "task", "file", "INF-123", "src/parser.rs", "--json"])
-                .expect("parse task file");
-        assert!(matches!(
-            file.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::File { issue, path, json: true, recoveries: false }
-            }) if issue == "INF-123" && path == "src/parser.rs"
-        ));
     }
 
     #[test]

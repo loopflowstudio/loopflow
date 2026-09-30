@@ -798,3 +798,10 @@ other catalog cuts and the live first-provider-result walkthrough still precede
 Jack Heart's demo. Preserve all explicit demo choices and public deferral labels
 until their proofs hold. This slice does not publish, land, complete the Task or
 choose Flow navigation.
+
+Compression after `ac882b020` removes two parser-shape tests (63 net test lines):
+one still required the deleted Account status leaf and failed on reproduction;
+the other duplicated the public Task-file workflow. Route scope conflicts remain
+in public CLI coverage. Isolated `lf::tests` (50), `cli_discovery` (13),
+`task_diff_tests` (1), formatting, all-target Clippy (four jobs) and diff checks
+passed. Production behavior, compiled command counts and remaining scope are unchanged.

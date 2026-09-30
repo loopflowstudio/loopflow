@@ -197,7 +197,7 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     for args in [
         &["task", "changes", "INF-123", "--json"][..],
         &["task", "diff", "INF-123", "src.rs", "--files"],
-        &["task", "diff", "INF-123", "src.rs", "--files", "--draft"],
+        &["task", "diff", "INF-123", "--files", "--draft"],
         &["task", "wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
         &["task", "wt", "list", "--format", "json"],
@@ -205,6 +205,17 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["account", "status"],
         &["account", "--verify"],
         &["account", "route", "show"],
+        &["account", "route", "--default", "--repo", "a/b"],
+        &[
+            "account",
+            "route",
+            "set",
+            "claude",
+            "a",
+            "--default",
+            "--repo",
+            "a/b",
+        ],
         &[
             "account",
             "--cached",

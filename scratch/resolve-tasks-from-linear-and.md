@@ -17,6 +17,65 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Slice review — stacked migration and consumer integration, 2026-09-30
+
+**Blocked; no publication.** Reviewed the complete reconciliation/compression
+diff `a9d7ec2fd` → `a7db5b03c`, the Task directive and full acceptance matrix,
+and the affected migration, chapter, installation-routing and fixture callers.
+The inherited LOO-298 implementation is context, not newly reviewed acceptance.
+The required proof stops this review before whole-design acceptance.
+
+- **Executed failure:** `uv run python scripts/test_task_installation.py` exited
+  1 on these bytes. Docker returned `29.4.0`; canonicalization ordered 40 drafts,
+  but the release build exited 101 at `rust/loopflow/build.rs:95`:
+  `build canonical schema at 0.12.25.001_release: no such table: pm_snapshots`.
+  No installation, promotion or worker test ran. The harness removed container
+  `416e9198832ba454dbb969887a560e2196dede1e4f785178235d7310fd0655c1`;
+  a bounded all-container query independently confirmed it absent. The earlier
+  Docker outage is not the current blocker.
+- **Migration gap:** normalization drops `pm_snapshots` before
+  `project_status_chapters` reads it. Simply moving chapter conversion first
+  drops `wave_chapters` before `pm_project_evidence` preserves archive receipts.
+  Exact applied-draft prefix/checksum validation also prevents a reordered catalog
+  from proving adoption of either populated branch frontier. This requires an
+  explicit preserving migration integration, not a suffix-only patch or rewritten
+  applied history. No migration bytes changed during review.
+- **Consumer replacement:** chapter selection now reads the normalized typed
+  snapshot; the unused `fetch_pm_snapshot` wrapper and `WorkCatalog::load` are
+  gone. Project transitions and completion share one paginated status reader;
+  duplicate response DTOs and sorting are removed. The recorded 34 adapter passes
+  and subsequent two selection passes remain narrow simulated-provider evidence,
+  reused without rerunning unchanged behavior. They do not exercise the failing
+  materialized schema.
+- **Remaining source gaps:** chapter rotation completes the predecessor but never
+  calls `complete_and_archive_project`; that adapter has only test callers.
+  Retained-Session discovery still resolves manifests instead of AgentSession
+  identity. Normal promotion still stops at status/open identity and cwd checks,
+  without exact review completion, a second worker or its runtime digest.
+  Multiple physical execution matches still all refuse, including ordinary copied
+  installation data. These are outstanding integration work, not new policy
+  choices or reasons to select a copy by equality or timestamp.
+
+**Measurement:** `a9d7ec2fd` → `a7db5b03c` adds **63 / removes 114** non-test
+physical Rust lines across six files. The compression subset
+`6a2f7eae6` → `a7db5b03c` is **+38 / −64**. Counts compare production prefixes
+before trailing test modules, excluding test files, scripts, docs, scratch,
+generated artifacts and inherited parent changes; no rename credit. This final
+range replaces the earlier working-tree reconciliation count. The previous
+normal-promotion fixture pass (`83dea4b9c` → `1edec5de0`) was **+0 / −0** production
+Rust with no consumer replacement. The current pass does replace chapter's
+planning reader, so the two-consecutive-no-replacement condition does not apply.
+
+Next implement the preserving migration integration and prove released history
+plus both populated draft frontiers in disposable source/materialized stores.
+Then rerun the installation harness and finish normal-promotion succession through
+two workers using Exec/AgentSession/FlowSession evidence. Retain the divergent-copy,
+obsolete-executable and PTY cases, archive retry/history, all acceptance cases 1–15
+and the pending relationship-repair decision. `git diff --check` passes; existing
+formatting/Clippy receipts remain dated evidence. No executable edit, installed-Home
+access, host promotion, PR publication, Task disposition or Flow navigation occurred
+in this review. The saved decision step owns the response to these findings.
+
 ### This slice — LOO-298 stack integration, 2026-09-30 (blocked)
 
 Jack Heart's authorized local rebase is complete onto remote

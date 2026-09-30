@@ -123,14 +123,13 @@ pub(super) fn execute(
     let mut command = Command::new(&context.lf_bin);
     command.current_dir(cwd).args(args).stderr(Stdio::inherit());
     // A different data copy cannot inherit Run, worker, account or switch authority.
-    // Task origin is only a restriction and must survive the move.
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LF_") {
             command.env_remove(name);
         }
     }
-    if crate::run_record::task_origin() {
-        command.env("LF_TASK_ORIGIN", "1");
+    if let Some(declaration) = std::env::var_os(crate::lf::WORK_DECLARATION_ENV) {
+        command.env(crate::lf::WORK_DECLARATION_ENV, declaration);
     }
     for name in ["LF_HOME", "LF_CONTROL_HOME"] {
         command.env(name, &context.lf_home);
@@ -226,7 +225,6 @@ mod tests {
                 assert!(std::env::var_os("LF_WORK_ADVANCE_CLAIM").is_none());
                 assert!(std::env::var_os("LF_RUN_ID").is_none());
                 assert!(std::env::var_os("LF_ACCOUNT_LEASE").is_none());
-                assert!(crate::run_record::task_origin());
                 let conn = Connection::open(db).unwrap();
                 let drafts: i64 = conn
                     .query_row(

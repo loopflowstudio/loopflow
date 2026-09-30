@@ -25,6 +25,7 @@ impl Fixture {
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), bin.join("lf")).unwrap();
         let launched = home.path().join("launched");
         let provider = bin.join("opencode");
         std::fs::write(
@@ -870,23 +871,22 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
-fn continuing_provider_children_inherit_the_bound_session_without_rewriting_history() {
+fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let fixture = Fixture::new(false);
+    let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-binding",
         &fixture.repo.head_sha(),
     );
-    let untouched_path = fixture.repo.create_named_worktree("untouched");
-    let untouched = support::register_sibling_task(&task, "INF-124", "untouched", &untouched_path);
-    let output = fixture.run(&LAUNCH);
-    assert!(output.status.success(), "{output:?}");
+    let sibling_path = fixture.repo.create_named_worktree("sibling-task");
+    let sibling = support::register_sibling_task(&task, "INF-124", "sibling-task", &sibling_path);
+    assert!(fixture.run(&LAUNCH).status.success());
     let original = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&original);
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-    // This is synthetic provider provenance over real CLI admission, not a live engine.
     let origin: String = fixture
         .db()
         .query_row(
@@ -896,165 +896,84 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
         )
         .unwrap();
     let origin = loopflow::id::ExecId::parse(&origin).unwrap();
-    let driver = match store.session_driver(&session).unwrap() {
-        Some(driver) => driver,
-        None => store
+    let driver = store.session_driver(&session).unwrap().unwrap_or_else(|| {
+        store
             .claim_session_driver(&session, None, &origin, true)
-            .unwrap(),
-    };
+            .unwrap()
+    });
     let caller = serde_json::to_string(&driver.caller(session.clone())).unwrap();
-    fixture
-        .db()
-        .execute(
-            "UPDATE tasks SET work_state='done',work_terminal_at=1 WHERE id=?1",
-            [task.task.id.as_str()],
-        )
-        .unwrap();
-    let preview = fixture.json(&[
-        "session",
-        "bind",
-        &session,
-        "--task",
-        "INF-123",
-        "--dry-run",
-        "--json",
-    ]);
-    assert_eq!(preview["task_id"], task.task.id.as_str());
-    assert_eq!(
-        fixture
-            .db()
-            .query_row(
-                "SELECT work_state FROM tasks WHERE id=?1",
-                [task.task.id.as_str()],
-                |row| row.get::<_, String>(0)
-            )
-            .unwrap(),
-        "done"
-    );
-    fixture.json(&[
-        "session",
-        "bind",
-        &session,
-        "--task",
-        preview["task_id"].as_str().unwrap(),
-        "--json",
-    ]);
-    let started: i64 = fixture
-        .db()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [task.task.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let observation = fixture
-        .command(&["session", "list", "--task", "INF-124", "--json"])
-        .env("LF_AGENT_CALLER", &caller)
-        .output()
-        .unwrap();
-    assert!(observation.status.success(), "{observation:?}");
-    let untouched_start: Option<i64> = fixture
-        .db()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [untouched.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(untouched_start, None);
-
-    let child = fixture
-        .command(&LAUNCH)
-        .env("LF_AGENT_CALLER", &caller)
-        .output()
-        .unwrap();
-    assert!(child.status.success(), "{child:?}");
-    let child_run = fixture.launches().last().unwrap().clone();
-    let expected = (
-        Some(task.task.id.to_string()),
-        Some(task.task.wave_id.to_string()),
-        Some("inherited".to_string()),
-    );
-    assert_eq!(fixture.run_parents(&child_run), expected);
+    fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
+    // Synthetic provider provenance crosses real public CLI admission. The
+    // same causal parent may issue taskless, checkout-bound or explicitly selected work.
+    for (cwd, args, expected, source, declaration) in [
+        (fixture.repo.path(), LAUNCH.to_vec(), None, None, false),
+        (
+            fixture.repo.path(),
+            LAUNCH.to_vec(),
+            Some(task.task.id.to_string()),
+            Some("declared"),
+            true,
+        ),
+        (
+            task_path.as_path(),
+            LAUNCH.to_vec(),
+            Some(task.task.id.to_string()),
+            Some("checkout"),
+            true,
+        ),
+        (
+            sibling_path.as_path(),
+            LAUNCH.to_vec(),
+            Some(sibling.id.to_string()),
+            Some("checkout"),
+            true,
+        ),
+        (
+            fixture.repo.path(),
+            BOUND_LAUNCH.to_vec(),
+            Some(task.task.id.to_string()),
+            Some("declared"),
+            true,
+        ),
+    ] {
+        let mut command = fixture.command(&args);
+        if declaration {
+            command.env("LF_AS", format!("task:{}", task.task.id));
+        }
+        let output = command
+            .current_dir(cwd)
+            .env("LF_AGENT_CALLER", &caller)
+            .env("LF_TASK_ORIGIN", "1")
+            .env("LF_WORK_ADVANCE_CLAIM", "obsolete identity")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let capture = fixture.launches().last().unwrap().clone();
+        let work = fixture.run_parents(&capture);
+        assert_eq!(work.0, expected);
+        assert_eq!(work.2.as_deref(), source);
+        let parent: String = fixture.db().query_row("SELECT parent_exec_id FROM execs WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+        assert_eq!(parent, origin.as_str());
+    }
+    // Asking outside the Task retains causal input but does not inherit its Task.
     let mut asking = fixture
-        .ask(&original, "Keep the existing target?")
+        .ask(&original, "Which target?")
         .env("LF_AGENT_CALLER", &caller)
         .spawn()
         .unwrap();
-    let (ask, ask_run) = fixture.wait_for_ask(&mut asking);
-    assert_eq!(fixture.run_parents(&ask_run), expected);
-    wait_for("Ask launcher", || {
-        fixture
-            .launcher_requests()
-            .contains("serve-ask")
-            .then_some(())
-    });
+    let (ask, input) = fixture.wait_for_ask(&mut asking);
+    assert_eq!(fixture.run_parents(&input), (None, None, None));
     store
-        .ready_session(&ask, store.captured_sequence(&ask_run).unwrap(), "Keep it")
-        .unwrap();
-    let complete = fixture.run(&["session", "complete", &ask]);
-    assert!(complete.status.success(), "{complete:?}");
-    let answer = asking.wait_with_output().unwrap();
-    assert!(answer.status.success(), "{answer:?}");
-    assert!(String::from_utf8_lossy(&answer.stdout).contains("Keep it"));
-    // This child inherited its ancestry during admission, after the immutable
-    // manifest was authored. Preserve that source when it becomes a prior input.
-    let child_input = str::parse::<String>(&child_run).unwrap();
-    let manifest: Value = serde_json::from_slice(
-        &std::fs::read(fixture.run_dir(&child_run).join("manifest.json")).unwrap(),
-    )
-    .unwrap();
-    assert!(manifest["subjects"].as_array().unwrap().is_empty());
-    let mut next = store.session_for_artifact(&child_input).unwrap().unwrap();
-    for replaced in [false, true] {
-        if replaced {
-            next.artifact_key = uuid::Uuid::new_v4().simple().to_string();
-            next.input_published = false;
-            next = store.replace_session_input(next.captured, next).unwrap();
-            assert_eq!(
-                next.work_source,
-                Some(loopflow::session::WorkSource::Inherited)
-            );
-        }
-        for command in ["runs", "usage"] {
-            for filtered in [false, true] {
-                let mut args = vec![command, "--json"];
-                if filtered {
-                    args.extend(["--task", "INF-123"]);
-                }
-                let rows = fixture.json(&args);
-                let row = rows
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|row| row["artifact_key"] == child_run)
-                    .unwrap();
-                assert_eq!(row["task_identifier"], "INF-123", "{row}");
-                assert_eq!(row["work_source"], "inherited", "{row}");
-                if !filtered {
-                    let original = rows
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .find(|row| row["artifact_key"] == original)
-                        .unwrap();
-                    assert_eq!(original["task_id"], Value::Null);
-                    assert_eq!(original["wave_id"], Value::Null);
-                }
-            }
-        }
-    }
-    assert_eq!(fixture.run_parents(&original), (None, None, None));
-    let retained: (i64, String, i64) = fixture
-        .db()
-        .query_row(
-            "SELECT started_at,work_state,work_terminal_at FROM tasks WHERE id=?1",
-            [task.task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        .ready_session(
+            &ask,
+            store.captured_sequence(&input).unwrap(),
+            "Keep this checkout",
         )
         .unwrap();
-    assert_eq!(retained, (started, "done".to_string(), 1));
-    // A delayed tool from the replaced provider cannot borrow the continuing Session's assignment.
+    assert!(fixture.run(&["session", "complete", &ask]).status.success());
+    assert!(asking.wait_with_output().unwrap().status.success());
+    assert_eq!(fixture.run_parents(&original), (None, None, None));
+    // A stale provider keeps its original causal parent and grants no Work.
     store
         .claim_session_driver(&session, Some(&driver), &origin, true)
         .unwrap();
@@ -1064,8 +983,167 @@ fn continuing_provider_children_inherit_the_bound_session_without_rewriting_hist
         .env("LF_AGENT_CALLER", &caller)
         .output()
         .unwrap();
-    assert!(!stale.status.success(), "{stale:?}");
-    assert_eq!(fixture.launches().len(), before);
+    assert!(stale.status.success(), "{stale:?}");
+    assert_eq!(fixture.launches().len(), before + 1);
+    assert_eq!(
+        fixture.run_parents(fixture.launches().last().unwrap()),
+        (None, None, None)
+    );
+}
+
+#[test]
+fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
+    let fixture = Fixture::new(false);
+    let x = fixture.repo.create_named_worktree("task-x");
+    let task =
+        support::register_unrun_task(fixture.home.path(), &x, "task-x", &fixture.repo.head_sha());
+    let y = fixture.repo.create_named_worktree("task-y");
+    let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
+    std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
+        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
+    })).unwrap()).unwrap();
+    let output = fixture.run(&[
+        "--as",
+        "task:INF-123",
+        "--tui",
+        "--model",
+        "opencode",
+        ":",
+        "Call a tool in Y",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let result: Value = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("tool-result.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["code"], 0, "{result}");
+    let captures = fixture.launches();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(
+        fixture.run_parents(&captures[0]).0,
+        Some(task.task.id.to_string())
+    );
+    assert_eq!(
+        fixture.run_parents(&captures[1]).0,
+        Some(sibling.id.to_string())
+    );
+    let (caller, ..) = fixture.session_row(&captures[0]);
+    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_exec_id,s.provider_exec_id FROM execs c JOIN agent_sessions s ON s.id=c.caller_session_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(parent.0, parent.1);
+    for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
+        .unwrap()
+        .lines()
+    {
+        let env: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(env["as"], format!("task:{}", task.task.id));
+    }
+}
+
+#[test]
+#[ignore = "requires disposable Linux account with no installed Loopflow"]
+fn declared_agent_can_start_another_tasks_flow() {
+    assert!(Path::new("/.dockerenv").is_file());
+    assert!(!loopflow::machine_install::root().unwrap().exists());
+    let fixture = Fixture::new(false);
+    let y = fixture.repo.create_named_worktree("task-y");
+    let target =
+        support::register_unrun_task(fixture.home.path(), &y, "task-y", &fixture.repo.head_sha());
+    let x = fixture.repo.create_named_worktree("task-x");
+    let caller = support::register_sibling_task(&target, "INF-124", "task-x", &x);
+    std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
+    std::fs::write(
+        y.join(".lf/flows/switch-proof.yaml"),
+        "- op: rebase --plan\n",
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap();
+    let flow = store
+        .start_task_flow(
+            &target.task.id,
+            &loopflow::durable::FlowSession {
+                parent_id: None,
+                invocation: loopflow::engine::invocation::QueuedInvocation::load(
+                    &y,
+                    "switch-proof",
+                )
+                .unwrap(),
+                cursor: Default::default(),
+                version: 0,
+                task_id: Some(target.task.id.clone()),
+                wave_id: Some(target.task.wave_id.clone()),
+                cwd: y.clone(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        )
+        .unwrap();
+    let bin = fixture.home.path().join("bin");
+    // A local process stands in for tmux; the actual Task driver and op execute.
+    std::fs::write(bin.join("tmux"), format!(
+        "#!/bin/sh\ncase \"$1\" in new-session) cd \"$6\"; shift 8; /bin/sh -c \"$1\" >'{}' 2>&1 & ;; has-session) exit 1 ;; esac\n",
+        fixture.home.path().join("worker.log").display())).unwrap();
+    std::fs::remove_file(bin.join("lf")).unwrap();
+    std::fs::write(
+        bin.join("lf"),
+        format!(
+            "#!/bin/sh\nprintf '%s' \"$LF_AS\" >'{}'\nexec '{}' \"$@\"\n",
+            fixture.home.path().join("step-declaration").display(),
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(bin.join("lf"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        fixture.home.path().join("tool-command.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "--json"], "cwd": x,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let output = fixture.run(&[
+        "--as",
+        "task:INF-124",
+        "--tui",
+        "--model",
+        "opencode",
+        ":",
+        "Start Y",
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    let result: Value = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("tool-result.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["code"], 0, "{result}");
+    wait_for("Y Flow completion", || {
+        let current = store.flow(flow.id()).unwrap().unwrap();
+        assert!(
+            current.failure.is_none(),
+            "{:?}; {}",
+            current.failure,
+            std::fs::read_to_string(fixture.home.path().join("worker.log")).unwrap_or_default()
+        );
+        current.finished.then_some(())
+    });
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
+        format!("task:{}", target.task.id)
+    );
+    let observed: (String,String) = fixture.db().query_row("SELECT f.task_id,s.task_id FROM flow_events h JOIN flow_sessions f ON f.id=h.flow_id JOIN execs child ON child.id=h.exec_id JOIN execs worker ON worker.id=child.parent_exec_id JOIN execs command ON command.id=worker.parent_exec_id JOIN agent_sessions s ON s.id=command.caller_session_id WHERE f.id=?1 AND h.kind='operation_started'", [flow.id()], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(
+        observed,
+        (target.task.id.to_string(), caller.id.to_string())
+    );
 }
 
 fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
@@ -1098,6 +1176,7 @@ fn ask_session_is_rows_from_request_to_answer() {
         "task-binding",
         &fixture.repo.head_sha(),
     );
+    fixture.repo.create_branch("task-binding");
     let (caller, caller_run) = fixture.attach(&BOUND_LAUNCH);
 
     let mut asking = fixture
@@ -1121,7 +1200,7 @@ fn ask_session_is_rows_from_request_to_answer() {
     let inherited = (
         Some(task.task.id.to_string()),
         Some(task.task.wave_id.to_string()),
-        Some("inherited".to_string()),
+        Some("checkout".to_string()),
     );
     assert_eq!(fixture.run_parents(&first_run), inherited);
     let ask_run = |run_id: &str| -> (Option<String>, Option<String>, String) {
@@ -1870,7 +1949,7 @@ fn import_retains_replaced_inputs_without_rebinding_their_history() {
             serde_json::to_vec(&manifest).unwrap(),
         )
         .unwrap();
-        std::fs::write(dir.join("terminal.json"), serde_json::to_vec(&json!({
+        std::fs::write(dir.join("terminal.json"), serde_json::to_vec(&serde_json::json!({
             "schema_version":1,"outcome":outcome,"ended_at":(at+chrono::Duration::minutes(5)).to_rfc3339(),"result_ref":null
         })).unwrap()).unwrap();
         let measurement = json!({"schema_version":1,"seq":1,"observed_at":at.to_rfc3339(),
@@ -2012,7 +2091,7 @@ fn imported_final_and_events_survive_artifact_removal() {
     let at = "2026-09-29T00:00:00Z";
     std::fs::write(
         dir.join("manifest.json"),
-        serde_json::to_vec(&json!({
+        serde_json::to_vec(&serde_json::json!({
             "schema_version":1,"run_id":input,"parent_run_id":null,"created_at":at,
             "harness":"opencode","model":null,"surface":"headless",
             "cwd":fixture.repo.path(),"repo":fixture.repo.path(),"worktree":fixture.repo.path(),
@@ -2335,7 +2414,7 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
                 dir.join("manifest.json"),
-                serde_json::to_vec(&json!({
+                serde_json::to_vec(&serde_json::json!({
                     "schema_version": 1, "run_id": input, "parent_run_id": null,
                     "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
                     "surface": "tui", "cwd": fixture.repo.path(), "repo": fixture.repo.path(),
@@ -2376,7 +2455,7 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("manifest.json"),
-        serde_json::to_vec(&json!({
+        serde_json::to_vec(&serde_json::json!({
             "schema_version": 1, "run_id": autonomous_input, "parent_run_id": null,
             "created_at": "2026-09-20T20:00:00Z", "harness": "opencode", "model": null,
             "surface": "headless", "cwd": fixture.repo.path(), "repo": fixture.repo.path(),
@@ -2417,7 +2496,7 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
             .join(&id)
             .join("position.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, serde_json::to_vec(&json!({
+        std::fs::write(path, serde_json::to_vec(&serde_json::json!({
             "id": id, "flow": "design", "cwd": fixture.repo.path(), "steps": steps,
             "cursor": ExecutionCursor { index, ..Default::default() },
             "message": null, "model": "opencode", "wave": null, "task": null, "as_work": null,
@@ -3255,9 +3334,10 @@ fn import_stores_each_old_session_once_with_its_name() {
 #[test]
 fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let fixture = Fixture::new(false);
+    let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-binding",
         &fixture.repo.head_sha(),
     );
@@ -3310,9 +3390,14 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         (None, Some(fixture.session_row(&of_wave).0), None)
     );
 
-    // A headless Run that names a Task, and a child agent it launches. The
-    // child names no Work and takes its caller's.
-    let of_task = launch(&mut headless(&["--task", "INF-123"]));
+    // A Task conversation and a child agent it launches. The
+    // child carries the explicit --as declaration, independently of its parent.
+    let of_task = launch(&mut headless(&[
+        "--task",
+        "INF-123",
+        "--__cwd",
+        fixture.repo.path().to_str().unwrap(),
+    ]));
     assert_eq!(
         fixture.run_parents(&of_task),
         (
@@ -3330,7 +3415,9 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         .unwrap()
         .caller(parent_session);
     let child = launch(
-        headless(&[])
+        fixture
+            .command(&HEADLESS)
+            .env("LF_AS", format!("task:{task_id}"))
             .env("LF_AGENT_CALLER", serde_json::to_string(&caller).unwrap())
             .env("LF_RUN_ID", &of_task)
             .env("LF_RUN_DIR", fixture.run_dir(&of_task)),
@@ -3340,7 +3427,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
         (
             Some(task_id.clone()),
             Some(wave_id.clone()),
-            Some("inherited".to_string())
+            Some("declared".to_string())
         )
     );
     assert_eq!(
@@ -3561,9 +3648,10 @@ fn invocation_inputs(fixture: &Fixture, invocation: &str) -> Vec<AttemptRow> {
 fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
+    let task_path = fixture.repo.create_named_worktree("task-row-flow");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-row-flow",
         &fixture.repo.head_sha(),
     );
@@ -3572,6 +3660,8 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let blocked = fixture.run(&[
         "--task",
         "INF-123",
+        "--__cwd",
+        fixture.repo.path().to_str().unwrap(),
         "--model",
         "opencode",
         "flow",
@@ -3603,7 +3693,7 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
     let failure = failure.unwrap();
     assert!(
         failure.contains("work-proof: opencode_error: fixture failure"),
-        "{failure}"
+        "{failure}; {stderr}"
     );
     assert_eq!(pointer, None, "a Flow about the Task is not its Flow");
     let failed = invocation_inputs(&fixture, &invocation);
@@ -3632,7 +3722,11 @@ fn a_task_flow_runs_on_its_row_through_failure_retry_and_review() {
         "--json",
     ]);
 
-    let waiting = fixture.run(&["flow", "resume", &invocation, "--retry"]);
+    let waiting = fixture
+        .command(&["flow", "resume", &invocation, "--retry"])
+        .env("LF_AS", format!("task:{task_id}"))
+        .output()
+        .unwrap();
     assert!(
         String::from_utf8_lossy(&waiting.stderr).contains("waiting for human input"),
         "{waiting:?}"

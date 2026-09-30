@@ -1234,17 +1234,6 @@ pub(super) fn reserve_session_in(
     mut session: AgentSession,
     caller: Option<&crate::id::ExecId>,
 ) -> StoreResult<AgentSession> {
-    if session.flow_session_id.is_none()
-        && (session.work_source.is_none() || session.work_source == Some(WorkSource::Inherited))
-    {
-        if let Some(caller) = caller {
-            if let Some(work) = super::execs::agent_work_in(conn, caller)? {
-                session.task_id = work.task_id;
-                session.wave_id = work.wave_id;
-                session.work_source = Some(work.source);
-            }
-        }
-    }
     if let Some(id) = &session.flow_session_id {
         let flow = super::flows::flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
         if session.task_id.is_some() && session.task_id != flow.task_id {

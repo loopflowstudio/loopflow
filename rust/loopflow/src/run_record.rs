@@ -37,41 +37,7 @@ pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::
 }
 
 pub const RUN_DIR_ENV: &str = "LF_RUN_DIR";
-pub const PARENT_RUN_ID_ENV: &str = "LF_PARENT_RUN_ID";
 pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
-/// A restriction inherited across Home changes, never execution authority.
-pub(crate) const TASK_ORIGIN_ENV: &str = "LF_TASK_ORIGIN";
-
-pub(crate) fn task_origin() -> bool {
-    if std::env::var_os(TASK_ORIGIN_ENV).is_some()
-        || std::env::var_os(crate::durable::TASK_WORKER_CLAIM_ENV).is_some()
-    {
-        return true;
-    }
-    let Some(run_id) = std::env::var_os(RUN_ID_ENV) else {
-        return false;
-    };
-    let manifest = std::env::var_os(RUN_DIR_ENV)
-        .map(PathBuf::from)
-        .and_then(|dir| read_manifest(&dir).ok());
-    // An unreadable or mismatched inherited Run cannot establish permission
-    // to change the machine installation. Ordinary commands still work.
-    let Some(manifest) = manifest.filter(|manifest| manifest.run_id.as_str() == run_id) else {
-        return true;
-    };
-    manifest
-        .subjects
-        .iter()
-        .any(|subject| subject.selector.starts_with("task:"))
-        || matches!(manifest.flow, Some(RunFlowMembership::Step(step)) if step.task_id.is_some())
-}
-
-pub(crate) fn preserve_task_origin() {
-    if task_origin() {
-        std::env::set_var(TASK_ORIGIN_ENV, "1");
-    }
-}
-
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
@@ -2347,8 +2313,8 @@ impl CaptureHandle {
             (RUN_ID_ENV.to_string(), capture.manifest.run_id.to_string()),
             (RUN_DIR_ENV.to_string(), capture.dir.display().to_string()),
         ]);
-        if let Some(parent_run_id) = &capture.manifest.parent_run_id {
-            environment.insert(PARENT_RUN_ID_ENV.to_string(), parent_run_id.to_string());
+        if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
+            environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
         if let Some((session, driver)) = &capture.driver {
             environment.insert(
@@ -3250,35 +3216,6 @@ mod tests {
             flow: crate::run_record::RunFlowMembership::Independent,
             work: None,
         }
-    }
-
-    #[test]
-    fn task_installation_restriction_survives_removing_run_authority() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let home = tempfile::tempdir().unwrap();
-        assert!(!super::task_origin());
-        for bound in [false, true] {
-            let mut request = spec(home.path());
-            if bound {
-                request.subjects.push(SubjectAttribution::declared(format!(
-                    "task:{}",
-                    crate::durable::TaskId::new()
-                )));
-            }
-            let run = CaptureHandle::prepare_at(home.path(), request, None).unwrap();
-            let dir = super::record_dir(home.path(), &run).unwrap();
-            std::env::set_var(super::RUN_ID_ENV, run.as_str());
-            std::env::set_var(super::RUN_DIR_ENV, dir);
-            assert_eq!(super::task_origin(), bound);
-            super::preserve_task_origin();
-            std::env::remove_var(super::RUN_ID_ENV);
-            std::env::remove_var(super::RUN_DIR_ENV);
-            assert_eq!(super::task_origin(), bound);
-        }
-        std::env::remove_var(super::TASK_ORIGIN_ENV);
-        std::env::set_var(super::RUN_ID_ENV, "run_missing");
-        assert!(super::task_origin());
     }
 
     #[test]

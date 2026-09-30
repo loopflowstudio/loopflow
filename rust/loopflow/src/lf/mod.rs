@@ -1,5 +1,8 @@
 /// Prompt flags forwarded to a managed Task's ordinary skill commands.
 #[doc(hidden)]
+/// Explicit Work declaration inherited by descendants; checkout inference never writes it.
+pub const WORK_DECLARATION_ENV: &str = "LF_AS";
+
 pub const TASK_SKILL_OPTIONS_ENV: &str = "LF_TASK_SKILL_OPTIONS";
 
 use std::path::PathBuf;
@@ -136,7 +139,7 @@ pub struct Cli {
 
 impl Cli {
     /// Forward prompt and provider options to a captured step. Work and the
-    /// definition come from its Flow row, not another launch-time lookup.
+    /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
         let mut args = vec!["--batch".to_string()];

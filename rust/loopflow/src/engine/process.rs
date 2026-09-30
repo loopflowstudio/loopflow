@@ -302,11 +302,15 @@ async fn start_session_with_context(
     env: &[(&str, &str)],
     context: crate::child::ChildExecutionContext,
 ) -> Result<()> {
-    let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
-        .into_iter()
-        .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
-        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-        .collect::<Vec<_>>();
+    let inherited_context = [
+        "LF_TRACE_ID",
+        "LF_PROCESS_ID",
+        crate::lf::WORK_DECLARATION_ENV,
+    ]
+    .into_iter()
+    .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
+    .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+    .collect::<Vec<_>>();
     let mut child_env = env
         .iter()
         .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
@@ -330,14 +334,6 @@ fn extend_session_control_context(
     context: &crate::child::ChildExecutionContext,
     provenance: crate::build_info::BuildProvenance,
 ) {
-    // A detached Session starts in the tmux server's environment, not ours.
-    if crate::run_record::task_origin()
-        && !child_env
-            .iter()
-            .any(|(key, _)| key == crate::run_record::TASK_ORIGIN_ENV)
-    {
-        child_env.push((crate::run_record::TASK_ORIGIN_ENV.to_string(), "1".into()));
-    }
     let pinned = [
         (
             crate::store::CONTROL_BIN_ENV,
@@ -387,7 +383,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_FLOW_STEP LF_HUMAN_SESSION LF_HUMAN_SESSION_RUN_BIND LF_RUN_DIR LF_RUN_CONTEXT LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_TASK_ORIGIN LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_AS LF_FLOW_STEP LF_HUMAN_SESSION LF_HUMAN_SESSION_RUN_BIND LF_RUN_DIR LF_RUN_CONTEXT LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_TASK_ORIGIN LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -604,56 +600,6 @@ mod tests {
         assert!(command.contains("LF_WAVE_ID LF_RUN_ID"));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
-    }
-
-    #[test]
-    fn detached_session_restriction_follows_caller_not_tmux_server() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let context = ChildExecutionContext {
-            lf_bin: PathBuf::from("/branch/lf"),
-            lf_home: PathBuf::from("/branch/home"),
-            db_path: PathBuf::from("/branch/home/loopflow.db"),
-        };
-        for restricted in [true, false] {
-            if restricted {
-                std::env::set_var(crate::run_record::TASK_ORIGIN_ENV, "1");
-            } else {
-                std::env::remove_var(crate::run_record::TASK_ORIGIN_ENV);
-            }
-            let mut environment = Vec::new();
-            extend_session_control_context(
-                &mut environment,
-                &context,
-                BuildProvenance::Development,
-            );
-            let environment = environment
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect::<Vec<_>>();
-            let argv = vec![
-                "/bin/sh".into(),
-                "-c".into(),
-                "printf '%s' \"${LF_TASK_ORIGIN-unset}\"".into(),
-            ];
-            let output = std::process::Command::new("/bin/sh")
-                .args(["-c", &lf_session_shell_command(&argv, &environment)])
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                // Simulate a pre-existing server with the opposite origin.
-                .envs((!restricted).then_some((crate::run_record::TASK_ORIGIN_ENV, "1")))
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            assert_eq!(
-                output.stdout,
-                if restricted {
-                    b"1".as_slice()
-                } else {
-                    b"unset".as_slice()
-                }
-            );
-        }
     }
 
     #[test]

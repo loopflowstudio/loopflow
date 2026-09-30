@@ -338,7 +338,7 @@ pub(crate) async fn flow_unblock(
         .context("blocked conversation is missing")?;
     let id = keyed_ask_id(&flow_unblock_key(flow)?)?;
     let ask = launch_keyed_ask(store, id.clone(), |id| async move {
-        let binding = crate::ops::resolve_checkout_binding(store, &flow.cwd).await?;
+        let binding = crate::ops::resolve_execution_binding(store, &flow.cwd).await?;
         let mut session = caller;
         session.captured = None;
         session.id = id;
@@ -354,7 +354,7 @@ pub(crate) async fn flow_unblock(
             _ => None,
         });
         session.wave_id = binding.as_ref().map(|binding| binding.wave_id.clone());
-        session.work_source = binding.as_ref().map(|_| WorkSource::Checkout);
+        session.work_source = binding.as_ref().map(|binding| binding.source);
         session.flow_session_id = None;
         session.bound_at = None;
         session.kind = crate::session::SessionKind::Ask;
@@ -522,7 +522,7 @@ fn report_ask_wait(id: &str) {
 }
 
 /// Store an Ask's Session with its first Run prepared. Work and the caller
-/// come from the asking Run; its invocation never does.
+/// come from its checkout and asking input respectively; its invocation never does.
 async fn reserve_ask(
     store: &SharedStore,
     id: String,
@@ -538,19 +538,12 @@ async fn reserve_ask(
     if let Some(skill) = skill {
         crate::engine::load_skill(skill, &cwd).context("load Ask skill")?;
     }
-    let current_work = match crate::journal::current_exec_id() {
-        Some(exec) => store.agent_work(&exec).await?,
-        None => None,
-    };
-    // A continuing provider inherits its Session's present assignment. Old
-    // launch evidence alone still describes only its historical assignment.
-    let (task_id, wave_id) = match current_work {
-        Some(work) => (work.task_id, work.wave_id),
-        None => match store.session_for_artifact(&caller.run_id).await? {
-            Some(run) => (run.task_id, run.wave_id),
-            None => (None, None),
-        },
-    };
+    let binding = crate::ops::resolve_execution_binding(store, &cwd).await?;
+    let task_id = binding.as_ref().and_then(|binding| match &binding.work {
+        crate::durable::WorkRef::Task(id) => Some(id.clone()),
+        _ => None,
+    });
+    let wave_id = binding.as_ref().map(|binding| binding.wave_id.clone());
     if let Some(task_id) = &task_id {
         let task = store
             .get_task(task_id)
@@ -579,7 +572,7 @@ async fn reserve_ask(
         model: caller.model,
         node: None,
         iterations: None,
-        work_source: wave_id.as_ref().map(|_| WorkSource::Inherited),
+        work_source: binding.as_ref().map(|binding| binding.source),
         task_id,
         wave_id,
         flow_session_id: None,

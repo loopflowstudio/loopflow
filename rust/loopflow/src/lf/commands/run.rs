@@ -26,20 +26,13 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     if let Some(flow) = saved_flow(cli)? {
         return run_flow_skill(flow, skill, cli);
     }
-    if let Some(binding) = checkout_binding(cli)? {
+    if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.launch_options();
         bound.wave = Some(binding.wave_name.clone());
         if bound.model.is_none() {
             bound.model = binding.agent.clone();
         }
-        return launch_bound(
-            skill,
-            message,
-            &bound,
-            &binding,
-            crate::session::WorkSource::Checkout,
-        )
-        .map(|_| ());
+        return launch_bound(skill, message, &bound, &binding, binding.source).map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -89,6 +82,15 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
     let store =
         crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let binding = implicit_binding(cli)?;
+    let task = binding.as_ref().and_then(|binding| match &binding.work {
+        crate::durable::WorkRef::Task(id) => Some(id.clone()),
+        _ => None,
+    });
+    anyhow::ensure!(
+        task == flow.task_id,
+        "Flow Task and current checkout disagree; restore the Flow checkout before resuming"
+    );
     let flow = store.reserve_attempt(flow.id(), flow.version, claim.as_ref(), Some(&exec))?;
     let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
         .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
@@ -98,7 +100,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
     );
     let mut launch = cli.launch_options();
     launch.batch = true;
-    launch.task = flow.task_id.as_ref().map(ToString::to_string);
+    launch.task = task.as_ref().map(ToString::to_string);
     launch.wave = flow
         .wave_id
         .as_ref()
@@ -153,7 +155,14 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         Some(skill.skill.clone()),
     )?;
     built.subjects = launch.work_subject_selector().into_iter().collect();
-    built.work = flow.declared_work();
+    built.work = binding
+        .as_ref()
+        .map(|binding| crate::session::RunWork {
+            task_id: task,
+            wave_id: Some(binding.wave_id.clone()),
+            source: binding.source,
+        })
+        .or_else(|| flow.declared_work().filter(|work| work.task_id.is_none()));
     built.claim = claim;
     print_context_header(&built, &launch);
     launch_prompt(&built, &launch).map(|_| ())
@@ -233,22 +242,20 @@ fn launch_bound(
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
-/// the caller selected Work explicitly (Jack, 2026-09-26). No registry, an
-/// unreadable one, a checkout outside git or an unregistered branch all leave
-/// the launch unbound; nothing here refuses a launch that worked before.
-pub(crate) fn checkout_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+/// the caller selected Work explicitly. Otherwise checkout ownership wins over
+/// an ancestor's explicit declaration. An unavailable registry leaves context
+/// unresolved; it never reconstructs Task identity from process ancestry.
+pub(crate) fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
     if cli.work_subject_selector().is_some() {
         return Ok(None);
     }
-    let Some(repo) = crate::repo::discover_repo_root(&std::env::current_dir()?)? else {
-        return Ok(None);
-    };
+    let repo = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok(None);
         };
-        crate::ops::resolve_checkout_binding(&std::sync::Arc::new(store), &repo)
+        crate::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)
             .await
             .map_err(anyhow::Error::from)
     })
@@ -369,7 +376,13 @@ fn build_prompt_at(
 ) -> Result<PromptBuild> {
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
-    let confine = confine_checkout_agent(task_input.is_some(), is_interactive);
+    let task_checkout = match &task_input {
+        Some((_, seed)) => {
+            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
+        }
+        None => false,
+    };
+    let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input
         .as_ref()
         .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
@@ -1395,7 +1408,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_PARENT_RUN_ID",
             crate::store::CONTROL_HOME_ENV,
             crate::store::CONTROL_DB_PATH_ENV,
         ];
@@ -1421,7 +1434,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             home.path().join("stale-run"),
         );
         std::env::set_var(
-            crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_PARENT_RUN_ID",
             crate::run_record::new_artifact_key().as_str(),
         );
         std::env::remove_var(crate::store::CONTROL_HOME_ENV);
@@ -1618,7 +1631,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_PARENT_RUN_ID",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             "LF_WAVE_ID",

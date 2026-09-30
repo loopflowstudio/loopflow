@@ -1,5 +1,7 @@
 //! Public commands must acquire only the repository context they actually use.
 
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -75,26 +77,46 @@ fn explicit_branch_data_overrides_inherited_observation_and_run_context() {
 }
 
 #[test]
-fn task_origin_prevents_promotion_but_allows_read_only_candidate_preflight() {
+fn installation_restriction_uses_checkout_or_explicit_declaration() {
     let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    repo.create_branch("install-task");
+    let task = support::register_unrun_task(
+        &home.path().join(".lf"),
+        repo.path(),
+        "install-task",
+        &repo.head_sha(),
+    );
     let store_path = home.path().join(".lf/loopflow.db");
-    SqliteStore::new(&store_path).unwrap();
+    for (cwd, declaration, restricted) in [
+        (repo.path(), None, true),
+        (home.path(), Some(format!("task:{}", task.task.id)), true),
+        (home.path(), None, false),
+    ] {
+        let mut cmd = command(
+            home.path(),
+            cwd,
+            &["install", "promote", "--cli-target", "/unused/lf"],
+        );
+        cmd.env("LF_TASK_ORIGIN", "1")
+            .env("LF_WORK_ADVANCE_CLAIM", "obsolete")
+            .env("LF_INSTALL_PROMOTE_HOP", "6");
+        if let Some(value) = declaration {
+            cmd.env("LF_AS", value);
+        }
+        let output = cmd.output().unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        let expected = if restricted {
+            "Task Work cannot change"
+        } else {
+            "did not converge"
+        };
+        assert!(error.contains(expected), "{error}");
+    }
     let output = command(
         home.path(),
-        home.path(),
-        &["install", "promote", "--cli-target", "/unused/lf"],
-    )
-    .env("LF_TASK_ORIGIN", "1")
-    // A broken origin check must still stop before any machine effects.
-    .env("LF_INSTALL_PROMOTE_HOP", "6")
-    .output()
-    .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr)
-        .contains("Task execution cannot change the machine installation"));
-    let output = command(
-        home.path(),
-        home.path(),
+        repo.path(),
         &[
             "install",
             "local-preflight",
@@ -103,7 +125,6 @@ fn task_origin_prevents_promotion_but_allows_read_only_candidate_preflight() {
             "--json",
         ],
     )
-    .env("LF_TASK_ORIGIN", "1")
     .output()
     .unwrap();
     let preview: serde_json::Value = serde_json::from_str(&success(output)).unwrap();

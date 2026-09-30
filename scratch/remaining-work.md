@@ -52,10 +52,15 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
    `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn token and
    `LF_PARENT_RUN_ID`. One owner per attribution fact; derive the rest. Keep the
    lookup that resolves an agent-issued command's parent through Session and
-   provider generation. Jack's September 30 rule removes all inherited Task
-   identity: only explicit `--as` or checkout binding names a Task. Remove
-   `agent_work_in` Task inheritance, `LF_TASK_ORIGIN`, and claim/manifest Task
-   discovery; move affected PR/installation checks to the checkout or selector.
+   provider generation. Jack's final September 30 precedence is explicit `--as`
+   on this command (including Task shortcuts), then checkout ownership, then
+   an ancestor's explicit `--as` through `LF_AS`. The current attribution slice
+   deletes `agent_work_in`, `LF_TASK_ORIGIN`, claim/manifest Task discovery and
+   the `LF_PARENT_RUN_ID` writer; PR/installation checks use the common reader.
+   The public cross-checkout proof passes. The Task-shortcut public proof is
+   authored but blocked by unavailable Docker; two broader fixture regressions
+   remain under repair. Keep the dead per-turn token and Flow membership
+   provenance audit open. See [evidence](evidence.md).
 4. **One naming commit** (Jack). Exec instead of launch or run for one agent
    start under one lf process; Session names for conversation things; "compile"
    for turning a definition into its graph; "parent" only for Exec to Exec, so

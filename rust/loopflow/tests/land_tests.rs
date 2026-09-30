@@ -375,7 +375,7 @@ fn land_preserves_main_on_failure() {
 
     assert!(result.is_err());
     let _ = Command::new("git")
-        .args(["rebase", "--abort"])
+        .args(["merge", "--abort"])
         .current_dir(repo.path())
         .status();
     let _ = Command::new("git")
@@ -476,7 +476,7 @@ fn land_clears_scratch_and_preserves_gitkeep() {
 }
 
 #[test]
-fn final_preparation_only_rewrites_a_single_commit_when_the_base_changes() {
+fn final_preparation_keeps_published_history_when_the_base_changes() {
     for (manual_merge, advance_base) in [(false, false), (true, false), (false, true)] {
         let home = tempfile::TempDir::new().unwrap();
         let repo = TestRepo::new();
@@ -521,6 +521,9 @@ fn final_preparation_only_rewrites_a_single_commit_when_the_base_changes() {
         }
         if advance_base {
             assert_ne!(repo.head_sha(), published_head);
+            assert!(
+                loopflow::engine::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap()
+            );
             assert_eq!(
                 fs::read_to_string(repo.path().join("upstream.txt")).unwrap(),
                 "new upstream work"
@@ -646,7 +649,7 @@ fi
 }
 
 #[test]
-fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
+fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("first.txt", "first");
@@ -689,13 +692,13 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
             next_slug: None,
             worktree: None,
             commit_message: None,
-            pr_title: Some("collapsed change".to_string()),
+            pr_title: Some("merged change".to_string()),
             pr_body: Some("proof".to_string()),
             agent: None,
         },
         &NullProgress,
     )
-    .expect("land collapsed history");
+    .expect("land preserved history");
 
     let output = |args: &[&str]| {
         let result = Command::new("git")
@@ -706,7 +709,9 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
         assert!(result.status.success(), "git {:?} failed", args);
         String::from_utf8_lossy(&result.stdout).trim().to_string()
     };
-    assert_eq!(output(&["rev-list", "--count", "origin/main..HEAD"]), "1");
+    assert!(
+        output(&["log", "--format=%s", "origin/main..HEAD"]).contains("checkpoint: first slice")
+    );
     assert_eq!(
         output(&["rev-parse", "HEAD"]),
         Command::new("git")
@@ -728,15 +733,17 @@ fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
         vec!["refs/heads/feature"],
         "submit/land must push only the verified final head"
     );
-    assert!(
-        !output(&[
-            "for-each-ref",
-            "--format=%(refname)",
-            "refs/loopflow/recovery/"
-        ])
-        .is_empty(),
-        "the pre-collapse head must remain recoverable"
+    // GitHub owns the squash. Exercise that Git operation with the published tree.
+    let final_tree = output(&["rev-parse", "HEAD^{tree}"]);
+    let original_main = output(&["rev-parse", "main"]);
+    output(&["checkout", "main"]);
+    output(&["merge", "--squash", "feature"]);
+    output(&["commit", "-m", "Squash PR"]);
+    assert_eq!(
+        output(&["rev-list", "--count", &format!("{original_main}..HEAD")]),
+        "1"
     );
+    assert_eq!(output(&["rev-parse", "HEAD^{tree}"]), final_tree);
 }
 
 #[test]
@@ -839,8 +846,8 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("expected" ) && message.contains("empty")),
-        "an empty final replay must fail before push: {result:?}"
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no authored changes remain") && message.contains("empty")),
+        "an empty final integration must fail before push: {result:?}"
     );
     assert_eq!(
         Command::new("git")
@@ -859,7 +866,7 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
             && !gh_calls.contains("pr edit")
             && !gh_calls.contains("pr ready")
             && !gh_calls.contains("pr merge"),
-        "GitHub must not be mutated for an empty replay: {gh_calls}"
+        "GitHub must not be mutated for an empty integration: {gh_calls}"
     );
 }
 
@@ -1805,7 +1812,7 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
   export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" rebase --manual >"$LF_TEST_REBASE_LOG" 2>&1 || exit 1
+  "$LF_TEST_BIN" sync --manual >"$LF_TEST_REBASE_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
@@ -1814,7 +1821,7 @@ fi"#;
             if blocked {
                 r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
             } else {
-                r#"{"status":"published","summary":"Rebased the linked worktree; the same head can now merge."}"#
+                r#"{"status":"published","summary":"Synced the linked worktree; the same head can now merge."}"#
             },
             "",
         )
@@ -1856,7 +1863,7 @@ fi"#;
         let database = lf_home.join("loopflow.db");
         initialize_landing_store(&database);
         let repair_proof = repo.path().join(".git/landing-repair-proof");
-        let rebase_log = repo.bare_path().join("repair-rebase.log");
+        let sync_log = repo.bare_path().join("repair-sync.log");
         let repair_launches = repo.bare_path().join("repair-launches.log");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         if flow {
@@ -1891,7 +1898,7 @@ fi"#;
             .env("LF_HOME", &lf_home)
             .env("LF_DB_PATH", &database)
             .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env("LF_TEST_REBASE_LOG", &rebase_log)
+            .env("LF_TEST_REBASE_LOG", &sync_log)
             .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
             .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
             .env(
@@ -2009,9 +2016,9 @@ fi"#;
         }
         assert!(
             output.status.success(),
-            "lf pr land failed: {}\nNested rebase: {}",
+            "lf pr land failed: {}\nNested sync: {}",
             String::from_utf8_lossy(&output.stderr),
-            fs::read_to_string(&rebase_log).unwrap_or_default(),
+            fs::read_to_string(&sync_log).unwrap_or_default(),
         );
         assert!(
             flow || String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
@@ -2030,7 +2037,7 @@ fi"#;
                 repaired_head.trim(),
                 String::from_utf8_lossy(&head.stdout).trim()
             );
-            assert!(String::from_utf8_lossy(&output.stderr).contains("Rebased the linked worktree"));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Synced the linked worktree"));
         }
     }
 }

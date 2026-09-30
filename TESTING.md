@@ -508,7 +508,7 @@ LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout
 ```
 
 The background-push regression holds Git until the CLI exits, then verifies
-upstream tracking and a subsequent rebase. Immediate local pushes can hide
+upstream tracking and a subsequent sync. Immediate local pushes can hide
 broken pipes that interrupt Git after the remote ref moves; background children
 must use stdio that survives their parent's exit.
 
@@ -715,7 +715,7 @@ Long-running workflow tests for mechanical `lf` commands:
 
 ```bash
 tests/e2e/test_full_cycle.sh
-tests/e2e/test_rebase_conflict.sh
+tests/e2e/test_sync_safety.sh
 ```
 
 Exercise Task deletion through the real CLI on Linux:

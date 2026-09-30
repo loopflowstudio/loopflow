@@ -58,7 +58,7 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    Build a useful atom before choosing its place in a process. Require the
    information the task needs, not a preceding skill, named Flow, Task binding,
    branch name, or document layout that happened to supply it once. Keep real
-   domain constraints and authority boundaries. Let callers compose rebasing,
+   domain constraints and authority boundaries. Let callers compose synchronization,
    publication, and navigation around the operation.
 
    Match proof to maturity: an early Task needs a concrete problem and
@@ -112,6 +112,15 @@ consumer. Do not create miscellaneous `.lf/` learning notes.
    When relocating instructions, inspect both the ordinary assembled prompt
    and the receiving skill's standalone export. Prove the old audience no longer
    pays for the procedure and the intended consumer can still execute it.
+
+## Persisted plans
+
+Plan-writing skills must produce step-neutral artifacts: named, dated decisions,
+explicit acceptance or draft status, remaining work, and proof. Keep session/step
+instructions and ambient Home facts out of plans. Historical skill invocations
+use plain names without dollar prefixes; verbatim transcripts remain separate
+reference evidence. Audit a plan as input to a different skill in a fresh Run:
+the plan cannot select that reader's skill or claim its execution environment.
 
 ## Skill contract
 

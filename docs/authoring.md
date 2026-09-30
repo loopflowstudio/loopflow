@@ -193,7 +193,7 @@ deciding step stable ids:
       from: implement
 ```
 
-One pass runs implement, compress, refresh (rebase → realign), and loop-decide.
+One pass runs implement, compress, refresh (sync → realign), and loop-decide.
 The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
 [decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
 with direction; Advance publishes, then reaches the human demo. Complete returns the demo's

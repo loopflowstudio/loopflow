@@ -349,7 +349,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         finish(&mut position).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "rebase", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(!finish(&mut position).unwrap());
             }
@@ -421,7 +421,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         finish(&mut position).unwrap();
-        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
             assert_eq!(finished, expected == "pr land -c");
@@ -1080,7 +1080,15 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Account launch intent is process-scoped.
     async fn active_task_invocation_ignores_later_flow_and_skill_edits() {
+        let _lock = crate::journal::test_env_lock();
+        let accounts = crate::provider_account::lease::AccountSelection::from_flags(
+            &["claude=first@".into(), "codex=second@".into()],
+            &[],
+        )
+        .unwrap();
+        let selected = accounts.activate().unwrap();
         let (store, task, _) = human_task_fixture().await;
         let flow_dir = task.worktree.join(".lf/flows");
         let skill_dir = task.worktree.join(".lf/skills");
@@ -1088,7 +1096,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: rebase --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -1097,6 +1105,7 @@ mod planning_tests {
         )
         .unwrap();
         let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        drop(selected);
         store.start_task_flow(&task.id, flow.clone()).await.unwrap();
 
         std::fs::write(
@@ -1116,6 +1125,7 @@ mod planning_tests {
         .unwrap();
 
         let persisted = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let crate::engine::ConcreteStep::Skill(active_skill) = persisted.current_plan() else {
             panic!("active first step is a skill")
         };
@@ -1129,7 +1139,7 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.command, "sync");
         assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();
@@ -1178,6 +1188,7 @@ mod planning_tests {
         let original = park_human_task(&store, &task, &flow).await;
         ready_review(&store, &task, "ready").await;
         let persisted = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let run_id = persisted.review_artifact_key().cloned().unwrap();
         let restarted_flow = super::ensure_flow_position(&store, &task.id, None)
             .await

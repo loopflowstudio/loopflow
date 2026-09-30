@@ -52,7 +52,7 @@ stable ordering rather than usage rankings.
 | `runs`, `exec`, `activity`, `usage` | Inspect conversation, process, and Work history |
 | `ps`, `top`, `prune`, `doctor` | Inspect processes and diagnose the Home |
 | `auth` | Connect accounts and configure routing |
-| `wt`, `commit`, `rebase`, `pr` | Manage checkouts and deliver changes |
+| `wt`, `commit`, `sync`, `pr` | Manage checkouts and deliver changes |
 | `home`, `ssh`, `install` | Inspect placement, reach another Home, and install releases |
 | `release`, `ci`, `cron` | Release software, inspect CI, and schedule work |
 
@@ -161,7 +161,7 @@ the same as asking it to publish or merge.
 |---|---|
 | `code` | Implement and simplify locally |
 | `task-design` | Shape the implementation plan and review the design |
-| `refresh` | Rebase, then reconcile the design and implementation |
+| `refresh` | Sync, then reconcile the design and implementation |
 | `queue` | Simplify, refresh, and verify without PR publication |
 | `pursue` | Iterate on implementation, publish, and review a demo |
 | `feature` | Review the design, pursue the work, verify, land, and complete |
@@ -223,6 +223,15 @@ are assembled automatically. Direct launches leave edits for an explicit
 commit. Several AgentSessions may concern the same Task; attribution does not grant
 exclusive ownership of its files.
 
+Launch assembly allows 8,000 tokens of Wave memory, 16,000 across scratch notes,
+and 16,000 for the launch goal/message. Oversized sources become marked excerpts
+with their full local paths; oversized messages are preserved under
+`.lf/tmp/context/`. Read relevant omitted sections before acting. The complete
+assembled input must fit 64,000 cl100k tokens and 512 KiB, otherwise launch reports
+which explicit sources to reduce before contacting the provider. Native provider
+instructions, tools, later file reads and conversation history are outside this
+launch budget. Run context evidence records reductions and original sizes.
+
 Put global options before the command. Command-local options retain their
 meaning after shorthand expansion: `lf commit -m "Fix startup"` supplies a
 commit message, not a model. `--` ends option interpretation where literal
@@ -274,7 +283,7 @@ The answer starts another turn in the same conversation for reassessment.
 
 Implement builds the intended behavior and updates the working plan with what
 remains. When replacing a path, move its consumer and delete the predecessor.
-Compress simplifies code related to the change. Refresh rebases, then runs
+Compress simplifies code related to the change. Refresh syncs, then runs
 realign. Realign edits the plan, corrects clear code mismatches, and reads and
 updates the identified Wave's memory using what the work has taught us. Accepted
 requirements and unresolved evidence stay visible; no per-pass report or
@@ -385,7 +394,7 @@ lf task status                      # Task bound to this checkout
 lf pr status                        # current branch's PR, with or without a Task
 ```
 
-Task commands manage concrete work. Commit, rebase, worktree, and PR operations
+Task commands manage concrete work. Commit, sync, worktree, and PR operations
 also work in an ordinary checkout. They do not create an issue merely to satisfy
 the command path.
 
@@ -418,6 +427,7 @@ can move to the default branch after the parent merges.
 lf task edit DES-123 --title "Repair dialog keyboard navigation"
 lf task comment DES-123 "Keep this change inside the dialog"
 lf task comment DES-123 --json       # read the thread
+lf task comment DES-123 --steer "Keep the public API" # direction from an agent Run
 lf task interrupt DES-123            # interrupt the active provider turn
 lf task run DES-123                  # continue after interruption
 lf task restart DES-123 --flow feature
@@ -484,27 +494,39 @@ work, the current checkout, the default branch, nonterminal Tasks, and live
 owned work. Inspect `--dry-run` before cleanup. Explicit forced removal is a
 separate destructive choice.
 
-### Commit and rebase
+### Commit and sync
 
 ```bash
 lf commit -m "Fix keyboard navigation in dialogs"
 lf commit --no-add                  # commit only the existing index
-lf rebase --plan                    # inspect the integration strategy
-lf rebase                           # integrate and publish the branch with a lease
+lf sync --plan                    # inspect the integration strategy
+lf sync                           # integrate and publish the branch with a lease
 ```
 
 Commit stages changes and generates a message unless given explicit options.
 Publishing is a separate PR operation.
 
-Rebase refreshes upstream, preserves local edits, integrates the appropriate
-base, and pushes the resulting branch with a lease. The default branch's local
-unpublished commits are preserved; it is not pushed. `--plan` uses local
-evidence and makes no changes.
+`lf sync` replaces `lf rebase`. Saved Flow command records migrate the old name
+on decode while preserving captured arguments and structure. It merges main into
+the current branch, or the live parent into a stacked child, then publishes with
+a lease. Original commits and reviewed merge resolutions stay in the branch.
+Unstacked empty and scratch-only branches reset to their target while preserving scratch.
+Stacked children retain their initial `Clear inherited scratch` commit and merge
+updates while keeping their own scratch, including inherited files the child deleted.
+CLI and Flow sync use the same Task parent. If the child already contains its
+parent's head, sync leaves its history and remote branch unchanged.
+Main retains unpublished commits and edits and is never pushed. `--plan` uses local
+evidence without fetching.
+
+After a stack parent lands by squash, synchronization uses the recorded parent
+base to compare the child's changes with main. The resulting merge records main
+as its parent, preserving the child's edits and original history. PR landing uses
+the same integration; GitHub's squash merge adds one commit to main.
 
 ```bash
-lf rebase --manual
-lf rebase --continue
-lf rebase --abort
+lf sync --manual
+lf sync --continue
+lf sync --abort
 ```
 
 Manual recovery stays local and does not push. A retained conflict keeps its
@@ -540,7 +562,7 @@ as an unbound branch.
 | `next` | Continue a Task on its next PR after an out-of-band merge |
 | `abandon` | Close the PR and remove its branch and worktree |
 
-Publish leaves scratch notes and integration history alone. It does not rebase.
+Publish leaves scratch notes and integration history alone. It does not sync.
 Submit, arm, and land preserve useful conclusions, clear scratch, prepare a
 reviewable commit, and integrate the branch before publication. They preserve
 valid reviewer-facing copy and update Task merge consequences.
@@ -1078,7 +1100,7 @@ lf doctor --json
 ```
 
 Install updates the CLI and supported application components from verified
-release artifacts. It does not require a source checkout. Use `rebase`
+release artifacts. It does not require a source checkout. Use `sync`
 to update repository work instead. Scheduled installation supports weekly,
 daily, hourly, and five-minute cadences on macOS; Linux supports explicit
 installation.

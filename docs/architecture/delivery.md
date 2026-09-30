@@ -34,7 +34,7 @@ Task Work ----> managed worktree ----> commits
 | --- | --- |
 | Task directive and Project membership | Linear Issue |
 | managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
-| commits, branch ancestry, rebase state | Git |
+| commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
 | landing supervision and repair admission | exact recorded PR head plus landing generation |
 
@@ -62,7 +62,13 @@ lf task run INF-124 --stack-on INF-123
 ```
 
 The child records its fork point and targets the parent's active PR branch.
-After the parent merges, it replays child-authored commits onto current main.
+Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
+updates keep the child's entire `scratch/` tree, including deleted files; the
+parent's notes remain on the parent branch. Even a child with only this cleanup
+commit merges updates instead of resetting onto the parent's scratch.
+After the parent merges, `lf sync` merges current main using the recorded fork
+as the comparison base. Child edits and original commit identities survive squash
+landing without replay.
 The parent Task does not hold two simultaneously open PRs.
 
 ## Commit and publish
@@ -75,14 +81,18 @@ lf pr arm                                      # request exact-head auto-merge a
 lf pr land                                     # prepared and auto-merged
 ```
 
-`publish` creates or refreshes the current PR without rebasing. `arm` and
-`land` integrate current main, clear merge-time scratch state, collapse
-checkpoint history into one authored commit, verify once, and push the exact
-head. A range with one linear commit keeps that commit; integrating a changed
-target can still replace it. `arm` requests GitHub auto-merge and returns. `land`
-watches through merge. `submit` performs the same preparation but leaves the exact-head merge
-to a person. These delivery commands inspect Task delivery state when present;
-they do not require a live Task worker or certify that a particular Flow ran.
+`publish` creates or refreshes the current PR without integration. A completed
+merge, including one made outside `lf`, advances the recorded Task base to the
+actual merge base when the old base is its ancestor. Publication, submit and
+landing share that ancestry check; unrelated or divergent bases still fail.
+
+`arm` and `land` merge current main, clear merge-time scratch state, verify once,
+and push the exact head. Branch commits and merge resolutions retain their identities.
+GitHub squash-merges the final PR tree into one commit on main. `arm` requests
+GitHub auto-merge and returns. `land` watches through merge. `submit` performs the
+same preparation but leaves the exact-head merge to a person. These delivery
+commands inspect Task delivery state when present; they do not require a live
+Task worker or certify that a particular Flow ran.
 
 Scratch cleanup selects landing candidates for this repository's
 [hosted CI](../../TESTING.md); PR readiness alone does not select CI.
@@ -117,23 +127,30 @@ directory:
 The open file descriptor is authority. JSON is a readable receipt. Process
 death releases the kernel lock even if metadata remains.
 
-### Rebase operation
+### Sync operation
 
 Provider launches receive no durable Git writer token. Independent agents may
-coexist in the shared worktree. A rebase locks `rebase-owner.json` for the Git
-sequencer lifetime; new agent launches refuse while that operation is live.
+coexist in the shared worktree. A sync locks `rebase-owner.json` for the Git
+merge lifetime; new agent launches refuse while that operation is live. The
+existing receipt filename stays stable so older executables share the same lock.
 
 | Concurrent work | Result |
 | --- | --- |
 | agent + independent agent | allowed; use distinct output paths |
 | read/build/test + agent | allowed |
-| live rebase + new agent launch | blocked |
-| rebase + its exact recovery child | allowed |
-| stale rebase record without a kernel lock | adopted or removed through the rebase path |
+| live sync + new agent launch | blocked |
+| sync + its exact recovery child | allowed |
+| stale sync record without a kernel lock | adopted or removed through the sync path |
+| unowned or stopped merge + agent launch | allowed; continuation adopts the existing merge |
 
-The rebase owner authorizes only its exact sequencer and recovery child. It does
+The sync owner authorizes only its exact sequencer and recovery child. It does
 not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
+
+A supervisor-started merge can be handed to an agent in the same checkout.
+`lf sync --continue --adopt` claims a raw merge after resolution. For a stopped
+Loopflow sync, ordinary `--continue` retains the saved branch and pinned target.
+Launching the agent neither adopts the operation nor publishes the result.
 
 ### PR mutation
 
@@ -226,7 +243,7 @@ serial chain to a new branch from fetched main.
 
 - An interrupted provider turn does not discard the worktree or PR chain.
 - A failed check is GitHub evidence, not a completed local transition.
-- A crashed rebase keeps Git's sequencer state; explicit recovery adopts it
+- A crashed sync keeps Git's sequencer state; explicit recovery adopts it
   with fresh operation identity.
 - A crashed PR mutation is retried by resolving current Git and GitHub truth
   inside the same narrow lock.

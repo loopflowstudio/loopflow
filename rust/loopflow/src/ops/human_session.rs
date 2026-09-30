@@ -1169,6 +1169,8 @@ async fn serve_flow_locked(
         token: Box::new(token.clone()),
     })?;
     let (position, reserved) = store.reserve_review_run(position).await?;
+    let accounts = position.invocation.accounts.clone().unwrap_or_default();
+    let _accounts = accounts.activate()?;
     let agent = select_review_agent(&store, &task, &position).await?;
     let reservation = ReviewCaptureReservation {
         captured: reserved.captured.context("review has no captured event")?,
@@ -1182,7 +1184,11 @@ async fn serve_flow_locked(
         .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
-        .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?);
+        .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            accounts.env_value()?,
+        );
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;

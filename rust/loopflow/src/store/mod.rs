@@ -701,11 +701,13 @@ impl Store {
         email: &str,
         subject: &str,
         plan: Option<&str>,
+        credential_digest: Option<&str>,
     ) -> StoreResult<()> {
         let provider = provider.to_string();
         let account_id = account_id.clone();
         let email = email.to_string();
         let subject = subject.to_string();
+        let credential_digest = credential_digest.map(str::to_string);
         let plan = plan.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
             store.record_provider_account_identity(
@@ -714,6 +716,7 @@ impl Store {
                 &email,
                 &subject,
                 plan.as_deref(),
+                credential_digest.as_deref(),
             )
         })
         .await
@@ -1068,6 +1071,7 @@ pub struct ProviderAccount {
     pub login_email: Option<EmailAddress>,
     pub observed_email: Option<String>,
     pub observed_subject: Option<String>,
+    pub observed_credential_digest: Option<String>,
     pub observed_plan: Option<String>,
     pub credential_state: CredentialState,
     pub routing_state: RoutingState,
@@ -2952,7 +2956,7 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "parent-tip-2",
                 false,
@@ -2960,16 +2964,16 @@ mod tests {
             )
             .await
             .unwrap();
-        let rebased = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
-        assert_eq!(rebased.base_commit, "parent-tip-2");
-        assert_eq!(rebased.parent_pr_id, Some(parent.id.clone()));
+        let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
+        assert_eq!(synced.base_commit, "parent-tip-2");
+        assert_eq!(synced.parent_pr_id, Some(parent.id.clone()));
 
         // The parent merges; the child collapses onto main, dropping the link.
         parent.merge_commit = Some("merge-200".to_string());
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "main-after-200",
                 true,
@@ -3310,6 +3314,7 @@ mod tests {
             login_email: Some(EmailAddress::parse(&format!("{account_id}@example.com")).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,

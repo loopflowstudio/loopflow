@@ -354,13 +354,13 @@ provider, and literal subprocess edge must appear exactly once.
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable readable locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
 | **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
-| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. One Task worker at a time owns advancement of the selected Flow; helpers and delivery commands may mutate the worktree without that claim. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | hidden `lf task __worker` drives successive claimed boundaries until a stop; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf rebase`, `lf commit` | Linear |
+| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. One Task worker at a time owns advancement of the selected Flow; helpers and delivery commands may mutate the worktree without that claim. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | hidden `lf task __worker` drives successive claimed boundaries until a stop; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one watched attempt to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation owns one supervisor, which repairs current failures until resolved; CI incidents record evidence rather than admit execution. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The invoking local PR supervisor | `lf pr arm`, `lf pr land`, `lf ci` | `provider:github`, model provider for `ci-fix`, `exec:git`, `exec:gh` |
 | **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. Confirmed native deletions suppress stale items without rewriting historical workflow outcomes. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync and Task polling | `lf repo`, `lf wave sync` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its advancing worker | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task worker refreshes comments and attempts live input; successor workers refresh their seed | `lf task comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, `lf ask`, interactive `lf` | — |
-| **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to rebase. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
+| **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
 | **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf runs`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Exec** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ExecId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/exec.rs) | `execs` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf exec`; ordinary parsed CLI commands | — |
@@ -420,7 +420,7 @@ a disposable copy; it never grants permission to mutate the installed Home.
 | `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
 | `$LF_HOME/runs/<prefix>/<run-id>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
 | Home provider directories | Provider-native login and resume state | Owned by provider adapters |
-| Git directory `loopflow/` receipts | writer/rebase/PR mutation coordination | Kernel-locked receipt files |
+| Git directory `loopflow/` receipts | writer/sync/PR mutation coordination | Kernel-locked receipt files |
 | machine install root | Versioned artifact sets and switch receipts | Stage immutably, select atomically |
 
 ### External systems
@@ -458,7 +458,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Home |
 | `lf wave`, `repo`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf ask`, `session` | Sessions and explicit resolution | Current Home AgentSession and FlowSession state |
-| `lf wt`, `commit`, `rebase`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
+| `lf wt`, `commit`, `sync`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf exec`, `runs`, `usage`, `ps`, `top`, `prune`, `doctor` | Execution and process observation | Current Home only |
 | `lf home`, `lf wave place` | Home identity and Work placement | Current Home unless routed explicitly |
 | `lf ssh <home-id> <args...>` | Run the target Home's `lf` | Explicit remote Home; no implicit fan-out |
@@ -654,10 +654,10 @@ open file descriptor holds authority; the JSON file is a readable receipt.
 Process death releases the kernel lock even if the receipt remains, so the next
 operation can clean or explicitly adopt stale metadata.
 
-### Git mutation and rebase locks
+### Git mutation and sync locks
 
 For a Git worktree, `absolute_git_dir` selects the real Git directory, including
-the linked-worktree case. Rebase coordination lives beneath it:
+the linked-worktree case. Sync coordination lives beneath it:
 
 ```text
 <absolute-git-dir>/loopflow/rebase-owner.json
@@ -668,18 +668,23 @@ checkpointing, and land take short OS-held locks only around their exact Git
 mutation. Independent agents may edit and run concurrently; the shared
 worktree remains the durable blackboard.
 
-A rebase takes an exclusive lock on `rebase-owner.json` for the complete Git
-sequencer lifetime. New agent launches refuse while that rebase lock is live.
+A sync takes an exclusive lock on `rebase-owner.json` for the complete Git
+sequencer lifetime. New agent launches refuse while that sync lock is live.
 The exact `LF_GIT_OPERATION_ID` lets only the operation's recovery child
-continue or abort inside the fence. A raw or crashed rebase can be adopted only
+continue or abort inside the fence. A raw or crashed sync can be adopted only
 through the explicit adoption path, which mints a new id.
+
+Unowned and stopped Git operations do not block agent launch. A stopped operation's
+receipt survives so continuation can adopt its pinned target. Raw merges use
+`lf sync --continue --adopt`; launching an agent grants no operation ownership.
 
 Therefore:
 
 - agent + agent is allowed;
 - reader/build/test + agent is allowed;
-- rebase + independent agent is blocked in both start orders;
-- rebase + its exact recovery child is allowed;
+- live sync + new independent agent launch is blocked;
+- a running agent does not reserve the worktree against sync;
+- sync + its exact recovery child is allowed;
 - stale JSON with no OS lock is not a live owner;
 - raw Git outside Loopflow is not compelled by these advisory locks.
 
@@ -897,7 +902,7 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
 - Bind is write-once, same-target idempotent and valid for done Tasks. CLI states
   the permanent target and writes; Desktop confirms. Historical attribution and
   set-once Started survive assignment and driver changes.
-- OS locks cover their named critical sections. Rebase admits only its exact
+- OS locks cover their named critical sections. Sync admits only its exact
   recovery child; causal identity does not bypass Git or PR mutation authority.
 - Store copies preserve evidence without acquiring process authority. Promotion
   and historical-writer continuity remain separate proof obligations.

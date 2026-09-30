@@ -99,19 +99,32 @@ Make the plan explicit where these boundaries matter; omit irrelevant sections:
 - **Current and target architecture** — the concepts, authorities, persisted
   records, writers, and launch paths before and after the change; state what is
   reshaped and what becomes obsolete.
+- **Delete — do not maintain** — carry forward or identify concrete files/symbols
+  and their exclusive tests/fixtures slated for removal. Never plan repairs to
+  them. Name required behavior, data, and proof that must survive, plus any
+  consumer cutover or migration needed for removal.
 - **Forbidden outcomes** — duplicate representations, Legacy/New splits,
   adapters, fallbacks, dual writes, or locally passing states that would still
   violate the intended architecture.
 - **Internal slices** — for an indivisible change, keep the complete end state
-  intact with its integration/deletion path and full proof. Order coherent cuts,
-  mark one `This slice` with focused proof, and update remaining work and evidence
-  in place rather than replacing the design with a narrower plan.
+  intact with its integration/deletion path and full proof. Order the deepest
+  deletions first, then build on what remains. Include the minimum consumer
+  cutover or migration in the deletion cut, without modernizing the old path
+  first. Mark one `This slice` with focused proof, and update deletion targets,
+  remaining work, and evidence in place rather than narrowing the plan.
+  Additive work needs no invented deletion.
 
 Files changed, migrations applied, tests added, and a PR opened are
 implementation receipts. They may support the proof, but they are not the
 finish line; the design must end in an observable condition.
 
 ## Output
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
 
 Update the existing plan at `scratch/<slug>.md`. Organize it around the problem,
 demo, chosen approach, risk findings, alternatives and decisions, scope, and

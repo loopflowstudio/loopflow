@@ -51,6 +51,7 @@ struct AuthRow {
     expires_at: Option<i64>,
     windows: Vec<AccountLimitRow>,
     verified_windows: Vec<String>,
+    reset_credits: Option<crate::subscription::RateLimitResetCredits>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -163,6 +164,7 @@ fn forwarded_rows(provider: Option<Provider>) -> Result<Vec<AuthRow>> {
                     expires_at: None,
                     windows: vec![],
                     verified_windows: vec![],
+                    reset_credits: None,
                 });
             }
         }
@@ -217,6 +219,7 @@ async fn local_rows(
             expires_at: snapshot.and_then(|s| s.expires_at),
             windows: vec![],
             verified_windows: vec![],
+            reset_credits: None,
         });
     }
     Ok(rows)
@@ -259,19 +262,17 @@ async fn managed_rows(
         } else {
             None
         };
-        let mut observed_login = account
-            .home
-            .as_deref()
-            .filter(|_| provider == Provider::Codex)
-            .and_then(crate::provider_auth::codex_identity_from_home)
-            .map(|identity| identity.email)
-            .or_else(|| account.observed_email.clone());
+        let cached_identity = crate::provider_account::identity::cached_identity(account);
+        let mut observed_login = cached_identity
+            .as_ref()
+            .map(|identity| identity.email.clone());
         let mut live_usage = None;
-        let identity_error = (presence == crate::provider_auth::CredentialPresence::Present)
-            .then(|| {
-                crate::provider_account::identity::check_account_identity(account, &accounts).err()
-            })
-            .flatten();
+        let identity_error = (presence == crate::provider_auth::CredentialPresence::Present
+            && (provider == Provider::Codex || (!verify && cached_identity.is_some())))
+        .then(|| {
+            crate::provider_account::identity::check_account_identity(account, &accounts).err()
+        })
+        .flatten();
         let mut diagnostic = None;
         let mut recover = presence == crate::provider_auth::CredentialPresence::Missing
             || account.credential_state == CredentialState::Missing;
@@ -308,6 +309,7 @@ async fn managed_rows(
                             &usage.identity.email,
                             &usage.identity.subject,
                             usage.plan.as_deref(),
+                            usage.identity.credential_digest.as_deref(),
                         )
                         .await?;
                     store
@@ -348,6 +350,14 @@ async fn managed_rows(
                     Verification::Unavailable
                 }
             }
+        } else if !verify
+            && provider == Provider::Claude
+            && cached_identity.is_none()
+            && presence == crate::provider_auth::CredentialPresence::Present
+        {
+            diagnostic =
+                Some("current credential identity is unverified; run lf auth status claude".into());
+            Verification::Unavailable
         } else if verify {
             diagnostic = Some("no readable managed credential".into());
             Verification::Unavailable
@@ -401,6 +411,9 @@ async fn managed_rows(
             cooldown_until: account.cooldown_until,
             expires_at: None,
             windows,
+            reset_credits: live_usage
+                .as_ref()
+                .and_then(|usage| usage.reset_credits.clone()),
             verified_windows: live_usage
                 .map(|u| u.windows.into_iter().map(|w| w.window).collect())
                 .unwrap_or_default(),
@@ -504,6 +517,27 @@ fn render(report: &AuthReport, width: usize, now: i64) -> String {
                         timestamp(window.observed_at),
                         window.plan.as_deref().unwrap_or("unknown")
                     ));
+                }
+            }
+            if row.provider == Provider::Codex && row.scope == Scope::Managed {
+                match &row.reset_credits {
+                    Some(credits) => {
+                        lines.push(format!(
+                            "  banked resets: {} available (live)",
+                            credits.available_count
+                        ));
+                        for credit in credits.credits.iter().flatten() {
+                            let expiry = credit
+                                .expires_at
+                                .map(timestamp)
+                                .unwrap_or_else(|| "unknown".into());
+                            lines.push(format!(
+                                "    {}: {} · expires {expiry}",
+                                credit.id, credit.status
+                            ));
+                        }
+                    }
+                    None => lines.push("  banked resets: unknown".into()),
                 }
             }
             if report.browser.is_some() {
@@ -614,6 +648,146 @@ fn wrap_line(line: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{render, AuthReport};
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn claude_cached_identity_requires_current_verified_credentials() {
+        let _env = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                root.path().join("store.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let mut account = crate::provider_account::new_account(
+            crate::provider_auth::Provider::Claude,
+            crate::store::ProviderAccountId::parse("primary").unwrap(),
+            root.path().to_path_buf(),
+            Some(crate::profile::EmailAddress::parse("first@example.com").unwrap()),
+        );
+        // Legacy observations have no binding to credential bytes.
+        account.observed_email = Some("first@example.com".into());
+        account.observed_subject = Some("first-user".into());
+        store.upsert_provider_account(&account).await.unwrap();
+        let credential =
+            r#"{"claudeAiOauth":{"accessToken":"fixture-first","expiresAt":4102444800000}}"#;
+        std::fs::write(root.path().join(".credentials.json"), credential).unwrap();
+        std::fs::write(
+            root.path().join(".claude.json"),
+            r#"{"oauthAccount":{"emailAddress":"first@example.com","accountUuid":"first-user"}}"#,
+        )
+        .unwrap();
+        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        assert_eq!(rows[0].verification, super::Verification::Unavailable);
+        assert!(rows[0]
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("identity is unverified"));
+
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (200, r#"{"limits":[]}"#.into()),
+                (
+                    200,
+                    r#"{"account":{"email":"first@example.com","uuid":"first-user"}}"#.into(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+        let rows = super::managed_rows(&store, None, true).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(rows[0].verification, super::Verification::Accepted);
+        let verified = store
+            .get_provider_account("claude", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(verified.observed_credential_digest.is_some());
+        // The fixture server has exited. Cached inspection needs neither it nor
+        // a native provider process and writes no new evidence.
+        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        assert_eq!(rows[0].verification, super::Verification::NotChecked);
+        assert_eq!(rows[0].login.as_deref(), Some("first@example.com"));
+        assert_eq!(
+            store
+                .get_provider_account("claude", &account.account_id)
+                .await
+                .unwrap(),
+            Some(verified.clone())
+        );
+
+        std::fs::write(
+            root.path().join(".credentials.json"),
+            credential.replace("fixture-first", "fixture-second"),
+        )
+        .unwrap();
+        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        assert_eq!(rows[0].verification, super::Verification::Unavailable);
+        assert_eq!(
+            store
+                .get_provider_account("claude", &account.account_id)
+                .await
+                .unwrap(),
+            Some(verified.clone())
+        );
+        let (_endpoints, server) = crate::subscription::observation_tests::serve(
+            vec![
+                (200, r#"{"limits":[]}"#.into()),
+                (
+                    200,
+                    r#"{"account":{"email":"wrong@example.com","uuid":"wrong-user"}}"#.into(),
+                ),
+            ],
+            |_| {},
+        )
+        .await;
+        let rows = super::managed_rows(&store, None, true).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(rows[0].verification, super::Verification::Rejected);
+        assert!(rows[0]
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("wrong@example.com"));
+        let rejected = store
+            .get_provider_account("claude", &account.account_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rejected.observed_credential_digest,
+            verified.observed_credential_digest
+        );
+        assert_eq!(rejected.observed_subject, verified.observed_subject);
+
+        std::fs::write(root.path().join(".credentials.json"), credential).unwrap();
+        store.upsert_provider_account(&verified).await.unwrap();
+        let duplicate_home = root.path().join("duplicate");
+        std::fs::create_dir(&duplicate_home).unwrap();
+        std::fs::write(duplicate_home.join(".credentials.json"), credential).unwrap();
+        let duplicate = crate::provider_account::new_account(
+            crate::provider_auth::Provider::Claude,
+            crate::store::ProviderAccountId::parse("duplicate").unwrap(),
+            duplicate_home,
+            Some(crate::profile::EmailAddress::parse("other@example.com").unwrap()),
+        );
+        store.upsert_provider_account(&duplicate).await.unwrap();
+        let rows = super::managed_rows(&store, None, false).await.unwrap();
+        let primary = rows
+            .iter()
+            .find(|row| row.account_id.as_ref() == Some(&account.account_id))
+            .unwrap();
+        assert_eq!(primary.verification, super::Verification::Rejected);
+        assert!(primary
+            .diagnostic
+            .as_deref()
+            .unwrap()
+            .contains("share login"));
+    }
 
     #[test]
     fn auth_report_fixture_preserves_missingness_and_readable_widths() {

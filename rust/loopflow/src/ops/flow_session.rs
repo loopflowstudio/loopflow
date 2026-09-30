@@ -139,7 +139,15 @@ pub(crate) async fn prepare_exec(
     let flow = store.waiting_review(session_id).await?;
     command
         .arg("--tui")
-        .env(flow_run::FLOW_STEP_ENV, ActiveStep::of(&flow).env_value()?);
+        .env(flow_run::FLOW_STEP_ENV, ActiveStep::of(&flow).env_value()?)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            flow.invocation
+                .accounts
+                .clone()
+                .unwrap_or_default()
+                .env_value()?,
+        );
     if let Some(model) = &flow.model {
         command.args(["--model", model]);
     }

@@ -417,6 +417,12 @@ async fn drive_loop(
     let id = flow.id().to_owned();
     let _driver = flow_run::driver_lock(&id)?;
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.invocation.flow);
+    let _accounts = flow
+        .invocation
+        .accounts
+        .clone()
+        .unwrap_or_default()
+        .activate()?;
     let mut owned_claim = claim;
     loop {
         let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;

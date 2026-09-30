@@ -41,7 +41,7 @@ lf pr publish --title "..."         # push + create/update PR, print state+URL (
 lf pr submit                         # done; the user clicks merge
 lf pr land                           # done; loopflow lands it hands-off
 lf pr land -c                        # land and complete the owning Task
-lf rebase --plan                     # show strategy; bare `lf rebase` applies it
+lf sync --plan                       # show strategy; bare `lf sync` applies it
 lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 

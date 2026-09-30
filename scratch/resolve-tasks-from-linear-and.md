@@ -17,6 +17,69 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Unblock direction — 2026-09-30
+
+Jack Heart's supervising session relayed his instruction to stack LOO-334 on
+LOO-298: use `lf rebase` onto `jack-heart/data-model-one-table-per` (PR #1296),
+resolve conflicts toward LOO-298's model, retarget PR #1354 to that branch, then
+continue ownership work against its execution owners. This supersedes waiting
+for integration through main and authorizes that specific PR retargeting.
+The [Ask feedback](installation-continuity-unblock.md) records the direction and
+fresh recovery evidence: Docker returned server 29.4.0; the exact stranded proof
+container was removed and confirmed absent without restarting the service.
+The caller still owns stack integration and the two-worker promotion proof.
+All acceptance cases, the full-code publication boundary and the separate pending
+relationship-repair decision remain. No rebase, PR mutation or behavioral proof
+was performed in this Ask.
+
+### Slice review — normal promotion prerequisites, 2026-09-30
+
+**Blocked; no publication.** Reviewed the complete current-slice diff
+`53fbf5435` → `b1719ea6c`, the supplied directive/design and prior receipts,
+and the installation/discovery callers. The required proof stopped this review
+before a fresh whole-branch review or behavioral acceptance could finish.
+
+- **Executed gap:** `uv run python scripts/test_task_installation.py` exited 1
+  at Docker preflight: `Docker did not respond within 10 seconds; no proof
+  container was created.` No test or promotion ran in this attempt. The corrected
+  promotion fixture and divergent-invocation extension remain unverified. The
+  previous six-case pass predates both changes and cannot validate them.
+- **Source gap:** the new fixture captures operation → review → operation but
+  stops after post-promotion status/open assertions. It neither completes the
+  review nor executes the second worker, poisons inherited runtime selection,
+  or checks that worker's digest. Even a future pass of this fixture alone will
+  not satisfy cases 6 or 15. The earlier obsolete-command and PTY cases remain.
+- **Ownership gap:** `existing_execution` still rejects every multiple physical
+  match. `promote_local_candidate` can reuse development data or copy production
+  independently of `prior.store`; `disposable_store_owned` records cleanup, not
+  execution succession. These source observations support the existing finding,
+  not a newly observed promotion failure or permission for equality/timestamp
+  selection. LOO-298 revision `d61295196` is still not an ancestor of HEAD
+  (exit 1); last-fetched `origin/main` remains `a3820bf7e`.
+- **Measurement:** current slice adds **0 / removes 0** non-test production Rust
+  lines. Its only Rust diff is the integration-test file (+258/−29); scripts,
+  docs, scratch and generated files are excluded from the production count.
+  No production consumer or predecessor path is replaced in this pass. The
+  preceding implementation `01158f839` → `53fbf5435` replaced installed
+  Task/Session routing and captured Session forwarding. Compression at
+  `b1719ea6c` belongs to the current pass, not a second implementation pass;
+  the two-consecutive-no-replacement blocker does not apply yet.
+
+`git diff --check` passed. Prior formatting/Clippy and Session results are retained
+as dated evidence, not rerun or upgraded. No code changed during this review.
+The earlier stranded container's cleanup remains unconfirmed; this attempt did
+not inspect/remove it or restart Docker.
+
+Next resolve Docker availability, remove the exact previously recorded proof
+container, and run the required harness. Then finish the installation-copy
+ownership cut against integrated execution owners and extend the same proof
+through the second actual worker. Return this blocker to the saved decision step;
+do not repeat an unchanged implementation pass. All cases 1–15, recursive locks,
+delayed startup, local/contextual planning and command-story obligations remain.
+The existing relationship Ask and other recorded policy choices are unchanged.
+Jack Heart's full-code publication boundary remains unmet; this review selects
+no Flow navigation, Task disposition or installation promotion.
+
 
 ### This slice — normal promotion prerequisites, 2026-09-30 (blocked)
 

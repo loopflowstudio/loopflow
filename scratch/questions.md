@@ -147,6 +147,15 @@ may touch the installed host Home.
 
 ## Execution coordination received — 2026-09-30
 
+**Subsequent unblock direction:** Jack Heart authorized stacking this Task onto
+`jack-heart/data-model-one-table-per` (PR #1296) through `lf rebase`, resolving
+conflicts toward LOO-298's model, and retargeting PR #1354 to that branch. Consume
+those execution owners through the stack rather than waiting for main. Docker
+responsiveness and exact stranded-container cleanup are now verified; the normal
+promotion/two-worker proof remains unexecuted. See
+[the Ask feedback](installation-continuity-unblock.md). This does not settle
+copy succession, relax acceptance, or select a relationship-repair policy.
+
 Jack supplied the successful read-only LOO-298 contribution from its retained
 installation (source `4f4edff9b` through `d61295196`, documentation-only difference).
 This supersedes the earlier unregistered coordination attempt. Task retains

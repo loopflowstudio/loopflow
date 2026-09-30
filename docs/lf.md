@@ -976,6 +976,8 @@ Discovery by Ask and ordinary Flow Session identifiers remains unfinished.
 Multiple physical execution copies remain
 an explicit conflict, even when their Task IDs match. Incompatible data reports
 the location and preserves the pending work without migration.
+This conflict also affects execution copied by local installation promotion;
+automatic continuation across those copies is not implemented yet.
 
 New `create --run` operations use the selected installation. Source `task run`
 delegates there or to a discovered retained execution; non-launching source

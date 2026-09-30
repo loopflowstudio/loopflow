@@ -17,6 +17,80 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+
+### This slice — normal promotion prerequisites, 2026-09-30 (blocked)
+
+Preserved the supplied terminal-forwarding repair, PTY fixture and documentation
+in `53fbf5435` before editing. The current pass adds a real-promotion regression
+and corrects the existing divergent-copy fixture; it changes no production routing.
+The full Done When and acceptance cases 1–15 remain unmet. Publication is not ready.
+
+**New source observation:** `promote_local_candidate` normally reuses a selected
+development database. When creating a development installation, it backs up
+`production_database_path()`, which need not equal `SwitchReceipt.prior.store`.
+Published promotion selects production again without transferring development
+execution. The receipt's `disposable_store_owned` records cleanup ownership; it
+contains neither an execution transfer nor the copied execution baseline. Thus
+`prior → target` alone cannot authorize choosing one of two Task copies. A receipt
+plus equal Task IDs also cannot detect later independent writes. Stop the dependent
+succession resolver change; do not add the equality shortcut rejected at review.
+This is source evidence, not a reproduced normal-promotion failure or a claim that
+all possible succession evidence has been exhausted.
+
+**Authored proof:** `normal_promotion_preserves_pending_task_review` starts from an
+empty disposable account using actual published promotion, authors cached planning
+and a captured operation → review → operation Flow, then starts the first real
+worker. At the pending review it invokes ordinary development promotion through
+`install promote --from-build`, checks both retained Flow positions, and requires
+public status and Session open to retain the original Task/review. The harness
+materializes migrations only in its container and builds separate release-provenance
+and development pairs. No fixture-written switch receipt substitutes for promotion.
+The existing empty-B test now creates a different captured invocation in its backup
+before asserting ambiguity; its earlier identical-copy interpretation was wrong.
+The obsolete executable and PTY regressions are preserved.
+
+**Observed verification:**
+
+- `uv run python scripts/test_task_installation.py` first reached the new test but
+  failed before promotion: development bytes correctly refused production data.
+  Replaced that invalid fixture with actual release-provenance bootstrap. A second
+  setup attempt used the member manifest for the workspace version and failed with
+  an empty version; corrected to root `Cargo.toml`.
+- The corrected attempt materialized all three planning drafts inside the container
+  and began the release-provenance build. Docker then stopped answering, including
+  a ten-second `docker info` and inspection of this exact container. No corrected
+  promotion, Task continuation or divergent-copy result was reached. The original
+  six-case receipt remains prior evidence, not a current-tree pass.
+- Interrupted the owned Python driver and its blocked local Docker clients. A
+  separate `docker rm --force` timed out after 30 seconds. Cleanup of container
+  `e6e1f0a11850241a3e010fe6e7acbd7d79054b1514c080e8664fd421ef3311a6` remains
+  unconfirmed. Do not restart the shared Docker service or claim the container is
+  absent. The harness now bounds cleanup to 30 seconds and limits Cargo to two jobs;
+  these changes are not evidence of the outage's cause or a successful retry.
+- Host formatting, all-target Clippy, Python syntax and whitespace checks passed.
+  No affected-suite or repository gate ran. No branch binary touched the host
+  installed Home; both attempted installation targets were container-owned.
+
+Compared with `53fbf5435`, this pass adds **0** and removes **0** non-test production
+Rust lines. All Rust edits are integration-test code; the harness, docs and scratch
+are excluded. No production consumer is replaced in this pass. The immediately
+preceding pass replaced Task/Session routing, so this is not two consecutive
+no-replacement implementation passes. Do not count preserved prior repairs as new
+implementation.
+
+`git merge-base --is-ancestor d61295196 HEAD` returned 1. The fetched main remains
+`a3820bf7e`; the received LOO-298 revision is present only on its feature refs.
+No fetch, integration, owner-branch edit or shared execution migration occurred.
+After Docker recovers, remove the exact stranded container and rerun the required
+harness. Finish the normal-copy ownership cut and two actual worker boundaries
+before locks/startup and broader discovery. Ask/ordinary Flow discovery must use
+the integrated stable owners; do not build another schema here. All local lifecycle,
+contextual Wave, managed-validity, DTO/action, migration and command-story obligations
+remain. Relationship repair stays with the existing Ask; outage/connection/baseline
+choices are unchanged. No publication, host promotion, Task completion or Flow
+navigation follows from this blocked proof.
+
+
 ### Slice review — installation continuity, 2026-09-30
 
 Reviewed the active diff from `a3820bf7e` through `b79d3cce4`, concentrating on

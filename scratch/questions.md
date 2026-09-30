@@ -66,6 +66,19 @@ loop-decide owns navigation; this review supplies approval and feedback only.
 
 ## Still open
 
+- **Installation copy provenance (implementation finding, 2026-09-30):** local
+  promotion reuses an existing development database by default; a new development
+  installation copies the production database, not necessarily its receipt's
+  `prior` database. Published promotion returns to production without transferring
+  development execution. `disposable_store_owned` records cleanup ownership, not
+  a Task transfer or a baseline for detecting subsequent divergence. Do not infer
+  execution succession from `prior → target` alone or repair this with equality
+  or timestamp selection. The real-promotion regression is authored but blocked
+  during its corrected build by an unresponsive Docker service; no normal-copy
+  continuation result has been observed. Resolve this technical ownership cut
+  with LOO-298's integrated owners before changing admission. No product policy
+  or new execution schema is selected by this finding.
+
 - **Project relationship repair authority:** public SDK schema inspection at
   `b37823be308a42f837277671f3ded66d33d92e6c` found Initiative join revisions, but no
   established deleted-join recovery contract or Project–Team relationship revision.

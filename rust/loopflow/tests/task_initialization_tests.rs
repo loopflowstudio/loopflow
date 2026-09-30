@@ -354,6 +354,229 @@ fn incompatible_branch_data_recommends_only_a_verified_retained_pair() {
 
 #[test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn normal_promotion_preserves_pending_task_review() {
+    assert!(std::path::Path::new("/.dockerenv").is_file());
+    let account = machine_install::account_home().unwrap();
+    assert_eq!(account, std::path::Path::new("/home/lf-task-proof"));
+    let home = account.join(".lf");
+    assert!(
+        !home.join("loopflow.db").exists(),
+        "proof requires no production database"
+    );
+    assert!(
+        !machine_install::root().unwrap().exists(),
+        "proof requires no selected installation"
+    );
+    let _env = EnvGuard::with_lf_home(&[], &home);
+    let repo = TestRepo::new();
+    repo.create_branch("jack/promotion-review");
+    let transport = tempfile::tempdir().unwrap();
+    let log = transport.path().join("worker.log");
+    let tmux = transport.path().join("tmux");
+    fs::write(&tmux, format!(
+        "#!/bin/sh\ncase \"$1\" in\nnew-session) for argument do last=$argument; done; sh -c \"$last\" >>'{}' 2>&1 & ;;\nhas-session) exit 1 ;;\nesac\n", log.display(),
+    )).unwrap();
+    fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
+    let command = |cli: &std::path::Path, args: &[&str]| {
+        let mut command = Command::new(cli);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_") {
+                command.env_remove(name);
+            }
+        }
+        command.current_dir(repo.path()).args(args).env(
+            "PATH",
+            format!(
+                "{}:{}",
+                transport.path().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+        command
+    };
+    let targets = tempfile::tempdir().unwrap();
+    let public_cli = targets.path().join("lf");
+    let public_daemon = targets.path().join("lfd");
+    let published = std::path::PathBuf::from(
+        std::env::var_os("TASK_PROOF_PUBLISHED_DIR")
+            .expect("harness supplies a release-provenance predecessor"),
+    );
+    let installed = command(
+        &published.join("lf"),
+        &[
+            "install",
+            "promote",
+            "--cli-target",
+            public_cli.to_str().unwrap(),
+            "--daemon-source",
+            published.join("lfd").to_str().unwrap(),
+            "--daemon-target",
+            public_daemon.to_str().unwrap(),
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(
+        installed.status.success(),
+        "published setup failed:\n{}\n{}",
+        String::from_utf8_lossy(&installed.stdout),
+        String::from_utf8_lossy(&installed.stderr)
+    );
+    let task = register_unrun_task(
+        &home,
+        repo.path(),
+        "jack/promotion-review",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut invocation =
+        loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
+    let review = invocation
+        .steps
+        .iter()
+        .find(|step| {
+            matches!(step,
+                loopflow::engine::ConcreteStep::Skill(skill) if skill.policy.human
+            )
+        })
+        .unwrap()
+        .clone();
+    let operation = loopflow::engine::ConcreteStep::Op(loopflow::engine::flow::ConcreteOp {
+        item: loopflow::engine::flow::Op {
+            command: "rebase".into(),
+            args: vec!["--plan".into()],
+        },
+        flow_parents: vec!["task-design".into()],
+    });
+    invocation.steps = vec![operation.clone(), review, operation];
+    runtime
+        .block_on(task.store.set_flow_position(
+            &task.task.id,
+            loopflow::durable::FlowPosition {
+                task_id: task.task.id.clone(),
+                invocation,
+                session_run_id: None,
+                ready_summary: None,
+                cursor: Default::default(),
+                version: 0,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                updated_at: time::OffsetDateTime::now_utc(),
+            },
+        ))
+        .unwrap();
+    let first = command(&public_cli, &["task", "run", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let position = loop {
+        let position = runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap()
+            .unwrap();
+        if position.session_run_id.is_some() && position.claim.is_none() {
+            break position;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "first worker did not reach review: {}",
+            fs::read_to_string(&log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(position.cursor.index, 1);
+    let review = position.session_run_id.as_ref().unwrap().as_str();
+    let before = command(&public_cli, &["session", "open", review, "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        before.status.success(),
+        "{}",
+        String::from_utf8_lossy(&before.stderr)
+    );
+    let before: serde_json::Value = serde_json::from_slice(&before.stdout).unwrap();
+
+    // Both installations use real promotion. The development switch includes
+    // preflight, SQLite backup, activation and settlement.
+    let promoted = command(
+        std::path::Path::new(env!("CARGO_BIN_EXE_lf")),
+        &[
+            "install",
+            "promote",
+            "--from-build",
+            env!("CARGO_BIN_EXE_lf"),
+            "--cli-target",
+            public_cli.to_str().unwrap(),
+            "--daemon-source",
+            env!("CARGO_BIN_EXE_lfd"),
+            "--daemon-target",
+            public_daemon.to_str().unwrap(),
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(
+        promoted.status.success(),
+        "promotion failed:\n{}\n{}",
+        String::from_utf8_lossy(&promoted.stdout),
+        String::from_utf8_lossy(&promoted.stderr)
+    );
+    let root = machine_install::root().unwrap();
+    let MachineInstallState::Settled(active) = machine_install::read_state(&root).unwrap() else {
+        panic!("promotion did not settle")
+    };
+    assert_ne!(active.selection.store, home.join("loopflow.db"));
+    assert!(!root.join("switch.json").exists());
+    let copied = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(active.selection.store.clone()),
+        ))
+        .unwrap();
+    assert_eq!(
+        runtime
+            .block_on(copied.flow_position(&task.task.id))
+            .unwrap()
+            .as_ref(),
+        Some(&position)
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap()
+            .as_ref(),
+        Some(&position)
+    );
+    let status = command(&public_cli, &["task", "status", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "normal promotion hid the pending Task:\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["execution"]["task_id"], task.task.id.to_string());
+    let reopened = command(&public_cli, &["session", "open", review, "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        reopened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopened.stderr)
+    );
+    let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
+    assert_eq!(reopened["id"], before["id"]);
+    assert_eq!(reopened["cwd"], before["cwd"]);
+}
+
+#[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_switch_preserves_task_review_without_store_overrides() {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -742,12 +965,22 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         fs::read_to_string(input_record).unwrap(),
         "continue the retained conversation"
     );
-    // Equal Task and Home identities in two physical copies are still separate
-    // execution records. A write may not pick one by timestamp or selection.
+    // A separately captured invocation makes this a real execution conflict,
+    // unlike an untouched installation backup of the same review.
     let mut divergent = Connection::open(&later_db).unwrap();
     Backup::new(&original, &mut divergent)
         .unwrap()
         .run_to_completion(100, Duration::from_millis(1), None)
+        .unwrap();
+    let mut conflicting_position = position.clone();
+    conflicting_position.invocation =
+        loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
+    conflicting_position.session_run_id = None;
+    conflicting_position.ready_summary = None;
+    conflicting_position.cursor = Default::default();
+    assert_ne!(conflicting_position.invocation.id, position.invocation.id);
+    runtime
+        .block_on(later_store.set_flow_position(&task.task.id, conflicting_position.clone()))
         .unwrap();
     let ambiguous = invoke(&["task", "run", "INF-123", "--json"]);
     assert!(!ambiguous.status.success());
@@ -760,10 +993,12 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .block_on(task.store.flow_position(&task.task.id))
         .unwrap()
         .is_none());
-    assert!(runtime
-        .block_on(later_store.flow_position(&task.task.id))
-        .unwrap()
-        .is_none());
+    assert_eq!(
+        runtime
+            .block_on(later_store.flow_position(&task.task.id))
+            .unwrap(),
+        Some(conflicting_position)
+    );
 }
 
 #[test]

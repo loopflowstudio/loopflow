@@ -632,8 +632,19 @@ uv run python scripts/test_task_installation.py
 uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
-This copies source into a disposable Linux container and creates an OS account
-whose installation records select the compiled CLI. An ELF trailer gives
+This copies source into a disposable Linux container, materializes its draft
+migrations and builds release-provenance and development CLI/daemon pairs with
+two Cargo jobs. The promotion case starts with real published promotion into an
+empty disposable account, runs an operation to a pending Task review, then invokes
+local promotion through `install promote --from-build`. It requires ordinary
+status and Session continuation to retain that review after the database copy.
+This new case is not yet verified: its first fixture used development bytes
+against production data and correctly failed; the corrected two-build attempt
+lost Docker service access during compilation. Two-worker succession remains
+additional acceptance work.
+
+The other cases author installation records selecting the compiled CLI/daemon.
+An ELF trailer gives
 the installed CLI a distinct identity: byte-identical copies are installed too,
 regardless of path. No host Home, credentials or installation is mounted.
 The harness also runs planning-only `task status` by identifier and UUID against
@@ -652,9 +663,12 @@ simulated; the child runs the real CLI with `rebase --plan`. A retained provider
 Session also opens through a real pseudoterminal; simulated OpenCode requires
 terminal stdin/stdout and records input from that terminal. This proves forwarding
 preserves interactive I/O, not configured provider acceptance. Incompatible drafts
-must leave execution DB/WAL bytes untouched, and two execution copies must refuse
-ambiguous continuation. Selection receipts are fixture-authored: this does not
-prove normal promotion, provider shells, recursive locks or delayed-child startup.
+must leave execution DB/WAL bytes untouched. The conflict case now captures a
+different invocation in the second copy before requiring ambiguous continuation
+to refuse; an identical backup alone is not divergent execution. This extension
+also awaits the disposable run. These selection receipts are fixture-authored;
+the separate promotion case owns actual installation proof. Neither covers
+provider shells, recursive locks or delayed-child startup.
 They prove Task continuation’s auto-merge revocation and review continuity, agent
 selection read from the installed database while branch reads remain private, and direct-open
 refusal without changing the owned development database/WAL bytes. Review

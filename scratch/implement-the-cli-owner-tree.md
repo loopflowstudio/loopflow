@@ -8,17 +8,18 @@ no landing is authorized.
 
 The Clap tree is the sole command catalog. Canonical commands live under their
 objects, and navigation derives unique owner omission from that tree. Remove
-predecessor parser variants rather than retain aliases. Fixed `mon` is the documented monitor spelling. Account has no short alias. Task delivery also works in an ordinary
+predecessor parser variants rather than retain aliases. `mon` is derived by unique-prefix resolution, not a fixed alias (Jack Heart, September 30). Account has no short alias. Task delivery also works in an ordinary
 repository without a registered Task.
 
-- Task owns PR, worktree, commit and rebase operations. Repo owns releases.
-- Monitor owns activity, ps, top, show, usage, list, active, replay and prune.
+- Task owns PR, `wt`, commit and rebase operations. Repo owns releases.
+- Monitor owns the selected monitoring operations. Jack retains ps/top;
+  the catalog leaves runs-derived active/watch/detail choices open at demo.
   Its overview joins existing Work, Session and process observations, reporting
   waiting, blocked, active and finished items with reason and next action.
   Missing observation never proves liveness or completion.
 - Account owns logins and routing. Its overview exposes usable connections,
-  observed capacity and attention per provider/account without refreshing secrets
-  or converting unknown/stale capacity to zero or unlimited.
+  observed capacity and attention per provider/account with LOO-340 live observation by default and explicit cached mode, never
+  converting unknown/stale capacity to zero or unlimited.
 - Foreground, background and remote launches resolve the access required by the
   selected work before effects. Inherited selection restrictions remain binding;
   a remote child checks destination capabilities, not origin readiness alone.
@@ -50,16 +51,16 @@ No competing model migration belongs here.
 
 ## This slice
 
-Move Repo release, tokens and CI ownership end to end from `abf449df5`.
-Replace root parser variants, preserving the existing release operations and
-runtime scope, source measurement, and Home-wide CI reader. Migrate typed Flow
-release dispatch, publisher scripts, Desktop source measurements, instructions,
-docs and tests together. Prove canonical discovery, saved release command
-resolution, real disposable source measurement and local release operations.
+Jack Heart's September 30 steers stop further owner moves. Redo concept verdicts
+against ongoing work before implementation resumes. The destination audit and
+per-view `runs` comparison now live in `cli-command-catalog.md`; every baseline
+command and argument names its concept and following Work. Open demo decisions
+remain marked instead of being silently implemented.
 
-Home, Wave and Session moves, LOO-298 integration before Monitor, local discovery,
-child readiness, a real first-provider-result walkthrough and Jack's demo remain
-required. This slice does not authorize landing or establish whole-Task readiness.
+Next apply Jack's independently selected corrections: retain `wt`, shorten guide
+and skill commands through actual unique resolution, and add a CI ambiguity proof.
+Then integrate LOO-298/334/340 and apply the concept merges/deletions vertically.
+The complete target, real provider journey and Jack's demo remain required.
 
 ## Slice ledger
 
@@ -447,3 +448,29 @@ The next work is that verdict revision and those corrections. Home/Wave/Session
 moves, LOO-298/Monitor, discovery, child readiness, real provider proof and demo
 remain required, subject to the revised concept map. No publication, landing,
 Task completion or Flow navigation is authorized by this checkpoint.
+
+### Destination-aware cull revision · 2026-09-30
+
+Jack Heart's new direction supersedes the earlier rename-only trajectory. The
+catalog audit records current roadmap and seven open PRs, all repository Wave
+memories, sibling designs and their contradictions. The correct read used this
+Run manifest's runtime with inherited Home; LF_BIN's different-store result was
+incomplete. No installed data or sibling checkout was edited.
+
+142 baseline command concepts and 535 argument roles now have dispositions:
+48/66/17/11 keep/rename/merge/delete commands, 397/1/90/47 arguments. These are
+proposed/adopted targets with explicit open integration/demo choices, not compiled
+reductions. Actual counts remain 139 commands below root, 436 flags, 92 positionals
+and zero aliases. LOO-298/340 additions require a new integrated catalog before
+final counts. Every merge/delete is listed in the rendered catalog.
+
+Source inspection disproved three preliminary cuts: top is explicitly retained
+by Jack; saved FlowSession list/show cannot merge into definition help; and
+--as is the ordinary execution declaration, not redundant with Task-only launch.
+LOO-332 also invalidates adding --no-wait to preserve the old watcher. The final
+catalog corrects all four. LOO-334's local-planning scratch differs from Jack's
+newer existence direction; no private DB is accepted as current Task truth here.
+
+This pass changes design/tooling only after checkpoint 23c588154 (+0/−0 production
+Rust). No behavioral runtime pass or completed cull is claimed. No further owner
+move, publication, landing, Task completion or Flow navigation occurred.

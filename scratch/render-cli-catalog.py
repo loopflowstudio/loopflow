@@ -30,20 +30,22 @@ def main() -> None:
 
     out = [old.split('## Commands', 1)[0].rstrip(), '', '## Commands', '',
            'P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.', '',
-           '| Row | Canonical path | Target owner | Purpose | Callers / source | Overlap | Verdict → target |',
-           '|---|---|---|---|---|---|---|']
+           '| Row | Canonical path | Target owner | Concept owned | Callers / source | Rationale | Verdict → target | Follows / decision |',
+           '|---|---|---|---|---|---|---|---|']
     for row in commands.values():
         overlap = row['overlap']
         if overlap.startswith('Owns '):
             overlap = 'Distinct operation described in purpose; no equivalent identified.'
         values = [row['row_id'], row['path'] + (' (hidden)' if row['hidden'] else ''),
-                  row['owner'], row['description'], evidence(row) + f"; P:{row['source_line']}",
-                  note(overlap), row['verdict'] + ' → ' + row['target']]
+                  row['owner'], row['concept'], evidence(row) + f"; P:{row['source_line']}",
+                  note(overlap), row['verdict'] + ' → ' + row['target'], row['follows'] + '; ' + row['decision_state']]
         out.append('| ' + ' | '.join(_cell(v) for v in values) + ' |')
+    out += ['', '## Merge and deletion checklist', '', '| Row | Former command | Verdict / surviving owner |', '|---|---|---|']
+    out.extend('| ' + ' | '.join(_cell(v) for v in [r['row_id'], r['path'], r['verdict'] + ' → ' + r['target']]) + ' |' for r in data['commands'] if r['verdict'] in ('merge into', 'delete'))
     out += ['', '## Options and positional arguments', '',
             'Primary short and long flags share one row. Hidden and automatic arguments are included; required/default metadata remains in the raw JSON. Purpose and distinct effect justify retained options; literal caller absence alone is not evidence of a dead public input.', '',
-            '| Row | Canonical path and argument | Owner / callers | Purpose | Overlap / source | Verdict → target |',
-            '|---|---|---|---|---|---|']
+            '| Row | Canonical path and argument | Owner / callers | Concept / distinct input | Rationale / source | Verdict → target | Follows / decision |',
+            '|---|---|---|---|---|---|---|']
     for row in data['arguments']:
         owner = commands[' '.join(row['path'])]
         label = row['canonical']
@@ -51,8 +53,8 @@ def main() -> None:
             label += f" / -{row['short']}"
         if row['hidden']:
             label += ' (hidden)'
-        values = [row['row_id'], label, owner['row_id'], row['description'],
-                  note(row['overlap']) + f"; P:{row['source_line']}", row['verdict'] + ' → ' + row['target']]
+        values = [row['row_id'], label, owner['row_id'], row['concept'],
+                  note(row['overlap']) + f"; P:{row['source_line']}", row['verdict'] + ' → ' + row['target'], row['follows'] + '; ' + row['decision_state']]
         out.append('| ' + ' | '.join(_cell(v) for v in values) + ' |')
     out += ['', '## Rationale key', '']
     out.extend(f'- **{key}**: {text}' for text, key in notes.items())

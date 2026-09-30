@@ -9,3 +9,16 @@
 - LOO-298 owns Exec/AgentSession/FlowSession. Local history provides naming
   evidence, but that model is absent from this branch's base. Monitor must
   integrate its owners before replacing Run inspection; no relabeling shim.
+
+- Jack Heart's September 30 steers supersede rename-only implementation: cull
+  concepts against LOO-298/334/339/340 first; guides use shortest unique commands;
+  keep wt, top and ps; mon is a unique prefix, not an alias. The catalog's
+  destination audit records each boundary and leaves runs view cuts open at demo.
+- LOO-334 scratch still discusses a private local planning store; Jack's newer
+  direction says Linear/Git establish Tasks and the DB records execution. Follow
+  the newer instruction; reconcile integration without inventing Task records.
+- LOO-329/330 sibling drafts disagree on rename-preserved Wave identity. Retain
+  the rename operation's concept but do not decide their identity contract here.
+- LOO-340 has no checkout in the current roadmap. Its live-default account,
+  machine-store, provider-bundle and explicit banked-reset requirements are
+  known from its Task directive; implementation availability is not established.

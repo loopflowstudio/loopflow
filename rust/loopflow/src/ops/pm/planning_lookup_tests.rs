@@ -258,6 +258,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let missing_fields = [
+        "issue",
         "project",
         "description",
         "project.initiatives",
@@ -271,11 +272,18 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     ];
     for field in missing_fields {
         let mut incomplete = issue(project());
-        let object = &mut incomplete["data"]["issue"];
-        if let Some(field) = field.strip_prefix("project.") {
-            object["project"].as_object_mut().unwrap().remove(field);
+        if field == "issue" {
+            incomplete["data"].as_object_mut().unwrap().remove(field);
+        } else if let Some(field) = field.strip_prefix("project.") {
+            incomplete["data"]["issue"]["project"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
         } else {
-            object.as_object_mut().unwrap().remove(field);
+            incomplete["data"]["issue"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
         }
         responses.extend([team_response(), json_response(StatusCode::OK, incomplete)]);
     }

@@ -17,6 +17,63 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Slice review — 2026-09-30
+
+Reviewed the branch diff from `a3820bf7e` through `dc010b78c`, with the current
+chapter-completion slice measured from `44b2ec74e`. **Local slice passes; the
+full single-PR Done When remains unfulfilled.**
+
+- **Pass:** `apply_rotation` transfers/disposes work, completes predecessors, then
+  archives and records their retirement through the existing chapter operation.
+  Refused completion and lost completion/archive responses preserve retry and
+  dated history. The sole consumer now calls `complete_and_archive_project`;
+  `archive_project` is deleted. Compression also removes the redundant
+  `store_pm_snapshot_with_store` wrapper and reuses one refresh/store path.
+- **Fixed:** a GraphQL response containing `data: {}` decoded as `issue: null`,
+  incorrectly reporting absence and invalidating cached planning. Extending
+  `omitted_detail_fields_do_not_clear_known_planning` reproduced
+  `task "FIX-1" is absent from repository planning`. The existing decoder now
+  requires the nullable `issue` field. A malformed response fails acquisition
+  while preserving the prior record and age; explicit null retains its existing
+  absence semantics. This adds no storage or admission policy.
+- **Executed proof:** `cargo test -p loopflow --lib ops::pm::planning_lookup_tests`
+  passed all 11 cases after the repair; the focused omission test failed before
+  it. `cargo test -p loopflow --lib chapter_rotation_previews_retries_and_preserves_dated_history -- --nocapture`
+  passed one stateful case, and
+  `cargo test -p loopflow --lib complete_and_archive_project` passed two cases.
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and
+  `git diff --check` passed. These use disposable stores and simulated Linear;
+  no configured Project was completed. Earlier public-CLI, migration and DTO
+  receipts remain supporting evidence, not reruns or full acceptance.
+- **Measured replacement:** `44b2ec74e` → `01d4894a2` is +153/−6 production Rust
+  lines; through `dc010b78c`, +158/−23 across chapter, Linear and PM operations.
+  This review adds one production attribute (+1/−0). Counts include non-test
+  physical lines and exclude test modules/files, docs, scratch and generated
+  artifacts. The previous implementation pass `34a8eb7b2` changed only research
+  notes and replaced no consumer; the current pass replaces chapter archival.
+  Thus the two-consecutive-no-replacement blocker does not apply.
+
+**Remaining findings and next cut:** source still couples runtime/database in
+`task_destination::destination` and `resolve_current_home_lf_binary`, and releases
+the startup claim after the ten-second observation error. `RegistryQuery.taskStatus`
+has no app caller yet; planning DTO tests do not establish execution/action parity.
+Switch ordinary Task status/run and Session continuation onto bounded execution
+discovery and independent runtime selection, using LOO-298's received owners.
+First add acceptance case 15 to the disposable installation harness, then prove
+the unchanged review/invocation across selection and the selected next worker.
+Cases 6–8 retain recursive-lock and delayed-child obligations. Local lifecycle,
+contextual Wave imports, command-story handoff and all other acceptance cases
+remain required. Relationship repair still awaits the recorded decision; outage
+and transition choices remain open and were not inferred here.
+
+`uv run python scripts/test_task_installation.py` was not rerun: its present five
+cases omit the required installation-switch/runtime/lock scenarios. No environment
+failure is claimed; the missing proof is implementation work. Jack Heart's full
+code-completion publication boundary is unmet, so this review does not publish,
+land, complete the Task or choose Flow navigation. Return this evidence to the
+saved decision step; do not repeat the finished planning/chapter slice as the
+next implementation pass.
+
 ### This slice — predecessor completion, 2026-09-30
 
 Continued from `44b2ec74e`, preserving the supplied unfinished chapter/Linear

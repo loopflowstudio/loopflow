@@ -1908,6 +1908,7 @@ struct ProjectRef {
 
 #[derive(Deserialize)]
 struct IssueOwnershipData {
+    #[serde(deserialize_with = "Option::deserialize")]
     issue: Option<IssueNode<ProjectNode>>,
 }
 

@@ -1496,6 +1496,9 @@ impl CodexAuthBroker {
         let mut command = Command::new("codex");
         command.env("CODEX_HOME", &self.codex_home);
         command
+            .env_remove("CODEX_ACCESS_TOKEN")
+            .env_remove("OPENAI_API_KEY");
+        command
     }
 
     fn add_file_store_override(&self, command: &mut Command) {
@@ -1508,7 +1511,9 @@ impl CodexAuthBroker {
         let mut command = self.command();
         self.add_file_store_override(&mut command);
         command.arg("app-server");
-        refresh_codex_access_token_with_command(&mut command).await
+        refresh_codex_access_token_with_command(&mut command)
+            .await
+            .map(|_| ())
     }
 }
 
@@ -2675,6 +2680,84 @@ fn codex_token_from_credentials_json(json: &serde_json::Value) -> Option<Provide
     })
 }
 
+pub(crate) fn codex_identity_from_home(
+    home: &Path,
+) -> Option<crate::provider_account::identity::AccountIdentity> {
+    let raw = fs::read(home.join("auth.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    let id_token = json
+        .get("id_token")
+        .or_else(|| json.pointer("/tokens/id_token"))?
+        .as_str()?;
+    let claims = jwt_claims(id_token)?;
+    let email = claims.get("email")?.as_str()?.trim();
+    let subject = claims
+        .get("sub")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            claims
+                .get("https://api.openai.com/auth")?
+                .get("chatgpt_user_id")?
+                .as_str()
+        })?
+        .trim();
+    if email.is_empty() || subject.is_empty() {
+        return None;
+    }
+    Some(crate::provider_account::identity::AccountIdentity {
+        email: email.into(),
+        subject: subject.into(),
+    })
+}
+
+pub(crate) async fn verify_codex_identity(
+    home: &Path,
+) -> Result<
+    (
+        crate::provider_account::identity::AccountIdentity,
+        Option<String>,
+    ),
+    AuthError,
+> {
+    let broker = CodexAuthBroker::for_profile(home.to_path_buf());
+    let mut command = broker.command();
+    broker.add_file_store_override(&mut command);
+    command.arg("app-server");
+    let response = refresh_codex_access_token_with_command(&mut command).await?;
+    let identity = codex_identity_from_account(home, &response).map_err(|message| {
+        AuthError::CommandFailed {
+            provider: Provider::Codex,
+            message,
+        }
+    })?;
+    let plan = response
+        .pointer("/account/planType")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok((identity, plan))
+}
+
+pub(crate) fn codex_identity_from_account(
+    home: &Path,
+    response: &serde_json::Value,
+) -> Result<crate::provider_account::identity::AccountIdentity, String> {
+    let identity = codex_identity_from_home(home).ok_or_else(|| {
+        "Codex credential has no email and per-user identity; reconnect".to_string()
+    })?;
+    let email = response
+        .pointer("/account/email")
+        .and_then(serde_json::Value::as_str);
+    if !email.is_some_and(|email| email.eq_ignore_ascii_case(&identity.email)) {
+        return Err(format!(
+            "Codex account/read reports {}; credential reports {}; reconnect",
+            email.unwrap_or("no login"),
+            identity.email
+        ));
+    }
+    Ok(identity)
+}
+
 fn codex_login_from_auth(json: &serde_json::Value) -> Option<String> {
     let id_token = json
         .get("id_token")
@@ -2702,7 +2785,9 @@ async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> 
     broker.refresh_access_token().await
 }
 
-async fn refresh_codex_access_token_with_command(command: &mut Command) -> Result<(), AuthError> {
+async fn refresh_codex_access_token_with_command(
+    command: &mut Command,
+) -> Result<serde_json::Value, AuthError> {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2796,7 +2881,7 @@ async fn write_codex_auth_request(
 async fn read_codex_auth_response(
     stdout: &mut BufReader<tokio::process::ChildStdout>,
     request_id: i64,
-) -> Result<(), AuthError> {
+) -> Result<serde_json::Value, AuthError> {
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             let mut line = String::new();
@@ -2826,7 +2911,10 @@ async fn read_codex_auth_response(
                     message: "app-server rejected the proactive token refresh".to_string(),
                 });
             }
-            return Ok(());
+            return Ok(message
+                .get("result")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null));
         }
     })
     .await

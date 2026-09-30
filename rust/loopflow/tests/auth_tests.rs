@@ -106,6 +106,9 @@ fn account(account_id: &str, home: std::path::PathBuf) -> ProviderAccount {
         login_email: Some(
             loopflow::profile::EmailAddress::parse(&format!("{account_id}@example.com")).unwrap(),
         ),
+        observed_email: None,
+        observed_subject: None,
+        observed_plan: None,
         credential_state: CredentialState::Connected,
         routing_state: RoutingState::Automatic,
         plan: None,
@@ -165,26 +168,31 @@ fn status_verify_separates_cached_state_from_live_provider_state() {
     let revoked_home = home.path().join("accounts/codex/revoked");
     std::fs::create_dir_all(&active_home).expect("active home");
     std::fs::create_dir_all(&revoked_home).expect("revoked home");
-    for path in [&active_home, &revoked_home] {
-        std::fs::write(
-            path.join("auth.json"),
-            r#"{"tokens":{"access_token":"fixture"}}"#,
-        )
-        .unwrap();
+    for (path, email) in [
+        (&active_home, "active@example.com"),
+        (&revoked_home, "revoked@example.com"),
+    ] {
+        write_identity(path, email, email);
     }
     let codex = r#"#!/bin/sh
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r account
+case "$CODEX_HOME" in
+  */active) echo '{"id":2,"result":{"account":{"email":"active@example.com","planType":"team"}}}';;
+  */revoked) echo '{"id":2,"result":{"account":{"email":"revoked@example.com"}}}';;
+esac
 read -r limits
 case "$CODEX_HOME" in
   */active)
     if [ "$LF_TEST_EMPTY_USAGE" = 1 ]; then
-      echo '{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"planType":"team"}}}'
+      echo '{"jsonrpc":"2.0","id":3,"result":{"rateLimits":{"planType":"team"}}}'
     else
-      echo '{"jsonrpc":"2.0","id":2,"result":{"rateLimits":{"planType":"team","primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1900000000}}}}'
+      echo '{"jsonrpc":"2.0","id":3,"result":{"rateLimits":{"planType":"team","primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1900000000}}}}'
     fi;;
   */revoked)
-    echo '{"jsonrpc":"2.0","id":2,"error":{"code":401,"message":"token_invalidated"}}';;
+    echo '{"jsonrpc":"2.0","id":3,"error":{"code":401,"message":"token_invalidated"}}';;
   *) exit 9;;
 esac
 "#;
@@ -297,7 +305,7 @@ esac
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("auth: active (verified)"));
-    assert!(stdout.contains("auth: needs login (verified)"));
+    assert!(stdout.contains("auth: needs login (identity or credential rejected)"));
     assert!(stdout.contains("recover: lf auth connect codex revoked@example.com"));
     let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
     let revoked = runtime
@@ -430,11 +438,7 @@ esac
         before
     );
     // An in-progress login is unavailable evidence, not a failure of the report.
-    std::fs::write(
-        home.path().join("accounts/codex/active/auth.json"),
-        r#"{"tokens":{"access_token":"fixture"}}"#,
-    )
-    .unwrap();
+    std::fs::write(&credential_path, &credentials_before).unwrap();
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -500,15 +504,7 @@ esac
         .unwrap()
         .unwrap();
     let cleared = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args([
-            "auth",
-            "set",
-            "codex",
-            "active@",
-            "--clear-cooldown",
-            "--login-email",
-            "renamed@example.com",
-        ])
+        .args(["auth", "set", "codex", "active@", "--clear-cooldown"])
         .output()
         .unwrap();
     assert!(
@@ -524,7 +520,7 @@ esac
     assert_eq!(after_clear.cooldown_reason, None);
     assert_eq!(
         after_clear.login_email.as_ref().unwrap().as_str(),
-        "renamed@example.com"
+        "active@example.com"
     );
     after_clear.login_email = before_clear.login_email.clone();
     after_clear.cooldown_until = before_clear.cooldown_until;
@@ -538,8 +534,8 @@ esac
         observed
     );
     for args in [
-        vec!["auth", "set", "codex", "renamed@", "--routing", "automatic"],
-        vec!["auth", "route", "set", "codex", "renamed@", "--default"],
+        vec!["auth", "set", "codex", "active@", "--routing", "automatic"],
+        vec!["auth", "route", "set", "codex", "active@", "--default"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .current_dir(home.path())
@@ -575,7 +571,7 @@ esac
         .unwrap();
     assert_eq!(codex["scope"], "default");
     assert_eq!(codex["candidates"][0]["account_id"], "active");
-    assert_eq!(codex["candidates"][0]["login"], "renamed@example.com");
+    assert_eq!(codex["candidates"][0]["login"], "active@example.com");
     assert_eq!(
         runtime
             .block_on(store.list_provider_accounts(None))
@@ -584,7 +580,7 @@ esac
     );
     let unscoped = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["auth", "route", "set", "codex", "renamed@"])
+        .args(["auth", "route", "set", "codex", "active@"])
         .output()
         .unwrap();
     assert!(!unscoped.status.success());
@@ -615,4 +611,279 @@ fn cached_auth_leaves_an_absent_home_absent() {
         .iter()
         .all(|r| r["scope"] == "local" && r["cached_credential_state"] == "uninspected"));
     assert!(!lf_home.exists());
+}
+
+fn write_identity(home: &std::path::Path, email: &str, subject: &str) {
+    std::fs::create_dir_all(home).unwrap();
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+        serde_json::json!({"email":email,"sub":subject,"https://api.openai.com/auth":{"chatgpt_account_id":"shared-team"}}).to_string());
+    std::fs::write(
+        home.join("auth.json"),
+        serde_json::json!({"tokens":{
+            "access_token":"fixture-token", "id_token":format!("h.{claims}.s")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn managed_identity_public_status_connect_import_and_relabel() {
+    let home = tempfile::tempdir().unwrap();
+    let codex = r#"#!/bin/sh
+[ "$1" = '-c' ] && [ "$2" = 'cli_auth_credentials_store="file"' ] || exit 19
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r account
+printf '{"id":2,"result":{"account":{"email":"%s","planType":"pro"}}}\n' "${LF_TEST_SERVER_EMAIL:-engineering@example.com}"
+read -r limits || exit 0
+echo '{"id":3,"result":{"rateLimits":{}}}'
+"#;
+    let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let engineering = account(
+        "engineering",
+        home.path().join("accounts/codex/engineering"),
+    );
+    let personal = account("personal", home.path().join("accounts/codex/personal"));
+    for account in [&engineering, &personal] {
+        runtime
+            .block_on(store.upsert_provider_account(account))
+            .unwrap();
+        write_identity(
+            account.home.as_ref().unwrap(),
+            "personal@example.com",
+            "personal-user",
+        );
+    }
+    let status = |verify: bool, server_email: &str| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+        cmd.args(["auth", "status", "codex", "--json"]);
+        if verify {
+            cmd.arg("--verify");
+        } else {
+            cmd.env("PATH", "/nonexistent");
+        }
+        let out = cmd
+            .env("LF_TEST_SERVER_EMAIL", server_email)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        report["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["scope"] == "managed")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for verify in [false, true] {
+        let rows = status(verify, "personal@example.com");
+        assert!(rows.iter().all(|row| row["verification"] == "rejected"));
+        assert_eq!(rows[0]["login"], "personal@example.com");
+        assert!(rows[0]["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("engineering@example.com"));
+        assert!(rows[1]["diagnostic"]
+            .as_str()
+            .unwrap()
+            .contains("share login"));
+    }
+    // Distinct people in the same workspace are accepted. The server is definitive.
+    write_identity(
+        engineering.home.as_ref().unwrap(),
+        "engineering@example.com",
+        "engineering-user",
+    );
+    let rows = status(true, "wrong@example.com");
+    assert_eq!(rows[0]["verification"], "rejected");
+    assert!(rows[0]["diagnostic"]
+        .as_str()
+        .unwrap()
+        .contains("wrong@example.com"));
+    let rows = status(true, "engineering@example.com");
+    assert_eq!(rows[0]["verification"], "accepted");
+    assert_eq!(rows[0]["observed_plan"], "pro");
+    assert!(rows[0]["verified_windows"].as_array().unwrap().is_empty());
+    assert_eq!(status(false, "unused")[0]["observed_plan"], "pro");
+    let installed = runtime
+        .block_on(store.get_provider_account("codex", &engineering.account_id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        installed.observed_subject.as_deref(),
+        Some("engineering-user")
+    );
+
+    let relabel = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "auth",
+            "set",
+            "codex",
+            "engineering@",
+            "--login-email",
+            "wrong@example.com",
+        ])
+        .output()
+        .unwrap();
+    assert!(!relabel.status.success());
+    assert!(String::from_utf8_lossy(&relabel.stderr).contains("cannot relabel"));
+    assert_eq!(
+        runtime
+            .block_on(store.get_provider_account("codex", &engineering.account_id))
+            .unwrap()
+            .unwrap(),
+        installed
+    );
+    let before = std::fs::read(engineering.home.as_ref().unwrap().join("auth.json")).unwrap();
+    let imported = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "auth",
+            "connect",
+            "codex",
+            "engineering@example.com",
+            "--import",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert_eq!(
+        std::fs::read(engineering.home.as_ref().unwrap().join("auth.json")).unwrap(),
+        before
+    );
+    // A second home holding this login blocks import and names both owners.
+    write_identity(
+        personal.home.as_ref().unwrap(),
+        "engineering@example.com",
+        "engineering-user",
+    );
+    let duplicate = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args([
+            "auth",
+            "connect",
+            "codex",
+            "engineering@example.com",
+            "--import",
+        ])
+        .output()
+        .unwrap();
+    assert!(!duplicate.status.success());
+    let error = String::from_utf8_lossy(&duplicate.stderr);
+    assert!(
+        error.contains("engineering")
+            && error.contains("personal")
+            && error.contains("share login")
+    );
+    assert_eq!(
+        std::fs::read(engineering.home.as_ref().unwrap().join("auth.json")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn account_read_failure_preserves_credentials_unless_revoked() {
+    let home = tempfile::tempdir().unwrap();
+    let codex = r#"#!/bin/sh
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r account
+printf '{"id":2,"error":{"code":%s,"message":"fixture failure"}}\n' "$LF_TEST_ACCOUNT_ERROR"
+read -r limits
+echo '{"id":3,"result":{"rateLimits":{}}}'
+"#;
+    let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let active = account("active", home.path().join("accounts/codex/active"));
+    write_identity(
+        active.home.as_ref().unwrap(),
+        "active@example.com",
+        "active",
+    );
+    runtime
+        .block_on(store.upsert_provider_account(&active))
+        .unwrap();
+
+    for (code, verification, state) in [
+        (500, "unavailable", CredentialState::Connected),
+        (401, "rejected", CredentialState::Missing),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["auth", "status", "codex", "--verify", "--json"])
+            .env("LF_TEST_ACCOUNT_ERROR", code.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let row = report["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["scope"] == "managed")
+            .unwrap();
+        assert_eq!(row["verification"], verification);
+        let saved = runtime
+            .block_on(store.get_provider_account("codex", &active.account_id))
+            .unwrap()
+            .unwrap();
+        let mut expected = active.clone();
+        expected.credential_state = state;
+        expected.updated_at = saved.updated_at;
+        assert_eq!(saved, expected);
+    }
+}
+
+#[test]
+fn managed_connect_requires_email_before_starting_browser() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let mut unlabeled = account("legacy", home.path().join("accounts/codex/legacy"));
+    unlabeled.login_email = None;
+    runtime
+        .block_on(store.upsert_provider_account(&unlabeled))
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["auth", "connect", "codex", "legacy"])
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--login-email"));
+    assert_eq!(
+        runtime
+            .block_on(store.get_provider_account("codex", &unlabeled.account_id))
+            .unwrap(),
+        Some(unlabeled)
+    );
 }

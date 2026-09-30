@@ -126,6 +126,63 @@ remain deferred; the reported Linux oversized-prompt defect is outside this scop
 Readiness, fixture success and publication authorize neither demo acceptance nor
 Flow navigation, Task completion, provider mutation or installation promotion.
 
+## Managed account identity (LOO-339, branch evidence 2026-09-30)
+
+Jack Heart selected the identity core for [LOO-339](https://linear.app/loopflow/issue/LOO-339)
+delivery and authorized landing and a patch release without review. The earlier
+expanded scope is superseded: [LOO-340](https://linear.app/loopflow/issue/LOO-340)
+owns shared account state across Homes, current status by default, browser
+suppression, Claude cached identity/routing, Flow account bundles and reset credits.
+[LOO-338](https://linear.app/loopflow/issue/LOO-338) owns the command rename;
+this branch retains `lf auth`. Authorization is not evidence of shipment.
+
+The [design](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on.md)
+and [review and gate evidence](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on-review.md)
+are preserved in local history before scratch clearing; remote availability was
+not checked. Current behavior belongs in [subscriptions](../../docs/subscriptions.md).
+
+- **Usage acceptance cannot establish the intended login.** The incident found
+  wrong native logins displayed as verified under configured labels. Shared
+  validation in `provider_account/identity.rs` compares expected email and
+  per-user subject, never shared workspace identity. Codex cached status, routing
+  and readiness inspect current credentials; connect/import and explicit
+  verification also compare `account/read` email with the file identity using
+  file-store mode. Claude connect/import and verification use profile email/UUID,
+  never stale `.claude.json`.
+  Public auth tests cover disagreement, duplicates and relabel refusal; identity
+  tests retain shared-workspace/different-user acceptance.
+- **Reconnect must preserve the live login while authorization waits.** The
+  existing staged connect path installs only after identity and duplicate checks;
+  its paused-browser regression reads the unchanged live credential before
+  completion. The provider-directory install lock serializes Loopflow installs,
+  not native provider writers. This does not prove refresh coordination or sole
+  browser ownership: Codex can still open an extra tab on macOS.
+- **An unavailable identity service is not credential rejection.** `poll_codex`
+  classifies both account and usage RPC errors before decoding identity. The
+  public `account_read_failure_preserves_credentials_unless_revoked` regression
+  proves a 500 preserves connected state while a 401 records missing credentials,
+  retaining other account facts. A plan is separate from quota: observed Pro
+  precedes Plus only among healthy automatic candidates; explicit selection and
+  Session affinity remain authoritative. JSON windows retain dated observations;
+  expired text windows show unknown, not new capacity.
+- **Fixture isolation includes executable selection.** Gate launched real Claude
+  because the harness prepended inherited `LF_BIN`'s directory ahead of stubs.
+  [TESTING.md](../../TESTING.md#test-without-an-installed-loopflow) now requires
+  clearing inherited `LF_*` authority and pinning the compiled source CLI for
+  managed-Run gate invocations. An isolated Home alone is insufficient. The
+  interrupted run remains failed evidence; accidental native credential reads
+  or refresh effects were not audited.
+
+Recorded final isolated materialized Rust checks passed 2,192 tests (13 skipped),
+including seven public auth tests; website passed 78 (three skipped). Formatting,
+all-target Clippy, architecture, migration history and fresh-Home JSON checks
+passed. The original gate receipt remains failed after a screenshot timeout;
+separate successful checks do not rewrite it or provide a reusable final-tree
+receipt. This curation reruns no behavioral checks. Synthetic proofs establish
+neither live OAuth nor installed acceptance. State remains Home-local; recorded
+replay cannot recover another Home's custom database path. LOO-340 owns shared
+authority; this curation authorizes no installed-store repair.
+
 ## Account auth consolidation (LOO-320, branch evidence 2026-09-27)
 
 [Make account login, usage, and auth output clear and reliable · LOO-320](https://linear.app/loopflow/issue/LOO-320)

@@ -714,6 +714,31 @@ impl Store {
         .await
     }
 
+    pub async fn record_provider_account_identity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        email: &str,
+        subject: &str,
+        plan: Option<&str>,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let email = email.to_string();
+        let subject = subject.to_string();
+        let plan = plan.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_identity(
+                &provider,
+                &account_id,
+                &email,
+                &subject,
+                plan.as_deref(),
+            )
+        })
+        .await
+    }
+
     pub async fn get_provider_account(
         &self,
         provider: &str,
@@ -1061,6 +1086,9 @@ pub struct ProviderAccount {
     pub account_id: ProviderAccountId,
     pub home: Option<PathBuf>,
     pub login_email: Option<EmailAddress>,
+    pub observed_email: Option<String>,
+    pub observed_subject: Option<String>,
+    pub observed_plan: Option<String>,
     pub credential_state: CredentialState,
     pub routing_state: RoutingState,
     pub plan: Option<String>,
@@ -3381,6 +3409,9 @@ mod tests {
             account_id: ProviderAccountId::parse(account_id).unwrap(),
             home: Some(PathBuf::from(format!("/accounts/{provider}/{account_id}"))),
             login_email: Some(EmailAddress::parse(&format!("{account_id}@example.com")).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
             plan: None,

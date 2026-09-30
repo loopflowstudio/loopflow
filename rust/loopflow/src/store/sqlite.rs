@@ -233,6 +233,9 @@ fn read_provider_account(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<Pr
             account_id,
             home,
             login_email,
+            observed_email: row.get(14)?,
+            observed_subject: row.get(15)?,
+            observed_plan: row.get(16)?,
             credential_state,
             routing_state,
             plan,
@@ -1040,14 +1043,17 @@ impl SqliteStore {
                 provider, account_id, home, login_email, credential_state,
                 routing_state, plan, paid_through, utilization_percent,
                 cooldown_until, cooldown_reason, last_selected_at, created_at,
-                updated_at
+                updated_at, observed_email, observed_subject, observed_plan
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14
+                ?14, ?15, ?16, ?17
              )
              ON CONFLICT(provider, account_id) DO UPDATE SET
                 home = excluded.home,
                 login_email = excluded.login_email,
+                observed_email = excluded.observed_email,
+                observed_subject = excluded.observed_subject,
+                observed_plan = excluded.observed_plan,
                 credential_state = excluded.credential_state,
                 routing_state = excluded.routing_state,
                 plan = excluded.plan,
@@ -1075,6 +1081,33 @@ impl SqliteStore {
                 account.last_selected_at,
                 account.created_at,
                 account.updated_at,
+                account.observed_email,
+                account.observed_subject,
+                account.observed_plan,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_provider_account_identity(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        email: &str,
+        subject: &str,
+        plan: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE provider_accounts SET observed_email = ?3, observed_subject = ?4,
+            observed_plan = ?5, updated_at = ?6 WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                email,
+                subject,
+                plan,
+                now_unix()
             ],
         )?;
         Ok(())
@@ -1090,7 +1123,7 @@ impl SqliteStore {
             "SELECT provider, account_id, home, login_email, credential_state,
                     routing_state, plan, paid_through, utilization_percent,
                     cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at
+                    created_at, updated_at, observed_email, observed_subject, observed_plan
              FROM provider_accounts
              WHERE provider = ?1 AND account_id = ?2",
         )?;
@@ -1113,7 +1146,7 @@ impl SqliteStore {
                 "SELECT provider, account_id, home, login_email, credential_state,
                         routing_state, plan, paid_through, utilization_percent,
                         cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at
+                        created_at, updated_at, observed_email, observed_subject, observed_plan
                  FROM provider_accounts
                  WHERE provider = ?1
                  ORDER BY provider, account_id"
@@ -1122,7 +1155,7 @@ impl SqliteStore {
                 "SELECT provider, account_id, home, login_email, credential_state,
                         routing_state, plan, paid_through, utilization_percent,
                         cooldown_until, cooldown_reason, last_selected_at,
-                        created_at, updated_at
+                        created_at, updated_at, observed_email, observed_subject, observed_plan
                  FROM provider_accounts
                  ORDER BY provider, account_id"
             }
@@ -1612,7 +1645,7 @@ impl SqliteStore {
             "SELECT provider, account_id, home, login_email, credential_state,
                     routing_state, plan, paid_through, utilization_percent,
                     cooldown_until, cooldown_reason, last_selected_at,
-                    created_at, updated_at
+                    created_at, updated_at, observed_email, observed_subject, observed_plan
              FROM provider_accounts
              WHERE provider = ?1 AND account_id = ?2",
         )?;
@@ -2522,6 +2555,9 @@ mod account_observation_tests {
             account_id: ProviderAccountId::parse("primary").unwrap(),
             home: None,
             login_email: None,
+            observed_email: None,
+            observed_subject: None,
+            observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Disabled,
             plan: Some("configured".into()),

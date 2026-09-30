@@ -14,8 +14,7 @@ fn task_delete_binary_reconciles_provider_and_local_history() {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
-    let mut registered =
-        register_unrun_task(home.path(), repo.path(), "jack/delete", &repo.head_sha());
+    let mut registered = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     registered.pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),

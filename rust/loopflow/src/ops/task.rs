@@ -5554,10 +5554,13 @@ mod tests {
             fixture.store.work_status(&fixture.work).await.unwrap(),
             WorkStatus::Abandoned
         );
-        assert_eq!(
-            fixture.store.flow_position(&fixture.task.id).await.unwrap(),
-            Some(replacement)
-        );
+        // Abandonment retires saved execution; a stale restart cannot restore it.
+        assert!(fixture
+            .store
+            .flow_position(&fixture.task.id)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test(start_paused = true)]

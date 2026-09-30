@@ -1718,7 +1718,7 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         for verb in [
-            "abandon", "recover", "enable", "disable", "prepare", "resume", "advance",
+            "recover", "enable", "disable", "prepare", "resume", "advance",
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }

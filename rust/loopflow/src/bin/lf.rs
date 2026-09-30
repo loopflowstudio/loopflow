@@ -2478,12 +2478,12 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "wt", "--force", "rm", "old-tree"]
+        let args: Vec<String> = ["lf", "wt", "--force", "delete", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "wt", "rm", "--force", "old-tree"]
+            vec!["lf", "wt", "delete", "--force", "old-tree"]
         );
     }
 

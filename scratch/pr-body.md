@@ -41,15 +41,23 @@ trashing the issue, preserving Task/PR/Run history.
 | Recover interrupted execution | `task run ISSUE --reason TEXT` | Retry saved boundary after correcting the blocker |
 | Delete checkout | `wt delete BRANCH` | Remote branch + local checkout/branch; retain PR and Task outcomes |
 
-Validation: the final compression passed 16 focused worker-settlement, completion,
-cancellation and sweep tests. Earlier 15 focused completion/deletion tests passed, plus composed
-cancellation/deletion, sweep and parser proofs, and the empty-successor landing
-regression. Formatting, all-target Clippy and diff checks passed. Real disposable Git repositories/remotes and simulated provider
-responses were used; no live cancellation is claimed. Review preserved empty
-successor history for retries and moved completion writeback to the owning repo
-after discovering that cleanup removes the old path. Worker retirement now uses one finish path for final Flow steps and Tasks completed
-inside a turn. Exact commands, earlier fixture failures and static results are
-retained in the working design.
+Gate review fixed missing-directory cleanup with retained Git registration and
+removed unrelated network refreshes from checkout selection. It also reconciled
+existing tests with retired Flows, retained empty-successor history, post-landing
+checkout removal and the `wt delete` spelling. Landing proof checks the durable
+merged head after the checkout is gone; release proofs retain their cleanup locks.
+
+Validation: the affected Rust suite ran 1,967 tests: 1,960 passed, seven failed,
+12 skipped. Six stale lifecycle expectations were corrected; all ten targeted
+lifecycle checks then passed. The unchanged screenshot timeout fixture failed
+both in the suite and alone because its fake-browser PID file was absent after
+500 ms. The full gate remains red on that unresolved test; no clean full-suite
+pass is claimed. The Linux-only CLI deletion proof passed in a disposable
+container, and website checks passed 78 tests (three skipped). Provider responses
+were simulated; disposable Git repositories/remotes were real. Earlier focused
+completion, cancellation, sweep and worker-settlement evidence remains in the
+design, alongside exact gate commands and failure logs. Final formatting, all-target
+Clippy, Python Ruff and diff checks passed.
 
 Configured acceptance remains after landing and installation, as Jack Heart's
 supervising steer directs: disposable Task abandonment, configured Wave sweep

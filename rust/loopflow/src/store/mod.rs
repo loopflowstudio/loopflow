@@ -3105,7 +3105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_pr_is_skipped_when_task_completes() {
+    async fn empty_pr_is_retired_with_cleanup_identity_when_task_completes() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             dir.path().join("registry.db"),
@@ -3130,7 +3130,12 @@ mod tests {
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
-        assert!(stored.is_empty());
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, pr.id);
+        assert_eq!(stored[0].branch, pr.branch);
+        assert_eq!(stored[0].base_commit, pr.base_commit);
+        assert_eq!(stored[0].phase(), PrPhase::Abandoned);
+        assert!(store.active_task_pr(&task.id).await.unwrap().is_none());
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

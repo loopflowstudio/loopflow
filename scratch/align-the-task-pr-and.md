@@ -220,3 +220,74 @@ outstanding; this pass performs no publication, installation or live cancellatio
 
 Final `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
 `git diff --check` passed. No broader gate or hosted CI ran.
+
+## Gate review (2026-09-30)
+
+Jack Heart's latest supervising steer authorizes shipment and assigns the live
+disposable-Task proof and configured sweep to the supervisor after the next patch
+release installs the change. This gate does not perform those provider mutations.
+
+Review found and fixed these implementation/test boundaries:
+
+- Checkout deletion now accepts an absent directory whose Git registration still
+  exists. It retains the normal deletion lease and branch-head checks, removes
+  the registration and both branches, and propagates filesystem inspection errors.
+  The regression uses a disposable checkout and bare remote. Selection uses local
+  worktree facts instead of refreshing every checkout's PR/network state.
+- An old parser test still classified `task abandon` as removed. The Linux CLI
+  deletion fixture also expected the previous retained-PR wording and allowed
+  unfinished primary-checkout deletion. It now names the actual primary branch,
+  checks cancellation refuses that checkout before provider trash, and retains
+  the completed-history and planning-only deletion proofs.
+- Broader tests still expected abandoned Tasks to keep saved execution and empty
+  successors to disappear. They now prove a stale restart cannot restore the Flow
+  and the retired successor keeps its cleanup identity without remaining active.
+- Watched landing now verifies checkout/local/remote deletion and compares the
+  repair head with the durable landing record, rather than running Git in the
+  deleted checkout. Release cleanup-lock and argument-order fixtures use `wt delete`.
+
+The initial changed-aware gate (`--base 12013dae4fadc4946b885309ebcc22f1061e6493
+--reuse-passing`, no evidence reused) passed architecture, formatting, Clippy and
+website checks (78 passed, three skipped). Rust stopped on the stale parser
+expectation: 827 passed, one failed, 12 skipped, 1,138 not run. Its receipt remains
+failed at `.lf/tmp/gate/run-47778`; later checks do not rewrite that result.
+
+The all-target rerun used `scripts/materialize_rust_tests.py -- cargo nextest run
+--all --build-jobs 4 --test-threads 4 --no-fail-fast`: 1,960 passed, seven failed,
+12 skipped. Six failures were the stale lifecycle/command expectations corrected
+above. The seventh was the unchanged screenshot timeout fixture: its fake-browser
+PID file was absent after its 500 ms deadline (`screenshot.rs:465`). This is an
+observation of fixture startup timing, not a live browser failure. The failed run
+remains `.lf/tmp/gate/final-rust.log`; no all-green full-suite result is claimed.
+
+Rust runs clear inherited `LF_*` variables and pin `LF_BIN` to this checkout's compiled CLI;
+materialization uses a disposable source snapshot. The Linux fixture uses an
+isolated container, synthetic Linear HTTPS and no host Home or credentials.
+
+Final focused verification ran all seven failed cases plus the parser and shared
+checkout deletion tests, in the materialized source snapshot with one test worker.
+Ten passed; the screenshot fixture failed again with the same absent PID file.
+All lifecycle failures from the broader run are corrected and passing. The
+screenshot implementation and test are unchanged by this branch; its cause remains
+unresolved outside this gate's lifecycle scope. No retry, timeout extension or
+assertion weakening was added. The full gate remains red on that existing test.
+
+```text
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run --all --build-jobs 4 --test-threads 1 --no-fail-fast -E 'test(task_worker_stop_observation_) | test(empty_pr_is_retired_) | test(lf_pr_land_waits_) | test(active_candidate_preparation_) | test(active_tagged_publisher_) | test(reorder_args_moves_flags_to_nested_owners) | test(timeout_reaps_) | test(consolidated_commands_) | test(ops::wt::tests)'
+```
+
+The Linux-only `cargo test -p loopflow --test task_deletion_tests --jobs 1 --
+--nocapture` passed in a disposable `loopflow-task-proof-fixture:local` container:
+one test, exercising the compiled CLI through synthetic Linear HTTPS. The container
+was removed; host Home, provider credentials and installed state were not mounted.
+The fixture tests completed primary-checkout retention, unfinished primary-checkout
+refusal, confirmed-trash retries and planning-only deletion. It does not replace
+the supervisor's configured abandonment/sweep acceptance.
+
+Logs: `.lf/tmp/gate/final-focused.log` and `.lf/tmp/gate/linux-deletion.log`.
+Python Ruff checks and formatting passed. No hosted CI, publication, installation,
+Task completion or live provider mutation was performed. Unchanged Swift/UI and
+the full hosted matrix remain with CI; the affected website suite already passed.
+
+Final `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`,
+and `git diff --check` passed after the test corrections.

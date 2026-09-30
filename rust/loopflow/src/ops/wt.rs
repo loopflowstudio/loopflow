@@ -6,7 +6,7 @@ use crate::engine::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned,
 };
-use crate::engine::worktrees::{list_worktrees, main_repo_root, sibling_worktree_name};
+use crate::engine::worktrees::{list_worktrees_local, main_repo_root, sibling_worktree_name};
 use crate::ops::{OpsError, OpsResult, Progress};
 
 #[derive(Debug)]
@@ -37,7 +37,8 @@ pub(crate) fn prepare_delete(
     force: bool,
 ) -> OpsResult<BranchDeletion> {
     let repo = main_repo_root(repo)?;
-    let matches = list_worktrees(&repo)?
+    let matches = list_worktrees_local(&repo)?
+        .1
         .into_iter()
         .filter(|wt| {
             wt.branch.as_deref() == Some(selector)
@@ -69,7 +70,7 @@ pub(crate) fn prepare_delete(
         ));
     }
     if let Some(wt) = &worktree {
-        if !force && !is_clean(&wt.path)? {
+        if wt.path.try_exists()? && !force && !is_clean(&wt.path)? {
             return Err(OpsError::Message(
                 "worktree has uncommitted changes; use --force to discard them".into(),
             ));
@@ -142,7 +143,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
         ));
     }
     if let Some(path) = &worktree {
-        if !force && !is_clean(path)? {
+        if path.try_exists()? && !force && !is_clean(path)? {
             return Err(OpsError::Message(
                 "worktree changed during deletion; retained its branches".into(),
             ));
@@ -267,5 +268,51 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    #[test]
+    fn deletion_recovers_a_missing_directory_with_retained_git_registration() {
+        let fixture = TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let checkout = directory.path().join("work");
+        git(
+            fixture.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "missing-checkout",
+                checkout.to_str().unwrap(),
+            ],
+        )
+        .unwrap();
+        git(fixture.path(), &["push", "origin", "missing-checkout"]).unwrap();
+        std::fs::remove_dir_all(&checkout).unwrap();
+
+        apply_delete(
+            prepare_delete(fixture.path(), "missing-checkout", false).unwrap(),
+            &NullProgress,
+        )
+        .unwrap();
+
+        assert!(
+            git(fixture.path(), &["branch", "--list", "missing-checkout"])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(git(
+            fixture.path(),
+            &[
+                "ls-remote",
+                "--heads",
+                "origin",
+                "refs/heads/missing-checkout"
+            ]
+        )
+        .unwrap()
+        .is_empty());
+        assert!(!git(fixture.path(), &["worktree", "list", "--porcelain"])
+            .unwrap()
+            .contains("missing-checkout"));
     }
 }

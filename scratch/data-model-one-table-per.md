@@ -2,11 +2,12 @@
 
 LOO-298 · Jack Heart · Accepted contract consolidated 2026-09-28.
 
-The finish line is **code-complete concept review**: the accepted model works end
+The finish line is **code-complete implementation**: the accepted model works end
 to end, affected checks pass on integrated bytes, replaced owners are deleted,
-and the usage/ownership/deletion review is ready. Tables, renames or a passing
-slice alone do not qualify. Configured provider/Desktop and installed migration
-proofs stay explicit; no branch binary may touch the installed Home.
+and the usage/ownership/deletion evidence is ready for Jack Heart's demo and
+final gate. The current feature Flow has no separate slice or concept-review
+step. Tables, renames or a passing slice alone do not qualify. Configured
+provider/Desktop and installed migration proofs stay explicit; no branch binary may touch the installed Home.
 
 Read [current work](parallel-execution.md), [remaining work](remaining-work.md),
 [import obligations](import-preservation.md) and [evidence](evidence.md) beside
@@ -50,8 +51,12 @@ that graph, identified by node and iteration tuple in AgentSession and Flow
 history. Passes and subflows are display lenses, without another Session, claim
 or lifecycle. Retry retains the same pass; Iterate advances the cursor and return
 counters. Jack Heart selected this on 2026-09-30, superseding the runtime-child
-contract. Implementation must fold existing child-pass history into the root by
-forward migration before removing child rows and their ownership machinery.
+contract. Implemented by `fold_flow_passes`: original root/child rows remain in
+immutable import evidence; membership and events move to the root, and only the
+deepest current pass supplies its active selection. Child rows and ownership
+machinery are removed. Retry, overlapping returns, review and populated migration
+have focused proof; see [remaining work](remaining-work.md) for the rebase baseline
+and full-design obligations.
 
 ## Usage to implement
 
@@ -148,17 +153,20 @@ This is the concrete ownership plan, not a Run-to-Exec rename.
 | Flow graph/cursor/claim and pending review | Existing invocation owner evolved to FlowSession; one shared driver |
 | Agent work start, completion, failure, retries, duration and usage | AgentSession history, correlated to provider turn/receipt and driving Exec; idempotent receipt acceptance, missing distinct from zero |
 | Agent-backed Flow step completion | FlowSession references the exact successful AgentSession history entry, validated against its selected boundary and generation |
-| Mechanical Flow step start and outcome | FlowSession history, correlated by node, iteration tuple and generation; no invented AgentSession or child Exec |
+| Mechanical Flow step start and outcome | FlowSession history, correlated by node, iteration tuple and generation; references the actual child Exec, with no invented AgentSession |
 | Task/Wave and provenance | Typed Session/FlowSession ancestry plus immutable event attribution; Exec command context remains distinguishable from work performed |
 | Prior Run IDs and historical outcomes | One-time import mapping/evidence; preserve exact known relationships and explicitly unknown ones |
 
 Reuse the existing event journal and event infrastructure. Do not add a generic
 attempt table, object hierarchy or public lifecycle merely to recreate Run.
 An event sequence/correlation key is necessary evidence, not a new resumable object.
-A Flow boundary can run in-process with no child Exec and no AgentSession.
+Each executed skill or mechanical boundary runs in its own child lf Exec.
+Mechanical work creates no AgentSession; compiling a subflow or changing loop
+position creates neither an Exec nor another FlowSession. Imported history keeps
+only proven processes, including several old boundaries sharing one old Exec.
 
-One Exec can complete step A then fail in step B. Its process exit cannot be the
-outcome of both steps. Persist each boundary's start before external work and its
+One Flow-driving Exec can consume step A then fail during step B. Its process
+exit cannot be the outcome of both child steps. Persist each boundary's start before external work and its
 outcome afterward; settlement compares current FlowSession/version/generation and
 selected Session where present. Old successes, late provider output and helper
 Sessions cannot settle the current boundary. Retries retain earlier outcomes.
@@ -239,7 +247,8 @@ Jack selected provider-constrained output, informed by
 [PydanticAI](https://ai.pydantic.dev/output/) and
 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
 The captured boundary defines the type before launch: a repeat returns
-`{decision: advance|iterate, summary: string}`; an XOR returns
+`{decision: advance|iterate, summary: string}` or
+`{decision: blocked, reason: string}`; an XOR returns
 `{path: <one captured path name>}`. Reject additional fields. No confidence score
 is inferred. Each occurrence answers its own question; neither current catalog
 content nor a later conversation turn can choose its result type.
@@ -347,6 +356,6 @@ content is available on detail; no transcript search platform is introduced.
 Measure actual timings rather than declaring a new latency budget from an index.
 
 Configured provider/Desktop acceptance, backed-up real-Home conversion and release
-activation remain full Task obligations. The current code-complete review must
+activation remain full Task obligations. The code-complete handoff must
 name their status and prepared procedure; it cannot claim them from fixtures or
 perform forbidden installed-Home changes to close a checklist.

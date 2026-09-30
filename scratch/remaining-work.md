@@ -30,6 +30,16 @@ each with focused tests for the changed behavior and hosted CI; run the full
 local Rust suite only before the final gate. New decisions arrive at implement
 boundaries.
 
+## Reconciled baseline
+
+Rebased onto main `a6b1bc3df`; reconciliation `27e4d776e` preserves typed CLI
+command discovery, precedence and flattened step settings. Saved
+`flow list/show --sessions` reaches SQL; selected steps execute captured Skills
+before mutable catalog lookup; Ask escapes reserved Skill names. The short guide
+is `docs/lf.md`, with detailed execution contracts in `docs/lf-reference.md`.
+[Rebase evidence](rebase-main.md) records 13 focused passes and static checks.
+No new full-suite or configured acceptance result follows from this realignment.
+
 ## Order, deepest first
 
 1. **Every step runs its ordinary lf command.** Ops and skills are converted and
@@ -42,10 +52,12 @@ boundaries.
    do not build another transport. Typed `blocked` with a required reason now
    replaces `lf flow blocked`; the public taskless proof recovers the keyed Ask
    and continues three deciding turns in the same native conversation. See
-   [blocked decisions](blocked-decision.md); managed/interactive acceptance is
-   still distinct. See [the current audit](task-command-equivalence.md) and
+   [blocked-decision evidence](evidence.md#structured-blocked-decisions--2026-09-30);
+   managed/interactive acceptance is still distinct. See
+   [Task-command evidence](evidence.md#task-command-slice-review--2026-09-30) and
    [the before/after inventory](exec-per-step.md#direct-skill-command-cut--2026-09-29).
-2. **Remove loop passes as FlowSessions** — implemented in this pass. One
+2. **Remove loop passes as FlowSessions — done.** Implementation `a66f42a0a`
+   replayed as `cbd2b1d7c`; checkpoint simplification is `4f2ec5491`. One
    FlowSession retains its cursor and return counters across retry and Iterate.
    The forward `fold_flow_passes` migration moves child history, conversation
    membership and the deepest active selection to the root, retaining original
@@ -53,14 +65,19 @@ boundaries.
    triggers, managed-child view, child claim transfer, deepest-child reads and
    driver-lock indirection are deleted. Seven focused source checks, the same
    seven on materialized schema, and five public CLI/discovery checks pass.
-   Rust production delta: +28/−200; including the +112-line migration: **net −60**.
+   Compression removes recursive checkpointing, repeated movement calculation
+   and a full Flow clone; its 14 focused checks pass. These receipts precede the
+   rebase; the 13 rebase checks above cover the reconciled discovery/execution paths.
    See [evidence](evidence.md#one-flowsession-through-loop-passes--2026-09-30).
    Configured acceptance and the whole-design import obligations remain open.
-3. **Simplify attribution and the parent tree** (Jack). Before and after tables
+3. **Simplify attribution and the parent tree — next** (Jack). Before and after tables
    are in [exec-per-step.md](exec-per-step.md); the inventory is
-   `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn token and
-   `LF_PARENT_RUN_ID`. One owner per attribution fact; derive the rest. Keep the
-   lookup that resolves an agent-issued command's parent through Session and
+   `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn
+   `caller_flow_turn` column/field, `AgentCaller.flow_turn` and associated index,
+   plus residual `LF_PARENT_RUN_ID` filtering/fixtures. The environment writer is
+   already removed. Preserve historical evidence with a forward migration;
+   released/applied migration bytes stay immutable. One owner per attribution
+   fact; derive the rest. Keep the lookup that resolves an agent-issued command's parent through Session and
    provider generation. Jack's final September 30 precedence is explicit `--as`
    on this command (including Task shortcuts), then checkout ownership, then
    an ancestor's explicit `--as` through `LF_AS`. The current attribution slice
@@ -70,7 +87,7 @@ boundaries.
    on hosted `36cbb3d4b`: its inherited OpenCode selection cannot enforce the
    checkout boundary. The fixture now selects Claude for Y's mechanical Flow;
    confinement is unchanged. The subsequent
-   [slice review](review-task-command-slice.md) executed the corrected public
+   [slice review evidence](evidence.md#task-command-slice-review--2026-09-30) executed the corrected public
    proof successfully in disposable Linux after Docker recovered, plus three
    public attribution checks. Post-CI repairs pass the complete
    materialized Rust matrix (2,024 passed, 17 skipped); see the retained failures
@@ -85,8 +102,10 @@ boundaries.
    after table for Jack.
 5. **Released-populated import**, executed through the public binary and on a
    materialized copy. Obligations: [import-preservation.md](import-preservation.md).
-6. **Docs, skills and generated pages** for final behavior, including the stale
-   Codex-retry row in the architecture reference's cutover status.
+6. **Docs, skills and generated pages** for final behavior after the remaining
+   cuts. The architecture reference already records the successful Codex
+   synthetic-Responses retry and the one-FlowSession implementation; retain
+   configured-provider limits. Keep main's short guide/reference split.
 
 Done and verified on hosted CI: structured-result decisions, captured input as a
 Session event, typed history readers, saved-Flow discovery with Desktop paging,

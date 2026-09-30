@@ -449,7 +449,11 @@ object or table. Decisions below are Jack's unless marked; the branch's
   reference other Flows; starting it compiles them into one graph (Jack's word).
   A subflow is "more of a lens than an operational entity". Loop passes are not
   child FlowSessions either (2026-09-30, reversing the earlier "runtime nesting
-  creates parents" rule): a pass is a node and iteration position.
+  creates parents" rule): a pass is a node and iteration position. The forward
+  migration archives original rows before folding child history into the root;
+  only the deepest current pass supplies active state. Completed siblings must
+  never overwrite it. Focused source/materialized and scripted CLI proofs cover
+  this preservation; they do not establish installed-Home conversion.
 - **An ID names an object.** A captured input is not an object: it is an event
   in AgentSession history that names its Exec. `RunId` and its side table were
   deleted. Prefer the word Exec over launch or run where the thing is one agent
@@ -457,10 +461,13 @@ object or table. Decisions below are Jack's unless marked; the branch's
 - **Flow decisions are typed results** of the selected successful turn,
   modelled on PydanticAI and Jev: the step declares its output schema. The
   in-turn decide and route commands are removed; Jack said the command "felt
-  wrong". `lf flow blocked` remains, undecided.
+  wrong". On 2026-09-30 Jack selected Blocked with a required reason in that
+  structured result; the blocked command is removed. A keyed Ask returns
+  feedback to another turn of the same conversation without moving the cursor.
 - **Bind** is write-once null to Task, allowed on done Tasks, and sets Started
-  once. Usage after bind is prospective as implemented; Jack leans post-hoc and
-  has not decided, and the design keeps it a single read-time choice.
+  once. Jack selected prospective usage attribution for now on 2026-09-30;
+  earlier usage retains its recorded owner. Keep this one read-time choice for
+  Intelligence to re-evaluate; do not invent a mid-turn token split.
 - Every denormalization has a validator or is deleted. Method for any model
   review: derive the user's objects and APIs from the product first, then check
   the infrastructure for hops.
@@ -468,7 +475,13 @@ object or table. Decisions below are Jack's unless marked; the branch's
 Lessons from implementing it (2026-09-29):
 
 - Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
-  unrun. Run the full Rust suite locally with no fail-fast before publishing.
+  unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
+  use focused proofs plus hosted CI between items; run the full local Rust
+  matrix without fail-fast before the final gate.
+- Typed CLI discovery must preserve saved execution: inventory flags reach the
+  SQL reader, selected boundaries resolve captured Skills before the mutable
+  catalog, and Ask escapes reserved Skill names. The main integration has 13
+  focused passes for these paths; it is not configured-provider acceptance.
 - The pinned 0.12.23 worker's output classifier read a quoted sentence in a
   scratch note as a capability denial. The source fix is on the branch; resume
   with the actual cause until workers run a release carrying it.

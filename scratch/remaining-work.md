@@ -55,18 +55,21 @@ will not run that proof.
    The Task restart stop path now retains the selected child after claim release;
    the real-child proof and its boundaries are recorded below. Client replacement
    now reconnects through the retained live Codex engine; its focused proof is
-   recorded below. Implement the architecture reference's remaining explicit
-   conversation/engine restart contract and its public proof. `session connect
-   --replace` replaces clients and does not satisfy that separate obligation.
-   Explicitly disposition the earlier Task-row/publication, stacking and
-   refused-start cleanup reports against #1359 and current code. #1359's landing
-   alone does not establish all three repaired. Leave `agent_events` and
-   `exec_events` proposals open; neither is a merge prerequisite.
+   recorded below. Workflow review removed the speculative separate engine
+   restart: reconnect, client replacement and confirmed-loss retry cover the
+   recorded needs. [Incident dispositions](incident-dispositions.md) trace
+   Task-row/publication, stacking and refused-start cleanup to current owners
+   and focused proofs, including the limits of #1359/#1363. Integrate remaining
+   main changes before the final gate; the attempted merges described there
+   were aborted cleanly. Leave `agent_events` and `exec_events` proposals open;
+   neither is a merge prerequisite.
 2. **Docs.** Reconcile `docs/architecture-reference.md`, the short `docs/lf.md`
    and detailed `docs/lf-reference.md`, affected architecture pages, builtin
    skills and `TESTING.md` with the final CLI/schema and #1360's removal. Remove
    stale archive/import, old Run-owner and resident-service instructions; retain
    the distinction between implemented behavior and configured acceptance.
+   `docs/architecture/planning.md` still describes runtime child FlowSessions;
+   replace that stale paragraph with the single cursor/return-counter model.
    Regenerate affected website pages and the architecture HTML from their source.
 3. **Measurements and behavioral checks.** Measure cold/warm CLI list and detail
    on a representative disposable dense store, separating startup, SQL and
@@ -133,8 +136,9 @@ agent-issued Exec names the replacement driver. Both prior clients exit, and
 `--replace --json` leaves clients and ownership unchanged. Earlier red-1/2 runs
 were fixture setup failures, not product reproductions. This uses real Codex
 0.157.1 with synthetic local Responses and controlled protocol clients, not
-configured-provider or rendered Desktop acceptance. Explicit engine restart
-remains outstanding. Review also moved the existing deleted-Task check ahead
+configured-provider or rendered Desktop acceptance. The separate engine restart
+obligation was subsequently removed by workflow review above. Review also moved
+the existing deleted-Task check ahead
 of live connection so it cannot be bypassed by a driver handoff.
 `connect-replace-retained-task.log` records the retained/deleted-Task regression
 passing; `connect-replace-clippy.log` records all-target Clippy passing. Build,
@@ -153,7 +157,8 @@ also reported one leaky command-construction test; it did not recur in the final
 run, and no leak repair is claimed. Evidence remains under `.lf/tmp/test-compress/`.
 Build, formatting, Ruff, diff checks and all-target Clippy passed
 (`client-compress-build.log`, `client-compress-clippy.log`).
-Explicit engine restart and configured provider/Desktop acceptance remain open.
+Configured provider/Desktop acceptance remains open. The separate engine restart
+obligation was subsequently removed by workflow review above.
 
 `lf pr publish` checkpoint publication is blocked after local code commit `58ea71c2b`.
 `lf pr publish` refused: Task LOO-298 records base `00cf9dffe840`, behind the

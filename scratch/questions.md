@@ -5,6 +5,12 @@ pass histories stay in Git.
 
 ## Settled
 
+- Workflow review under Jack Heart's supervising-session direction found no
+  separate need to restart a live conversation engine: connect replaces the
+  driver, `--replace` replaces clients, and Flow retry recovers confirmed engine
+  loss. Remove the speculative engine-restart operation from the contract.
+  Unknown engine liveness remains unknown; `task restart` replaces a Flow and
+  is a different operation. See [incident dispositions](incident-dispositions.md).
 - One actual lf process is an Exec. Flow steps run ordinary skill/command
   children; no second provider executor. Definitions compile before execution.
 - One started Flow is one FlowSession. Subflows and loop passes are display

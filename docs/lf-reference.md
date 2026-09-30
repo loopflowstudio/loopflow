@@ -763,9 +763,10 @@ name, feedback and native history. The new driver receives write authority; the
 old client can remain a passive display. `--replace` stops Loopflow-owned clients
 before connecting here; with a live Codex engine, the active turn and sibling
 conversations continue in that engine. `--json --replace` prepares the command
-without stopping clients or transferring the driver. Engine restart is not
-exposed by this flag; its remaining contract is tracked in the
-[cutover status](architecture-reference.md#cutover-status).
+without stopping clients or transferring the driver. There is no separate
+Session engine-restart command. `lf flow resume FLOW --retry` recovers a saved
+Flow after confirmed engine exit while retaining its native conversation;
+`lf task restart TASK` instead replaces the Task's saved workflow.
 Unsubmitted editor text requires its own surface-preservation proof.
 
 Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered

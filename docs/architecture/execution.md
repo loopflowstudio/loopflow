@@ -100,12 +100,13 @@ Session state. The continuing engine retains its provider generation while the
 new driver receives a new driver generation. Engine ownership and driver ownership
 must not be collapsed into one counter.
 
-Explicit restart stops only the exact conversation owner, preserves its recorded
-native identity and history, and excludes late writes from the replaced provider.
-Graceful stop precedes force termination of an exclusively owned process. A shared
-engine and sibling conversations survive a thread-specific restart. Mere process
-silence, tmux visibility, causal ancestry or a stored active label grants no
-termination authority.
+`session connect --replace` stops the exact owned clients and reconnects to the
+live engine, preserving the active turn and sibling conversations. Flow retry
+can resume the recorded native conversation after confirmed engine exit;
+the replacement provider generation excludes late writes from the old provider.
+There is no separate Session engine-restart operation. Mere process silence,
+tmux visibility, causal ancestry or a stored active label grants no termination
+authority, and recovery never authorizes killing a shared engine for one thread.
 
 ## Outcomes, retries and usage
 

@@ -25,9 +25,9 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` stops owned clients and connects through the same live
-Codex engine, preserving its active turn and other conversations. It does not
-restart that engine. The explicit conversation/engine
-restart contract below has no public `--restart` flag yet. `session list` supports
+Codex engine, preserving its active turn and other conversations. There is no
+separate Session engine-restart operation. Saved Flow retry can recover after
+confirmed engine exit while retaining the conversation. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
 observations until enumeration succeeds. `lf flow list/show --sessions` discovers
@@ -42,7 +42,7 @@ consumers without their coordinated migration.
 | Contract | Current evidence and next dependency |
 | --- | --- |
 | One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Installed startup acceptance and final discovery/wire coverage remain open. |
-| Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Complete recorded account/native Home, public restart, stale-client exclusion and shared-engine preservation across every provider path. |
+| Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Home, stale-client exclusion and shared-engine preservation across every provider path. |
 | Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. All-provider recovery and final retired-owner deletion remain required. |
 | One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. The final schema contains no child-pass owner. Runtime progression uses one cursor and return counters; retry retains its pass. Focused migration and progression proofs cover the cut; configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
@@ -184,7 +184,7 @@ attempt object. History entries have stable references, not independent lifecycl
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `execs` | ID, immutable parent Exec, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, restart, bind, rename, ready, complete |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, bind, rename, ready, complete |
 | `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, claim/version/generation, selected conversation/completion reference, pending review and status; capture, claim, checkpoint, settle, recover |
 | `tasks` | Project, issue, durable disposition, worktree/delivery facts, managed FlowSession selection and set-once `started_at` |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
@@ -205,11 +205,12 @@ interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
-Explicit restart replaces the exact conversation owner and preserves the native
-conversation and history. Graceful thread-specific stop precedes force termination
-of an exclusively owned process. A shared engine must survive another thread's
-restart. PID/start identity and native endpoint are operational evidence;
-conversation identity, causality and elapsed time grant no signal authority.
+Connect transfers the driver while retaining the live conversation. Client
+replacement stops only the exact owned clients; it leaves the engine and sibling
+conversations running. Flow retry can resume the recorded native conversation on
+a new engine after confirmed engine exit. Missing process evidence remains unknown.
+PID/start identity and native endpoint are operational evidence; conversation
+identity, causality and elapsed time grant no signal authority.
 
 AgentSession history records provider starts, successful/failed/interrupted
 outcomes, retries, durations and usage, correlated with driving Exec and native
@@ -548,9 +549,10 @@ lf session complete SESSION
 ```
 
 Every conversation has one AgentSession regardless of launch surface. Connect
-uses the existing engine where possible; restart is explicit. Name, feedback,
-native identity and history survive both. A suggested title cannot overwrite a
-human-assigned title. CLI and Desktop use the same action and availability reason.
+uses the existing engine where possible; client replacement retains its active
+turn. Name, feedback, native identity and history survive reconnect and recovery.
+A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
+the same action and availability reason.
 
 Ready saves feedback and keeps the conversation open. Complete persists its
 closed state and exact feedback before teardown. A keyed Ask retry returns the
@@ -560,8 +562,8 @@ Pane close, provider exit and readiness do not complete the review.
 
 The desktop terminal pool keys on stable AgentSession identity. Rename, bind,
 reconnect and replacement retain the pane and draft when reusing that surface.
-Provider restart does not claim preservation of text never submitted to Loopflow
-without separate UI evidence.
+Recovery after engine exit does not claim preservation of text never submitted
+to Loopflow without separate UI evidence.
 
 ## Flow execution
 
@@ -700,8 +702,9 @@ provider generation. Revalidate that evidence before every signal.
 
 A driver can die while its engine continues. A saved endpoint alone is not
 liveness; a missing endpoint alone is not engine death. Recovery reads surviving
-native history and preserves unknown command outcomes. Explicit restart stops
-only the selected conversation; a shared engine's sibling conversations survive.
+native history and preserves unknown command outcomes. Client replacement leaves
+the engine alive; Flow retry replaces an engine only after confirmed exit.
+Neither operation authorizes terminating a shared engine to recover one thread.
 
 ## Homes and process topology
 

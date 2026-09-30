@@ -218,9 +218,10 @@ payloads remain files, but readers select and page rows before opening them.
 Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Explicit restart
-replaces only the exact conversation owner; it never kills a shared engine to
-restart one thread. Engine PID, client PID and conversation driver are distinct.
+replace the provider generation or interrupt an existing turn. Client replacement
+leaves the engine alive; Flow retry can recover after confirmed engine exit while
+retaining native history. Neither operation authorizes killing a shared engine
+for one thread. Engine PID, client PID and conversation driver are distinct.
 
 Exec ancestry records the actual lf caller. A direct child names its parent's
 Exec; an agent-issued child also records `via_agent` and AgentSession provenance.

@@ -5,7 +5,8 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Window appearance", .serialized)
+@Suite("Window appearance", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
+                 "Optional display-session diagnostic"), .serialized)
 @MainActor
 struct AppAppearanceTests {
     @Test("Native controls and the custom palette follow the same window appearance",

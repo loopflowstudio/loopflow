@@ -41,17 +41,13 @@ Do not ask permission for reversible edits or local tests. Ask before pushing,
 PR mutations, external messages or other external side effects, and destructive
 operations unless already authorized by the user or selected workflow.
 
-## Evidence Loop
+## Checks and Flow boundaries
 
-Make the finish line explicit: the observable result, proof, and near-misses
-that do not count. When uncertainty matters, record observations separately
-from hypotheses in the working design or evidence notes.
-
-Use the smallest safe check that distinguishes the leading explanations.
-Verify against all relevant recorded evidence, not only the latest case.
-Treat unexpected tool, test, or user output as a
-counterexample: stop dependent steps, revise the model, then continue. Never
-rewrite an observation to preserve an explanation or call a simulation live proof.
+Implement and compress do basic build/focused-test sanity checks. Gate owns
+verification once; CI owns its matrix. Checks must run headless. Leave unavailable
+checks to a capable later step and human judgment to demo/review; neither blocks
+earlier work. Record a one-line result in scratch, not a verification ledger.
+Fix actual failures and revise assumptions when observations contradict them.
 
 Delegate only when authorized and when an independent subset makes the problem
 smaller. Keep the main blocker inline. A supplied Flow is an instruction;

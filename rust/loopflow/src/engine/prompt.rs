@@ -2082,8 +2082,9 @@ mod tests {
             let prompt = render_full_prompt(components);
             assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
             assert!(prompt.contains("Execute Here First"));
-            assert!(prompt.contains("Evidence Loop"));
-            assert!(prompt.contains("all relevant recorded evidence"));
+            assert!(prompt.contains("Checks and Flow boundaries"));
+            assert!(prompt.contains("Gate owns\nverification once"));
+            assert!(prompt.contains("Checks must run headless"));
             assert!(prompt.contains("lf pr land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));

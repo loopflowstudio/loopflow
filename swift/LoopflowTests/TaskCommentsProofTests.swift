@@ -16,7 +16,8 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task Comments native proof", .serialized)
+@Suite("Task Comments native proof", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
+                 "Optional display-session diagnostic"), .serialized)
 @MainActor
 struct TaskCommentsProofTests {
     @Test("Collapsed count, thread, failure and a late read stay with their own Task beside a live Session")

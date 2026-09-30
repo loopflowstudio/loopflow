@@ -88,7 +88,8 @@ struct TaskMonitorTests {
     }
 
 #if canImport(GhosttyKit)
-    @Test("Task selection and Monitor preserve native Session input and its companion")
+    @Test("Task selection and Monitor preserve native Session input and its companion", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
+                 "Optional display-session diagnostic"))
     func mixedMonitorRetainsInput() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()

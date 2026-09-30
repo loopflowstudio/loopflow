@@ -1,0 +1,3 @@
+(version 1)
+(allow default)
+(deny mach-lookup (global-name-regex ".*[Ww]indow[Ss]erver.*"))

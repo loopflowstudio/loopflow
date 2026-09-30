@@ -16,7 +16,8 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task recent Runs and Session rows native proof", .serialized)
+@Suite("Task recent Runs and Session rows native proof", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
+                 "Optional display-session diagnostic"), .serialized)
 @MainActor
 struct TaskRunsProofTests {
     @Test("Recent Runs load on demand for their own Task; Session rows show recorded provider and summary")

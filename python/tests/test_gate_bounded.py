@@ -656,11 +656,11 @@ def test_changed_gate_always_runs_architecture_check():
     ]
 
 
-def test_all_never_runs_the_required_host_gate():
+def test_all_never_runs_the_optional_host_diagnostic():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")
     assert ui.run is False
-    assert "required host gate" in ui.reason
+    assert "optional display diagnostic" in ui.reason
 
 
 def test_build_and_test_commands_share_the_four_worker_budget():
@@ -673,9 +673,7 @@ def test_build_and_test_commands_share_the_four_worker_budget():
 
     assert clippy.argv[clippy.argv.index("--jobs") + 1] == jobs
     assert jobs in tests.argv
-    for command in (
-        command for command in swift if command.label in {"swift-cli", "swift", "swift-build"}
-    ):
+    for command in (command for command in swift if command.label in {"swift-cli", "swift"}):
         assert command.argv[command.argv.index("--jobs") + 1] == jobs
     xcodebuild = next(command for command in loopflow if command.label == "xcodebuild")
     assert xcodebuild.argv[xcodebuild.argv.index("-jobs") + 1] == jobs
@@ -808,3 +806,15 @@ def test_ui_host_suite_serializes_and_checks_machine_state():
     ui = next(s for s in gate.SUITES if s.name == "ui-host")
     assert ui.machine_lock == "ui-host"
     assert ui.postcheck is gate._ui_host_postcheck
+
+
+def test_desktop_changes_select_headless_checks_without_host_automation():
+    plans = gate.build_plan(
+        changed=["swift/LoopflowMac/Views/WorkSurfaceView.swift"], run_all=False, forced=set()
+    )
+    selected = {plan.suite.name: plan for plan in plans if plan.run}
+    assert "swift" in selected
+    assert "ui-host" not in selected
+    commands = selected["swift"].commands
+    assert any(command.argv[0] == "scripts/test_desktop.sh" for command in commands)
+    assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)

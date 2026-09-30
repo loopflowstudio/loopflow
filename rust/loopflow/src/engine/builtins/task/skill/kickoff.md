@@ -1,13 +1,13 @@
 ---
 requires: product direction, an existing design, or a Task brief
-produces: an implementation plan with resolved risks, sequencing and proof
+produces: an implementation plan with resolved risks, sequencing and acceptance checks
 default_agent: claude
 ---
 Shape the supplied product direction into an implementation plan.
 
 Start from the intended experience and decisions already established. Investigate
 technical risks, inspect the existing system, choose supported mechanisms and
-sequence the work with concrete proof. Preserve accepted product decisions;
+sequence the work with concrete acceptance checks. Preserve accepted product decisions;
 do not restart product discovery or substitute a technically convenient outcome.
 If an unresolved product choice prevents planning, identify that choice for the
 participant. Keep an already sufficient plan rather than forcing a rewrite.
@@ -17,7 +17,7 @@ participant. Keep an already sufficient plan rather than forcing a rewrite.
 Treat the Task as the user's problem and desired experience. Explore possible
 solutions before choosing one; distinguish observations, proposed mechanisms,
 real constraints, and accepted decisions. The design owns architecture,
-implementation sequencing, and proof. A Task need not arrive with an
+implementation sequencing, and acceptance checks. A Task need not arrive with an
 implementation plan. Preserve its original problem when the solution changes.
 
 Continue an existing design and investigate its material gaps; a newly filed
@@ -78,15 +78,22 @@ re-derive what these already record.
    contain an older or poor design; do not continue it merely because it was
    present first.
 
+## Checks run unattended
+
+Specify headless acceptance commands and expected results for gate to run once.
+Desktop uses app builds and view/interaction tests. Never require a person,
+display session or permission dialog. Defer unavailable checks to capable CI
+without blocking earlier steps. Put judgment in demo/review. Implement/compress
+only build and run focused tests; scratch keeps one command/result line.
+
 ## Computable design contract
 
 Make the plan explicit where these boundaries matter; omit irrelevant sections:
 
 - **User-visible outcome** — whose behavior changes and what they can observe
   when the Task holds.
-- **End-to-end proof** — one concrete scenario that crosses the source of truth
-  and every affected consumer, plus the command, test, or observation that
-  proves the outcome.
+- **Acceptance check at gate** — one concrete scenario that crosses the source of truth
+  and every affected consumer, plus the headless command and expected result.
 - **Source of truth** — the authoritative persisted record, model, or API and
   which views are derived from it.
 - **Affected surfaces and consumers** — every CLI, wire DTO, app, automation,
@@ -101,34 +108,31 @@ Make the plan explicit where these boundaries matter; omit irrelevant sections:
   reshaped and what becomes obsolete.
 - **Delete — do not maintain** — carry forward or identify concrete files/symbols
   and their exclusive tests/fixtures slated for removal. Never plan repairs to
-  them. Name required behavior, data, and proof that must survive, plus any
+  them. Name required behavior, data, and tests that must survive, plus any
   consumer cutover or migration needed for removal.
 - **Forbidden outcomes** — duplicate representations, Legacy/New splits,
   adapters, fallbacks, dual writes, or locally passing states that would still
   violate the intended architecture.
 - **Internal slices** — for an indivisible change, keep the complete end state
-  intact with its integration/deletion path and full proof. Order the deepest
+  intact with its integration/deletion path and acceptance conditions. Order the deepest
   deletions first, then build on what remains. Include the minimum consumer
   cutover or migration in the deletion cut, without modernizing the old path
-  first. Mark one `This slice` with focused proof, and update deletion targets,
+  first. Mark one `This slice` with a focused test, and update deletion targets,
   remaining work, and evidence in place rather than narrowing the plan.
   Additive work needs no invented deletion.
 
-Files changed, migrations applied, tests added, and a PR opened are
-implementation receipts. They may support the proof, but they are not the
-finish line; the design must end in an observable condition.
+Done when names observable behavior, not a list of implementation artifacts.
 
 ## Output
 
-Record named, dated decisions, explicit draft or acceptance status, remaining
-work, and proof. Omit session/step instructions and ambient Home facts. Name
-historical skills without dollar prefixes; keep verbatim transcripts as separate
-reference evidence. Reread the plan as input to another skill in a fresh Run:
-it must not select that reader's skill or claim its execution environment.
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Home
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
 
 Update the existing plan at `scratch/<slug>.md`. Organize it around the problem,
 demo, chosen approach, risk findings, alternatives and decisions, scope, and
-Done when proof. Use the contract above for relevant boundaries; preserve a
+Done when checks. Use the contract above for relevant boundaries; preserve a
 clear existing structure rather than imposing a template. Include before/after
 measures when the outcome is quantitative. Keep consequential findings and
 remaining work beside the decisions they inform.
@@ -155,7 +159,8 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` (and `MEMORY.md`) in docs
 
 **Complete over incremental.** Prefer landing an entire architectural chunk in one go. Splitting a coherent change into pieces creates backwards-compatibility adapters, dual states, and integration ambiguity. Only split when pieces are genuinely independent and each delivers something a user or developer would notice on its own.
 
-**Comprehensive over light.** Kickoff outputs get read by reviewers evaluating the design and by implementing agents executing it. Be thorough — decisions, alternatives, "done when." This isn't a roadmap sketch; it's the spec a future session works from.
+**Sufficient for the next reader.** Keep consequential decisions, alternatives
+and acceptance checks; omit repeated validation requirements and pass ledgers.
 
 **Integrate over layer.** Map current concepts, types, authorities, writers, and
 launch paths before adding another one. Name what the change reshapes and what

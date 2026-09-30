@@ -38,7 +38,7 @@ having this file.
 ## Persisted plans survive their authoring session
 
 Record named, dated decisions, explicit draft or acceptance status, remaining
-work, and proof. Do not persist session/step instructions or facts about the
+work, and a one-line check result. Do not persist session/step instructions or facts about the
 current Home in plans. Report failed lookups as dated evidence separately.
 Historical skill invocations use plain names; dollar-prefixed mentions can
 activate installed native skills even inside Markdown quotes or code blocks.
@@ -126,11 +126,13 @@ to judge well; the review should supply them without choosing the navigation
 outcome. Avoid duplicating the plan or accumulating reports by default.
 
 Keep evidence that changes a decision, unresolved counterexamples, accepted
-constraints, and consequential rationale. Link durable proof instead of copying
-it. When working notes are needed, use topic-named Markdown under `scratch/`
+constraints, and consequential rationale. Keep one command/result line in scratch;
+link logs only when needed to diagnose a failure. Gate owns automated acceptance
+once; implement/compress only build and run focused tests. Generate headless
+checks only. A missing environment goes to capable gate/CI, and judgment goes
+to demo/review; neither blocks earlier work. When working notes are needed, use topic-named Markdown under `scratch/`
 that makes sense without the producing conversation. Handoffs link the current
-artifacts and summarize enough evidence for the next decision, including proof
-limits. They do not grant execution authority. Update an existing summary when
+artifacts and name any remaining decision or deferred check owner. They do not grant execution authority. Update an existing summary when
 it serves the handoff; a no-op needs no new artifact.
 
 Define the finish line before the procedure. A strong prompt makes five things

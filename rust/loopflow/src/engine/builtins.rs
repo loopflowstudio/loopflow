@@ -399,13 +399,12 @@ mod tests {
         let kickoff = get_builtin_skill("kickoff").expect("implementation plan");
         for requirement in [
             "User-visible outcome",
-            "End-to-end proof",
+            "Acceptance check at gate",
             "Source of truth",
             "Affected surfaces and consumers",
             "Absent and error states",
             "Operational boundary",
             "Exclusions",
-            "implementation receipts",
         ] {
             assert!(kickoff.contains(requirement));
         }

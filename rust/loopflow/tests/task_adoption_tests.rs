@@ -325,9 +325,14 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .unwrap();
             let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
             let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
-            for (index, condition) in ["canceled", "moved", "connection", "removed"]
-                .into_iter()
-                .enumerate()
+            for (index, (condition, expected)) in [
+                ("canceled", "terminal"),
+                ("moved", "no longer matches"),
+                ("connection", "Team"),
+                ("removed", "Removed"),
+            ]
+            .into_iter()
+            .enumerate()
             {
                 let mut observed = original.clone();
                 observed.item.revision = Some(format!("2026-09-30T12:00:0{index}Z"));
@@ -359,13 +364,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                     "{condition} allowed managed continuation"
                 );
                 let error = String::from_utf8_lossy(&output.stderr);
-                let expected = match condition {
-                    "canceled" => "terminal",
-                    "moved" => "no longer matches",
-                    "connection" => "Team",
-                    "removed" => "Removed",
-                    _ => unreachable!(),
-                };
                 assert!(error.contains(expected), "{condition}: {error}");
                 assert_eq!(
                     runtime

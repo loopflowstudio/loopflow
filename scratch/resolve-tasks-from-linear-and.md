@@ -26,6 +26,20 @@ cursor; no progress is invented from either. Prove adoption from a store with
 planning but no Task row, then repeated checkout/continuation preservation.
 No source binary touches the installed Home. Integration merges main; no rebase.
 
+Compression removed the receipt-list API left by the superseded succession path:
+its only caller now validates and collects retained installations directly,
+without an intermediate receipt vector. Removed two leftover temporaries and
+placed validity-case expectations beside their inputs. Review corrected stale
+discovery and outage-policy prose. Managed-Flow lookup retains its child-pass
+semantics; no adoption, admission, migration or installation policy changed.
+
+Verification: 23 isolated `machine_install::tests` passed, including retained
+store discovery and immutable receipt settlement (`.lf/tmp/task-compress-installation.log`).
+`cargo fmt --check`, all-target Clippy with warnings denied
+(`.lf/tmp/task-compress-clippy.log`), and diff checks passed. The public adoption
+and due-refresh proofs below remain applicable to unchanged behavior and were
+not rerun. Main integration, live-provider and installed acceptance remain open.
+
 ### Managed validity — current implementation, 2026-09-30
 
 Saved continuation previously skipped planning lookup whenever a Flow existed.

@@ -2336,8 +2336,9 @@ fn promote_local_candidate(
         if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
             return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
-        let source = crate::store::production_database_path();
-        if let Err(error) = _copy_store_for_candidate(&source, &target_store) {
+        if let Err(error) =
+            _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
+        {
             return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
     }

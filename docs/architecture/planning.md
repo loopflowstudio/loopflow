@@ -66,10 +66,10 @@ invalid until complete detail repairs it. This creates no deletion receipt.
 `planning.observed_at` remains the last successful acquisition. An unresolved
 selector returns an unavailable envelope even without execution.
 
-Invalid and removed facts remain inspectable through status. Managed readers
-exclude them, and retain their existing hard/forced-refresh refusal. Inspection
-does not select an outage-admission policy. Wave `synced_at` dates its last
-successful list acquisition; joined entities may have newer detail observations.
+Invalid and removed facts remain inspectable through status. Managed execution
+requires available planning: a fresh cached observation suffices, but a failed
+due refresh stops continuation. Wave `synced_at` dates its last successful list
+acquisition; joined entities may have newer detail observations.
 
 Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
 mutation refreshes share one writer: older provider revisions cannot overwrite

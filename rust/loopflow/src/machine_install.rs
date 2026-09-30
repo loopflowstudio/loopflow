@@ -921,23 +921,11 @@ pub(crate) fn known_installations(root: &Path) -> Result<Vec<InstallSelection>> 
             selections.extend(receipt.prior);
         }
     }
-    for receipt in retained_receipts(root)? {
-        for selection in std::iter::once(receipt.target).chain(receipt.prior) {
-            if !selections.contains(&selection) {
-                selections.push(selection);
-            }
-        }
-    }
-    Ok(selections)
-}
-
-pub(crate) fn retained_receipts(root: &Path) -> Result<Vec<SwitchReceipt>> {
     let entries = match fs::read_dir(root.join("receipts")) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(selections),
         Err(error) => return Err(error.into()),
     };
-    let mut receipts = Vec::new();
     for entry in entries {
         let path = entry?.path();
         if path.extension().is_none_or(|extension| extension != "json") {
@@ -945,9 +933,13 @@ pub(crate) fn retained_receipts(root: &Path) -> Result<Vec<SwitchReceipt>> {
         }
         let receipt: SwitchReceipt = read_json(&path)?;
         receipt.validate()?;
-        receipts.push(receipt);
+        for selection in std::iter::once(receipt.target).chain(receipt.prior) {
+            if !selections.contains(&selection) {
+                selections.push(selection);
+            }
+        }
     }
-    Ok(receipts)
+    Ok(selections)
 }
 
 /// The install selection ordinary startup should use while a switch receipt is

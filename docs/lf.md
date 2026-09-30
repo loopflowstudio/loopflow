@@ -992,8 +992,7 @@ Use ordinary installed `lf task status` to follow managed execution. Worker
 boundaries select the current installed runtime independently of execution
 placement; inherited `LF_BIN` does not lock that selection. The data copies do
 not synchronize. Review launchers use the same verified runtime; missing or changed
-installed bytes report an error. Discovery currently covers installation receipts; source-private
-and remote execution discovery remain separate work.
+installed bytes report an error.
 A private data copy does not isolate external effects such
 as provider issue deletion or shared worktree edits.
 

@@ -308,14 +308,7 @@ pub(crate) struct TaskWorkerLaunch {
 }
 
 pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
-    let environment = request.environment.clone();
-    start_work_session(&request, environment).await
-}
-
-async fn start_work_session(
-    request: &TaskWorkerLaunch,
-    mut environment: Vec<(String, String)>,
-) -> OpsResult<()> {
+    let mut environment = request.environment;
     let execution = current_home_execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)

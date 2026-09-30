@@ -32,7 +32,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
         if bound.model.is_none() {
             bound.model = binding.agent.clone();
         }
-        return launch_bound(skill, message, &bound, &binding, binding.source).map(|_| ());
+        return launch_bound(skill, message, &bound, &binding).map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -175,14 +175,7 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
-    launch_bound(
-        skill,
-        message,
-        cli,
-        binding,
-        crate::session::WorkSource::Declared,
-    )
-    .map(|_| ())
+    launch_bound(skill, message, cli, binding).map(|_| ())
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
@@ -191,14 +184,7 @@ pub(crate) fn answer_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
-    launch_bound(
-        None,
-        Some(message),
-        cli,
-        binding,
-        crate::session::WorkSource::Declared,
-    )
-    .map(|answer| answer.map(|answer| answer.text))
+    launch_bound(None, Some(message), cli, binding).map(|answer| answer.map(|answer| answer.text))
 }
 
 fn launch_bound(
@@ -206,7 +192,6 @@ fn launch_bound(
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
-    source: crate::session::WorkSource,
 ) -> Result<Option<crate::run_record::FinalAnswer>> {
     let mut launch = cli.launch_options();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
@@ -234,7 +219,7 @@ fn launch_bound(
             crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
         },
         wave_id: Some(binding.wave_id.clone()),
-        source,
+        source: binding.source,
     });
 
     print_context_header(&built, cli);
@@ -262,21 +247,17 @@ pub(crate) fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBindi
 }
 
 pub(crate) fn bound_message(binding: &crate::ops::WorkBinding, message: Option<&str>) -> String {
-    match message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>\n\n{}",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-            message,
-        ),
-        None => format!(
-            "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
-            binding.work.kind(),
-            binding.work.id(),
-            binding.context,
-        ),
+    let mut context = format!(
+        "<lf:work kind=\"{}\" id=\"{}\">\n{}\n</lf:work>",
+        binding.work.kind(),
+        binding.work.id(),
+        binding.context,
+    );
+    if let Some(message) = message.filter(|message| !message.trim().is_empty()) {
+        context.push_str("\n\n");
+        context.push_str(message);
     }
+    context
 }
 
 struct PromptBuild {

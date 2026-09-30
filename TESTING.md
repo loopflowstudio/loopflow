@@ -134,6 +134,10 @@ returns before resource scans and cleanup. Neither executes a build nor writes
 a new proof receipt. Changed content or commands require fresh verification and
 the normal resource checks.
 
+Busy uv cache pruning times out after 15 seconds while other eligible recovery
+continues. Retry `uv cache prune` after other uv processes exit, or run recovery
+from an activated `.venv`; an enclosing `uv run` can hold the cache lock.
+
 Every phase runs under a printed wall-clock limit. A phase that overruns is
 killed—process group and all—and reported as `VERIFICATION BUDGET`, so
 **no phase can hang the

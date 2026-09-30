@@ -92,26 +92,23 @@ impl WorkspaceResolver {
         }
         // An unavailable cwd is not an ancestor match. Only exact recorded
         // checkout evidence or explicit Task attribution can retain association.
-        let candidates: Vec<_> = self
-            .checkouts
-            .iter()
-            .filter(|checkout| {
-                checkout
-                    .home_id
-                    .as_ref()
-                    .is_none_or(|home| home == &self.home)
-                    && (checkout.worktree == cwd
-                        || recorded_root == Some(checkout.worktree.as_path())
-                        || work == Some(&WorkRef::Task(checkout.task_id.clone())))
-            })
-            .collect();
-        let checkout = candidates.first()?;
+        let mut candidates = self.checkouts.iter().filter(|checkout| {
+            checkout
+                .home_id
+                .as_ref()
+                .is_none_or(|home| home == &self.home)
+                && (checkout.worktree == cwd
+                    || recorded_root == Some(checkout.worktree.as_path())
+                    || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id))
+        });
+        let checkout = candidates.next()?;
+        let ambiguous = candidates.next().is_some();
         Some(SessionWorkspace {
             home_id: self.home.clone(),
             worktree: checkout.worktree.clone(),
-            task_id: (candidates.len() == 1).then(|| checkout.task_id.clone()),
+            task_id: (!ambiguous).then(|| checkout.task_id.clone()),
             unavailable: Some(
-                if candidates.len() > 1 {
+                if ambiguous {
                     "Multiple Tasks claim this unavailable checkout"
                 } else if checkout.home_id.is_none() {
                     "Task placement and checkout are unavailable"

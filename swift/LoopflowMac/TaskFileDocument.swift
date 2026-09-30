@@ -146,7 +146,6 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     private func loadSnapshot(_ next: TaskFileSnapshot) {
-        updateAccess(next)
         guard !dirty, !editor.hasMarkedText() else {
             external = next.revision != snapshot?.revision || next.state != snapshot?.state ? next : nil
             return
@@ -285,6 +284,7 @@ final class TaskFilesStore {
     var expandedDirectories: Set<String> = []
     var showIgnored = false
     var showsChanges = false
+    var needsComparison: Bool { showsChanges || mode == .diff }
     private var directoryGenerations: [String: Int] = [:]
     private(set) var documents: [String: TaskFileDocument] = [:]
     private(set) var diff: TaskDiffSnapshot?
@@ -347,11 +347,11 @@ final class TaskFilesStore {
                     return parent.isEmpty || directory == parent || directory.hasPrefix(parent + "/")
                 }
                 return $0.isEmpty || $0 == directory || directory.hasPrefix($0 + "/")
-                    || ($0 as NSString).deletingLastPathComponent == directory
+                    || parent == directory
             }) {
                 await self.loadDirectory(directory)
             }
-            if self.showsChanges || self.mode == .diff { await self.refreshChanges() }
+            if self.needsComparison { await self.refreshChanges() }
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
         }
     }
@@ -403,7 +403,7 @@ final class TaskFilesStore {
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
         await loadDirectory("")
-        if showsChanges || mode == .diff { await refreshChanges() }
+        if needsComparison { await refreshChanges() }
     }
 
     func loadDirectory(_ path: String, more: Bool = false) async {

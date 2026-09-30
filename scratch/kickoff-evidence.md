@@ -362,6 +362,23 @@ This executes the `--loopflow` suite's build commands directly without broadenin
 this implementation pass to the affected-suite gate. It compiled the fallback app
 and test targets; it did not execute hosted UI tests.
 
+Compression of this cut keeps directory enumeration dependent only on the
+checkout path and Task grouping dependent only on Task identity. Session opening
+shares its surface dispatch with other readers; workspace association still runs
+after boundary preparation/resume. Missing-checkout ambiguity needs only the first
+two candidates. The file view now owns directory refresh in one task, independent
+of comparison selection and polling. This avoids duplicate root reads and preserves
+directory pagination when the comparison base changes. Access updates remain at reconciliation
+and save entry points, before revision shortcuts; the nested loader no longer
+repeats the update.
+
+Focused compression proof passed: 21 Session tests, 6 file tests, and 42 Swift
+tests across `TaskFilesTests|WorkspaceNavigationTests`, using the same commands
+above. Formatting, Clippy with warnings denied, and the Xcode fallback
+build-for-testing passed again. These are local model,
+simulated-transport, and compilation proofs; the configured desktop/provider gap
+below remains open.
+
 Remaining Unit 1 implementation: Home/worktree-keyed retained workspace ownership,
 collapse and focus/restore, reassociation without surface destruction, replacement
 of the old Task terminal owner, participatory graph/navigation and indications,

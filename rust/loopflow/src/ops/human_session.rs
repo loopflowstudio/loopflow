@@ -805,7 +805,13 @@ fn provider_history(dir: &Path, manifest: &RunManifest) -> Result<ProviderSessio
 }
 
 async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
-    let mut session = match target {
+    let mut session = read_surface(store, target).await?;
+    workspace::associate(store, std::slice::from_mut(&mut session)).await?;
+    Ok(session)
+}
+
+async fn read_surface(store: &SharedStore, target: &SessionTarget) -> Result<SessionRecord> {
+    match target {
         SessionTarget::Interactive { dir, manifest, .. } => {
             interactive_surface(store, dir, manifest).await
         }
@@ -814,9 +820,7 @@ async fn session_surface(store: &SharedStore, target: &SessionTarget) -> Result<
         SessionTarget::StandaloneFlow(token) => {
             attribute_standalone_session(store, crate::ops::flow_session::surface(token)?).await
         }
-    }?;
-    workspace::associate(store, std::slice::from_mut(&mut session)).await?;
-    Ok(session)
+    }
 }
 
 pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()> {
@@ -1208,13 +1212,7 @@ pub(crate) async fn open(
             let target = find_session(store, &id)
                 .await?
                 .ok_or_else(|| session_not_found(&id))?;
-            let mut session = match &target {
-                SessionTarget::Ask(record) => ask_surface(store, record).await?,
-                SessionTarget::Flow { task, position } => {
-                    flow_surface(store, task, position).await?
-                }
-                _ => unreachable!("prepared boundary remains Ask or Flow"),
-            };
+            let mut session = read_surface(store, &target).await?;
             if resume {
                 session.run_id = open_boundary(store, &id).await?;
             }

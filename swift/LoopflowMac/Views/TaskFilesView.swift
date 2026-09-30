@@ -24,18 +24,20 @@ struct TaskFilesView: View {
             documentPane
         }
         .background(palette.background)
-        .task(id: store.base) {
-            store.observeFiles()
-            await store.refresh()
+        .task(id: "\(store.base)|\(store.needsComparison)") {
+            guard store.needsComparison else { return }
+            await store.refreshChanges()
             // Linked-worktree Git metadata may live outside the watched checkout.
             // Refresh membership/base only; document synchronization is event-driven.
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                if store.showsChanges || store.mode == .diff { await store.refreshChanges() }
+                await store.refreshChanges()
             }
         }
-        .task(id: store.showIgnored) { await store.refreshDirectories() }
-        .task(id: store.showsChanges) { if store.showsChanges { await store.refreshChanges() } }
+        .task(id: store.showIgnored) {
+            store.observeFiles()
+            await store.refreshDirectories()
+        }
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
             if store.mode == .file { await store.loadFile() }
         }

@@ -194,7 +194,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
-    /// Current contents of one file, constrained to the Task worktree.
+    /// One page of immediate directory entries in the Task checkout.
     public func taskFiles(issue: String, directory: String, cursor: String? = nil,
                           showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
         var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]

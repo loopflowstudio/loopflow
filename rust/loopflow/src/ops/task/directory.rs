@@ -5,7 +5,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use super::{file_context, task_error, validate_task_relative_path, TaskWorkspace};
+use super::{file_context, task_error, validate_task_relative_path};
 use crate::ops::error::OpsResult;
 
 const PAGE_SIZE: usize = 500;
@@ -51,16 +51,11 @@ pub fn task_files(
     show_ignored: bool,
 ) -> OpsResult<TaskDirectory> {
     let checkout = file_context(issue)?;
-    directory_snapshot(
-        TaskWorkspace::from(&checkout),
-        directory,
-        cursor,
-        show_ignored,
-    )
+    directory_snapshot(&checkout.worktree, directory, cursor, show_ignored)
 }
 
 fn directory_snapshot(
-    workspace: TaskWorkspace<'_>,
+    worktree: &Path,
     directory: &str,
     cursor: Option<&str>,
     show_ignored: bool,
@@ -90,7 +85,7 @@ fn directory_snapshot(
             "Directory cursor belongs to another directory or ignored-file selection",
         ));
     }
-    let root = workspace.worktree.canonicalize()?;
+    let root = worktree.canonicalize()?;
     let absolute = root.join(&directory).canonicalize()?;
     if !absolute.starts_with(&root) || !absolute.is_dir() {
         return Err(task_error("Directory must remain inside the Task worktree"));
@@ -172,18 +167,11 @@ fn directory_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{directory_snapshot, TaskFileKind};
-    use crate::ops::task::TaskWorkspace;
-    use crate::work::task::TaskId;
 
     #[test]
     fn task_files_pages_include_unchanged_untracked_and_bounded_links() {
         let repo = loopflow_test_support::TestRepo::new();
-        let id = TaskId::new();
-        let workspace = TaskWorkspace {
-            issue_identifier: "FILES-1",
-            task_id: &id,
-            worktree: repo.path(),
-        };
+        let worktree = repo.path();
         std::fs::write(repo.path().join(".gitignore"), "ignored/\n").unwrap();
         for directory in ["nested", "ignored"] {
             std::fs::create_dir(repo.path().join(directory)).unwrap();
@@ -192,15 +180,14 @@ mod tests {
             std::fs::write(repo.path().join(format!("file-{index:03}")), "").unwrap();
         }
         std::os::unix::fs::symlink("nested", repo.path().join("link")).unwrap();
-        let first = directory_snapshot(workspace, "", None, false).unwrap();
+        let first = directory_snapshot(worktree, "", None, false).unwrap();
         assert_eq!(first.entries.len(), 500);
         assert_eq!(first.entries[0].path, "nested");
         assert!(!first
             .entries
             .iter()
             .any(|entry| entry.path == ".git" || entry.path == "ignored"));
-        let second =
-            directory_snapshot(workspace, "", first.next_cursor.as_deref(), false).unwrap();
+        let second = directory_snapshot(worktree, "", first.next_cursor.as_deref(), false).unwrap();
         assert!(second.next_cursor.is_none());
         assert!(second
             .entries
@@ -210,15 +197,15 @@ mod tests {
             .entries
             .iter()
             .all(|entry| !second.entries.contains(entry)));
-        let visible = directory_snapshot(workspace, "", None, true).unwrap();
+        let visible = directory_snapshot(worktree, "", None, true).unwrap();
         assert!(visible.entries.iter().any(|entry| entry.path == "ignored"));
         assert!(
-            directory_snapshot(workspace, "nested", first.next_cursor.as_deref(), false).is_err()
+            directory_snapshot(worktree, "nested", first.next_cursor.as_deref(), false).is_err()
         );
-        assert!(directory_snapshot(workspace, "", first.next_cursor.as_deref(), true).is_err());
-        assert!(directory_snapshot(workspace, ".git", None, true).is_err());
+        assert!(directory_snapshot(worktree, "", first.next_cursor.as_deref(), true).is_err());
+        assert!(directory_snapshot(worktree, ".git", None, true).is_err());
         let outside = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(outside.path(), repo.path().join("outside")).unwrap();
-        assert!(directory_snapshot(workspace, "outside", None, true).is_err());
+        assert!(directory_snapshot(worktree, "outside", None, true).is_err());
     }
 }

@@ -129,8 +129,6 @@ public struct SessionAction: Codable, Sendable, Hashable {
     }
 }
 
-/// One resumable Session and the exact command that opens it.
-/// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionWorkspace: Codable, Sendable, Hashable {
     public let homeId: String
     public let worktree: String
@@ -144,6 +142,8 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
     }
 }
 
+/// One resumable Session and the exact command that opens it.
+/// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let runId: String

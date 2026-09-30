@@ -214,7 +214,6 @@ mod tests {
     #[test]
     fn worker_liveness_is_separate_from_durable_ready_work() {
         let mut position = FlowSession {
-            parent_id: None,
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             cursor: crate::engine::ExecutionCursor {
                 index: 0,

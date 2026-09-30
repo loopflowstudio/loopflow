@@ -226,8 +226,6 @@ pub struct FlowTurnSelection {
 /// same executor; a Task's `cwd` is its worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowSession {
-    /// Runtime loop parent; template composition does not create a parent.
-    pub parent_id: Option<String>,
     pub invocation: QueuedInvocation,
     pub cursor: crate::engine::ExecutionCursor,
     pub version: u64,
@@ -460,7 +458,6 @@ pub struct AbandonReceipt {
 /// Query values for retained FlowSession discovery; none carries driver authority.
 #[derive(Debug, Clone, Default)]
 pub struct FlowFilter {
-    pub parent_id: Option<String>,
     pub repo: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
@@ -472,7 +469,6 @@ pub struct FlowFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowInventoryEntry {
-    pub parent_id: Option<String>,
     #[serde(flatten)]
     pub summary: crate::session::FlowSummary,
     pub repo: Option<String>,

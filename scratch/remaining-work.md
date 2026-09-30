@@ -45,15 +45,17 @@ boundaries.
    [blocked decisions](blocked-decision.md); managed/interactive acceptance is
    still distinct. See [the current audit](task-command-equivalence.md) and
    [the before/after inventory](exec-per-step.md#direct-skill-command-cut--2026-09-29).
-2. **Remove loop passes as FlowSessions** (Jack, 2026-09-30). The contract text
-   is updated (`d61295196`); the code is not. A forward migration folds existing
-   child passes into their root, preserving history, selected completions,
-   reviews and active cursor and return counters. Then drop
-   `flow_sessions.parent_id`, `flow_current_child`, `validate_flow_parent`,
-   `retain_flow_parent`, and `managed_flows` if it only serves this. Delete child
-   claim transfer, deepest-current-child reads, root driver-lock indirection and
-   `FlowFilter.parent_id`. Retry and next pass stay on the cursor. Rewrite
-   behavior tests to positions; delete child-row-only tests. Report net lines.
+2. **Remove loop passes as FlowSessions** — implemented in this pass. One
+   FlowSession retains its cursor and return counters across retry and Iterate.
+   The forward `fold_flow_passes` migration moves child history, conversation
+   membership and the deepest active selection to the root, retaining original
+   rows and import payloads as immutable evidence. Parent columns, indexes,
+   triggers, managed-child view, child claim transfer, deepest-child reads and
+   driver-lock indirection are deleted. Seven focused source checks, the same
+   seven on materialized schema, and five public CLI/discovery checks pass.
+   Rust production delta: +28/−200; including the +112-line migration: **net −60**.
+   See [evidence](evidence.md#one-flowsession-through-loop-passes--2026-09-30).
+   Configured acceptance and the whole-design import obligations remain open.
 3. **Simplify attribution and the parent tree** (Jack). Before and after tables
    are in [exec-per-step.md](exec-per-step.md); the inventory is
    `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn token and

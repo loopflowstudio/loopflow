@@ -208,7 +208,6 @@ async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
 /// A fresh invocation of `selected_flow` for the Task, at its first step.
 fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
     Ok(FlowSession {
-        parent_id: None,
         invocation: QueuedInvocation::load(&task.worktree, selected_flow)?,
         cursor: crate::engine::ExecutionCursor::default(),
         version: 0,

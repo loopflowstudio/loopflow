@@ -5317,6 +5317,150 @@ mod tests {
     }
 
     #[test]
+    fn fold_passes_preserves_active_review_completion_and_exact_history() {
+        let conn = open();
+        let name = "fold_flow_passes";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('wave','infra','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project','wave','linear',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES('task','project','issue','INF-1','/repo',1);
+            INSERT INTO flow_sessions(id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id)
+                VALUES('root','{"id":"root","steps":["retained graph"]}',2,0,7,2,10,'current','task','wave');
+            INSERT INTO flow_sessions(id,parent_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id)
+                VALUES('past','root','{"id":"past","steps":["retained graph"]}',2,1,3,2,11,'current','task','wave');
+            UPDATE flow_sessions SET state='completed',ended_at=12 WHERE id='past';
+            INSERT INTO flow_sessions(id,parent_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id)
+                VALUES('outer','root','{"id":"outer","steps":["retained graph"]}',2,2,4,3,13,'current','task','wave'),
+                ('inner','outer','{"id":"inner","steps":["retained graph"]}',1,3,9,4,17,'current','task','wave');
+            UPDATE tasks SET current_invocation_id='root' WHERE id='task';
+            INSERT INTO agent_sessions(id,title,title_source,ready_summary,created_at,request,kind,interactive,input_published,cwd,task_id,wave_id,flow_session_id,node,iterations)
+                VALUES('review','Review title','human','Keep this feedback',15,'Original request','flow_review',1,1,'/repo','task','wave','inner',1,'[2,1]');
+            INSERT INTO session_events(seq,session_id,kind,receipt_key,observed_at,payload)
+                VALUES(101,'review','captured','run_saved',15,'{ "artifact_key":"run_saved" }');
+            UPDATE agent_sessions SET current_capture=101 WHERE id='review';
+            INSERT INTO session_events(seq,session_id,kind,provider_thread,provider_turn,receipt_key,observed_at,payload,captured_event)
+                VALUES(102,'review','started','thread','turn','start',16,'{"original":true}',101),
+                (103,'review','completed','thread','turn','done',17,'{"status":"completed"}',101);
+            INSERT INTO flow_events(seq,flow_id,version,node,iterations,kind,session_event,observed_at)
+                VALUES(201,'inner',9,1,'[2,1]','selected',102,16),
+                (202,'past',3,2,'[1,0]','consumed',103,17);
+            INSERT INTO flow_events(seq,flow_id,version,node,iterations,kind,observed_at,payload)
+                VALUES(203,'outer',4,0,'[2,0]','operation_started',16,'{"command":"retained"}');
+            UPDATE flow_sessions SET review_json='{"index":1,"iteration":3,"progress":{"repeats":{"outer":2,"inner":1}}}',
+                claim_json='{"invocation_id":"inner","generation":4,"position_version":9,"owner":{"retained":true}}',
+                failure_json='{"reason":"retained"}',pending_session_id='review',current_capture=101,selected_start=102,operation_start=203
+                WHERE id='inner';
+            INSERT INTO import_evidence(source,selector,payload)
+                VALUES('runs','old-selector','{ "invocation_id":"past", "task_id":"task", "wave_id":"wave", "outcome":"failed" }');
+        "#).unwrap();
+        let original: String = conn
+            .query_row(
+                "SELECT payload FROM import_evidence WHERE selector='old-selector'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let cursor: String = conn
+            .query_row(
+                "SELECT review_json FROM flow_sessions WHERE id='inner'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let started: i64 = conn
+            .query_row("SELECT started_at FROM tasks WHERE id='task'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        let position = conn.query_row("SELECT id,review_json,iteration,position_version,worker_generation,pending_session_id,current_capture,selected_start,operation_start,json_extract(claim_json,'$.invocation_id') FROM flow_sessions", [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,i64>(6)?,r.get::<_,i64>(7)?,r.get::<_,i64>(8)?,r.get::<_,String>(9)?))).unwrap();
+        assert_eq!(
+            position,
+            (
+                "root".into(),
+                cursor,
+                3,
+                9,
+                4,
+                "review".into(),
+                101,
+                102,
+                203,
+                "root".into()
+            )
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM flow_sessions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM flow_events WHERE flow_id='root' AND seq IN (201,202,203)",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(conn.query_row("SELECT flow_session_id||':'||title||':'||ready_summary FROM agent_sessions WHERE id='review'", [], |r| r.get::<_,String>(0)).unwrap(),"root:Review title:Keep this feedback");
+        assert_eq!(
+            conn.query_row(
+                "SELECT payload FROM import_evidence WHERE selector='old-selector'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            original
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT historical_flow_id FROM import_evidence WHERE selector='old-selector'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "root"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM import_evidence WHERE source='flow_pass'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        assert_eq!(conn.query_row("SELECT json_extract(payload,'$.claim_json') FROM import_evidence WHERE source='flow_pass' AND selector='inner'", [], |r| r.get::<_,String>(0)).unwrap(),r#"{"invocation_id":"inner","generation":4,"position_version":9,"owner":{"retained":true}}"#);
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='task' AND current_invocation_id='root'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            started
+        );
+        assert!(conn.prepare("SELECT parent_id FROM flow_sessions").is_err());
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('managed_flows','flow_current_child','validate_flow_parent','retain_flow_parent')", [], |r| r.get::<_,i64>(0)).unwrap(),0);
+        assert!(conn
+            .execute("UPDATE import_evidence SET payload='{}'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn runtime_children_upgrade_preserves_existing_flows_without_inventing_parents() {
         let conn = open();
         let name = "runtime_flow_children";

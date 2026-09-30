@@ -15,7 +15,7 @@ use super::SqliteStore;
 const INVENTORY_FROM: &str = "FROM flow_sessions f INDEXED BY flow_metadata
     LEFT JOIN tasks t ON t.id=f.task_id LEFT JOIN waves w ON w.id=f.wave_id";
 const INVENTORY_EXTRA: &str = "COALESCE(w.repo,f.unbound_repo),
-    COALESCE(t.current_invocation_id=f.id,0),f.ended_at,f.parent_id";
+    COALESCE(t.current_invocation_id=f.id,0),f.ended_at";
 
 fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String, Vec<Value>) {
     let mut sql = format!("WITH page AS MATERIALIZED (SELECT f.id {INVENTORY_FROM} WHERE 1");
@@ -28,7 +28,6 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
         ("COALESCE(w.repo,f.unbound_repo)", filter.repo.as_deref()),
         ("f.task_id", filter.task_id.as_ref().map(|id| id.as_str())),
         ("f.wave_id", filter.wave_id.as_ref().map(|id| id.as_str())),
-        ("f.parent_id", filter.parent_id.as_deref()),
     ] {
         if let Some(value) = value {
             sql.push_str(&format!(
@@ -73,7 +72,6 @@ fn query(filter: &FlowFilter, after: Option<&str>, limit: NonZeroU32) -> (String
 fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowInventoryEntry>> {
     Ok((|| {
         Ok(FlowInventoryEntry {
-            parent_id: row.get(11)?,
             summary: read_flow_summary(row, 0)?.ok_or(StoreError::NotFound)?,
             repo: row.get(8)?,
             managed: row.get(9)?,
@@ -274,7 +272,6 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
         let saved = store
             .create_flow(&FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::new(
                     "removed-template",
                     vec![ConcreteStep::Skill(ConcreteSkill {
@@ -346,24 +343,11 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,parent_id,task_id,wave_id)
-                 SELECT 'other','{\"id\":\"other\",\"flow\":\"feature\",\"steps\":\"corrupt\"}',cwd,0,0,1,0,17,'current',id,task_id,wave_id FROM flow_sessions WHERE id='managed'",
+                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state,task_id,wave_id)
+                 SELECT 'other','{\"id\":\"other\",\"flow\":\"feature\",\"steps\":\"corrupt\"}',cwd,0,0,1,0,17,'current',task_id,wave_id FROM flow_sessions WHERE id='managed'",
                 [],
             )
             .unwrap();
-        let children = store
-            .flow_inventory(
-                &FlowFilter {
-                    parent_id: Some("managed".into()),
-                    ..FlowFilter::default()
-                },
-                None,
-                NonZeroU32::new(10).unwrap(),
-            )
-            .unwrap();
-        assert_eq!(children.entries.len(), 1);
-        assert_eq!(children.entries[0].parent_id.as_deref(), Some("managed"));
-        assert!(!children.entries[0].managed);
         let id = store
             .resolve_task_id("PROOF-1", Some("/repo"))
             .unwrap()

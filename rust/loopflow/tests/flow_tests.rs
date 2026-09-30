@@ -304,7 +304,6 @@ fn mechanical_task_step_owns_its_effect_without_taking_the_driver_claim() {
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "task-op").unwrap(),
                 cursor: Default::default(),
                 version: 0,
@@ -872,7 +871,6 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 &child.task.id,
                 FlowSession {
                     task_id: Some(child.task.id.clone()),
-                    parent_id: None,
                     wave_id: Some(child.task.wave_id.clone()),
                     cwd: child.task.worktree.clone(),
                     message: None,
@@ -1940,7 +1938,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "claim-proof").unwrap(),
                 cursor: Default::default(),
                 version: 0,
@@ -2106,7 +2103,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation:
                     QueuedInvocation::new("restart-proof", flow.invocation.steps.clone()).unwrap(),
                 ..flow.clone()
@@ -2185,7 +2181,6 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "code").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,
@@ -2685,7 +2680,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         .block_on(task.store.start_task_flow(
             &task.task.id,
             FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::load(repo.path(), "two-loops").unwrap(),
                 cursor: loopflow::engine::ExecutionCursor {
                     index: 1,

@@ -427,3 +427,54 @@ passed (`review-slice-public-attribution.log`). Both logs are under
 installation suite was not rerun. These are scripted provider/terminal proofs,
 not configured acceptance. No production edit was needed during review; the
 one-FlowSession migration and the other remaining-work obligations stay open.
+
+## One FlowSession through loop passes · 2026-09-30
+
+Jack Heart selected item 2 only, followed by commit/publication and stop.
+The shared driver, Task reader and discovery now use the original FlowSession
+through every pass. Retry retains its position; Iterate advances the cursor and
+return counters without creating a row or transferring a claim. The Flow parent
+field/filter, managed-child view, child lookup and root-lock indirection are gone.
+The wire fixture and affected CLI documentation reflect the removal.
+
+The forward `fold_flow_passes` draft preserves original root/child SQL rows in
+`import_evidence`, moves AgentSession membership and Flow events to the root,
+and copies only the deepest current pass's selection/cursor/review/claim.
+Completed siblings contribute history and never overwrite the active position.
+Review found that historical import payloads can themselves name removed children:
+the archive keeps their exact payload bytes and resolves its foreign key to the
+surviving owner. No capture, native receipt, event sequence or payload is rewritten.
+Existing migration checksums are untouched.
+
+Focused evidence under `.lf/tmp/cut-i/`:
+
+- `fold-focused.log`: seven source checks pass. Same-pass failure/retry,
+  Iterate twice, overlapping counters, stale-result refusal, blocked feedback,
+  conversation reuse and populated migration.
+- `fold-public.log`: five checks pass. Public taskless two-return Flow records
+  one completed FlowSession and three history positions; completed resume starts
+  no more agents. Public Task-attributed failure/retry/review and saved-Flow
+  paging/detail/wire proofs also pass. Providers are scripted, stores isolated.
+- `fold-canonical.log`: the same seven focused checks pass after materialization
+  in a disposable exact-source copy. `fold-canonical-source.json` records its
+  input hashes and command. The populated nested-pass case retains selected
+  completion and mechanical history, pending review identity/title/feedback,
+  exact original archive payloads, Task pointer/Started and valid foreign keys.
+- `fold-clippy.log`: all-target Clippy with warnings denied passes. Formatting,
+  diff whitespace, migration history and architecture coverage pass. The initial
+  check found one leftover CLI parent-field reference; it was removed before
+  every behavioral proof. Generated architecture HTML is current; rendering
+  required the website project environment after the root environment lacked
+  `fasthtml`.
+
+Measured against `cbf01f5ab`: Rust production **+28/−200 (net −172)**;
+forward SQL migration **+112/−0**; total production **+140/−200 (net −60)**.
+Counts exclude integration and inline test code, DTO fixtures, docs, generated
+files and supervisor scratch trimming. Inline production is the pre-test portion
+of each changed Rust module, retaining durable.rs's public model definitions.
+The supervisor's pre-existing scratch trim is preserved separately at `1fb9e32f9`.
+
+No full local suite ran. These are local source/materialized and scripted CLI
+proofs, not hosted CI, configured-provider/Desktop acceptance, real-Home conversion,
+installation, merge or Task completion. The remaining implementation items and
+full-design obligations are unchanged.

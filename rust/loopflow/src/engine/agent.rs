@@ -191,7 +191,7 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
     crate::journal::LF_PROCESS_ID_ENV,
     crate::durable::RUN_ID_ENV,
     crate::run_record::RUN_DIR_ENV,
-    crate::run_record::PARENT_RUN_ID_ENV,
+    "LF_PARENT_RUN_ID",
 ];
 
 #[derive(Clone, Default)]

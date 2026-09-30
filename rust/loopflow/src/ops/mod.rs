@@ -72,8 +72,8 @@ pub(crate) use run::render_task_context;
 pub(crate) use run::{launch_task_worker, TaskWorkerLaunch};
 #[doc(hidden)]
 pub use run::{
-    resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
-    WorkSelection,
+    resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,
+    resolve_work_selection, WorkBinding, WorkSelection,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

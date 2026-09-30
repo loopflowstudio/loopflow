@@ -38,13 +38,6 @@ impl Store {
         })
         .await
     }
-    pub async fn agent_work(
-        &self,
-        exec: &crate::id::ExecId,
-    ) -> StoreResult<Option<crate::session::RunWork>> {
-        let exec = exec.clone();
-        run_sqlite(&self.sqlite, move |store| store.agent_work(&exec)).await
-    }
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,

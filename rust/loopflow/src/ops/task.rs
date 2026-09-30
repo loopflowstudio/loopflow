@@ -1342,17 +1342,26 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
         .map_err(|error| task_error(format!("failed to resolve Task branch {branch:?}: {error}")))
 }
 
+/// Machine installation is separate from execution in a registered Task checkout.
+pub(crate) fn require_unmanaged_checkout(repo: &Path) -> OpsResult<()> {
+    block_on_task(async {
+        if matches!(
+            resolve_managed_task(repo).await?,
+            ManagedTask::Managed { .. }
+        ) {
+            return Err(task_error("Task Work cannot change the machine installation. Run installation outside the Task checkout without a Task --as declaration."));
+        }
+        Ok(())
+    })
+}
+
 /// A managed Task worktree, or an explicit decision
 /// that this worktree is not a Task worktree.
 ///
 /// The PR publication, stacking, submit, and land entry points share this one
-/// resolver so they cannot disagree about Task ownership. A missing
-/// or incompatible registry never collapses to [`ManagedTask::Unmanaged`]
-/// silently: only a registry file that provably does not exist (no tasks have
-/// ever been registered on this machine) and no ambient Task id together prove
-/// "not a Task," which preserves ordinary non-Task PR flows. Everything else
-/// that cannot be opened is a refusal with an actionable authority error, so a
-/// Task entry point never degrades to generic PR behavior.
+/// resolver so they cannot disagree about Task ownership. An absent registry
+/// without an explicit declaration permits ordinary PR work. An unreadable
+/// registry or unresolved declaration reports the missing authority instead.
 #[derive(Debug)]
 enum ManagedTask {
     /// This checkout is not on a Task branch. Task-specific bookkeeping is an
@@ -1386,21 +1395,27 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
 
 /// Resolve the managed Task for a PR entry point at `repo`.
 ///
-/// - Registry opens and the checkout is on a current Task branch → [`ManagedTask::Managed`].
-/// - Registry opens and its checked-out branch names no Task → [`ManagedTask::Unmanaged`].
-/// - Registry file missing and no ambient Task id → [`ManagedTask::Unmanaged`]
-///   (no registry means no tasks exist, so this is provably an ordinary PR).
-/// - Registry missing with an ambient Task id, or present but unopenable → refuse.
+/// - Checkout ownership, then an explicit declaration, resolves a Task → [`ManagedTask::Managed`].
+/// - Neither resolves a Task → [`ManagedTask::Unmanaged`].
+/// - Registry file missing without a declaration → [`ManagedTask::Unmanaged`].
+///   Missing records cannot recover checkout ownership or authorize inherited identity.
+/// - Registry present but unopenable → refuse.
 async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
-    let ambient = std::env::var_os(crate::durable::RUN_ID_ENV).is_some();
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
-        Err(RegistryUnavailable::MissingFile { .. }) if !ambient => {
+        Err(RegistryUnavailable::MissingFile { .. })
+            if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none() =>
+        {
             return Ok(ManagedTask::Unmanaged);
         }
         Err(err) => return Err(task_registry_error(err)),
     };
-    match task_for_checkout(&store, repo).await? {
+    let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
+    let task = match binding.map(|binding| binding.work) {
+        Some(crate::durable::WorkRef::Task(id)) => store.get_task(&id).await.map_err(task_error)?,
+        _ => None,
+    };
+    match task {
         Some(task) => Ok(ManagedTask::Managed {
             store,
             task: Box::new(task),
@@ -2570,6 +2585,10 @@ pub(crate) async fn launch_task_process(
     selected_flow: Option<&str>,
 ) -> OpsResult<()> {
     super::task_destination::require_worker_destination().map_err(task_error)?;
+    let _declaration = crate::lf::commands::flow::EnvVarGuard::set(
+        crate::lf::WORK_DECLARATION_ENV,
+        &format!("task:{}", task.id),
+    );
     let position = crate::controller::task::ensure_flow_position(store, &task.id, selected_flow)
         .await
         .map_err(task_error)?;
@@ -6306,7 +6325,7 @@ mod tests {
         let _environment = EnvRestore::capture(&[
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
-            crate::run_record::PARENT_RUN_ID_ENV,
+            "LF_PARENT_RUN_ID",
         ]);
         let repository = loopflow_test_support::TestRepo::new();
         repository.create_branch("test/task-recovery-fixture");
@@ -6316,7 +6335,7 @@ mod tests {
         let parent_run_id = crate::run_record::new_artifact_key();
         std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
         std::env::remove_var(crate::run_record::RUN_DIR_ENV);
-        std::env::remove_var(crate::run_record::PARENT_RUN_ID_ENV);
+        std::env::remove_var("LF_PARENT_RUN_ID");
 
         let resolved = super::task_for_checkout(&store, &task.worktree)
             .await

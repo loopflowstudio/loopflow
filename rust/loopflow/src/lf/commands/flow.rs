@@ -23,7 +23,7 @@ pub fn run(
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
     let checkout = if binding.is_none() {
-        crate::lf::commands::run::checkout_binding(cli)?
+        crate::lf::commands::run::implicit_binding(cli)?
     } else {
         None
     };

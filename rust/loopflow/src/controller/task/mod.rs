@@ -19,9 +19,6 @@ pub(crate) async fn run(store: SharedStore, task_id: TaskId) -> Result<()> {
             .transpose()
             .map_err(|error| anyhow!("invalid Task worker claim: {error}"))?
             .ok_or_else(|| anyhow!("Task boundary launch is missing its worker claim"))?;
-    // Consuming the launch capability must not erase the restriction on Task
-    // descendants changing the machine installation, including operation steps.
-    std::env::set_var(crate::run_record::TASK_ORIGIN_ENV, "1");
     let owner = crate::journal::current_process_identity()
         .ok_or_else(|| anyhow!("Task worker requires a registered Exec"))?;
     let launch_claim = store

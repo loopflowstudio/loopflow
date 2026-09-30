@@ -243,3 +243,34 @@ skills and ordinary/managed Flows. This is an interim preservation choice, not
 approval of either wider policy. The two options remain checkout-only (including
 interactive commands) or unattended-only (including unbound work). See
 [the branch audit](task-command-equivalence.md).
+
+2026-09-30 · **An ancestor's --as is inherited: decided.** Jack Heart, refining
+the rule above: "Well, a parent --as should also work. i guess that could use an
+env variable after all." A run's Task comes from `--as` on this command, `--as`
+declared by an ancestor and carried through one environment variable, or the
+checkout. What is inherited is the explicit declaration, not ancestry: being
+under `lf task`, holding a claim, or being called by an agent Session still
+names no Task. Operator assumption, open for Jack: precedence is this command's
+`--as`, then an inherited `--as`, then the worktree.
+
+2026-09-30 · **Task commands set --as.** Jack Heart: "using lf task should
+automatically use --as for subcommands basically." `lf task run X` is exactly
+`lf --as task:X flow <the Task's Flow>` in X's worktree. Its children see the
+Task through the ordinary inherited `--as`, not through a Task-specific path.
+
+2026-09-30 · **Task precedence: decided.** Jack Heart: "i think worktree beats
+inherited as." Order: `--as` on this command (including one implied by an
+`lf task` command), then the checkout's Task, then an `--as` inherited from an
+ancestor. This replaces the operator's earlier assumption, which put inherited
+`--as` ahead of the worktree. Causation stays in the Exec parent tree.
+
+## Explicit Work declaration refinement · 2026-09-30
+
+Jack Heart decided that explicit `--as` on this command wins, followed by the
+Task checkout, followed by an ancestor's explicit declaration. The earlier
+operator assumption putting inheritance before checkout is superseded.
+`lf task run X` is the explicit `--as task:X` shortcut. Use one variable (`LF_AS`;
+no existing declaration variable was found) and never populate it from checkout
+inference, Session ownership, claims or legacy Task-origin bytes. Provider,
+tmux and SSH forwarding preserve that declaration, while Exec causation stays
+with the original provider parent. No new confinement decision follows.

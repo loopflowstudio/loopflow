@@ -3,6 +3,7 @@
 import json
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -25,12 +26,30 @@ def _event(kind, **properties):
     EVENTS.put({"type": kind, "properties": properties})
 
 
-def _launch(session, request, prompt, output_format):
+def _record_launch():
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_RUN_ID"] + "\n")
+    with (HOME / "declarations").open("a") as output:
+        declaration = {"capture": os.environ["LF_RUN_ID"], "as": os.environ.get("LF_AS")}
+        output.write(json.dumps(declaration) + "\n")
+    tool = HOME / "tool-command.json"
+    if tool.exists():
+        command = json.loads(tool.read_text())
+        tool.unlink()
+        result = subprocess.run(
+            command["argv"], cwd=command["cwd"], capture_output=True, timeout=60
+        )
+        (HOME / "tool-result.json").write_text(
+            json.dumps({"code": result.returncode, "stderr": result.stderr.decode()})
+        )
+
+
+def _launch(session, request, prompt, output_format):
+    _record_launch()
     assistant = "msg_" + uuid.uuid4().hex
     info = {"id": assistant, "sessionID": session, "role": "assistant", "parentID": request,
-            "time": {"created": int(time.time() * 1000)}, "modelID": "fixture", "providerID": "opencode"}
+            "time": {"created": int(time.time() * 1000)},
+            "modelID": "fixture", "providerID": "opencode"}
     message = {"info": info, "parts": []}
     with LOCK:
         sessions[session].append(message)
@@ -40,7 +59,9 @@ def _launch(session, request, prompt, output_format):
     transient = HOME / "transient-once"
     if transient.exists() and "Decide the fixture." in str(prompt):
         transient.unlink()
-        info["structured_output"] = {"decision": "iterate", "summary": "Failed turn cannot navigate"}
+        info["structured_output"] = {
+            "decision": "iterate", "summary": "Failed turn cannot navigate"
+        }
         info["error"] = {"name": "APIError", "data": {"message": "fixture status 502"}}
     elif fail.exists():
         fail.unlink()
@@ -52,7 +73,9 @@ def _launch(session, request, prompt, output_format):
         _event("permission.asked", sessionID=session, id=permission,
                tool={"messageID": assistant, "callID": "call_fixture"})
         if not reply.wait(15):
-            info["error"] = {"name": "APIError", "data": {"message": "fixture permission unanswered"}}
+            info["error"] = {
+                "name": "APIError", "data": {"message": "fixture permission unanswered"}
+            }
         else:
             if output_format:
                 assert output_format["type"] == "json_schema"
@@ -119,7 +142,9 @@ class Server(BaseHTTPRequestHandler):
                 if session not in sessions:
                     self._json({}, 404)
                 else:
-                    self._json(sessions[session] if self.path.endswith("/message") else {"id": session})
+                    self._json(
+                        sessions[session] if self.path.endswith("/message") else {"id": session}
+                    )
         else:
             self._json({})
 
@@ -143,7 +168,12 @@ class Server(BaseHTTPRequestHandler):
                     "request": body,
                 }))
             self._json({})
-            threading.Thread(target=_launch, args=(self.path.split("/")[2], body["messageID"], body["parts"], body.get("format")), daemon=True).start()
+            threading.Thread(
+                target=_launch,
+                args=(self.path.split("/")[2], body["messageID"], body["parts"],
+                      body.get("format")),
+                daemon=True,
+            ).start()
         elif self.path.startswith("/permission/"):
             assert body == {"reply": "once"}
             REPLIES[self.path.split("/")[2]].set()
@@ -156,10 +186,11 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 if "serve" not in sys.argv:
     print("message=created id=ses_" + os.environ["LF_RUN_ID"], file=sys.stderr)
-    with (HOME / "launched").open("a") as output:
-        output.write(os.environ["LF_RUN_ID"] + "\n")
-    if __WAIT__:
+    _record_launch()
+    if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
-ThreadingHTTPServer(("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Server).serve_forever()
+ThreadingHTTPServer(
+    ("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Server
+).serve_forever()

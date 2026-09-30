@@ -292,7 +292,11 @@ fn run_with_env(
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
     let user_name = crate::engine::config::launch_user_name()?.unwrap_or_default();
+    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
     let mut extra_env = extra_env.to_vec();
+    if let Some(value) = declaration.as_deref() {
+        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
+    }
     extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
     let preamble = build_preamble(
         &credentials,

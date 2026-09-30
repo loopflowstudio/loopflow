@@ -1441,6 +1441,7 @@ fn dispatch(
         };
 
     let mut direct_binding = None;
+    let mut _work_declaration = None;
     let mut _bound_cwd = None;
     let selects_direct_work = cli.as_work.is_some()
         || cli.task.is_some()
@@ -1478,6 +1479,10 @@ fn dispatch(
         }
         let cwd = CwdGuard::enter(&binding.cwd)?;
         require_bound_invocation(&cli.command)?;
+        _work_declaration = Some(EnvGuard::set(
+            loopflow::lf::WORK_DECLARATION_ENV,
+            format!("{}:{}", binding.work.kind(), binding.work.id()),
+        ));
         direct_binding = Some(binding);
         _bound_cwd = Some(cwd);
     }

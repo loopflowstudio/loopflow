@@ -15,6 +15,7 @@ use super::{OpsError, OpsResult};
 
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
+    pub source: crate::session::WorkSource,
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub wave_name: String,
@@ -185,6 +186,7 @@ pub async fn resolve_work_selection(
             task.worktree.clone()
         };
         return Ok(WorkBinding {
+            source: crate::session::WorkSource::Declared,
             subjects: vec![
                 format!("wave:{}", wave.name()),
                 format!("project:{}", project.plan.slug),
@@ -212,6 +214,7 @@ pub async fn resolve_work_selection(
         let cwd = PathBuf::from(wave.repo());
         let context = render_wave_context(&cwd, &cwd, wave.name(), &metric_context);
         return Ok(WorkBinding {
+            source: crate::session::WorkSource::Declared,
             subjects: vec![format!("wave:{}", wave.name())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
@@ -223,6 +226,28 @@ pub async fn resolve_work_selection(
     }
 
     Err(run_error("select a Task or Wave"))
+}
+
+/// Resolve checkout ownership before an ancestor's explicit declaration.
+/// This command's --as is resolved by the CLI before reaching this fallback.
+pub async fn resolve_execution_binding(
+    store: &SharedStore,
+    cwd: &Path,
+) -> OpsResult<Option<WorkBinding>> {
+    if crate::repo::discover_repo_root(cwd)
+        .map_err(run_error)?
+        .is_some()
+    {
+        if let Some(binding) = resolve_checkout_binding(store, cwd).await? {
+            return Ok(Some(binding));
+        }
+    }
+    if let Ok(selector) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
+        let mut binding = resolve_work_binding(store, cwd, &selector).await?;
+        binding.cwd = cwd.to_path_buf();
+        return Ok(Some(binding));
+    }
+    Ok(None)
 }
 
 /// Resolve checkout attribution independently of Task or PR execution eligibility.
@@ -243,6 +268,7 @@ pub async fn resolve_checkout_binding(
         },
     )
     .await?;
+    binding.source = crate::session::WorkSource::Checkout;
     binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     Ok(Some(binding))
 }
@@ -302,6 +328,10 @@ async fn start_work_session(
         request.task_id.to_string(),
     ];
     environment.extend([
+        (
+            crate::lf::WORK_DECLARATION_ENV.to_string(),
+            format!("task:{}", request.task_id),
+        ),
         (
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),

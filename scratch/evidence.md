@@ -631,3 +631,12 @@ Longer names reflow signatures and literals; the figure is not a reduction claim
 No full local suite ran. This checkpoint does not establish configured-provider,
 rendered Desktop, released-populated public/canonical import, installed-Home
 conversion, merge or Task completion. Item 5 remains the next implementation cut.
+
+Compression after `a6150f52e` removes repeated type/module qualification and corrects
+capture-owner prose: **−37 production lines**, leaving the naming cut **+11 net**.
+No compatibility decoder, wrapper or alias was added by that cut; six serde key
+mappings and the pre-existing saved-skill codec retain stored formats. An import
+collision with the public membership projection was reverted. All ten focused
+capture/replay/codec/history checks pass (`naming-compress-focused.log`); final
+all-target Clippy, formatting and diff checks pass (`naming-compress-clippy-verified.log`).
+No full suite or configured acceptance was run.

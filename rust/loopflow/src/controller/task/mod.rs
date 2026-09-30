@@ -2104,13 +2104,11 @@ mod planning_tests {
                 crate::engine::ConcreteSkill {
                     skill: crate::engine::Skill::named("decide"),
                     flow_parents: vec![],
-                    policy: crate::engine::OccurrencePolicy {
-                        id: Some("decision".into()),
-                        human: false,
-                        repeat: Some(crate::engine::flow::RepeatPolicy {
-                            from: flow.current().policy.id.unwrap(),
-                        }),
-                    },
+                    id: Some("decision".into()),
+                    human: false,
+                    repeat: Some(crate::engine::flow::RepeatPolicy {
+                        from: flow.current().id.unwrap(),
+                    }),
                 },
             ));
         flow.cursor.index = 1;

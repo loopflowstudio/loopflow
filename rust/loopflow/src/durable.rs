@@ -261,29 +261,29 @@ impl FlowSession {
     }
 
     pub fn current_checked(&self) -> Option<StepRef> {
-        let (step, kind, policy) = match self.current_step()? {
+        let (step, kind, id, human, repeat) = match self.current_step()? {
             ConcreteStep::Skill(skill) => (
                 skill.skill.name.clone(),
                 StepKind::Skill,
-                skill.clone(),
+                skill.id.clone(),
+                skill.human,
+                skill.repeat.clone(),
             ),
-            ConcreteStep::Op(op) => (
-                op.item.display_name(),
-                StepKind::Command,
-                OccurrencePolicy::default(),
-            ),
-            ConcreteStep::Xor(branch) => (
-                branch.router.name.clone(),
-                StepKind::Xor,
-                OccurrencePolicy::default(),
-            ),
+            ConcreteStep::Command(command) => {
+                (command.item.display_name(), StepKind::Op, None, false, None)
+            }
+            ConcreteStep::Xor(branch) => {
+                (branch.router.name.clone(), StepKind::Xor, None, false, None)
+            }
         };
         Some(StepRef {
             invocation_id: self.invocation.id.clone(),
             flow: self.invocation.flow.clone(),
             step,
             kind,
-            policy,
+            id,
+            human,
+            repeat,
             index: u32::try_from(self.cursor.index).ok()?,
             total: u32::try_from(self.invocation.steps.len()).ok()?,
             iteration: self.cursor.iteration,
@@ -323,7 +323,7 @@ impl FlowSession {
     pub fn step_name(&self) -> Option<String> {
         Some(match self.current_step()? {
             ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
+            ConcreteStep::Command(op) => format!("op: {}", op.item.display_name()),
             ConcreteStep::Xor(branch) => branch.router.name.clone(),
         })
     }

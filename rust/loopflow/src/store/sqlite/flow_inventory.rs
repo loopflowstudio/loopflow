@@ -166,7 +166,7 @@ mod tests {
 
     use crate::durable::{FlowFilter, FlowSession};
     use crate::engine::invocation::QueuedInvocation;
-    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use crate::session::FlowSummaryState;
     use crate::store::sqlite::SqliteStore;
 
@@ -277,7 +277,9 @@ mod tests {
                     vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: Skill::named("removed-skill"),
                         flow_parents: vec![],
-                        policy: OccurrencePolicy::default(),
+                        id: None,
+                        human: false,
+                        repeat: None,
                     })],
                 )
                 .unwrap(),

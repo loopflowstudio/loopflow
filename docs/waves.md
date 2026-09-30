@@ -353,7 +353,7 @@ Historical work events retain their original attribution. Launching `lf` in a re
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
 states the permanent target in CLI; Desktop confirms it. An existing Task cannot change.
-See [Sessions](lf.md#sessions)
+See [Sessions](lf-reference.md#session-conversations-and-reviews)
 for rename, bind, and the distinction between ancestry and Flow membership.
 
 Each Task PR keeps its own benefit-focused title. After the opening summary,

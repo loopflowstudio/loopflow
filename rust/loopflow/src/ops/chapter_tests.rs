@@ -10,7 +10,7 @@ use super::{
 };
 use crate::durable::FlowSession;
 use crate::engine::invocation::QueuedInvocation;
-use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
 use crate::id::WaveId;
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
@@ -498,11 +498,9 @@ async fn local_started_task(
                     vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: Skill::named("implement"),
                         flow_parents: Vec::new(),
-                        policy: OccurrencePolicy {
-                            id: Some("implement".into()),
-                            human: false,
-                            repeat: None,
-                        },
+                        id: Some("implement".into()),
+                        human: false,
+                        repeat: None,
                     })],
                 )
                 .unwrap(),

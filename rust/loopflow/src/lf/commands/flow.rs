@@ -782,7 +782,11 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     }
 
     /// The child owns the effect; the driver consumes its Flow history.
-    async fn run_command(&self, ops: &crate::engine::ConcreteCommand, _ctx: ExecutionContext) -> Result<()> {
+    async fn run_command(
+        &self,
+        ops: &crate::engine::ConcreteCommand,
+        _ctx: ExecutionContext,
+    ) -> Result<()> {
         let flow = self.begin().await?;
         if self.store.sqlite.flow_operation_completed(flow.id())? {
             return Ok(());
@@ -810,7 +814,7 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
             "Flow changed before step execution"
         );
         let exec = journal::current_exec_id().context("Flow step requires a registered Exec")?;
-        let Some(ConcreteStep::Op(op)) = flow.current_step() else {
+        let Some(ConcreteStep::Command(op)) = flow.current_step() else {
             anyhow::bail!("agent steps execute through lf skill");
         };
         let Some(start) =
@@ -846,7 +850,7 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
     command
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
-    if matches!(flow.current_step(), Some(ConcreteStep::Op(_))) {
+    if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
     } else {
         command.args(cli.step_args());
@@ -927,7 +931,7 @@ fn print_nested_skill_progress(skill_name: &str) {
 #[cfg(test)]
 mod tests {
     use super::render_pipeline_lines;
-    use crate::engine::{ConcreteStep, Flow};
+    use crate::engine::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
 

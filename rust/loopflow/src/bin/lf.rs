@@ -545,6 +545,17 @@ fn resolve_cli_target(
         None => return Ok(None),
     };
     let repo = loopflow::repo::working_directory()?;
+    if kind == Some(DefinitionKind::Skill) {
+        if let Some(flow) = loopflow::lf::commands::run::saved_flow(cli)? {
+            let skill = loopflow::engine::current_skill(&flow.invocation.steps, &flow.cursor)
+                .ok_or_else(|| anyhow::anyhow!("saved FlowSession has no current skill"))?;
+            anyhow::ensure!(
+                skill.skill.name == name,
+                "skill does not match saved FlowSession"
+            );
+            return Ok(Some((Target::Skill(skill.skill), message)));
+        }
+    }
     let target = loopflow::lf::discovery::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
@@ -1278,8 +1289,8 @@ fn run() -> anyhow::Result<()> {
         .init();
 
     // Reorder args so flags can appear after the skill name
-    let normalized = loopflow::lf::navigation::normalize_args(std::env::args().collect())
-        .map_err(|error| {
+    let normalized =
+        loopflow::lf::navigation::normalize_args(std::env::args().collect()).map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
             loopflow::exec::CommandExit(code)
@@ -1534,16 +1545,16 @@ fn dispatch(
         _bound_cwd = Some(cwd);
     }
 
-    let result = resolve_cli_target(&cli, &args).and_then(|selected| match selected {
+    let result = resolve_cli_target(&cli, args).and_then(|selected| match selected {
         Some((target, message)) => execute_target(
             target,
             message.as_deref(),
             &cli,
-            &args,
+            args,
             direct_binding.as_ref(),
             &account_selection,
         ),
-        None => run_default_agent(&cli, &args),
+        None => run_default_agent(&cli, args),
     });
 
     finish_command(result)
@@ -1643,28 +1654,25 @@ fn execute_command(
             cmd: WaveCommand::List { json, all, current },
         }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
         Some(Commands::Wave {
-                cmd:
-                    WaveCommand::Status {
-                        wave,
-                        json,
-                        sync,
-                        no_sync: _,
-                    },
-            }) => {
-                let refreshed = if *sync {
-                    Some(loopflow::lf::commands::ops::refresh_status(
-                        wave.as_deref(),
-                    )?)
-                } else {
-                    None
-                };
-                loopflow::lf::commands::waves::status(
-                    refreshed.as_deref().or(wave.as_deref()),
-                    *json,
-                )
-            }
+            cmd:
+                WaveCommand::Status {
+                    wave,
+                    json,
+                    sync,
+                    no_sync: _,
+                },
+        }) => {
+            let refreshed = if *sync {
+                Some(loopflow::lf::commands::ops::refresh_status(
+                    wave.as_deref(),
+                )?)
+            } else {
+                None
+            };
+            loopflow::lf::commands::waves::status(refreshed.as_deref().or(wave.as_deref()), *json)
+        }
 
-            Some(Commands::Wave {
+        Some(Commands::Wave {
             cmd:
                 cmd @ (WaveCommand::Connect { .. }
                 | WaveCommand::Sync { .. }
@@ -1690,9 +1698,9 @@ fn execute_command(
                 | TaskCommand::File { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd, cli),
-        Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
-            run_task_command(repo, cmd, cli)
-        }),
+        Some(Commands::Task { cmd }) => {
+            in_repo_runtime(args, |repo| run_task_command(repo, cmd, cli))
+        }
         Some(Commands::Tokens { json, days }) => loopflow::lf::commands::tokens::run(*json, *days),
         Some(Commands::Usage {
             json,
@@ -1759,9 +1767,9 @@ fn execute_command(
             task.as_deref(),
             *json,
         ),
-        Some(Commands::FlowStep { id, version }) => {
+        Some(Commands::FlowStep { id, version }) => in_directory_runtime(args, |_| {
             loopflow::lf::commands::flow::execute_step(id, *version)
-        }
+        }),
         Some(Commands::Exec { cmd }) => loopflow::lf::commands::exec::run(cmd),
         Some(Commands::Runs {
             active,
@@ -1788,7 +1796,11 @@ fn execute_command(
             ),
         },
         Some(Commands::Replay { run }) => loopflow::lf::commands::replay::run(run),
-        Some(Commands::Discord { cmd: loopflow::lf::DiscordCommand::Serve { wave } }) => in_repo_runtime(&args, |repo| loopflow::lf::commands::discord::serve(repo, wave)),
+        Some(Commands::Discord {
+            cmd: loopflow::lf::DiscordCommand::Serve { wave },
+        }) => in_repo_runtime(args, |repo| {
+            loopflow::lf::commands::discord::serve(repo, wave)
+        }),
         Some(Commands::Install { .. }) => {
             unreachable!("install dispatches before home routing")
         }
@@ -1816,11 +1828,13 @@ fn execute_command(
             FlowCommand::List { json, inventory } if inventory.sessions => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)
             }
-            FlowCommand::Show { name, json, sessions: true } => {
-                loopflow::lf::commands::flow_inventory::inspect(name, *json)
-            }
+            FlowCommand::Show {
+                name,
+                json,
+                sessions: true,
+            } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => loopflow::lf::commands::flow::control(cmd, cli),
-        }
+        },
         Some(Commands::Skill { .. } | Commands::Run { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")
         }
@@ -1843,7 +1857,8 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                     | loopflow::engine::LoadError::FlowNotFound(_)
             )
         ) {
-            let error = clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
+            let error =
+                clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
             return Err(loopflow::exec::CommandExit(code).into());

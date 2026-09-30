@@ -623,7 +623,7 @@ impl Import<'_> {
             ));
         };
         let current_skill = match file.current_step() {
-            Some(ConcreteStep::Skill(skill)) if skill.policy.human && !file.finished => {
+            Some(ConcreteStep::Skill(skill)) if skill.human && !file.finished => {
                 Some(skill.skill.name.clone())
             }
             _ => None,
@@ -874,9 +874,7 @@ fn captured_node(flow: &FlowSession, key: &str) -> Result<u32> {
 mod numeric_node_tests {
     use super::captured_node;
     use crate::durable::FlowSession;
-    use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, Skill,
-    };
+    use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
     use crate::engine::invocation::QueuedInvocation;
 
     #[test]
@@ -884,7 +882,9 @@ mod numeric_node_tests {
         let skill = || {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named("repeated"),
-                policy: OccurrencePolicy::default(),
+                id: None,
+                human: false,
+                repeat: None,
                 flow_parents: vec![],
             })
         };

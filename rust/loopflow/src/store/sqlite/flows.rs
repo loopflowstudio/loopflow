@@ -275,7 +275,7 @@ fn validate_flow(flow: &FlowSession) -> StoreResult<()> {
     if step.flow.trim().is_empty() || step.step.trim().is_empty() {
         return Err(invalid("flow and step cannot be empty"));
     }
-    if step.policy.human && step.policy.id.is_none() {
+    if step.human && step.id.is_none() {
         return Err(invalid("review flow positions require a stable node id"));
     }
     if flow.claim.is_some() {
@@ -496,7 +496,9 @@ fn reserve_attempt_in(
             ));
         }
     }
-    if flow.current_attempt.is_some() || matches!(flow.current_step(), Some(ConcreteStep::Op(_))) {
+    if flow.current_attempt.is_some()
+        || matches!(flow.current_step(), Some(ConcreteStep::Command(_)))
+    {
         return Ok(());
     }
     if flow.is_human() {
@@ -1135,7 +1137,7 @@ impl SqliteStore {
         if flow.version != version
             || flow.claim.as_ref() != claim
             || flow.failure.is_some()
-            || !matches!(flow.current_step(), Some(ConcreteStep::Op(_)))
+            || !matches!(flow.current_step(), Some(ConcreteStep::Command(_)))
         {
             return Err(stale(id));
         }
@@ -1861,23 +1863,19 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use crate::durable::FlowSession;
-    use crate::engine::flow::{Op, RepeatPolicy};
+    use crate::engine::flow::{Command, RepeatPolicy};
     use crate::engine::invocation::QueuedInvocation;
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
-    use crate::engine::{
-        ConcreteOp, ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill,
-    };
+    use crate::engine::{ConcreteCommand, ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use crate::store::sqlite::SqliteStore;
 
     fn step(id: &str, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
             flow_parents: vec![],
-            policy: OccurrencePolicy {
-                id: Some(id.into()),
-                human: false,
-                repeat: from.map(|from| RepeatPolicy { from: from.into() }),
-            },
+            id: Some(id.into()),
+            human: false,
+            repeat: from.map(|from| RepeatPolicy { from: from.into() }),
         })
     }
 
@@ -2321,8 +2319,8 @@ mod tests {
 
         let op = launched(
             &store,
-            vec![ConcreteStep::Op(ConcreteOp {
-                item: Op {
+            vec![ConcreteStep::Command(ConcreteCommand {
+                item: Command {
                     command: "status".into(),
                     args: vec![],
                 },
@@ -2819,8 +2817,8 @@ mod tests {
         let flow = launched(
             &store,
             vec![
-                ConcreteStep::Op(ConcreteOp {
-                    item: Op {
+                ConcreteStep::Command(ConcreteCommand {
+                    item: Command {
                         command: "rebase".into(),
                         args: vec!["--plan".into()],
                     },

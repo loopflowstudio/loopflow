@@ -2635,10 +2635,10 @@ mod tests {
     use sha2::Digest;
 
     use super::{
-        active_flow_skill, ask, ask_background_name, ask_launch_args, ask_once,
-        flow_background_name, flow_id, flow_token_id, human_open_argv, question_title, reserve_ask,
-        serve_ask, session_run_is_resumable, token_matches, wait_for_ask, FlowSessionToken,
-        HumanSessionToken, HUMAN_SESSION_ENV,
+        ask, ask_background_name, ask_launch_args, ask_once, flow_background_name, flow_id,
+        flow_token_id, human_open_argv, question_title, reserve_ask, serve_ask,
+        session_run_is_resumable, token_matches, wait_for_ask, FlowSessionToken, HumanSessionToken,
+        HUMAN_SESSION_ENV,
     };
     use crate::durable::FlowSession;
     use crate::engine::{prepare_launch_prompt, Config, LaunchPromptInput, Surface};
@@ -3636,7 +3636,7 @@ mod tests {
             artifact_key: crate::run_record::new_artifact_key(),
             input_published: true,
             cwd: checkout.path().into(),
-            skill: Some("unblock".into()),
+            skill: Some("list".into()),
             provider: Some("claude".into()),
             model: Some("opus".into()),
             node: None,
@@ -3763,17 +3763,15 @@ mod tests {
 
     #[test]
     fn membership_wire_ids_are_derived_from_their_captures() {
-        use crate::engine::flow::{
-            ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, Skill,
-        };
+        use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
         use crate::engine::flow_graph::FlowGraph;
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),
-                policy: OccurrencePolicy {
-                    human,
-                    ..Default::default()
-                },
+
+                human,
+                id: None,
+                repeat: None,
                 flow_parents: Vec::new(),
             })
         }

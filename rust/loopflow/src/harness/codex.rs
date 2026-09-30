@@ -171,6 +171,7 @@ pub(super) struct NotificationState {
     /// Remember which item ids already arrived as deltas so completion is a
     /// recovery fallback, not a second copy of the prose.
     streamed_agent_messages: HashSet<String>,
+    reported_error: Option<String>,
     tag_parser: LfTagParser,
 }
 
@@ -189,6 +190,7 @@ impl NotificationState {
             pending_usage: None,
             reported: None,
             streamed_agent_messages: HashSet::new(),
+            reported_error: None,
             tag_parser: LfTagParser::default(),
         }
     }
@@ -327,6 +329,7 @@ pub(super) fn process_notification(
         "turn/started" => {
             let tid =
                 turn_id_from_params.unwrap_or_else(|| format!("turn_{}", uuid::Uuid::new_v4()));
+            state.reported_error = None;
             state.turn_in_progress.store(true, Ordering::Relaxed);
             state.set_current_turn_id(Some(tid.clone()));
             let _ = events.send(ConversationEvent::TurnStarted { turn_id: tid });
@@ -350,6 +353,7 @@ pub(super) fn process_notification(
                 if let Some(message) = params
                     .pointer("/turn/error/message")
                     .and_then(Value::as_str)
+                    .filter(|message| state.reported_error.as_deref() != Some(*message))
                 {
                     let _ = events.send(ConversationEvent::Error {
                         code: "codex_error".into(),
@@ -498,6 +502,7 @@ pub(super) fn process_notification(
                     },
                 });
             } else {
+                state.reported_error = Some(message.clone());
                 let _ = events.send(ConversationEvent::Error {
                     code: "codex_error".to_string(),
                     message,

@@ -274,3 +274,9 @@ no existing declaration variable was found) and never populate it from checkout
 inference, Session ownership, claims or legacy Task-origin bytes. Provider,
 tmux and SSH forwarding preserve that declaration, while Exec causation stays
 with the original provider parent. No new confinement decision follows.
+
+2026-09-30 · **Missing PATH executable.** Jack Heart's CI steer requires explicit
+lock → PATH → selected installation → driver as last resort. The accepted lock
+is a leading PATH directory (LOO-334), so current resolution honors it through
+the same PATH lookup; `LF_BIN`/`LF_CONTROL_BIN` are historical Home pins, not a
+new lock declaration. Exec `command[0]` records the actual child executable.

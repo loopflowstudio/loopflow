@@ -1777,6 +1777,7 @@ mod account_first_tests {
         }
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
+            "LF_DB_PATH",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             "PATH",
@@ -1784,6 +1785,7 @@ mod account_first_tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
@@ -1833,12 +1835,14 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
+            "LF_DB_PATH",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             lease::ACCOUNT_LEASE_ENV,
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
@@ -1928,12 +1932,14 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
+            "LF_DB_PATH",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             lease::ACCOUNT_LEASE_ENV,
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
@@ -2115,12 +2121,14 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
+            "LF_DB_PATH",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             lease::ACCOUNT_LEASE_ENV,
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
 
@@ -2171,12 +2179,14 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
+            "LF_DB_PATH",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             lease::ACCOUNT_LEASE_ENV,
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(

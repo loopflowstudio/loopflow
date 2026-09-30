@@ -1,3 +1,5 @@
+#[path = "support/installation.rs"]
+mod installation;
 mod support;
 
 use std::fs;
@@ -93,6 +95,19 @@ SQL
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completed: i64 = conn.query_row("SELECT count(*) FROM flow_events WHERE kind='operation_completed' AND outcome='completed'", [], |r| r.get(0)).unwrap();
         assert_eq!(completed, if upgrade { 1 } else { 2 });
+        let executable: String = conn
+            .query_row(
+                "SELECT json_extract(e.command,'$[0]') FROM flow_events f
+             JOIN execs e ON e.id=f.exec_id WHERE f.kind='operation_started' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            executable,
+            env!("CARGO_BIN_EXE_lf"),
+            "the wrapper delegated to these actual bytes"
+        );
         let state: String = conn
             .query_row("SELECT state FROM flow_sessions", [], |r| r.get(0))
             .unwrap();
@@ -576,6 +591,36 @@ fn write_executable(path: &Path, content: &str) {
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).unwrap();
     }
+}
+
+fn register_codex_account(home: &Path) {
+    let account_home = home.join("accounts/codex/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    fs::write(
+        account_home.join("auth.json"),
+        r#"{"tokens":{"access_token":"synthetic-fixture-token"}}"#,
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
 }
 
 fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::process::Output {
@@ -1559,6 +1604,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
 
     write_skill(repo.path(), "first-work", "Do this proof-owned work.");
+    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     write_executable(
         &bin.path().join("codex"),
@@ -1596,6 +1642,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
 #[test]
 fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     let repo = loopflow_test_support::TestRepo::new();
+    repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-history", &repo.head_sha());
@@ -1630,6 +1677,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         .unwrap());
 
     write_skill(repo.path(), "history-work", "Do proof-owned work.");
+    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     write_executable(
         &bin.path().join("codex"),
@@ -1640,7 +1688,13 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
-    // The same checkout runs one Task-bound and one unattributed Run.
+    // Explicit and checkout selection both name this Task. An unrelated checkout stays unbound.
+    let outside = loopflow_test_support::TestRepo::new();
+    write_skill(
+        outside.path(),
+        "history-work",
+        "Do unrelated proof-owned work.",
+    );
     for args in [
         &["--task", "INF-123", "history-work", "-b", "--no-loopflow"][..],
         &["history-work", "-b", "--no-loopflow"][..],
@@ -1653,11 +1707,22 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         );
     }
 
+    let unrelated = run_lf(
+        outside.path(),
+        home.path(),
+        &["history-work", "-b", "--no-loopflow"],
+        Some(&path),
+    );
+    assert!(
+        unrelated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&unrelated.stderr)
+    );
     let runs = read("INF-123");
     assert_eq!(
         runs.len(),
-        1,
-        "only the exact Task's Run, not its checkout: {runs:?}"
+        2,
+        "explicit and checkout work, excluding unrelated work: {runs:?}"
     );
     assert_eq!(runs[0]["harness"], "codex");
     assert_eq!(runs[0]["skill"], "history-work");
@@ -2153,6 +2218,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         ))
         .unwrap();
 
+    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_CONTROL_HOME/cwds\"").replace(
         "read -r turn_start",
@@ -2752,4 +2818,55 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     let status = String::from_utf8(status.stdout).unwrap();
     assert_eq!(status.lines().next(), Some("INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
+}
+
+#[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn flow_step_executable_falls_back_without_losing_its_store() {
+    assert!(Path::new("/.dockerenv").is_file());
+    assert!(!loopflow::machine_install::root().unwrap().exists());
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    write_flow(repo.path(), "fallback-proof", "- op: rebase --plan\n");
+    let execute = |driver: &Path, path: &str, expected: &Path| {
+        let mut command = Command::new(driver);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("LF_") {
+                command.env_remove(key);
+            }
+        }
+        let output = command
+            .args(["flow", "fallback-proof", "-b"])
+            .current_dir(repo.path())
+            .env("LF_HOME", home.path())
+            .env("LF_DB_PATH", home.path().join("loopflow.db"))
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let executable: String = db.query_row(
+            "SELECT json_extract(e.command,'$[0]') FROM flow_events f JOIN execs e ON e.id=f.exec_id WHERE f.kind='operation_started' ORDER BY f.seq DESC LIMIT 1",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(Path::new(&executable), expected);
+    };
+    let candidate = Path::new(env!("CARGO_BIN_EXE_lf"));
+    execute(candidate, "/usr/bin:/bin", candidate);
+    let installed = installation::Installation::new(home.path());
+    let alias = home.path().join("driver");
+    fs::copy(&installed.cli, &alias).unwrap();
+    execute(&alias, "/usr/bin:/bin", &installed.cli);
+    let bin = home.path().join("path-bin");
+    fs::create_dir(&bin).unwrap();
+    let path_lf = bin.join("lf");
+    fs::copy(&installed.cli, &path_lf).unwrap();
+    execute(
+        &alias,
+        &format!("{}:/usr/bin:/bin", bin.display()),
+        &path_lf,
+    );
 }

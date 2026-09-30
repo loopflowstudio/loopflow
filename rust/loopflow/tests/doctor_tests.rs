@@ -14,6 +14,7 @@ use time::OffsetDateTime;
 use loopflow_test_support::TestRepo;
 
 fn run_lf(home: &Path, args: &[&str]) -> Output {
+    let binary_dir = Path::new(env!("CARGO_BIN_EXE_lf")).parent().unwrap();
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(args)
         .current_dir(home)
@@ -21,6 +22,14 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env("LF_HOME", home)
         .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("NO_COLOR", "1")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                binary_dir.display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
         // Doctor prefers the compiled source root; scope even git -C there to
         // this fixture so freshness checks cannot fetch into a shared checkout.
         .env("GIT_DIR", home.join(".git"))

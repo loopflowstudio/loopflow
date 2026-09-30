@@ -58,8 +58,10 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
    deletes `agent_work_in`, `LF_TASK_ORIGIN`, claim/manifest Task discovery and
    the `LF_PARENT_RUN_ID` writer; PR/installation checks use the common reader.
    The public cross-checkout proof passes. The Task-shortcut public proof is
-   authored but blocked by unavailable Docker; two broader fixture regressions
-   remain under repair. Keep the dead per-turn token and Flow membership
+   authored and included in the disposable installation suite, but local execution
+   is blocked by unavailable Docker. Post-CI repairs now pass the complete
+   materialized Rust matrix (2,024 passed, 17 skipped); see the retained failures
+   and final source receipt in evidence. Keep the dead per-turn token and Flow membership
    provenance audit open. See [evidence](evidence.md).
 4. **One naming commit** (Jack). Exec instead of launch or run for one agent
    start under one lf process; Session names for conversation things; "compile"

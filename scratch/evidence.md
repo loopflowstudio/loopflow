@@ -311,3 +311,83 @@ At this checkpoint, `cargo fmt`, all-target Clippy with warnings denied
 (`attribution-clippy-final.log`), Ruff on the changed provider fixture, and
 `git diff --check` pass. The fixture's final formatting changes do not replace
 the two outstanding behavioral reruns.
+
+## Post-checkpoint CI repair · 2026-09-30
+
+Publication `80232a3f2` includes attribution checkpoint `a000e8d68` and the three
+preceding commits. Jack's operator read reports hosted Swift passing, Rust
+stopping on the obsolete Blocked decoding assertion with 1,613 tests unrun,
+and the disposable Task operation unable to find lf on PATH. The retained logs
+are `.lf/tmp/cut-i/ci-latest-*.log`; that Rust attempt is incomplete evidence.
+
+The decision test now includes Blocked among canonical values. Step discovery
+honors the lock's leading PATH directory, ordinary PATH, selected installation,
+then the driver executable. It records the actual executable in the existing
+Exec command, without another source-of-truth field or lock mechanism.
+`ci-repair-focused.log` passes the canonical-decision and public PATH/schema-gap
+proofs, including the operation Exec's command path.
+
+The row/reader regression passes in `attribution-two-remaining.log`. Its other
+failure established that attributed Task Flows derive their cwd from the Task,
+so overriding the caller cwd could not make a headless OpenCode fixture support
+confinement. The fixture now uses scripted Claude and a synthetic private account
+route. `task-claude-retry.log` passes failure, explicit retry in the same Session,
+review completion, exactly-once progression and independent managed-Flow identity.
+The first Claude attempt failed its version probe; the fixture now handles that
+probe without consuming its deliberate provider failure. Neither provider fixture
+proves configured account acceptance.
+
+Jack requires the complete local Rust suite with no fail-fast before another
+publication. The materialized current-tree run is
+`ci-repair-materialized-matrix.log`, with source hashes and exact command in
+`ci-repair-matrix-source.json`. Results remain pending until that run ends.
+The resource preflight passed at 37.9 GiB free against the 32 GiB reserve.
+Docker still failed a subsequent ten-second probe; the public Task shortcut and
+installed fallback proof remain unexecuted locally.
+
+The first complete post-CI matrix (`ci-repair-materialized-matrix.log`) ran all
+2,023 selected tests with `--no-fail-fast`: 2,006 passed, 17 failed, 16 skipped.
+Its copied source lacked Git metadata and therefore compiled as release; three
+failures expected development behavior. Five account fixtures inherited the
+runner's database override. Remaining failures exposed duplicate Codex error
+notification, removed parent-env expectations, deleted-Task Ask declaration,
+PATH candidate discovery, missing managed fixture accounts, automatic checkout
+attribution and newly rendered participant names. These observations are kept;
+this run is not a green result. Repairs use the existing owners and fixture
+isolation, with explicit development provenance on the next materialized copy.
+
+The Docker probe still timed out at ten seconds. The new executable fallback
+matrix and existing Task-Y shortcut proof are now selected by
+`scripts/test_task_installation.py`; both remain authored, not locally executed.
+The retained container's removal remains unconfirmed. No host service restart,
+installation promotion or branch access to installed data occurred.
+
+The first focused repair build stopped at a missing `Path` import in the landing
+fixture; the import is fixed. Its follow-up launcher initially named a nonexistent
+receipt. Correcting that harness path starts the same materialized snapshot. The
+first matrix's log and source copy remain, but the initial receipt filename was
+overwritten by the focused-copy setup; do not reuse that receipt for the first run.
+The final receipt has its own filename and records the actual command and provenance.
+
+`ci-repair-final-matrix.log` now passes the complete materialized Rust matrix:
+**2,024 passed, 17 skipped, none unrun**, `--no-fail-fast`, 778.309 seconds.
+`ci-repair-final-source.json` records the development provenance, canonicalized
+snapshot and exact command. All 478 Rust/fixture/golden hashes matched the
+checkout after the run; only the migration working note differed before this
+result was recorded. This supersedes the two unverified attribution regression
+reruns, while preserving the earlier failures above. The managed failure/retry/
+review fixture uses scripted Claude and a synthetic private account; it is not
+configured-provider acceptance.
+
+Review found two consequential repairs: inline Codex failure reporting must
+avoid repeating an already emitted error, and relative PATH entries must resolve
+against the step's cwd. Both are fixed. Child executable evidence stays in the
+existing Exec command; no second selection ledger or Task failure classifier is
+introduced. Publication remains a checkpoint. Child-pass migration, released
+populated import, configured acceptance and the other remaining-work obligations
+stay open.
+
+Final static checks pass: all-target Clippy with `-D warnings`
+(`ci-repair-clippy.log`), `cargo fmt --all -- --check`, changed Python Ruff and
+`git diff --check`. No new Swift code changed; Jack Heart's reported hosted
+Swift pass at `80232a3f2` remains the Swift evidence for this checkpoint.

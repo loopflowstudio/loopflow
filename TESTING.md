@@ -485,7 +485,9 @@ Fixtures selecting a private `LF_HOME` must also clear and restore
 control authority, and Run lookup otherwise reads outside the fixture's Home.
 Clearing inherited authority alone does not isolate a process that falls back
 to its development Home. Give each proof phase a disposable default `LF_HOME`
-and `LF_DB_PATH`; individual fixtures can override those with their own stores.
+and `LF_DB_PATH`; individual fixtures must clear or override both when selecting
+their own stores. Flow fixtures put the candidate `lf` on PATH, since child steps
+use ordinary executable discovery. `LF_BIN` alone does not select a Flow child.
 Reproduce executable-resolution failures with the compiled test
 binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
 containing Git but no `lf`.
@@ -574,7 +576,9 @@ source copy that includes the current tracked and untracked inputs. Materializat
 can change package versions, the lockfile, registry and migration files; another
 Run can commit those temporary changes before cleanup. Keep the assigned checkout
 on its authoring schema and leave the live Home untouched. A copy without Git
-metadata cannot prove fixtures that require `git rev-parse HEAD`: run those in
+metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
+source behavior; otherwise the build defaults to release provenance. It also
+cannot prove fixtures that require `git rev-parse HEAD`: run those in
 the assigned checkout when its schema suffices, and report that separate proof.
 Do not count a fixture setup failure as a passing materialized test.
 
@@ -651,6 +655,10 @@ The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
 captured Flow after the template disappears and creates no operation Run.
+The executable-discovery proof removes `lf` from PATH, exercises driver and
+selected-installation fallback, then puts another `lf` first on PATH. It checks
+the child Exec executable and its Flow store. The declaration proof starts Task Y
+from Task X's agent and checks Y attribution while retaining X as the causal parent.
 
 The recovery proof adds a draft unknown to the branch, preserves both
 databases and independent private writes, recommends the
@@ -671,7 +679,7 @@ storage, observation, Run artifacts, and child context with stale control pins,
 including a relative custom database and malformed inherited control path.
 `global_commands` has focused real-CLI proofs for explicit data-directory
 reads/writes and
-Task-origin promotion refusal with read-only candidate preflight. These use
+Task-bound promotion refusal with read-only candidate preflight. These use
 disposable stores; they do not prove installed worker routing or a live demo.
 
 After rebasing across a release cut, run the installed-development migration

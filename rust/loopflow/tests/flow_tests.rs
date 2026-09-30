@@ -780,6 +780,14 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.task_flow(&child.task.id))
             .unwrap()
             .unwrap();
+        let claimed = runtime
+            .block_on(child.store.reserve_attempt(
+                claimed.id(),
+                claimed.version,
+                Some(&claim),
+                None,
+            ))
+            .unwrap();
         let reviewer = claimed.current_attempt.as_ref().unwrap().run_id.clone();
         runtime
             .block_on(child.store.publish_attempt(
@@ -1047,6 +1055,307 @@ fn code_flow_records_each_skill_as_one_generic_run() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
+}
+
+#[test]
+fn a_review_executes_its_captured_skill_after_sources_disappear() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let bin = TempDir::new().unwrap();
+    write_skill(repo.path(), "saved-review", "CAPTURED_REVIEW_MARKER");
+    write_flow(
+        repo.path(),
+        "review-flow",
+        "- step:\n    id: review\n    name: saved-review\n    human: true\n",
+    );
+    let received = home.path().join("review-input");
+    write_executable(&bin.path().join("opencode"), &format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\nprintf '%s\\n' \"$*\" > '{}'\nprintf '%s\\n' 'message=created id=ses_review-proof' >&2\nread -r input\n", received.display()
+    ));
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let prepared = run_lf(
+        repo.path(),
+        home.path(),
+        &["--model", "opencode", "-b", "flow", "review-flow"],
+        Some(&path),
+    );
+    assert!(
+        String::from_utf8_lossy(&prepared.stderr).contains("waiting for human input"),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let listed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "list", "--json"],
+        Some(&path),
+    );
+    assert!(listed.status.success());
+    let sessions: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let id = sessions[0]["id"].as_str().unwrap();
+    fs::remove_file(repo.path().join(".lf/skills/saved-review.md")).unwrap();
+    fs::remove_file(repo.path().join(".lf/flows/review-flow.yaml")).unwrap();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let mut opened = lf_command(
+        repo.path(),
+        home.path(),
+        &["session", "connect", id],
+        Some(&path),
+    )
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped())
+    .spawn()
+    .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let native: i64 = conn.query_row(
+            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source') LIKE 'provider-session:%'",
+            [], |r| r.get(0),
+        ).unwrap();
+        if native > 0 {
+            break;
+        }
+        assert!(
+            opened.try_wait().unwrap().is_none(),
+            "review command exited before publishing its native identity"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "review did not publish native identity"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Rename waits for the review's startup lock: native identity alone does
+    // not mean that the caller has observed a live, resumable provider yet.
+    let renamed = run_lf(
+        repo.path(),
+        home.path(),
+        &["session", "rename", id, "Captured review"],
+        Some(&path),
+    );
+    assert!(
+        renamed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+    std::io::Write::write_all(&mut opened.stdin.take().unwrap(), b"done\n").unwrap();
+    let opened = opened.wait_with_output().unwrap();
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    assert!(fs::read_to_string(received)
+        .unwrap()
+        .contains("CAPTURED_REVIEW_MARKER"));
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let commands: Vec<String> = conn
+        .prepare("SELECT command FROM execs WHERE command LIKE '%saved-review%'")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(commands.len(), 1, "one actual skill Exec: {commands:?}");
+    let argv: Vec<String> = serde_json::from_str(&commands[0]).unwrap();
+    assert!(argv
+        .windows(2)
+        .any(|pair| pair == ["skill", "saved-review"]));
+    assert_eq!(
+        conn.query_row("SELECT state FROM flow_sessions", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        "current"
+    );
+}
+
+#[test]
+fn agent_step_survives_driver_death_without_another_turn() {
+    use std::time::{Duration, Instant};
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    let bin = TempDir::new().unwrap();
+    write_skill(repo.path(), "work", "Finish the selected work.");
+    write_flow(repo.path(), "survive-agent", "- work\n");
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
+        "read -r turn_start",
+        "read -r turn_start\nprintf 'turn\\n' >> \"$LF_CONTROL_HOME/turns\"",
+    ).replace(
+        "printf '%s\\n'",
+        "touch \"$LF_CONTROL_HOME/entered\"\ni=0\nwhile [ ! -e \"$LF_CONTROL_HOME/release\" ]; do\n  i=$((i+1)); [ \"$i\" -lt 300 ] || exit 1\n  sleep 0.1\ndone\nprintf '%s\\n'",
+    );
+    write_executable(&bin.path().join("codex"), &provider);
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let mut driver = lf_command(
+        repo.path(),
+        home.path(),
+        &["-b", "--no-loopflow", "flow", "survive-agent"],
+        Some(&path),
+    )
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !home.path().join("entered").exists() {
+        assert!(
+            driver.try_wait().unwrap().is_none(),
+            "driver exited before provider input"
+        );
+        assert!(Instant::now() < deadline, "agent never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (id, version, capture, step, parent): (String, i64, i64, String, String) = conn
+        .query_row(
+            "SELECT f.id,f.position_version,c.seq,c.exec_id,e.parent_exec_id FROM flow_sessions f
+         JOIN session_events c ON c.seq=f.current_capture JOIN execs e ON e.id=c.exec_id",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_ne!(step, parent, "captured input belongs to the step process");
+    let duplicate = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--__flow-step",
+            &serde_json::json!({"invocation": id,"version":version}).to_string(),
+            "skill",
+            "work",
+        ],
+        Some(&path),
+    );
+    assert!(
+        !duplicate.status.success(),
+        "a second child must not start another provider"
+    );
+    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("another or unknown step Exec"));
+    driver.kill().unwrap();
+    driver.wait().unwrap();
+    let mut resume = lf_command(
+        repo.path(),
+        home.path(),
+        &["flow", "resume", &id],
+        Some(&path),
+    )
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let roots: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM execs WHERE parent_exec_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if roots >= 3 {
+            break;
+        } // Original driver, rejected independent child, resume.
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        resume.try_wait().unwrap().is_none(),
+        "resume must wait for the surviving step"
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("turns")).unwrap(),
+        "turn\n"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT current_capture FROM flow_sessions WHERE id=?1",
+            [&id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        capture
+    );
+    fs::write(home.path().join("release"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = resume.try_wait().unwrap() {
+            assert!(status.success(), "resume failed: {status}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "resume did not consume the step completion"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let again = run_lf(
+        repo.path(),
+        home.path(),
+        &["flow", "resume", &id],
+        Some(&path),
+    );
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(home.path().join("turns")).unwrap(),
+        "turn\n"
+    );
+    let consumed: (i64, String, String) = conn.query_row(
+        "SELECT count(*), start.exec_id, f.state FROM flow_events used
+         JOIN session_events done ON done.seq=used.session_event
+         JOIN session_events start ON start.session_id=done.session_id AND start.provider_thread=done.provider_thread
+           AND start.provider_turn=done.provider_turn AND start.kind='started'
+         JOIN flow_sessions f ON f.id=used.flow_id
+         WHERE used.kind='consumed' AND done.kind='completed'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).unwrap();
+    assert_eq!(consumed, (1, step.clone(), "completed".into()));
+    let skill_events: i64 = conn.query_row(
+        "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='skill' AND event IN ('started','completed')",
+        [&step], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(skill_events, 2, "the skill child owns its journal events");
+    let resumed: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM run_events event JOIN execs e ON e.id=event.process_id
+         WHERE e.command LIKE '%resume%' AND event.node='flow' AND event.event='completed'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        resumed, 2,
+        "each resume command journals its observed completion"
+    );
+
+    assert_eq!(
+        conn.query_row(
+            "SELECT parent_exec_id FROM execs WHERE id=?1",
+            [&step],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        parent
+    );
+    assert_eq!(
+        conn.query_row("SELECT outcome FROM execs WHERE id=?1", [&parent], |r| {
+            r.get::<_, Option<String>>(0)
+        })
+        .unwrap(),
+        None
+    );
 }
 
 #[test]

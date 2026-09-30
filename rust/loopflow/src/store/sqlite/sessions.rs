@@ -680,7 +680,11 @@ impl SqliteStore {
         if session.input_published {
             session.artifact_key = crate::run_record::new_artifact_key();
             session.input_published = false;
-            replace_input_in(&tx, &mut session)?;
+            replace_input_in(
+                &tx,
+                &mut session,
+                crate::journal::current_exec_id().as_ref(),
+            )?;
             tx.execute(
                 "UPDATE flow_sessions SET position_version=position_version+1 WHERE id=?1",
                 [expected.id()],
@@ -817,7 +821,11 @@ impl SqliteStore {
                 "conversation changed before input replacement".into(),
             ));
         }
-        replace_input_in(&tx, &mut session)?;
+        replace_input_in(
+            &tx,
+            &mut session,
+            crate::journal::current_exec_id().as_ref(),
+        )?;
         tx.execute("UPDATE flow_sessions SET current_capture=?2 WHERE current_capture=?1 AND state='current'",
             params![previous.captured,session.captured])?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -1144,7 +1152,7 @@ pub(super) fn reserve_task_review_in(
                 [flow.task_id.as_ref().map(TaskId::as_str)],
                 |row| row.get(0),
             )?;
-            reserve_flow_conversation_in(conn, flow, id, SessionKind::FlowReview, title)?
+            reserve_flow_conversation_in(conn, flow, id, SessionKind::FlowReview, title, None)?
         }
     };
     if conn.execute("UPDATE flow_sessions SET pending_session_id=?2 WHERE id=?1 AND state='current' AND position_version=?3 AND claim_json IS NULL",
@@ -1161,6 +1169,7 @@ pub(super) fn reserve_flow_conversation_in(
     id: String,
     kind: SessionKind,
     title: String,
+    exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<AgentSession> {
     reserve_session_in(
         conn,
@@ -1191,7 +1200,7 @@ pub(super) fn reserve_flow_conversation_in(
             completed_at: None,
             created_at: crate::store::rows::now_unix(),
         },
-        None,
+        exec,
     )
 }
 
@@ -1359,6 +1368,7 @@ fn insert_session_in(
 pub(super) fn replace_input_in(
     conn: &Transaction<'_>,
     session: &mut AgentSession,
+    exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM session_events WHERE kind='captured' AND receipt_key=?1)",
@@ -1373,7 +1383,7 @@ pub(super) fn replace_input_in(
         conn,
         session,
         crate::store::rows::now_unix(),
-        crate::journal::current_exec_id().as_ref(),
+        exec,
     )?);
     conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
         WHERE id=?1 AND completed_at IS NULL",

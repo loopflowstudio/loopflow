@@ -28,6 +28,8 @@ pub mod task_actions;
 pub(crate) mod task_destination;
 pub mod task_execution;
 pub mod task_flow;
+#[doc(hidden)]
+pub mod task_input;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -65,7 +67,7 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
+pub(crate) use run::{launch_task_worker, TaskWorkerLaunch};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
@@ -73,6 +75,3 @@ pub use run::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
-
-#[cfg(test)]
-pub(crate) use run::TEST_TASK_LAUNCH;

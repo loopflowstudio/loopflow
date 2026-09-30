@@ -954,7 +954,12 @@ fn read_task_draft() -> anyhow::Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> anyhow::Result<()> {
+fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Result<()> {
+    let agent = cli.model.as_deref();
+    let _skill_options = EnvGuard::set(
+        loopflow::lf::TASK_SKILL_OPTIONS_ENV,
+        serde_json::to_string(&cli.step_args())?,
+    );
     match command {
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
         TaskCommand::Checkout {
@@ -1679,9 +1684,9 @@ fn execute_command(
                 | TaskCommand::Diff { .. }
                 | TaskCommand::File { .. }
                 | TaskCommand::Save { .. }),
-        }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
+        }) => run_task_command(&std::env::current_dir()?, cmd, cli),
         Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
-            run_task_command(repo, cmd, cli.model.as_deref())
+            run_task_command(repo, cmd, cli)
         }),
         Some(Commands::Tokens { json, days }) => loopflow::lf::commands::tokens::run(*json, *days),
         Some(Commands::Usage {
@@ -1750,7 +1755,7 @@ fn execute_command(
             *json,
         ),
         Some(Commands::FlowStep { id, version }) => {
-            loopflow::lf::commands::flow::run_step(id, *version)
+            loopflow::lf::commands::flow::execute_step(id, *version)
         }
         Some(Commands::Exec { cmd }) => loopflow::lf::commands::exec::run(cmd),
         Some(Commands::Runs {

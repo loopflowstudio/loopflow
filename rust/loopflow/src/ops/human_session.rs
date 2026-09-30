@@ -2409,7 +2409,8 @@ fn active_session_token() -> Result<HumanSessionToken> {
     serde_json::from_str(&raw).context("active session token is invalid")
 }
 
-pub(crate) fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
+#[doc(hidden)]
+pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
     let Some(raw) = std::env::var_os(HUMAN_SESSION_ENV) else {
         return Ok(None);
     };
@@ -3427,7 +3428,7 @@ mod tests {
                             .unwrap();
                     }
                     flow = store
-                        .reserve_attempt(flow.id(), flow.version, None)
+                        .reserve_attempt(flow.id(), flow.version, None, None)
                         .await
                         .unwrap();
                     let run_id = &flow.current_attempt.as_ref().unwrap().run_id;

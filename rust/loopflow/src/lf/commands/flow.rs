@@ -692,8 +692,21 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
     ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
         if skill.policy.human {
-            let feedback = if flow.claim.is_some() {
-                let task_id = flow.task_id.as_ref().context("claimed Flow has no Task")?;
+            // Reaching review releases the claim. The Task's selected Flow,
+            // including its active runtime pass, still owns review preparation.
+            let managed_task = match &flow.task_id {
+                Some(task_id)
+                    if self
+                        .store
+                        .task_flow(task_id)
+                        .await?
+                        .is_some_and(|managed| managed.id() == flow.id()) =>
+                {
+                    Some(task_id)
+                }
+                _ => None,
+            };
+            let feedback = if let Some(task_id) = managed_task {
                 let task = self
                     .store
                     .get_task(task_id)

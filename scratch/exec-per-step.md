@@ -278,9 +278,12 @@ One Task policy remains a review question: `ops/task.rs::preflight_task_executio
 requires a managed account and verifies it before Task/provider effects, while a
 direct skill may use ambient provider credentials. Deleting this would change
 Task-create preflight and attribution policy. OpenCode also lacks the Task
-execution-boundary treatment used by Codex/Claude. Those restrictions remain;
-Jack has not approved weakening them through the direct-path conversion. This
-exception must be resolved before claiming every Task/direct difference closed.
+execution-boundary treatment used by Codex/Claude. The 2026-09-30
+[slice review](skill-command-review.md) found that managed-account preflight
+survives at entry, but no longer at a later agent change or after an op-first
+boundary. The execution boundary remains enforced in the child. Jack has not
+approved weakening the managed-account policy; resolve this exception before
+claiming every Task/direct difference closed.
 
 ### Audit disposition and proof
 
@@ -393,8 +396,9 @@ override bundle. Failed children read their selected result through the driver's
 existing store instead of reopening it. Rust code/test delta: +23 / -90 lines.
 
 Review retained Task admission preflight, live input cursors and the comment
-refresh lifetime: these preserve policy and retry continuity, unlike the deleted
-adapters. No schema, wire or naming cut is included. Existing managed-command,
+refresh lifetime. Later review found the per-step account-policy gap described
+above; source continuity alone does not prove retry behavior. No schema, wire or
+naming cut is included. Existing managed-command,
 account, configured-provider and acceptance gaps above remain open.
 
 Focused isolated proof: `.lf/tmp/cut-i/task-command-compress.log` passed all
@@ -407,3 +411,7 @@ All-target Clippy (`task-command-compress-clippy.log`), formatting, architecture
 coverage and diff checks also pass. The pre-existing `scratch/questions.md`
 contribution is unchanged. Final gate and materialized full-matrix proof remain
 with their planned boundaries.
+
+The subsequent [shared-command slice review](skill-command-review.md) repairs
+managed review dispatch after claim release and records the named deleted test,
+fresh public proof, full-matrix failures/repairs and checkpoint publication.

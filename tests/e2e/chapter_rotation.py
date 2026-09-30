@@ -607,6 +607,15 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         time.sleep(0.1)
     receipt = json.loads((root / "provider.json").read_text())
     before = _snapshot(first / "loopflow.db")
+    with sqlite3.connect(first / "loopflow.db") as db:
+        review = db.execute(
+            "SELECT id,title FROM agent_sessions WHERE id=?",
+            (before["flow"]["pending_session_id"],),
+        ).fetchone()
+    expected_review = f"{before['task']['id']}:{before['flow']['id']}:{FLOW}:review:0"
+    assert review == (expected_review, before["task"]["issue_title"]), (
+        f"Managed review lost its Task identity after releasing its claim: {review}"
+    )
     assert receipt["cwd"] == before["task"]["worktree"]
     assert receipt["database"] == str(first / "loopflow.db")
     prompt = json.dumps(receipt["request"])

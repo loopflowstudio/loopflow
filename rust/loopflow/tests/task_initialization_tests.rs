@@ -762,12 +762,11 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             else {
                 panic!("fixture claim")
             };
-            // The claim reserved the deciding Run; its launch publishes it.
+            // The step reserves its input after the worker acquires its claim.
             let reserved = task
                 .store
-                .task_flow(&task.task.id)
+                .reserve_attempt(position.id(), position.version, Some(&claim), None)
                 .await
-                .unwrap()
                 .unwrap();
             let run = reserved.current_attempt.as_ref().unwrap().run_id.clone();
             task.store

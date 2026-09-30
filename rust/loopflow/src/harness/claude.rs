@@ -559,7 +559,9 @@ mod activity_tests {
 
     use super::ClaudeHarness;
     use crate::harness::Harness;
-    use crate::run_record::{activity, CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{
+        activity, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+    };
 
     #[tokio::test]
     async fn claude_body_activity_does_not_require_process_group_authority() {
@@ -575,7 +577,7 @@ mod activity_tests {
         );
         let capture = CaptureHandle::begin_at(
             home.path(),
-            RunSpec {
+            SessionCaptureSpec {
                 harness: "claude".into(),
                 model: None,
                 surface: "headless".into(),
@@ -584,7 +586,7 @@ mod activity_tests {
                 worktree: None,
                 skill: None,
                 subjects: vec![],
-                flow: RunFlowMembership::Independent,
+                flow: SessionFlowMembership::Independent,
                 work: None,
             },
         )
@@ -592,7 +594,7 @@ mod activity_tests {
         capture.observe_activity(harness.process_id()).await;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if activity::read(home.path(), &capture.run_id()).await
+                if activity::read(home.path(), &capture.artifact_key()).await
                     == activity::Activity::Running
                 {
                     break;
@@ -644,7 +646,7 @@ mod tests {
         let mut harnesses = Vec::new();
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
-            store.test_session(id, &crate::run_record::new_artifact_key());
+            store.test_session(id, &crate::session_record::new_artifact_key());
             let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);

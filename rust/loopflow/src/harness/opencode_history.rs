@@ -297,7 +297,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         let exec = ExecId::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
@@ -332,7 +332,7 @@ mod tests {
         }
         let session = store.session("session").unwrap().unwrap();
         let mut replacement = session.clone();
-        replacement.artifact_key = crate::run_record::new_artifact_key();
+        replacement.artifact_key = crate::session_record::new_artifact_key();
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();

@@ -86,3 +86,12 @@ the word exec instead of launch (or run etc) where possible." So the renames in
 this finding prefer Exec over both Run and launch. Session-prefixed names remain
 right for things that belong to the conversation and not to one process. A
 record of imported history with no process must not be named as an Exec.
+
+### Implementation status · naming cut · 2026-09-30
+
+The [naming table](naming.md) records the implemented replacements.
+`SessionCaptureManifest` names one capture, while `AgentExecRequest` names its
+provider inputs. Session recorder, context and membership names no longer say
+Run. Original manifest keys and old directory selectors still decode. The
+journal's trace types and history-table names remain unchanged. Focused results
+are in [evidence](evidence.md); Jack Heart's acceptance remains outstanding.

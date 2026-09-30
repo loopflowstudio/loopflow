@@ -320,7 +320,7 @@ pub fn with_runtime<T>(
 
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
-    let attribution = crate::work::wave::context::run_attribution(Some(repo_root));
+    let attribution = crate::work::wave::context::exec_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
             error = failure,
@@ -618,7 +618,7 @@ fn create_run_context(
     let wave_name = if early {
         None
     } else {
-        let attribution = crate::work::wave::context::run_attribution(main_repo.as_deref());
+        let attribution = crate::work::wave::context::exec_attribution(main_repo.as_deref());
         if let Some(failure) = attribution.failure.as_deref() {
             debug!(
                 error = failure,
@@ -1591,7 +1591,7 @@ mod tests {
         std::env::set_var(crate::work::wave::context::WAVE_ID_ENV, stale_id.as_str());
 
         // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::work::wave::context::run_attribution(Some(&worktree));
+        let attribution = crate::work::wave::context::exec_attribution(Some(&worktree));
         assert_eq!(
             attribution.wave, None,
             "stale identity attributes to no wave"

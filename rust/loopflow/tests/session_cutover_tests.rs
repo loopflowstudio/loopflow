@@ -1449,7 +1449,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("agent launch requires an admitted Exec"),
+                .contains("agent Exec requires an admitted Exec"),
             "{output:?}"
         );
         assert!(
@@ -2397,14 +2397,14 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
         human: true,
         id: None,
         repeat: None,
-        flow_parents: vec![],
+        sources: vec![],
     });
     let autonomous = ConcreteStep::Skill(ConcreteSkill {
         skill: Skill::named("implement"),
         id: None,
         human: false,
         repeat: None,
-        flow_parents: vec![],
+        sources: vec![],
     });
     let mut saved = Vec::new();
     for (opened, finished) in [(false, false), (true, false), (true, true)] {
@@ -2486,7 +2486,7 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
                     command: "pr publish".into(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             })],
             None,
             0,
@@ -2620,7 +2620,7 @@ fn import_tui_closure(flow_member: bool) {
                 "steps": [ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named("review-design"),
                     human: true, id: None, repeat: None,
-                    flow_parents: vec![]
+                    sources: vec![]
                 })],
                 "cursor": ExecutionCursor { index: 1, ..Default::default() },
                 "message": null, "model": "opencode", "wave": null,
@@ -2724,7 +2724,7 @@ fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() 
         id: None,
         human: false,
         repeat: None,
-        flow_parents: vec![],
+        sources: vec![],
     });
     let mut paths = Vec::new();
     for finished in [false, true] {
@@ -2800,7 +2800,7 @@ fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() 
             id: None,
             human: false,
             repeat: None,
-            flow_parents: vec![],
+            sources: vec![],
         }));
         std::fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
         let rejected = fixture.json(&["session", "import", "--json"]);
@@ -2862,7 +2862,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         path
     };
     let sources = std::cell::RefCell::new(Vec::new());
-    // A conversation's Run record: manifest, provider history and its name.
+    // A conversation's Session capture: manifest, provider history and its name.
     let record = |title: &str, source: &str, flow: Value, subjects: Value| -> String {
         let id = uuid::Uuid::new_v4().simple().to_string().to_string();
         let dir = fixture.run_dir(&id);
@@ -2924,7 +2924,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         id: Some("review".into()),
         human: true,
         repeat: None,
-        flow_parents: vec![],
+        sources: vec![],
     });
     let invocation = uuid::Uuid::new_v4().to_string();
     let boundary = uuid::Uuid::new_v4().to_string();
@@ -3040,7 +3040,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         json!({
             "id": past_flow, "flow": "historical", "cwd": sibling.worktree,
             "steps": [ConcreteStep::Skill(ConcreteSkill {
-                skill: Skill::named("implement"), id: None, human: false, repeat: None, flow_parents: vec![]
+                skill: Skill::named("implement"), id: None, human: false, repeat: None, sources: vec![]
             })],
             "cursor": ExecutionCursor { index: 1, ..Default::default() },
             "message": null, "model": "opencode", "wave": null,

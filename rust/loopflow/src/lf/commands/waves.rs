@@ -1020,7 +1020,7 @@ async fn snapshot_task_detail(
         None => None,
     };
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_launch_refusal(store, task).await?,
+        (Some(task), None) => crate::ops::task::task_exec_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {

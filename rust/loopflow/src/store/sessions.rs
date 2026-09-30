@@ -15,7 +15,7 @@ impl Store {
     pub(crate) async fn input_final_answer(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
         let input = input.to_owned();
         run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
     }
@@ -131,7 +131,7 @@ impl Store {
     pub(crate) async fn conversation_history(
         &self,
         since: i64,
-    ) -> StoreResult<Vec<crate::run_record::SessionHistory>> {
+    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
         run_sqlite(&self.sqlite, move |store| {
             store.conversation_history(None, None, None, None, since, true)
         })

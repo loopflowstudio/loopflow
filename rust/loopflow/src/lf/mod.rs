@@ -176,7 +176,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn launch_options(&self) -> Self {
+    pub(crate) fn exec_options(&self) -> Self {
         Self {
             command: None,
             docs: self.docs.clone(),

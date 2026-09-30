@@ -20,11 +20,11 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSe
             captured: row.get(24)?,
             caller_artifact_key: row
                 .get::<_, Option<String>>(23)?
-                .map(|id| crate::run_record::parse_artifact_key(&id))
+                .map(|id| crate::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
             id: row.get(0)?,
-            artifact_key: crate::run_record::parse_artifact_key(&row.get::<_, String>(1)?)
+            artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
@@ -182,7 +182,7 @@ fn read_summary(
         Ok(crate::session::SessionSummary {
             captured: row.get(17)?,
             id: row.get(0)?,
-            artifact_key: crate::run_record::parse_artifact_key(&row.get::<_, String>(1)?)
+            artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
@@ -295,7 +295,7 @@ impl SqliteStore {
                 )));
             }
             inputs.push((session, crate::session::SessionObservation {
-                artifact_key: crate::run_record::parse_artifact_key(&input).map_err(invalid)?, source: "runs".into(), observed_at,
+                artifact_key: crate::session_record::parse_artifact_key(&input).map_err(invalid)?, source: "runs".into(), observed_at,
                 task_id: task.map(|task| TaskId::parse(&task)).transpose().map_err(invalid)?,
                 wave_id: wave.map(|wave| crate::id::WaveId::parse(&wave)).transpose().map_err(invalid)?,
                 payload: serde_json::json!({"input_id":input,"source":"runs","evidence":evidence}),
@@ -338,7 +338,7 @@ impl SqliteStore {
         caller: Option<&str>,
         since: i64,
         include_finished: bool,
-    ) -> StoreResult<Vec<crate::run_record::SessionHistory>> {
+    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
         self.conversation_inputs(
             wave,
             project,
@@ -359,7 +359,7 @@ impl SqliteStore {
         task: Option<&str>,
         since: i64,
         limit: usize,
-    ) -> StoreResult<(Vec<crate::run_record::SessionHistory>, bool)> {
+    ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
         let (rows, truncated) =
             self.conversation_inputs(wave, project, task, None, (since, false, Some(limit)), None)?;
         Ok((rows, truncated))
@@ -368,7 +368,7 @@ impl SqliteStore {
     pub(crate) fn input_history(
         &self,
         selector: &str,
-    ) -> StoreResult<crate::run_record::SessionHistory> {
+    ) -> StoreResult<crate::session_record::SessionHistory> {
         let selected = self.resolve_history_input(selector)?;
         let input = self
             .session(&selected)?
@@ -388,7 +388,7 @@ impl SqliteStore {
         caller: Option<&str>,
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
-    ) -> StoreResult<(Vec<crate::run_record::SessionHistory>, bool)> {
+    ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare("WITH inputs AS (
@@ -530,7 +530,7 @@ impl SqliteStore {
                 )| {
                     let input = input
                         .as_deref()
-                        .map(crate::run_record::parse_artifact_key)
+                        .map(crate::session_record::parse_artifact_key)
                         .transpose()
                         .map_err(invalid)?;
                     let session = crate::session::HistoryCapture {
@@ -539,7 +539,7 @@ impl SqliteStore {
                         current_capture: current_input,
                         caller_artifact_key: caller
                             .as_deref()
-                            .map(crate::run_record::parse_artifact_key)
+                            .map(crate::session_record::parse_artifact_key)
                             .transpose()
                             .map_err(invalid)?,
                         task_id: task
@@ -574,7 +574,7 @@ impl SqliteStore {
                             turn.as_deref(),
                         )?,
                     };
-                    let snapshot = crate::run_record::project_input_history(
+                    let snapshot = crate::session_record::project_input_history(
                         &session,
                         input.as_deref(),
                         &history,
@@ -678,7 +678,7 @@ impl SqliteStore {
             return Err(StoreError::InvalidAuthority("review is complete".into()));
         }
         if session.input_published {
-            session.artifact_key = crate::run_record::new_artifact_key();
+            session.artifact_key = crate::session_record::new_artifact_key();
             session.input_published = false;
             replace_input_in(
                 &tx,
@@ -697,7 +697,7 @@ impl SqliteStore {
         Ok((flow, session))
     }
 
-    pub(crate) fn publish_review_run(
+    pub(crate) fn publish_review_capture(
         &self,
         session_id: &str,
         captured: i64,
@@ -980,7 +980,7 @@ impl SqliteStore {
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
         )?;
         let rows = query.query_map([id], |row| row.get::<_, String>(0))?;
-        rows.map(|row| crate::run_record::parse_artifact_key(&row?).map_err(invalid))
+        rows.map(|row| crate::session_record::parse_artifact_key(&row?).map_err(invalid))
             .collect()
     }
 
@@ -1176,7 +1176,7 @@ pub(super) fn reserve_flow_conversation_in(
             captured: None,
             caller_artifact_key: None,
             id,
-            artifact_key: crate::run_record::new_artifact_key(),
+            artifact_key: crate::session_record::new_artifact_key(),
             input_published: false,
             cwd: flow.cwd.clone(),
             skill: Some(flow.current().step),
@@ -1478,7 +1478,7 @@ mod metadata_tests {
         );
         assert_eq!(history.first().unwrap().seq, first.captured.unwrap());
         let mut next = first.clone();
-        next.artifact_key = crate::run_record::new_artifact_key();
+        next.artifact_key = crate::session_record::new_artifact_key();
         next.input_published = false;
         let next = store.replace_session_input(first.captured, next).unwrap();
         assert_ne!(next.captured, first.captured);
@@ -1638,7 +1638,7 @@ mod metadata_tests {
     fn session_metadata_survives_unreadable_detail_without_weakening_exact_reads() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1700,7 +1700,7 @@ mod metadata_tests {
     fn session_metadata_import_receipts_remain_idempotent_and_conflicts_do_not_relabel() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         store.test_session("imported", &input);
         let session = store.session("imported").unwrap().unwrap();
         let mut observation = crate::session::SessionObservation {
@@ -1765,7 +1765,7 @@ mod metadata_tests {
                 ),
                 ("later", "Zulu", true, "/repo", Some("bad metadata"), None),
             ] {
-                let input = crate::run_record::new_artifact_key();
+                let input = crate::session_record::new_artifact_key();
                 conn.execute(
                     "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
                     interactive,input_published,cwd,repo,iterations)

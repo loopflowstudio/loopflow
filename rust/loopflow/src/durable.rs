@@ -146,7 +146,7 @@ pub(crate) fn test_flow_invocation(
                 id: target.then(|| node_id.map(str::to_string)).flatten(),
                 human: target && human,
                 repeat: None,
-                flow_parents: Vec::new(),
+                sources: Vec::new(),
             })
         })
         .collect();
@@ -341,11 +341,11 @@ impl FlowSession {
     }
 
     /// The Work the Flow was launched with, as its Runs declare it.
-    pub fn declared_work(&self) -> Option<crate::session::RunWork> {
+    pub fn declared_work(&self) -> Option<crate::session::SessionWork> {
         if self.task_id.is_none() && self.wave_id.is_none() {
             return None;
         }
-        Some(crate::session::RunWork {
+        Some(crate::session::SessionWork {
             task_id: self.task_id.clone(),
             wave_id: self.wave_id.clone(),
             source: crate::session::WorkSource::Declared,

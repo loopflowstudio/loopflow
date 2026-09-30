@@ -598,7 +598,7 @@ mod discovery_tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let old = insert_exec(&store, 1, 1);
         let live = insert_exec(&store, 2, 2);
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(

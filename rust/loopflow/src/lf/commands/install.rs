@@ -546,7 +546,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
         let result = crate::engine::load_flow(flow, catalog_path)
             .map_err(anyhow::Error::from)
             .and_then(|loaded| {
-                crate::engine::expand_flow(&loaded, catalog_path)
+                crate::engine::compile_flow(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
                     .and_then(|steps| _validate_executable_steps(&steps))
             });

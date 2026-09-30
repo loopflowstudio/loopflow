@@ -67,7 +67,7 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch};
+pub(crate) use run::{exec_task_worker, TaskWorkerExec};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,

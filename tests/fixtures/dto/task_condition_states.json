@@ -182,7 +182,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": []
@@ -194,7 +194,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -207,7 +207,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -220,7 +220,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -233,7 +233,7 @@
               "kind": "skill",
               "human": true,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -246,7 +246,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -259,7 +259,7 @@
               "kind": "xor",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": [
@@ -274,7 +274,7 @@
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [],
+                      "sources": [],
                       "paths": []
                     }
                   ]
@@ -293,7 +293,7 @@
               "kind": "op",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "queue"
               ],
@@ -479,7 +479,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": []
@@ -491,7 +491,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -504,7 +504,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -517,7 +517,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -530,7 +530,7 @@
               "kind": "skill",
               "human": true,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -543,7 +543,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -556,7 +556,7 @@
               "kind": "xor",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": [
@@ -571,7 +571,7 @@
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [],
+                      "sources": [],
                       "paths": []
                     }
                   ]
@@ -590,7 +590,7 @@
               "kind": "op",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "queue"
               ],
@@ -806,7 +806,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": []
@@ -818,7 +818,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -831,7 +831,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -844,7 +844,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -857,7 +857,7 @@
               "kind": "skill",
               "human": true,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -870,7 +870,7 @@
               "kind": "skill",
               "human": false,
               "returns_to": 1,
-              "parents": [
+              "sources": [
                 "feature",
                 "pursue"
               ],
@@ -883,7 +883,7 @@
               "kind": "xor",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature"
               ],
               "paths": [
@@ -898,7 +898,7 @@
                       "kind": "skill",
                       "human": false,
                       "returns_to": null,
-                      "parents": [],
+                      "sources": [],
                       "paths": []
                     }
                   ]
@@ -917,7 +917,7 @@
               "kind": "op",
               "human": false,
               "returns_to": null,
-              "parents": [
+              "sources": [
                 "feature",
                 "queue"
               ],

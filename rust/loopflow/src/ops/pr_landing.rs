@@ -10,7 +10,7 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::current_branch;
 use crate::engine::load_skill;
@@ -133,7 +133,7 @@ impl LandingDriver for GithubLandingDriver {
         incident: &CiIncident,
         previous: &str,
     ) -> OpsResult<String> {
-        launch_ci_fix(landing, incident, previous)
+        exec_ci_fix(landing, incident, previous)
     }
 }
 
@@ -198,7 +198,7 @@ fn classify_github_observation(
     }
 }
 
-fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> OpsResult<String> {
+fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> OpsResult<String> {
     let skill = load_skill("ci-fix", &landing.worktree)
         .map_err(|error| OpsError::Message(format!("ci-fix skill not found: {error}")))?
         .content
@@ -263,8 +263,8 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         chrome: config.chrome,
     };
     let (harness, model) = crate::engine::parse_agent(launch.agent());
-    let capture = crate::run_record::CaptureHandle::begin_with_launch(
-        crate::run_record::RunSpec {
+    let capture = crate::session_record::CaptureHandle::begin_with_request(
+        crate::session_record::SessionCaptureSpec {
             harness,
             model,
             surface: "headless".to_string(),
@@ -273,14 +273,17 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
-            work: landing.task_id.clone().map(|task| crate::session::RunWork {
-                task_id: Some(task),
-                wave_id: None,
-                source: crate::session::WorkSource::Declared,
-            }),
+            flow: crate::session_record::SessionFlowMembership::Independent,
+            work: landing
+                .task_id
+                .clone()
+                .map(|task| crate::session::SessionWork {
+                    task_id: Some(task),
+                    wave_id: None,
+                    source: crate::session::WorkSource::Declared,
+                }),
         },
-        crate::run_record::RunLaunchRequest::from_prepared(&launch, &capabilities),
+        crate::session_record::AgentExecRequest::from_prepared(&launch, &capabilities),
     )
     .map_err(|error| OpsError::Message(error.to_string()))?;
     capture.record_input("initial", &launch.task_prompt);
@@ -290,7 +293,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let result = launch_agent(&launch, &process, &capabilities);
+    let result = exec_agent(&launch, &process, &capabilities);
     let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
         "completed"
     } else {
@@ -307,7 +310,7 @@ fn launch_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> 
         .unwrap_or_else(|| {
             format!(
                 "No repair conclusion recorded; inspect lf runs {} --events",
-                capture.run_id()
+                capture.artifact_key()
             )
         });
     let result = result.map_err(|error| {
@@ -1359,7 +1362,7 @@ mod tests {
     #[test]
     fn landing_waiter_reads_completed_repair_output_once() {
         use crate::chat::types::{ConversationEvent, ConversationItem};
-        use crate::run_record::{CaptureHandle, RunSpec};
+        use crate::session_record::{CaptureHandle, SessionCaptureSpec};
 
         let _ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -1377,7 +1380,7 @@ mod tests {
         ] {
             let capture = CaptureHandle::begin_at(
                 home.path(),
-                RunSpec {
+                SessionCaptureSpec {
                     harness: "codex".into(),
                     model: None,
                     surface: "headless".into(),
@@ -1386,7 +1389,7 @@ mod tests {
                     worktree: Some(worktree),
                     skill: Some(skill.into()),
                     subjects: Vec::new(),
-                    flow: crate::run_record::RunFlowMembership::Independent,
+                    flow: crate::session_record::SessionFlowMembership::Independent,
                     work: None,
                 },
             )

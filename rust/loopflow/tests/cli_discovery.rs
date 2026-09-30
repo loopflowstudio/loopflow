@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 
 use clap::Parser;
 use loopflow::engine::target::{resolve_definition, DefinitionKind, Target};
-use loopflow::engine::{expand_flow, load_flow, ConcreteStep};
+use loopflow::engine::{compile_flow, load_flow, ConcreteStep};
 use loopflow::lf::navigation::normalize_args;
 use loopflow::lf::{Cli, Commands, FlowCommand};
 use tempfile::TempDir;
@@ -201,7 +201,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
             resolve_definition(repo.path(), name, None).unwrap(),
             Target::Flow(_)
         ));
-        let expanded = expand_flow(&load_flow(name, repo.path()).unwrap(), repo.path()).unwrap();
+        let expanded = compile_flow(&load_flow(name, repo.path()).unwrap(), repo.path()).unwrap();
         assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     }
     assert!(matches!(
@@ -214,7 +214,7 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
         "- paired\n- flow: paired\n- step:\n    name: paired\n    id: review\n    human: true\n",
     )
     .unwrap();
-    let expanded = expand_flow(&load_flow("outer", repo.path()).unwrap(), repo.path()).unwrap();
+    let expanded = compile_flow(&load_flow("outer", repo.path()).unwrap(), repo.path()).unwrap();
     assert_eq!(expanded.len(), 3);
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
@@ -242,7 +242,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     )
     .unwrap();
     let flow = load_flow("commands", repo.path()).unwrap();
-    let steps = expand_flow(&flow, repo.path()).unwrap();
+    let steps = compile_flow(&flow, repo.path()).unwrap();
     let ConcreteStep::Command(step) = &steps[0] else {
         panic!("expected command")
     };

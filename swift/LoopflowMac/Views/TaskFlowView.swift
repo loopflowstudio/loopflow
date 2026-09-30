@@ -871,7 +871,7 @@ private struct FlowNodeDetail: View {
             let taken = pinned?.returns.first { $0.decider == node.key }?.traversals
             facts.append("Iterate returns to \(label)" + (taken.map { " · taken \($0)×" } ?? ""))
         }
-        if node.parents.count > 1 { facts.append("from \(node.parents.joined(separator: " › "))") }
+        if node.sources.count > 1 { facts.append("from \(node.sources.joined(separator: " › "))") }
         return facts
     }
 }

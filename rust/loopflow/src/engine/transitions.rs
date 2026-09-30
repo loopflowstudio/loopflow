@@ -156,7 +156,7 @@ mod tests {
             repeat: edge.map(|from| RepeatPolicy {
                 from: from.to_owned(),
             }),
-            flow_parents: vec![],
+            sources: vec![],
         })
     }
 
@@ -176,7 +176,7 @@ mod tests {
                     command: "finish".to_owned(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             }),
         ];
         let mut progress = FlowProgress {

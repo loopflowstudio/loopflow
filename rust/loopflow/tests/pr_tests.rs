@@ -1369,7 +1369,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
             push: true,
             create_draft_pr: false,
             task: "commit".to_string(),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
             message: Some("new Task head".to_string()),
             agent: None,
         },

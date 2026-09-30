@@ -97,7 +97,7 @@ impl TaskInput {
     pub(crate) async fn poll(
         &self,
         harness: &mut dyn Harness,
-        capture: Option<&crate::run_record::CaptureHandle>,
+        capture: Option<&crate::session_record::CaptureHandle>,
     ) -> Result<()> {
         let mut controls = self.0.lock().await;
         let Controls {

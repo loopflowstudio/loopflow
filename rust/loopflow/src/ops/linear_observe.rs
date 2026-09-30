@@ -66,7 +66,7 @@ pub(crate) async fn publish_issue_comment(
         return Err(OpsError::Message("Task direction cannot be empty".into()));
     }
     let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
-    let name = crate::engine::config::launch_user_name()
+    let name = crate::engine::config::participant_name()
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let text = match name {
         Some(name) => format!(

@@ -21,8 +21,8 @@ use crate::durable::{FlowSession, TaskId, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteStep, ExecutionCursor};
 use crate::id::WaveId;
-use crate::run_record::{AttributionSource, RunFlowMembership, RunManifest};
 use crate::session::{AgentSession, SessionKind, SessionObservation, TitleSource, WorkSource};
+use crate::session_record::{AttributionSource, SessionCaptureManifest, SessionFlowMembership};
 use crate::store::SharedStore;
 
 #[derive(Debug, Serialize)]
@@ -252,7 +252,7 @@ pub(crate) async fn import(store: &SharedStore, dry_run: bool) -> Result<ImportR
             .map_err(anyhow::Error::from);
         import.count(&database, result);
     }
-    for dir in crate::run_record::record_dirs(&import.home)? {
+    for dir in crate::session_record::record_dirs(&import.home)? {
         let stored = import.run(&dir).await;
         import.count(&dir, stored);
     }
@@ -377,7 +377,7 @@ impl Import<'_> {
     async fn history(&self, input: &String) -> Result<Vec<SessionObservation>> {
         let dir = self.run_dir(input)?;
         let mut history = Vec::new();
-        let (task_id, wave_id, _) = match crate::run_record::read_manifest(&dir) {
+        let (task_id, wave_id, _) = match crate::session_record::read_manifest(&dir) {
             Ok(manifest) => self.work(&manifest).await?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, None, None),
             Err(error) => return Err(error.into()),
@@ -447,11 +447,15 @@ impl Import<'_> {
 
     /// Historical agent inputs retain their exact recorded Flow occurrence.
     async fn run(&mut self, dir: &Path) -> Result<Option<Stored>> {
-        let manifest = crate::run_record::read_manifest(dir)?;
-        if self.claimed.contains(&manifest.run_id) {
+        let manifest = crate::session_record::read_manifest(dir)?;
+        if self.claimed.contains(&manifest.artifact_key) {
             return Ok(None);
         }
-        if let Some(session) = self.store.session_for_artifact(&manifest.run_id).await? {
+        if let Some(session) = self
+            .store
+            .session_for_artifact(&manifest.artifact_key)
+            .await?
+        {
             return self.review_evidence(dir, &manifest, session).await;
         }
         let interactive = manifest.surface == "tui" || dir.join("provider-clients").try_exists()?;
@@ -468,7 +472,7 @@ impl Import<'_> {
         let (task_id, wave_id, work_source) = self.work(&manifest).await?;
         let mut capture = None;
         let (flow_session_id, node, iterations) = match &manifest.flow {
-            Some(RunFlowMembership::Step(step)) => {
+            Some(SessionFlowMembership::Step(step)) => {
                 let flow = self
                     .captures
                     .get(&step.invocation_id)
@@ -477,7 +481,7 @@ impl Import<'_> {
                     .ok_or_else(|| {
                         anyhow!(
                             "input {} names unavailable capture {}",
-                            manifest.run_id,
+                            manifest.artifact_key,
                             step.invocation_id
                         )
                     })?;
@@ -497,16 +501,15 @@ impl Import<'_> {
         };
         let (title, title_source) = name(
             dir,
-            manifest
-                .skill
-                .clone()
-                .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
+            manifest.skill.clone().unwrap_or_else(|| {
+                crate::engine::naming::word_pair(manifest.artifact_key.as_str())
+            }),
         )?;
         let session = AgentSession {
             captured: None,
-            id: manifest.run_id.to_string(),
-            artifact_key: manifest.run_id,
-            caller_artifact_key: manifest.parent_run_id,
+            id: manifest.artifact_key.to_string(),
+            artifact_key: manifest.artifact_key,
+            caller_artifact_key: manifest.caller_artifact_key,
             input_published: true,
             cwd: manifest.cwd,
             skill: manifest.skill,
@@ -540,7 +543,7 @@ impl Import<'_> {
     }
 
     fn run_dir(&self, run: &String) -> Result<PathBuf> {
-        crate::run_record::record_dir(&self.home, run)
+        crate::session_record::record_dir(&self.home, run)
             .ok_or_else(|| anyhow!("Run {run} has an invalid id"))
     }
 
@@ -554,7 +557,7 @@ impl Import<'_> {
             None => (imported_input_id(&file.id)?, false, None),
         };
         let created_at = match &dir {
-            Some(dir) if published => crate::run_record::read_manifest(dir)?
+            Some(dir) if published => crate::session_record::read_manifest(dir)?
                 .created_at
                 .unix_timestamp(),
             _ => modified(path)?,
@@ -637,10 +640,12 @@ impl Import<'_> {
         let manifest = active
             .run_id
             .as_ref()
-            .map(|_| crate::run_record::read_manifest(&dir).context("the review's captured input"))
+            .map(|_| {
+                crate::session_record::read_manifest(&dir).context("the review's captured input")
+            })
             .transpose()?;
         let (node, iterations) = match manifest.as_ref().and_then(|input| input.flow.as_ref()) {
-            Some(RunFlowMembership::Step(step)) => {
+            Some(SessionFlowMembership::Step(step)) => {
                 if step.invocation_id != file.id {
                     bail!(
                         "review {id} names a different captured Flow {}",
@@ -709,7 +714,7 @@ impl Import<'_> {
             captured: None,
             caller_artifact_key: manifest
                 .as_ref()
-                .and_then(|input| input.parent_run_id.clone()),
+                .and_then(|input| input.caller_artifact_key.clone()),
             task_id: flow.task_id.clone(),
             wave_id: flow.wave_id.clone(),
             flow_session_id: Some(file.id.clone()),
@@ -749,7 +754,7 @@ impl Import<'_> {
     /// The Task and Wave a Run's manifest names, by the selectors it recorded.
     async fn work(
         &self,
-        manifest: &RunManifest,
+        manifest: &SessionCaptureManifest,
     ) -> Result<(Option<TaskId>, Option<WaveId>, Option<WorkSource>)> {
         let mut selected: Option<(Option<TaskId>, WaveId, WorkSource)> = None;
         for subject in &manifest.subjects {
@@ -770,7 +775,7 @@ impl Import<'_> {
                 {
                     bail!(
                         "input {} records conflicting Work ancestry",
-                        manifest.run_id
+                        manifest.artifact_key
                     );
                 }
                 if known_task.is_some() {
@@ -790,11 +795,11 @@ impl Import<'_> {
     async fn review_evidence(
         &mut self,
         dir: &Path,
-        manifest: &RunManifest,
+        manifest: &SessionCaptureManifest,
         session: AgentSession,
     ) -> Result<Option<Stored>> {
-        if session.artifact_key != manifest.run_id {
-            let history = self.history(&manifest.run_id).await?;
+        if session.artifact_key != manifest.artifact_key {
+            let history = self.history(&manifest.artifact_key).await?;
             let changed = self
                 .store
                 .import_session(session, None, history, self.report.dry_run)
@@ -841,7 +846,7 @@ impl Import<'_> {
 // Unopened historical conversations have identity, but no observed process.
 fn imported_input_id(session: &str) -> Result<String> {
     let digest = Sha256::digest(session.as_bytes());
-    Ok(crate::run_record::parse_artifact_key(&format!(
+    Ok(crate::session_record::parse_artifact_key(&format!(
         "run_{}",
         hex::encode(&digest[..16])
     ))?)
@@ -885,13 +890,13 @@ mod numeric_node_tests {
                 id: None,
                 human: false,
                 repeat: None,
-                flow_parents: vec![],
+                sources: vec![],
             })
         };
         let branch = |paths: Vec<(&str, Vec<ConcreteStep>)>| {
             ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("route"),
-                flow_parents: vec![],
+                sources: vec![],
                 paths: paths
                     .into_iter()
                     .map(|(name, steps)| {

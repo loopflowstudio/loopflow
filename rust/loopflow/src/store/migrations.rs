@@ -5481,7 +5481,7 @@ mod tests {
                     id: None,
                     human: false,
                     repeat: None,
-                    flow_parents: vec![],
+                    sources: vec![],
                 },
             )],
         )
@@ -6112,10 +6112,10 @@ mod tests {
                 .unwrap();
             apply_installed_development_sqlite(&conn, &drafts[..index]).unwrap();
         }
-        let prior = crate::run_record::new_artifact_key();
-        let current = crate::run_record::new_artifact_key();
-        let caller = crate::run_record::new_artifact_key();
-        let standalone = crate::run_record::new_artifact_key();
+        let prior = crate::session_record::new_artifact_key();
+        let current = crate::session_record::new_artifact_key();
+        let caller = crate::session_record::new_artifact_key();
+        let standalone = crate::session_record::new_artifact_key();
         let capture =
             crate::durable::test_flow_invocation("retained", 0, "review", Some("review"), true);
         conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
@@ -6172,7 +6172,7 @@ mod tests {
         conn.execute("INSERT INTO runs(id,task_id,wave_id,created_at,published,cwd,skill,provider,caller_run_id,work_source,outcome,ended_at)
             VALUES(?1,?2,?3,20,1,'/missing-original-checkout','research','claude',?4,'inherited','failed',21)",
             rusqlite::params![standalone.as_str(),task.as_str(),wave,caller.as_str()]).unwrap();
-        let mechanical = crate::run_record::new_artifact_key();
+        let mechanical = crate::session_record::new_artifact_key();
         let mut operation =
             crate::durable::test_flow_invocation("old-operation", 0, "publish", None, false);
         operation.steps = vec![crate::engine::ConcreteStep::Command(
@@ -6181,7 +6181,7 @@ mod tests {
                     command: "publish".into(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             },
         )];
         conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
@@ -6531,7 +6531,7 @@ mod tests {
         let mut captures = Vec::new();
         for human in [true, false] {
             let task = crate::durable::TaskId::new();
-            let input = crate::run_record::new_artifact_key();
+            let input = crate::session_record::new_artifact_key();
             let invocation = crate::durable::test_flow_invocation(
                 "retained",
                 0,
@@ -6758,7 +6758,7 @@ mod tests {
                 Some("review"),
                 human,
             );
-            let run = crate::run_record::new_artifact_key();
+            let run = crate::session_record::new_artifact_key();
             let claim = (!human).then(|| crate::durable::TaskWorkerClaim {
                 invocation_id: invocation.id.clone(),
                 generation: 4,
@@ -6872,8 +6872,8 @@ mod tests {
         let cursor = serde_json::to_string(&crate::engine::ExecutionCursor::default()).unwrap();
         conn.execute("INSERT INTO flow_invocations(id,invocation_json,review_json,step_index,iteration,position_version,worker_generation,updated_at,state)
             VALUES(?1,?2,?3,0,0,3,0,1,'current')", rusqlite::params![capture.id, serde_json::to_string(&capture).unwrap(), cursor]).unwrap();
-        let first = crate::run_record::new_artifact_key();
-        let second = crate::run_record::new_artifact_key();
+        let first = crate::session_record::new_artifact_key();
+        let second = crate::session_record::new_artifact_key();
         conn.execute_batch("BEGIN").unwrap();
         conn.execute(
             "INSERT INTO sessions(id,current_run_id,title,title_source,ready_summary,created_at)
@@ -6965,7 +6965,7 @@ mod tests {
         // Position identity intentionally permits multiple Runs; only Run identity is unique.
         for attempt in 1..=2 {
             conn.execute("INSERT INTO runs(id,invocation_id,node,iterations,attempt,created_at,cwd,published)
-                VALUES(?1,?2,0,'[[]]',?3,3,'/repo',0)", rusqlite::params![crate::run_record::new_artifact_key().as_str(),capture.id,attempt]).unwrap();
+                VALUES(?1,?2,0,'[[]]',?3,3,'/repo',0)", rusqlite::params![crate::session_record::new_artifact_key().as_str(),capture.id,attempt]).unwrap();
         }
         assert!(conn
             .execute("UPDATE runs SET node=5 WHERE id=?1", [first.as_str()])
@@ -7235,7 +7235,7 @@ mod tests {
                             },
                         )]
                         .into(),
-                        flow_parents: vec![],
+                        sources: vec![],
                     },
                 )];
                 cursor.child = Some(Box::new(crate::engine::NestedCursor::Xor {
@@ -7243,7 +7243,7 @@ mod tests {
                     cursor: crate::engine::ExecutionCursor::default(),
                 }));
             }
-            let run = crate::run_record::new_artifact_key();
+            let run = crate::session_record::new_artifact_key();
             let capture = serde_json::to_string(&invocation).unwrap();
             let cursor = serde_json::to_string(&cursor).unwrap();
             conn.execute("INSERT INTO flow_invocations(id,task_id,invocation_json,session_run_id,ready_summary,
@@ -7373,7 +7373,7 @@ mod tests {
         .unwrap();
         assert!(conn.execute_batch("COMMIT").is_err());
         conn.execute_batch("ROLLBACK").unwrap();
-        let independent = crate::run_record::new_artifact_key();
+        let independent = crate::session_record::new_artifact_key();
         conn.execute(
             "INSERT INTO flow_invocations(id,invocation_json,step_index,iteration,
             position_version,worker_generation,updated_at,state)

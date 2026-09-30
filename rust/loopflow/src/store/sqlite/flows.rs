@@ -510,7 +510,7 @@ fn reserve_attempt_in(
         params![flow.id(),node,serde_json::to_string(&iterations)?],|row| row.get(0)).optional()?;
     let session = if let Some(id) = existing {
         let mut session = super::sessions::session_in(tx, &id)?.ok_or(StoreError::NotFound)?;
-        session.artifact_key = crate::run_record::new_artifact_key();
+        session.artifact_key = crate::session_record::new_artifact_key();
         session.input_published = false;
         let exec = exec.cloned().or_else(crate::journal::current_exec_id);
         super::sessions::replace_input_in(tx, &mut session, exec.as_ref())?;
@@ -1848,7 +1848,7 @@ mod tests {
     fn step(id: &str, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
-            flow_parents: vec![],
+            sources: vec![],
             id: Some(id.into()),
             human: false,
             repeat: from.map(|from| RepeatPolicy { from: from.into() }),
@@ -2294,7 +2294,7 @@ mod tests {
                     command: "status".into(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             })],
             0,
         );
@@ -2487,7 +2487,7 @@ mod tests {
         let mut ask = original.clone();
         ask.id = "ask-policy".into();
         ask.captured = None;
-        ask.artifact_key = crate::run_record::new_artifact_key();
+        ask.artifact_key = crate::session_record::new_artifact_key();
         ask.caller_artifact_key = Some(original.artifact_key.clone());
         ask.flow_session_id = None;
         ask.node = None;
@@ -2789,7 +2789,7 @@ mod tests {
                         command: "rebase".into(),
                         args: vec!["--plan".into()],
                     },
-                    flow_parents: vec![],
+                    sources: vec![],
                 }),
                 step("finish", None),
             ],

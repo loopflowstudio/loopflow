@@ -69,6 +69,13 @@ cases. This narrow proof validates retained refusal/confirmation behavior only;
 the parent's chapter operation does not yet consume that archival adapter.
 No affected suite, full gate, live provider or installed acceptance ran.
 
+Compression shares Project-status pagination while retaining team preference for
+transitions and exact scope for completion; selection uses a minimum instead of
+sorting. Production Rust adds 38 / removes 64 lines, excluding tests. All 34 Linear
+adapter tests passed, then both selection tests passed with added fallback coverage;
+formatting, all-target Clippy and diff checks pass. These are simulated-provider
+proofs; the combined migration failure and installation cases above remain open.
+
 **Measurement:** compile reconciliation after replay (`a9d7ec2fd` → working tree)
 adds **29 / removes 54** non-test physical Rust lines. Counts exclude test modules,
 standalone test files, scripts, docs, scratch, generated artifacts and inherited

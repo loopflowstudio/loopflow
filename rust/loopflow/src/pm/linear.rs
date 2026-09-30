@@ -780,51 +780,20 @@ impl LinearClient {
 
     async fn project_status_id(&self, status: crate::pm::ProjectStatus) -> PmResult<String> {
         let team = self.require_team_id()?;
-        let mut after: Option<String> = None;
-        let mut choices = Vec::new();
-        loop {
-            let response: ProjectStatusesData = self
-                .graphql(
-                    r#"query ProjectStatuses($after: String) {
-                    projectStatuses(first: 100, after: $after) {
-                        nodes { id type position teamId }
-                        pageInfo { hasNextPage endCursor }
-                    }
-                }"#,
-                    json!({ "after": after }),
-                )
-                .await?;
-            choices.extend(
-                response
-                    .project_statuses
-                    .nodes
-                    .into_iter()
-                    .filter(|choice| {
-                        choice.type_ == status
-                            && choice.team_id.as_deref().is_none_or(|id| id == team)
-                    }),
-            );
-            if !response.project_statuses.page_info.has_next_page {
-                break;
-            }
-            after = response.project_statuses.page_info.end_cursor;
-            if after.is_none() {
-                return Err(PmError::Message(
-                    "Linear Project status page has no continuation".into(),
-                ));
-            }
-        }
-        choices.sort_by(|left, right| {
-            right
-                .team_id
-                .is_some()
-                .cmp(&left.team_id.is_some())
-                .then_with(|| left.position.total_cmp(&right.position))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        choices
+        self.project_statuses()
+            .await?
             .into_iter()
-            .next()
+            .filter(|choice| {
+                choice.type_ == status && choice.team_id.as_deref().is_none_or(|id| id == team)
+            })
+            .min_by(|left, right| {
+                right
+                    .team_id
+                    .is_some()
+                    .cmp(&left.team_id.is_some())
+                    .then_with(|| left.position.total_cmp(&right.position))
+                    .then_with(|| left.id.cmp(&right.id))
+            })
             .map(|choice| choice.id)
             .ok_or_else(|| {
                 PmError::Message(format!(
@@ -1014,8 +983,30 @@ impl LinearClient {
     }
 
     async fn completed_project_status(&self, current: &ProjectStatusRef) -> PmResult<String> {
+        self.project_statuses()
+            .await?
+            .into_iter()
+            .filter(|status| {
+                status.type_ == crate::pm::ProjectStatus::Completed
+                    && status.team_id == current.team_id
+            })
+            .min_by(|left, right| {
+                left.position
+                    .total_cmp(&right.position)
+                    .then_with(|| left.id.cmp(&right.id))
+            })
+            .map(|status| status.id)
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "Linear has no completed Project status in the scope of status {}",
+                    current.id
+                ))
+            })
+    }
+
+    async fn project_statuses(&self) -> PmResult<Vec<ProjectStatusChoice>> {
         let mut after = None;
-        let mut selected = None;
+        let mut statuses = Vec::new();
         loop {
             let response: ProjectStatusesData = self
                 .graphql(
@@ -1024,20 +1015,9 @@ impl LinearClient {
                 )
                 .await?;
             let page = response.project_statuses;
-            selected = selected
-                .into_iter()
-                .chain(page.nodes)
-                .filter(|status| {
-                    status.type_ == crate::pm::ProjectStatus::Completed
-                        && status.team_id == current.team_id
-                })
-                .min_by(|left, right| {
-                    left.position
-                        .total_cmp(&right.position)
-                        .then_with(|| left.id.cmp(&right.id))
-                });
+            statuses.extend(page.nodes);
             if !page.page_info.has_next_page {
-                break;
+                return Ok(statuses);
             }
             let cursor = page.page_info.end_cursor.ok_or_else(|| {
                 PmError::Message("Linear Project statuses have no next-page cursor".into())
@@ -1049,12 +1029,6 @@ impl LinearClient {
             }
             after = Some(cursor);
         }
-        selected.map(|status| status.id).ok_or_else(|| {
-            PmError::Message(format!(
-                "Linear has no completed Project status in the scope of status {}",
-                current.id
-            ))
-        })
     }
 
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
@@ -2764,6 +2738,82 @@ mod tests {
             .as_str()
             .expect("content")
             .contains("flow: task-design"));
+    }
+
+    #[tokio::test]
+    async fn project_status_selection_preserves_team_preference_and_completion_scope() {
+        let pages = [
+            json!({"data":{"projectStatuses":{"nodes":[
+                {"id":"workspace", "type":"completed", "teamId":null, "position":0.0},
+                {"id":"later", "type":"completed", "teamId":"selected", "position":10.0}
+            ], "pageInfo":{"hasNextPage":true, "endCursor":"page-2"}}}}),
+            json!({"data":{"projectStatuses":{"nodes":[
+                {"id":"z-tie", "type":"completed", "teamId":"selected", "position":5.0},
+                {"id":"a-tie", "type":"completed", "teamId":"selected", "position":5.0},
+                {"id":"current-done", "type":"completed", "teamId":"current", "position":1.0},
+                {"id":"started", "type":"started", "teamId":"selected", "position":0.0}
+            ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
+        ];
+        for (team, preferred, scope, expected) in [
+            ("selected", "a-tie", Some("selected"), Some("a-tie")),
+            ("selected", "a-tie", Some("current"), Some("current-done")),
+            ("selected", "a-tie", None, Some("workspace")),
+            ("missing", "workspace", Some("missing"), None),
+        ] {
+            let responses = pages
+                .iter()
+                .cycle()
+                .take(4)
+                .map(|page| json_response(StatusCode::OK, page.clone()))
+                .collect();
+            let (base_url, _) = test_server::spawn(responses).await;
+            let client = LinearClient::with_base_url("fixture".into(), Some(team.into()), base_url);
+            assert_eq!(
+                client
+                    .project_status_id(crate::pm::ProjectStatus::Completed)
+                    .await
+                    .unwrap(),
+                preferred
+            );
+            let completion = client
+                .completed_project_status(&ProjectStatusRef {
+                    id: "current-status".into(),
+                    r#type: "started".into(),
+                    team_id: scope.map(str::to_string),
+                })
+                .await;
+            match expected {
+                Some(id) => assert_eq!(completion.unwrap(), id),
+                None => assert!(completion
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no completed Project status in the scope of status current-status")),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn project_status_selection_rejects_incomplete_pagination() {
+        for cursor in [Value::Null, json!("page-2")] {
+            let responses = [json!("page-2"), cursor]
+                .into_iter()
+                .map(|cursor| {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data":{"projectStatuses":{"nodes":[],
+                            "pageInfo":{"hasNextPage":true, "endCursor":cursor}}}}),
+                    )
+                })
+                .collect();
+            let (base_url, _) = test_server::spawn(responses).await;
+            let client =
+                LinearClient::with_base_url("fixture".into(), Some("selected".into()), base_url);
+            let error = client
+                .project_status_id(crate::pm::ProjectStatus::Completed)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("cursor"));
+        }
     }
 
     #[tokio::test]

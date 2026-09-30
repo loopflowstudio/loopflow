@@ -40,7 +40,7 @@ Prove structured wakes and interactive draft input through one native execution
 owner before primary cutover. A second Harness or terminal keystroke injection
 does not prove that integration.
 
-The first internal Task-workspace cut implements Rust-derived checkout association
+The Task workspace implements Rust-derived checkout association
 and a paged directory browser independent of Project hydration and PR diff bases.
 Keep `(Home, resolved checkout)` location separate from Run attribution and Flow
 membership. Batch placement reads must propagate failure, preserving stale UI
@@ -48,14 +48,26 @@ inventory. Readable symlinks are read-only; refresh access before equal-revision
 shortcuts so an identical-content replacement disables editing and autosave
 without losing drafts. Comparison failure must leave directory browsing usable.
 
-Recorded Rust/Swift focused proofs, fixtures, Clippy and fallback compilation
-support that cut; Swift transport was simulated. Home-aware retained panes,
-collapse/focus, live reassociation, participation projection, raw Ask keys and
-configured desktop/provider proof remain. Remote owning-Home resolution is also
-unproved. The headless run cannot execute the required `--ui-host` gate or live
-Ask/Flow handoff. Unit 1 is not ready to ship; primary native wake delivery and
-durable Flow replacement remain separate Unit 2 obligations. These checks earn
-no external-product weekly-progress credit.
+Home-aware retained panes, collapse/focus, reassociation, participation projection
+and caller-scoped raw Ask keys are implemented on the branch, not shipped.
+The separate Task terminal owner is deleted. Remove only confirmed absent Sessions
+from panes and Undo; a repository-local inventory cannot establish absence in
+another repository, and a membership move must keep the same native surface.
+File visibility derives from retained preference plus zoom, without a second
+focus backup. Interaction edges exclude routes through another interactive visit;
+otherwise repeat work leaks into the exit edge. Raw Ask keys identify questions
+within one caller Run, independently of captured Flow recovery keys.
+
+Recorded Rust/Swift focused proofs, shared fixtures, Clippy and fallback compilation
+support the local implementation; Swift transport was simulated and native input
+proof used fixture shells. Jack Heart placed configured desktop/provider proof at
+the final demo boundary and authorized local implementation before it. The hosted
+UI gate, real Ask/Flow caller release, remote owning-Home association and measured
+layout/idle behavior remain unproved and mandatory before shipping. The retained
+workspace signpost ends at a main callback, not compositor presentation; it does
+not establish the proposed p95 target. Primary native wake delivery and durable
+Flow replacement remain separate Unit 2 obligations. These checks earn no
+external-product weekly-progress credit.
 
 ## Skill reduction decisions (2026-09-28)
 
@@ -545,10 +557,11 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   machine bylines, and the database message bus are deleted.
 - **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
-  is useful. `lf ask` is reserved for a review boundary: it starts a provider
-  Run in the caller's checkout and blocks until that Session is explicitly
-  completed. A declared Task review node persists its exact playhead and advances
-  only through Approve or Iterate. There is no agent exchange row, answer lane,
+  is useful. `lf ask` brings a decision that genuinely needs Jack into a direct
+  Session in the caller's checkout; ordinary Runs can ask without an authored
+  review node. Explicit completion releases the exact caller. Authored review
+  Sessions return feedback to their recorded Flow boundary, with navigation
+  owned by the following decider. There is no agent exchange row, answer lane,
   or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
   oldest-first. There is no live memory stream, and recent Wave Chat is not
@@ -788,9 +801,9 @@ substitute for another merely because identifiers coincide.
   `.prepared` bridges async opening and surface creation, and an open failure
   stays visible until retried or superseded. Shell panes also survive navigation,
   and closing an outer checkout slot only hides its entire inner layout. Explicit
-  inner close/process exit closes that shell. Task tmux tabs retain their own
-  kill-on-close/quit policy.
-- `TerminalIdentity` carries Session, shell, or Task-terminal purpose through
+  inner close/process exit closes that shell. September 30's Task workspace removes
+  the separate Task terminal owner and uses these retained shell/Session lifetimes.
+- `TerminalIdentity` carries Session or shell purpose through
   views, pools, and bell/title/close notifications. Input policy follows the
   enum case, never string prefixes. Resolve callback identity from surface
   userdata while its handle is valid; deferred notifications carry values.

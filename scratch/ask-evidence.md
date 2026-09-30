@@ -1,12 +1,13 @@
 # Ask and primary conversations: current evidence
 
-Source inspection, 2026-09-30. Supports `scratch/growth-thoughts.md`.
-No live Ask was opened, worker launched, or lifecycle test run in this inquiry.
+Source inspection reconciled at `841f3c580`, 2026-09-30. Supports
+`scratch/growth-thoughts.md`. Executed local proof and its limits are recorded in
+`kickoff-evidence.md`; no configured live Ask is established by this evidence.
 
 ## Current Ask
 
-- `lf/commands/ask.rs` calls `human_session::ask` and returns the completion
-  summary. `AskArgs` supports an optional `--skill` and a question.
+- `lf/commands/ask.rs` calls `human_session::ask_with_key` and returns the completion
+  summary. `AskArgs` supports optional `--skill` and `--key` arguments and a question.
 - `ops/human_session.rs::prepare_ask_record` requires an active Loopflow Run
   manifest, records its parent identity, working directory, Work binding when
   present, model, question, and selected skill. This is available to ordinary
@@ -19,10 +20,12 @@ No live Ask was opened, worker launched, or lifecycle test run in this inquiry.
   requires a ready summary, saves completion before provider cleanup, and releases
   the waiting caller with that summary. Ready and provider exit alone do not
   complete it.
-- A raw `ask` allocates a new UUID each call. Internal `ask_once` and
-  `task_unblock` reuse a key for an exact execution boundary and retain completed
-  feedback for recovery. Raw Ask does not inherit that deduplication just because
-  it was raised by the same Task.
+- A raw `ask` without `--key` allocates a new UUID each call. An explicit key is
+  scoped to the originating Run; a retry joins the pending Session or returns its
+  retained answer. The same key in another Run is a separate question. Internal
+  `ask_once` and `task_unblock` reuse a key for an exact execution boundary and
+  retain completed feedback for recovery. Raw Ask does not inherit their boundary
+  identity just because it was raised by the same Task.
 - `task_unblock` prepares an `unblock` skill Session for a failed decision.
   Completion supplies evidence for reassessment; it does not choose Advance or
   Iterate. Authored interactive skills are separate Flow Sessions with their
@@ -74,12 +77,13 @@ claim/requeue behavior is no longer an available migration mechanism.
 `swift/LoopflowMac/WorkspaceProjection.swift` now groups Task Sessions using
 Rust-derived `workspace.taskId` and the Task runtime's Work ID. The first internal
 cut supplies checkout association independently of Run attribution and
-`SessionFlowMembership`. Home/worktree-keyed pane retention and live reassociation
-remain to build; grouping alone does not prove surface continuity.
+`SessionFlowMembership`. Home/worktree-keyed pane retention and reassociation are
+now implemented in the window-owned registry. Focused Swift tests support surface
+retention; the configured cross-Task/provider demonstration remains unexecuted.
 
-Existing simulated tests cover keyed Ask reuse, independent boundaries, retained
-completion, and completion surviving cleanup failure. These tests were read,
-not rerun; they do not prove the configured desktop experience.
+Recorded simulated tests cover raw caller-scoped keys, concurrent retries,
+independent boundaries, retained completion, and completion surviving cleanup
+failure. They do not prove the configured desktop experience.
 
 Opening a new conversation for every question risks making Jack coordinate the
 workers. Routing everything through one primary agent risks a bottleneck and

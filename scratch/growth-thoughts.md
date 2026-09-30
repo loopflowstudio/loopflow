@@ -2,8 +2,9 @@
 
 Implementation plan drafted through kickoff, 2026-09-30. Jack Heart supplied the
 product decisions; mechanisms and sequencing below are kickoff recommendations.
-Status: the design is accepted for implementation. Build Unit 1 first, then
-Unit 2. Change the plan only when implementation finds a counterexample.
+Status: accepted for implementation, reconciled 2026-09-30 at `841f3c580`.
+Unit 1's local implementation is present; configured acceptance remains open.
+Unit 2 follows Unit 1 and retains the unresolved mechanisms described below.
 Placement: Product, matching its shared workspace/user-contract responsibility.
 [Evidence](kickoff-evidence.md) records the source findings behind the plan.
 
@@ -72,10 +73,8 @@ Three additive units, each delivering a usable experience without compatibility
 adapters. Unit 1 is the fully specified keystone and ships as one PR; its internal
 cuts are not separate partial products. Unit 2 introduces primary Task, Wave,
 and repo Sessions, including TaskSession-led Flow switching. Unit 3 makes default
-selection and direct Flow-file editing effective. Keep the
-later units here as bounded implementation direction; elaborate their final
-launch plans when selected. Keep all three units visible during design review.
-This kickoff files no follow-up Tasks and launches no implementation workers.
+selection and direct Flow-file editing effective. The later units remain bounded
+implementation direction, requiring detailed launch plans when selected.
 
 Unit 1 remains the selected delivery boundary. Its local implementation now includes
 Home/worktree identity in checkout receipts, planning readings and outer slots;
@@ -109,8 +108,8 @@ Removed: `TaskWorkspaceView.swift`, `TaskTerminalStore`, `TaskWorkspaceSection`,
 and the exclusive `TerminalIdentity.taskTerminal` case. Their consumers now use
 the retained Sessions workspace; keep these predecessors deleted. Preserve file documents, shell
 processes, and direct Session completion in the surviving window-owned registry.
-Replace path-only registry/outer-slot keys with Home and checkout identity; keep
-terminal identity independent of grouping. Focused retention tests own this proof.
+Registry and outer-slot keys now use Home and checkout identity; terminal identity
+remains independent of grouping. Focused retention tests support this separation.
 The compression pass also removes full-inventory reconciliation from the pane
 store and the view-owned file-focus backup. Explicit Session removals preserve
 other repositories' panes and invalidate resolved Sessions in Undo; file
@@ -531,7 +530,10 @@ identify the next visit; test an inner repeat while an outer switch is pending.
 
 Extend the existing restart operation and Task store transactions. The proposed
 pending switch holds a request key, source invocation, captured `QueuedInvocation`
-including its allocated replacement ID, exact timing, and replacement phase.
+including its allocated replacement ID and captured account selection, exact
+timing, and replacement phase. Upstream `e14a1d035` added account selection to
+invocation capture and restores it on Flow resume; replacement must preserve that
+capture rather than reselect accounts from a later process environment.
 Cancellation and changing a queued target compare against that request. Save it
 separately from the cursor fields that a running worker settles, so a worker's
 older in-memory `FlowPosition` cannot erase an accepted request.
@@ -911,8 +913,11 @@ Task Ask/Flow handoff before claiming the intended experience works.
 Kickoff's production-model zoom/close probe passed. It confirmed reuse of zoom
 and disproved close/undo as collapse. The follow-up checkout-root probe also
 passed for subdirectories, symlink aliases, and distinct main/linked roots.
-First-cut implementation evidence and remaining proof are recorded in
-`kickoff-evidence.md`. No full gate, primary-session launch, or live Ask
+Implementation and compression evidence, plus remaining configured proof, are
+recorded in `kickoff-evidence.md`. The `retained_workspace_action` signpost ends
+at the next main callback: it measures scheduling, not compositor presentation.
+It cannot alone establish the rendered/usable endpoint or the proposed p95 target.
+No full gate, primary-session launch, or live Ask
 demonstration has occurred. The Unit 2 native turn-delivery spike remains required.
 
 ## Alternatives, exclusions, and review

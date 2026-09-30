@@ -6,35 +6,59 @@ plan is `growth-thoughts.md`.
 
 ## Current reconciliation
 
-Read-only source review at `171d6f2e2`, 2026-09-30; no new behavioral test or
-configured desktop/provider run. The first-cut proof recorded below is reused
-as historical evidence. The working tree was clean at review start.
+Reconciled at `841f3c580`, 2026-09-30, after implementation `42e7daff0`,
+compression `980490733`, and the merge of release `12013dae4`. The working tree
+was clean at review start. This reconciliation changes documentation and memory,
+not production behavior. Earlier source findings below are dated baselines;
+the implementation/compression sections record what superseded them.
 
-- Upstream `3dc89bc9a` removed the resident/listener, Wave chat surfaces, external
-  bridge, and turn claim/requeue implementation. Earlier findings below about
-  those paths describe the pre-removal design baseline. The surviving
-  `controller/wave/journal.rs` only formats short IDs. The outbox and its
-  pending/delivered methods remain; source search finds their callers only in
-  store wrappers/tests, with no production dispatcher. Unit 2 must establish
-  primary-owned claims and receipts after proving native turn delivery, not
-  migrate a live resident consumer or revive the removed service.
-- `engine::worktrees::ensure_agent_worktree` survives independently of the
-  deleted Wave placement wrapper. Its create path still selects
-  `agent_base_ref(..., true)`; the offline primary placement requirement remains.
-- The first cut's Rust association and Swift `workspace.taskId` grouping agree.
-  The registry and outer worktree selectors remain path-keyed; the old Task
-  terminal owner remains. No collapse API, interaction projection, or raw Ask
-  key exists yet. Remote Flow workspace readings remain explicitly unavailable
-  locally; owning-Home resolution is not established by the local resolver test.
-- Product memory now carries Jack's accepted participation/primary-Session
-  direction and the no-Project/no-PR, same-revision access lessons. Earlier
-  orphan-only binding and scratch/Changes-only browser guidance is superseded.
+- Unit 1's local implementation is present: Home/worktree registry and outer
+  slots, retained Sessions/shells/files, collapse and focus/restore, exact
+  interactive-stage navigation, Task/Wave participation and caller-scoped raw
+  Ask keys. The old Task terminal owner is deleted. Source inspection confirms
+  membership moves preserve the surface pool, confirmed removals invalidate Undo,
+  and file visibility derives from zoom plus retained preference.
+- Product memory and the Ask evidence still described these changes as absent.
+  They now carry the implementation lessons and configured proof limits. The
+  plan preserves Unit 1 as one delivery boundary and keeps Unit 2/3 separate.
+- Upstream `e14a1d035` captures account selection in `QueuedInvocation` and
+  restores it at Task and standalone Flow Session opening. Unit 2's captured
+  successor must retain these accounts as well as its ID and steps. The merge
+  also replaces authored `rebase` steps with `sync`; projection expectations
+  now use those names. Saved-plan isolation from `31c6e5d8f` reinforces keeping
+  this artifact descriptive rather than selecting another reader's operation.
+- Upstream `3dc89bc9a` removed the resident/listener and its turn claims. The
+  outbox remains without that dispatcher. Primary native turn delivery and
+  durable replacement are still Unit 2 work, not inherited capabilities.
+- Remote Flow readings retain recorded Home/Task placement with an explicit
+  unavailable checkout-resolution reason. This is a fallback, not verified
+  owning-Home resolution. The configured multi-Home case must establish actual
+  association; a repeated unavailable result leaves acceptance open.
 
-The plan and questions now use this baseline. Unit 1 still requires its remaining
-workspace, participation and Ask implementation plus the configured desktop
-demo. `uv run python scripts/test.py --ui-host` and the real-provider Ask/Flow
-handoff remain unavailable in this headless run's supplied no-rendering
-environment. No compilation or simulated transport result substitutes for them.
+Fresh focused checks after the merge:
+
+- `cargo test -p loopflow --lib ops::human_session::`: 24 passed.
+- `cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1`:
+  3 passed.
+- `cargo test -p loopflow --lib engine::flow_graph::tests`: 8 passed.
+
+These 35 checks exercise local models and simulated provider lifecycles, not
+configured provider account continuation. `git diff --check` also passed.
+
+The prior 89-case Swift compression run, Rust projection/DTO checks, Clippy and
+Xcode fallback build below remain historical evidence at `980490733`, not an
+identical-tree gate pass after the merge. No Swift source changed in that merge;
+no Swift/Xcode rerun was needed for these documentation-only corrections.
+
+Remaining acceptance: the configured cross-Task walkthrough, exact live
+Ask/Flow continuation, retained input/processes/documents and file split restoration,
+remote owning-Home association, at least 20 comparable layout samples, and idle
+CPU/process counts. The layout signpost measures a next-main-callback proxy,
+not rendered presentation. `uv run python scripts/test.py --ui-host` and the
+real-provider handoff were not attempted: this reconciliation has no rendering
+environment. Jack Heart assigned this proof to the final demo and permitted
+local implementation before it. Shipping still requires that proof; a full
+affected-suite gate also remains unrecorded.
 
 ## Initial Session grouping findings (before the first cut)
 

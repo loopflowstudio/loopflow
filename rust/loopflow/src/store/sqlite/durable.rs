@@ -2196,7 +2196,11 @@ mod durable_store_tests {
             .release_flow(id, recovered.version, Some(&replacement))
             .unwrap();
         assert!(released.cursor.progress.verdict.is_none());
-        assert!(released.claim.is_none() && released.current_attempt.is_none());
+        assert!(released.claim.is_none());
+        assert_eq!(released.current_attempt, recovered.current_attempt);
+        assert!(store.flow_output(id).is_err());
+        let retried = store.retry_flow(id, None).unwrap();
+        assert!(retried.current_attempt.is_none());
     }
 
     #[test]

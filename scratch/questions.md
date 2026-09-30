@@ -53,8 +53,8 @@ pass histories stay in Git.
 - Configured provider/Desktop acceptance and actual quiescent conversion need
   their own proof and authority. Fixture success does not close either.
 
-Current realign authorization: reconcile the plan and Infrastructure memory,
-commit, push without force and stop. Subsequent autonomous landing belongs to
-the supervising session. [Remaining work](remaining-work.md) separates merge
-requirements from release conversion of `~/.lf`; neither installed migration
-nor promotion is part of this pass.
+Current implementation authorization: work the Before merge list in
+[remaining work](remaining-work.md), one coherent item per implement iteration,
+with focused checks and checkpoint publication. The supervising session owns
+shipping after the list is complete. Merge main, never rebase; neither installed
+migration nor promotion is part of these implementation passes.

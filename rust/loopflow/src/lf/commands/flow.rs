@@ -240,9 +240,6 @@ pub(crate) async fn prepare_native_retry(
     flow: FlowSession,
 ) -> Result<FlowSession> {
     wait_for_step(store, &flow).await?;
-    if store.sqlite.pending_flow_conversation(flow.id())?.is_none() {
-        return Ok(flow);
-    }
     let _driver = flow_run::driver_lock(flow.id())?;
     let saved = store
         .flow(flow.id())
@@ -313,7 +310,7 @@ async fn recover_native_flow(
                 {
                     // No provider may start before publication. Retain this capture
                     // in history and let the next command capture its own input.
-                    return Ok(store.release_flow(id, flow.version, claim).await?);
+                    return Ok(store.reset_flow_input(id, flow.version, claim).await?);
                 }
             }
         }
@@ -323,7 +320,7 @@ async fn recover_native_flow(
         if retry && crate::session_record::conversation_engine_exited(&store.sqlite, &session_id)? {
             // Missing native completion remains unknown. Explicit retry releases
             // only the fenced boundary after exact engine exit evidence.
-            return Ok(store.release_flow(id, flow.version, claim).await?);
+            return Ok(store.reset_flow_input(id, flow.version, claim).await?);
         }
         let (endpoint, thread_id) =
             store
@@ -831,6 +828,9 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
         })
         .await
         .context("Flow operation worker failed")?;
+        // Interrupt cleanup can kill the operation and wake this waiter. Its
+        // exit is not evidence that the external effect failed or completed.
+        crate::engine::agent::wait_for_interrupt_cleanup();
         store.sqlite.finish_flow_operation(
             id,
             version,

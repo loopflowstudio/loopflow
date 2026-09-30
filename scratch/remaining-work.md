@@ -41,18 +41,19 @@ supersedes the older Task snapshot and demo boundary, not the technical proofs.
 #1358, #1359 and #1360 already landed the independent resource, publication and
 resident-Wave cuts. The proposed Exec/Chapter splits in `.lf/tmp/landing-groups.md`
 would remove only about 10% and require manual extraction; Jack rejected them.
-Sync this branch by merging main, never rebasing. `e3a2c7e2c` merged main through
-#1360. This realign pass ends after a local commit and non-force push; the
-supervising session owns subsequent landing.
+Sync this branch by merging main, never rebasing. `94f472815` merged main through
+#1361 without conflicts. Jack Heart's one-item implement cadence remains in
+force: focused proof, checkpoint publication, then the next Flow boundary. The
+supervising session owns shipping after this list is complete. Hosted CI now
+defers the full matrix while scratch is present; checkpoint publication alone
+will not run that proof.
 
 ## Before merge
 
 1. **Code and unresolved behavior.** Keep the implemented three-owner model and
    three direct migrations; do not rebuild historical import or split the PR.
-   Close the retained Task-cancellation case with an exactly owned live child:
-   prove child exit, claim release and truthful Flow/Exec settlement, including
-   unresolved completion. The passing direct-command SIGINT test alone is not
-   that proof. Reconcile the architecture reference's remaining public
+   The Task restart stop path now retains the selected child after claim release;
+   the real-child proof and its boundaries are recorded below. Reconcile the architecture reference's remaining public
    conversation/engine restart obligation with `session connect --replace`,
    which currently selects client replacement; implement any missing accepted
    behavior and its focused proof rather than treating the flag as engine restart.
@@ -93,6 +94,31 @@ Build and final Clippy logs passed. These are earlier focused results, not a
 full final-tree gate. Realign inspects this evidence without rerunning the suite.
 This documentation reconciliation passed architecture coverage, migration-history
 validation (three drafts, 56 shipped migrations unchanged) and `git diff --check`.
+
+Cancellation implementation, 2026-09-30: the existing real-process stop tests
+now include an actual child `lf __flow-step` and a disposable scorecard effect,
+with both retained and already-released driver claims. The first run reproduced
+the missed cancellation (exit 1 instead of 130); the stronger assertion then
+exposed release clearing the selected operation. Release now preserves selected
+operation/conversation evidence; explicit retry or proven native-exit recovery
+resets input. Stop waits for the exact child to exit, retains the cursor and
+unknown effect, and recovery requires inspection. Interrupt cleanup fences
+mechanical result writes. Task deletion remains the existing LOO-305 operation;
+this proof exercises the restart stop core, not a new deletion/stop command.
+
+Focused evidence is under `.lf/tmp/test-compress/`: `cancellation-final-focused.log`
+records nine passes covering owned-child exit, handoff, unknown identity,
+replacement preservation, retained operation uncertainty and same-pass retry.
+The child CLI was built before the library test; source authority was scrubbed
+and all data was disposable. Linux's deterministic delayed-cleanup interposition
+is authored in the same proof but was not executed by the macOS run.
+`cancellation-native-retry.log` records passing driver-and-engine-loss recovery
+with the native Codex executable and local synthetic Responses: one conversation
+and its earlier history survive explicit retry. The killed request produced a
+fixture-server BrokenPipe diagnostic; the protocol/identity assertions passed.
+`cancellation-clippy.log`, formatting, architecture coverage, generated HTML
+consistency and diff checks passed. Website docs were synced. This is not a final
+gate or configured provider/Desktop acceptance.
 
 ## Before a release migrates ~/.lf
 

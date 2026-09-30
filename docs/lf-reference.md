@@ -377,8 +377,9 @@ A boundary can fail several times before succeeding. AgentSession history keeps
 each provider start, result and usage receipt; the Flow consumes only its exact
 selected successful completion. A mechanical boundary runs in its own child
 `lf` process and records start and outcome in Flow history. Resume waits for a
-surviving step and consumes its result once. Task stop includes the selected step
-even when its driver has exited. An earlier success, helper completion or stale writer cannot
+surviving step and consumes its result once. Task restart stops the selected step
+even when its driver has exited or released its claim. The interrupted Exec is
+recorded separately from an unresolved mechanical effect. An earlier success, helper completion or stale writer cannot
 advance the current selection. Missing capture data is reported without replacing
 it with today's catalog; missing external-effect evidence requires inspection.
 

@@ -410,9 +410,8 @@ fn fail_flow_in(
     )
 }
 
-/// Release the position: the attempt and any failure go, the recorded
-/// candidate is discarded, and the step runs again as a new attempt.
-fn release_in(
+/// Reset selected input and failure for another execution at the same position.
+fn reset_input_in(
     tx: &Transaction<'_>,
     flow: &FlowSession,
     version: u64,
@@ -881,36 +880,24 @@ impl SqliteStore {
         ).optional()?)
     }
 
-    /// The process selected for an unfinished mechanical boundary, if recorded.
-    pub(crate) fn pending_flow_operation_exec(
-        &self,
-        id: &str,
-    ) -> StoreResult<Option<crate::id::ExecId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let exec: Option<String> = conn.query_row(
-            "SELECT start.exec_id FROM flow_sessions f JOIN flow_events start ON start.seq=f.operation_start
-             WHERE f.id=?1 AND NOT EXISTS(SELECT 1 FROM flow_events done WHERE done.operation_start=start.seq)",
-            [id], |row| row.get(0),
-        ).optional()?.flatten();
-        exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
-            .transpose()
-    }
-
-    /// The selected agent process remains owned until it exits, even after its
-    /// provider has returned. Mechanical steps retain their existing result gate.
+    /// A selected process remains owned until it exits, even after its provider
+    /// or mechanical effect has returned.
     pub(crate) fn pending_flow_step_exec(
         &self,
         id: &str,
     ) -> StoreResult<Option<crate::id::ExecId>> {
-        if let Some(exec) = self.pending_flow_operation_exec(id)? {
-            return Ok(Some(exec));
-        }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let exec: Option<String> = conn.query_row(
-            "SELECT captured.exec_id FROM flow_sessions f JOIN session_events captured ON captured.seq=f.current_capture
+        let exec: Option<String> = conn
+            .query_row(
+                "SELECT COALESCE(operation.exec_id,captured.exec_id) FROM flow_sessions f
+             LEFT JOIN flow_events operation ON operation.seq=f.operation_start
+             LEFT JOIN session_events captured ON captured.seq=f.current_capture
              WHERE f.id=?1 AND f.state='current'",
-            [id], |row| row.get(0),
-        ).optional()?.flatten();
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
         exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
             .transpose()
     }
@@ -1289,13 +1276,13 @@ impl SqliteStore {
                 "reopen the human Session to complete this review".into(),
             ));
         }
-        release_in(&tx, &flow, flow.version, flow.claim.as_ref(), direction)?;
+        reset_input_in(&tx, &flow, flow.version, flow.claim.as_ref(), direction)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
     }
 
-    /// Give the position back after a step ended without a result.
+    /// Release the driver without discarding its selected effect or conversation.
     pub fn release_flow(
         &self,
         id: &str,
@@ -1305,7 +1292,26 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
-        release_in(&tx, &flow, version, claim, None)?;
+        let mut cursor = flow.cursor.clone();
+        clear_candidate(&mut cursor);
+        write_cursor_in(&tx, (id, version), &cursor, None, false, claim, true)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// Recapture input after the caller proves that an unpublished launch or
+    /// its provider has exited. Releasing a driver alone cannot authorize this.
+    pub(crate) fn reset_flow_input(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        reset_input_in(&tx, &flow, version, claim, None)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)

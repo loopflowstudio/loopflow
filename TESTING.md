@@ -384,6 +384,19 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Task cancellation uses a real child CLI with a disposable scorecard effect.
+Build the sibling CLI before running this library-only proof:
+
+```bash
+cargo build -p loopflow --bin lf
+cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_death
+```
+
+The proof covers retained and released driver claims, child exit, interrupted
+Exec history, and an unresolved mechanical outcome. Linux also holds interrupt
+cleanup after the effect exits to exercise settlement ordering. It uses no
+configured provider or installed Home.
+
 For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused proof:
 

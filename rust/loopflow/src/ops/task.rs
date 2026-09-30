@@ -2434,25 +2434,23 @@ async fn stop_task_worker(
         .task_flow(&task.id)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    let Some(claim) = position
-        .as_ref()
-        .and_then(|position| position.claim.as_ref())
-    else {
-        return Ok(position);
+    let Some(position) = position else {
+        return Ok(None);
     };
-    let step_live = position
-        .as_ref()
-        .map(|flow| store.sqlite.pending_flow_step_exec(flow.id()))
-        .transpose()
+    let claim = position.claim.as_ref();
+    let step_live = store
+        .sqlite
+        .pending_flow_step_exec(position.id())
         .map_err(task_error)?
-        .flatten()
         .is_some_and(|exec| {
             crate::journal::exec_process_evidence(&store.sqlite, &exec)
                 == crate::journal::ProcessIdentityEvidence::Live
         });
     if step_live
-        || crate::journal::task_worker_owner_evidence(&claim.owner)
-            == crate::journal::ProcessIdentityEvidence::Live
+        || claim.is_some_and(|claim| {
+            crate::journal::task_worker_owner_evidence(&claim.owner)
+                == crate::journal::ProcessIdentityEvidence::Live
+        })
     {
         store
             .append_interrupt(&WorkRef::Task(task.id.clone()))
@@ -2468,8 +2466,11 @@ async fn stop_task_worker(
             .await
             .map_err(|error| task_error(error.to_string()))?;
         let replaced = if let Some(current) = &current {
-            current.id() != claim.invocation_id
-                || current.claim.as_ref().is_some_and(|active| active != claim)
+            current.id() != position.id()
+                || current
+                    .claim
+                    .as_ref()
+                    .is_some_and(|active| Some(active) != claim)
         } else {
             false
         };
@@ -2491,12 +2492,15 @@ async fn stop_task_worker(
         if step_evidence == Some(crate::journal::ProcessIdentityEvidence::Unknown) {
             return Err(task_error("cannot confirm the selected Task step process identity; execution remains unresolved"));
         }
-        let driver_evidence = crate::journal::task_worker_owner_evidence(&claim.owner);
+        let driver_evidence = claim
+            .map_or(crate::journal::ProcessIdentityEvidence::Dead, |claim| {
+                crate::journal::task_worker_owner_evidence(&claim.owner)
+            });
         match driver_evidence {
             crate::journal::ProcessIdentityEvidence::Unknown => {
                 return Err(task_error(format!(
-                    "cannot confirm Task {} worker {} process identity; execution remains unresolved",
-                    task.plan.identifier, claim.owner.exec_id
+                    "cannot confirm Task {} worker process identity; execution remains unresolved",
+                    task.plan.identifier
                 )));
             }
             crate::journal::ProcessIdentityEvidence::Dead
@@ -2506,7 +2510,7 @@ async fn stop_task_worker(
                 // rejected by the same transaction used by worker settlement.
                 return if let Some(current) = current.as_ref().filter(|flow| flow.claim.is_some()) {
                     store
-                        .release_flow(current.id(), current.version, Some(claim))
+                        .release_flow(current.id(), current.version, claim)
                         .await
                         .map(Some)
                         .map_err(task_error)
@@ -2520,8 +2524,8 @@ async fn stop_task_worker(
         let now = tokio::time::Instant::now();
         if now >= termination_deadline {
             return Err(task_error(format!(
-                "Task {} worker {} is still live after interruption; retry `lf task restart {}` after it exits",
-                task.plan.identifier, claim.owner.exec_id, task.plan.identifier
+                "Task {} execution is still live after interruption; retry `lf task restart {}` after it exits",
+                task.plan.identifier, task.plan.identifier
             )));
         }
         if now >= graceful_deadline {
@@ -2547,7 +2551,9 @@ async fn stop_task_worker(
                 // A step may finish between observations; reread its result on
                 // the next pass instead of treating receipt cleanup as failure.
             }
-            if driver_evidence == crate::journal::ProcessIdentityEvidence::Live {
+            if let Some(claim) =
+                claim.filter(|_| driver_evidence == crate::journal::ProcessIdentityEvidence::Live)
+            {
                 owners.push(claim.owner.clone());
             }
             for owner in owners {
@@ -5403,14 +5409,24 @@ mod tests {
 
     #[tokio::test]
     async fn task_stop_waits_for_selected_step_after_driver_death() {
+        for released in [false, true] {
+            assert_task_stop_waits_for_selected_step(released).await;
+        }
+    }
+
+    async fn assert_task_stop_waits_for_selected_step(released: bool) {
         let ledger = crate::journal::TestLedgerGuard::new();
-        let fixture = task_fixture("STOP-STEP").await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("STOP-STEP", repo.path().to_owned()).await;
+        repo.create_file(
+            "scripts/lifecycle_scorecard.py",
+            r#"import os, pathlib, time
+repo = pathlib.Path.cwd()
+repo.joinpath('entered').write_text(os.environ['LF_PROCESS_ID'])
+time.sleep(30)
+"#,
+        );
         let mut driver = tokio::process::Command::new("sleep")
-            .arg("30")
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let mut step = tokio::process::Command::new("sleep")
             .arg("30")
             .kill_on_drop(true)
             .spawn()
@@ -5420,8 +5436,8 @@ mod tests {
             vec![crate::engine::ConcreteStep::Command(
                 crate::engine::ConcreteCommand {
                     item: crate::engine::flow::Command {
-                        command: "rebase".into(),
-                        args: vec!["--plan".into()],
+                        command: "__telemetry-scorecard".into(),
+                        args: vec![],
                     },
                     sources: vec![],
                 },
@@ -5430,31 +5446,74 @@ mod tests {
         .unwrap();
         let position = claim_stop_fixture_for(&fixture, driver.id().unwrap(), invocation).await;
         record_stop_process(ledger.home(), &position);
-        let mut step_position = position.clone();
-        let step_owner = &mut step_position.claim.as_mut().unwrap().owner;
-        step_owner.exec_id = crate::id::ExecId::new();
-        step_owner.pid = step.id().unwrap();
-        let exec = step_owner.exec_id.clone();
-        record_stop_process(ledger.home(), &step_position);
-        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
-        conn.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?2,1)",
-            rusqlite::params![
-                exec.as_str(),
-                position.claim.as_ref().unwrap().owner.trace_id.as_str()
-            ],
-        )
-        .unwrap();
-        fixture
-            .store
-            .sqlite
-            .begin_flow_operation(
-                position.id(),
-                position.version,
-                position.claim.as_ref(),
-                Some(&exec),
+        // Use the Cargo-built CLI, never an installed lf or an inherited pin.
+        // `cargo build --bin lf` precedes a focused library-only invocation.
+        let binary = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("lf");
+        let mut command = tokio::process::Command::new(binary);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("LF_")
+                || key.to_string_lossy().starts_with("LOOPFLOW_")
+            {
+                command.env_remove(key);
+            }
+        }
+        // Expose the race between killing the effect and recording its result.
+        // Linux CI holds the existing interrupt hook after the owned group dies.
+        #[cfg(target_os = "linux")]
+        {
+            let source = repo.path().join("hold_group_kill.c");
+            let library = repo.path().join("hold_group_kill.so");
+            std::fs::write(
+                &source,
+                include_str!("../../tests/support/hold_group_kill.c"),
             )
             .unwrap();
+            let output = std::process::Command::new("cc")
+                .args(["-shared", "-fPIC", "-o"])
+                .arg(&library)
+                .arg(&source)
+                .arg("-ldl")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            command.env("LD_PRELOAD", library);
+        }
+        let log = std::fs::File::create(repo.path().join("step.log")).unwrap();
+        let mut step = command
+            .args(["__flow-step", position.id(), &position.version.to_string()])
+            .current_dir(repo.path())
+            .env("LF_HOME", ledger.home())
+            .env("LF_DB_PATH", &fixture.database_path)
+            .env(
+                crate::durable::TASK_WORKER_CLAIM_ENV,
+                serde_json::to_string(position.claim.as_ref().unwrap()).unwrap(),
+            )
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !repo.path().join("entered").exists() {
+            assert!(
+                step.try_wait().unwrap().is_none(),
+                "{}",
+                std::fs::read_to_string(repo.path().join("step.log")).unwrap()
+            );
+            assert!(tokio::time::Instant::now() < deadline, "step never entered");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let exec = crate::id::ExecId::parse(
+            &std::fs::read_to_string(repo.path().join("entered")).unwrap(),
+        )
+        .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         driver.kill().await.unwrap();
         driver.wait().await.unwrap();
         assert!(super::task_worker_live(&fixture.store, &fixture.task)
@@ -5479,12 +5538,42 @@ mod tests {
             "replacement cannot invalidate a live step's claim"
         );
         assert!(step.try_wait().unwrap().is_none());
-        let (stopped, exit) = tokio::join!(
-            super::stop_task_worker(&fixture.store, &fixture.task),
-            step.wait()
-        );
-        assert!(!exit.unwrap().success());
+        if released {
+            fixture
+                .store
+                .release_flow(position.id(), position.version, position.claim.as_ref())
+                .await
+                .unwrap();
+        }
+        let (stopped, exit) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            tokio::join!(
+                super::stop_task_worker(&fixture.store, &fixture.task),
+                step.wait()
+            )
+        })
+        .await
+        .expect("Task stop must wait for and terminate its selected child");
+        assert_eq!(exit.unwrap().code(), Some(130));
         assert!(stopped.unwrap().unwrap().claim.is_none());
+        let result: (String, i32) = conn
+            .query_row(
+                "SELECT outcome,exit_code FROM execs WHERE id=?1",
+                [exec.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(result, ("interrupted".into(), 130));
+        let retained = fixture.store.flow(position.id()).await.unwrap().unwrap();
+        assert!(!retained.finished);
+        assert_eq!(retained.cursor, position.cursor);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_flow_step_exec(position.id())
+                .unwrap(),
+            Some(exec)
+        );
         assert_eq!(
             conn.query_row(
                 "SELECT count(*) FROM flow_events WHERE kind='operation_completed'",
@@ -5495,6 +5584,17 @@ mod tests {
             0,
             "termination cannot invent an operation outcome"
         );
+        let recovered = fixture
+            .store
+            .recover_flow(position.id(), None)
+            .await
+            .unwrap();
+        assert!(recovered
+            .failure
+            .unwrap()
+            .reason
+            .contains("no completion receipt"));
+        assert_eq!(recovered.cursor, position.cursor);
     }
 
     #[tokio::test]

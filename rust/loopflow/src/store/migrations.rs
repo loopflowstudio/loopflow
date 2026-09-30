@@ -3244,6 +3244,18 @@ mod tests {
     }
 
     #[test]
+    fn provider_account_identity_preserves_existing_labels_and_health() {
+        let conn = open();
+        apply_before_current_draft(&conn, "provider_account_identity");
+        conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, plan, cooldown_until, created_at, updated_at)
+            VALUES ('codex', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'automatic', 'pro', 123, 1, 2);").unwrap();
+        conn.execute_batch(&current_draft_sql("provider_account_identity"))
+            .unwrap();
+        let row = conn.query_row("SELECT login_email, cooldown_until, observed_email, observed_subject, observed_plan FROM provider_accounts WHERE account_id = 'engineering'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?))).unwrap();
+        assert_eq!(row, ("eng@example.com".into(), 123, None, None, None));
+    }
+
+    #[test]
     fn auth_browser_bindings_preserve_populated_profiles_accounts_and_routes() {
         let conn = open();
         apply_before_current_draft(&conn, "auth_browser_bindings");

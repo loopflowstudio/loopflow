@@ -42,18 +42,26 @@ pub enum SubscriptionError {
 pub struct SubscriptionUsage {
     pub windows: Vec<AccountLimitWindow>,
     pub plan: Option<String>,
+    pub(crate) identity: crate::provider_account::identity::AccountIdentity,
 }
 
 /// Poll one managed account's provider for its live subscription state.
 pub async fn poll_account(
     account: &ProviderAccount,
 ) -> Result<SubscriptionUsage, SubscriptionError> {
-    let home = account.home.clone().ok_or_else(|| {
+    let home = account.home.as_deref().ok_or_else(|| {
         SubscriptionError::Unavailable("account has no managed credential home".to_string())
     })?;
     match account.provider.as_str() {
-        "claude" => poll_claude(&home).await,
-        "codex" => poll_codex(&home).await,
+        "claude" => poll_claude(home).await,
+        "codex" => {
+            crate::provider_account::identity::check_account_identity(account, &[])
+                .map_err(SubscriptionError::NeedsLogin)?;
+            let usage = poll_codex(home).await?;
+            crate::provider_account::identity::check_account_identity(account, &[])
+                .map_err(SubscriptionError::NeedsLogin)?;
+            Ok(usage)
+        }
         other => Err(SubscriptionError::Unavailable(format!(
             "no subscription poll for provider '{other}'"
         ))),
@@ -83,6 +91,7 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
         Ok(SubscriptionUsage {
             windows: claude_windows(&body),
             plan: None,
+            identity: request_claude_identity(&client, token.expose_secret()).await?,
         })
     }
     .await;
@@ -90,6 +99,60 @@ async fn poll_claude(home: &Path) -> Result<SubscriptionUsage, SubscriptionError
     // installed by a native provider while the request was in flight.
     ensure_claude_credential_unchanged(&credentials_path, credential.expose_secret())?;
     observation
+}
+
+pub(crate) async fn claude_identity(
+    home: &Path,
+) -> Result<crate::provider_account::identity::AccountIdentity, SubscriptionError> {
+    let path = home.join(".credentials.json");
+    let client = reqwest::Client::new();
+    let (token, credential, _) = fresh_claude_token(&client, &path, false).await?;
+    let identity = request_claude_identity(&client, token.expose_secret()).await?;
+    ensure_claude_credential_unchanged(&path, credential.expose_secret())?;
+    Ok(identity)
+}
+
+async fn request_claude_identity(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<crate::provider_account::identity::AccountIdentity, SubscriptionError> {
+    #[cfg(test)]
+    let url = std::env::var("LF_TEST_CLAUDE_PROFILE_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:1/profile".into());
+    #[cfg(not(test))]
+    let url = "https://api.anthropic.com/api/oauth/profile";
+    let response = client
+        .get(url)
+        .bearer_auth(token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|_| {
+            SubscriptionError::Unavailable("Claude profile request failed or timed out".into())
+        })?;
+    classify_http_status(response.status(), "profile")?;
+    let profile: Value = response
+        .json()
+        .await
+        .map_err(|_| SubscriptionError::Unavailable("invalid Claude profile response".into()))?;
+    let email = profile
+        .pointer("/account/email")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let subject = profile
+        .pointer("/account/uuid")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    match (email, subject) {
+        (Some(email), Some(subject)) => Ok(crate::provider_account::identity::AccountIdentity {
+            email: email.into(),
+            subject: subject.into(),
+        }),
+        _ => Err(SubscriptionError::Unavailable(
+            "Claude profile did not report an account email and user UUID".into(),
+        )),
+    }
 }
 
 async fn request_claude_usage(
@@ -311,7 +374,9 @@ fn ensure_claude_credential_unchanged(
 /// fails with `token_invalidated`, which is a re-login, not an outage.
 async fn poll_codex(home: &Path) -> Result<SubscriptionUsage, SubscriptionError> {
     let mut child = tokio::process::Command::new("codex")
-        .arg("app-server")
+        .args(["-c", "cli_auth_credentials_store=\"file\"", "app-server"])
+        .env_remove("CODEX_ACCESS_TOKEN")
+        .env_remove("OPENAI_API_KEY")
         .env("CODEX_HOME", home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -338,6 +403,7 @@ async fn poll_codex(home: &Path) -> Result<SubscriptionUsage, SubscriptionError>
             )
             .await?;
         let mut sent_read = false;
+        let mut account_response = None;
         while let Some(line) = lines.next_line().await? {
             let Ok(message) = serde_json::from_str::<Value>(&line) else {
                 continue;
@@ -345,21 +411,26 @@ async fn poll_codex(home: &Path) -> Result<SubscriptionUsage, SubscriptionError>
             match message.get("id").and_then(Value::as_i64) {
                 Some(1) if !sent_read => {
                     sent_read = true;
+                    stdin.write_all(b"{\"method\":\"initialized\"}\n").await?;
                     stdin
                         .write_all(
                             format!(
                                 "{}\n",
-                                json!({"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read", "params": {}})
+                                json!({"jsonrpc": "2.0", "id": 2, "method": "account/read", "params": {"refreshToken": true}})
                             )
                             .as_bytes(),
                         )
                         .await?;
                 }
-                Some(2) => return Ok(Some(message)),
+                Some(2) => {
+                    account_response = Some(message);
+                    stdin.write_all(format!("{}\n", json!({"jsonrpc":"2.0", "id":3, "method":"account/rateLimits/read", "params":{}})).as_bytes()).await?;
+                }
+                Some(3) => return Ok(Some((account_response, message))),
                 _ => {}
             }
         }
-        Ok::<Option<Value>, std::io::Error>(None)
+        Ok::<Option<(Option<Value>, Value)>, std::io::Error>(None)
     };
 
     let response = tokio::time::timeout(CODEX_READ_TIMEOUT, exchange).await;
@@ -371,34 +442,46 @@ async fn poll_codex(home: &Path) -> Result<SubscriptionUsage, SubscriptionError>
             SubscriptionError::Unavailable("codex app-server closed without answering".to_string())
         })?;
 
-    if let Some(error) = response.get("error") {
-        let message = error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("codex error");
-        if message.contains("token_invalidated")
-            || error.get("code").and_then(Value::as_i64) == Some(401)
-        {
-            return Err(SubscriptionError::NeedsLogin(
-                "credential revoked".to_string(),
-            ));
+    let (account_response, response) = response;
+    for (response, request) in [
+        (account_response.as_ref().unwrap_or(&Value::Null), "account"),
+        (&response, "rate-limit"),
+    ] {
+        if let Some(error) = response.get("error") {
+            let message = error.get("message").and_then(Value::as_str).unwrap_or("");
+            if message.contains("token_invalidated")
+                || error.get("code").and_then(Value::as_i64) == Some(401)
+            {
+                return Err(SubscriptionError::NeedsLogin("credential revoked".into()));
+            }
+            return Err(SubscriptionError::Unavailable(format!(
+                "codex {request} request failed"
+            )));
         }
-        return Err(SubscriptionError::Unavailable(
-            "codex rate-limit request failed".into(),
-        ));
+        if !response.get("result").is_some_and(Value::is_object) {
+            return Err(SubscriptionError::Unavailable(format!(
+                "codex returned an invalid {request} response"
+            )));
+        }
     }
-    if !response.get("result").is_some_and(Value::is_object) {
-        return Err(SubscriptionError::Unavailable(
-            "codex returned an invalid rate-limit response".into(),
-        ));
-    }
+    let account_response = account_response
+        .as_ref()
+        .and_then(|response| response.get("result"))
+        .unwrap_or(&Value::Null);
+    let identity = crate::provider_auth::codex_identity_from_account(home, account_response)
+        .map_err(SubscriptionError::NeedsLogin)?;
     let snapshot = response.pointer("/result/rateLimits");
     let windows = codex_windows(snapshot);
-    let plan = snapshot
-        .and_then(|value| value.get("planType"))
+    let plan = account_response
+        .pointer("/account/planType")
+        .or_else(|| snapshot.and_then(|value| value.get("planType")))
         .and_then(Value::as_str)
         .map(str::to_string);
-    Ok(SubscriptionUsage { windows, plan })
+    Ok(SubscriptionUsage {
+        windows,
+        plan,
+        identity,
+    })
 }
 
 fn percentage(value: &Value) -> Option<u8> {
@@ -497,6 +580,7 @@ pub(crate) mod observation_tests {
         fn drop(&mut self) {
             std::env::remove_var("LF_TEST_CLAUDE_USAGE_URL");
             std::env::remove_var("LF_TEST_CLAUDE_TOKEN_URL");
+            std::env::remove_var("LF_TEST_CLAUDE_PROFILE_URL");
         }
     }
 
@@ -508,6 +592,7 @@ pub(crate) mod observation_tests {
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         std::env::set_var("LF_TEST_CLAUDE_USAGE_URL", &endpoint);
         std::env::set_var("LF_TEST_CLAUDE_TOKEN_URL", &endpoint);
+        std::env::set_var("LF_TEST_CLAUDE_PROFILE_URL", &endpoint);
         let task = tokio::spawn(async move {
             for (index, (status, body)) in responses.into_iter().enumerate() {
                 let (mut stream, _) =
@@ -538,6 +623,20 @@ pub(crate) mod observation_tests {
         .to_string();
         std::fs::write(home.join(".credentials.json"), &raw).unwrap();
         raw
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn claude_identity_comes_from_profile_not_cached_oauth_account() {
+        let _env = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        credentials(home.path());
+        std::fs::write(home.path().join(".claude.json"), json!({"oauthAccount":{"emailAddress":"stale@example.com", "accountUuid":"stale-user"}}).to_string()).unwrap();
+        let (_endpoints, server) = serve(vec![(200, json!({"account":{"email":"actual@example.com", "uuid":"actual-user"}, "organization":{"uuid":"shared-team"}}).to_string())], |_| {}).await;
+        let identity = super::claude_identity(home.path()).await.unwrap();
+        server.await.unwrap();
+        assert_eq!(identity.email, "actual@example.com");
+        assert_eq!(identity.subject, "actual-user");
     }
 
     #[test]
@@ -574,6 +673,11 @@ pub(crate) mod observation_tests {
                 (
                     200,
                     json!({"limits":[{"group":"session", "percent":22.5}]}).to_string(),
+                ),
+                (
+                    200,
+                    json!({"account":{"email":"actual@example.com", "uuid":"actual-user"}})
+                        .to_string(),
                 ),
             ],
             |_| {},

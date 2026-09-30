@@ -41,11 +41,14 @@ Connect creates a **local managed identity**, not a new Claude or Codex account:
 2. The provider login runs in a private staging home. The chosen Chrome profile
    opens the provider's authorization page, but its browser profile is not
    copied.
-3. Loopflow asks the provider CLI which login completed authorization and
-   requires it to match the requested email.
+3. Loopflow matches Codex's `account/read` email to the staged credential and
+   reads its per-user subject from that credential. For Claude, it reads
+   `/api/oauth/profile` account email and UUID. The observed email must match
+   the requested email. A login already held by another managed account is
+   refused, naming both accounts.
 4. The verified provider credential moves into
    `~/.lf/accounts/<provider>/<account-id>/`.
-5. Loopflow writes the verified login and non-secret operating state to
+5. Loopflow writes the observed email, user identity, plan and operating state to
    `~/.lf/loopflow.db`.
 
 Claude opens its native browser callback route and completes after approval.
@@ -81,7 +84,9 @@ access-profile bindings, and provider-session pins.
 
 Commands identify an account by its full login email or an unambiguous email
 prefix. The path-safe internal account ID is a storage key, not a user-facing
-selector.
+selector. An older account with no email can be selected by its ID solely to
+set its expected email before reconnecting. `--login-email` refuses to relabel a
+credential whose observed email disagrees.
 
 An access profile records which Chrome profile can authenticate an identity:
 
@@ -107,7 +112,10 @@ lf auth status claude --verify       # request managed Claude observations
 lf auth status --details --json      # sources, saved browsers, full timestamps
 ```
 
-Status lists stable account IDs beside full usable logins. Managed accounts and
+Status lists stable account IDs beside full usable logins. Codex rows show the
+credential's observed login, and report mismatches or shared
+logins with a reconnect command even during cached inspection. Verification only
+accepts usage after the server and native identity agree. Managed accounts and
 local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
 uninspected. Cached inspection opens the database read-only, starts no provider,
@@ -120,7 +128,9 @@ origin broker. Local token metadata is cached evidence, not server acceptance;
 `auth status --verify` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
-reset asks for refresh instead of implying zero usage. `lf usage` reports Run
+reset displays usage as unknown until refreshed. Current windows say both
+`N% used` and `M% left`. JSON retains dated window observations; consumers must
+check `resets_at` before treating a recorded percentage as current. `lf usage` reports Run
 token/cost usage separately. With `--verify`, status reads forwarded identity
 metadata from the origin broker, without acquiring a remote credential or
 verifying remote accounts. An unavailable broker leaves local evidence visible.
@@ -143,12 +153,16 @@ lf auth status --verify --json |
 
 Claude's cached login metadata does not establish a freshly observed plan.
 Until the usage response supplies confirmed plan evidence, its new observations
-leave plan unknown. Codex retains the plan returned by its rate-limit response.
+leave plan unknown. Codex retains the plan from `account/read`, including when
+no usage windows are returned. Healthy automatic Codex candidates prefer an
+observed Pro plan, then Plus; explicit preferences and Session pins take priority.
+A plan does not establish remaining capacity.
 
 Cached account inspection starts no provider and changes no stored state. Missing
 credentials remain visible with older usage and the `lf auth connect` recovery
 command. Unreadable credentials are distinguished from missing files. Verification
-records decisive rejection as missing; unavailable usage leaves credential state
+records provider rejection as missing; locally detected identity mismatches are
+reported without changing cached state. Unavailable usage leaves credential state
 unchanged. Neither success nor rejection clears a routing cooldown or changes
 account configuration. Provider routes skip missing, disabled, cooling and
 limited accounts and continue to the next candidate.
@@ -159,9 +173,17 @@ native sessions is still under development; these comparisons do not serialize
 native refresh or credential writes.
 
 An active usage window at 95% or above demotes that account behind candidates
-below the threshold. Declared route order decides ties. A provider session stays
+below the threshold. Codex plan preference then applies; declared route order
+decides remaining ties. A provider session stays
 pinned to the account that created it so a resume does not silently switch
 identities.
+
+The identity core keeps account state in each execution Home. Claude's cached
+status and routing do not yet check live profile identity. Connect stages and
+rejects the wrong identity, but Codex may also open its own browser tab outside
+the saved Chrome profile on macOS. [Account usability follow-ups · LOO-340](https://linear.app/loopflow/issue/LOO-340)
+owns shared account state, current status by default, sole browser ownership,
+Claude cached identity and routing, Flow account bundles, and reset credits.
 
 Control automatic routing per account:
 

@@ -1,5 +1,6 @@
 mod support;
 
+use base64::Engine;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -143,6 +144,17 @@ esac
 while read -r line; do :; done
 "#;
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
+    struct RestoreLfBin(Option<std::ffi::OsString>);
+    impl Drop for RestoreLfBin {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("LF_BIN", value),
+                None => std::env::remove_var("LF_BIN"),
+            }
+        }
+    }
+    let _lf_bin = RestoreLfBin(std::env::var_os("LF_BIN"));
+    std::env::set_var("LF_BIN", env!("CARGO_BIN_EXE_lf"));
     let revoked_home = home.path().join("accounts/codex/revoked");
     let fallback_home = home.path().join("accounts/codex/fallback");
     std::fs::create_dir_all(&revoked_home).expect("revoked home");
@@ -150,21 +162,30 @@ while read -r line; do :; done
     let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
     let fallback_id = ProviderAccountId::parse("fallback").expect("fallback id");
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let account = |account_id: ProviderAccountId, path: std::path::PathBuf| ProviderAccount {
-        provider: "codex".to_string(),
-        account_id,
-        home: Some(path),
-        login_email: None,
-        credential_state: CredentialState::Connected,
-        routing_state: RoutingState::Automatic,
-        plan: None,
-        paid_through: None,
-        utilization_percent: None,
-        cooldown_until: None,
-        cooldown_reason: None,
-        last_selected_at: None,
-        created_at: now,
-        updated_at: now,
+    let account = |account_id: ProviderAccountId, path: std::path::PathBuf| {
+        let email = format!("{account_id}@example.com");
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::json!({"email":email, "sub":account_id.as_str()}).to_string());
+        std::fs::write(path.join("auth.json"), serde_json::json!({"tokens":{"access_token":"fixture", "id_token":format!("h.{claims}.s")}}).to_string()).unwrap();
+        ProviderAccount {
+            provider: "codex".to_string(),
+            account_id,
+            home: Some(path),
+            login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_plan: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        }
     };
     let runtime = tokio::runtime::Runtime::new().expect("store runtime");
     let store = runtime

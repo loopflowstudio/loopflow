@@ -231,7 +231,7 @@ async fn managed_rows(
         .list_provider_accounts(provider.map(Provider::as_str))
         .await?;
     let mut rows = Vec::new();
-    for account in accounts {
+    for account in &accounts {
         let provider = account.provider.parse::<Provider>()?;
         let presence = account
             .home
@@ -259,20 +259,57 @@ async fn managed_rows(
         } else {
             None
         };
+        let mut observed_login = account
+            .home
+            .as_deref()
+            .filter(|_| provider == Provider::Codex)
+            .and_then(crate::provider_auth::codex_identity_from_home)
+            .map(|identity| identity.email)
+            .or_else(|| account.observed_email.clone());
         let mut live_usage = None;
+        let identity_error = (presence == crate::provider_auth::CredentialPresence::Present)
+            .then(|| {
+                crate::provider_account::identity::check_account_identity(account, &accounts).err()
+            })
+            .flatten();
         let mut diagnostic = None;
         let mut recover = presence == crate::provider_auth::CredentialPresence::Missing
             || account.credential_state == CredentialState::Missing;
-        let auth = if verify && presence == crate::provider_auth::CredentialPresence::Present {
+        let auth = if let Some(reason) = identity_error {
+            diagnostic = Some(reason);
+            recover = true;
+            Verification::Rejected
+        } else if verify && presence == crate::provider_auth::CredentialPresence::Present {
             let observation = if _login_lock.as_ref().is_some_and(|lock| lock.is_err()) {
                 Err(crate::subscription::SubscriptionError::Unavailable(
                     "managed credential cannot be locked; another credential operation may be in progress; retry verification".into(),
                 ))
             } else {
-                crate::subscription::poll_account(&account).await
+                match crate::subscription::poll_account(account).await {
+                    Ok(usage) => {
+                        observed_login = Some(usage.identity.email.clone());
+                        crate::provider_account::identity::validate_observed_identity(
+                            account,
+                            &usage.identity,
+                            &accounts,
+                        )
+                        .await
+                        .map(|()| usage)
+                    }
+                    Err(error) => Err(error),
+                }
             };
             match observation {
                 Ok(usage) => {
+                    store
+                        .record_provider_account_identity(
+                            &account.provider,
+                            &account.account_id,
+                            &usage.identity.email,
+                            &usage.identity.subject,
+                            usage.plan.as_deref(),
+                        )
+                        .await?;
                     store
                         .upsert_provider_account_limits(
                             &account.provider,
@@ -329,6 +366,7 @@ async fn managed_rows(
         let observed_plan = live_usage
             .as_ref()
             .and_then(|u| u.plan.clone())
+            .or_else(|| account.observed_plan.clone())
             .or_else(|| {
                 windows
                     .iter()
@@ -339,7 +377,7 @@ async fn managed_rows(
         rows.push(AuthRow {
             provider,
             account_id: Some(account.account_id.clone()),
-            login: account.login_email.as_ref().map(ToString::to_string),
+            login: observed_login.or_else(|| account.login_email.as_ref().map(ToString::to_string)),
             scope: Scope::Managed,
             source: "managed_home".into(),
             cached_credential_state: cached.into(),
@@ -349,7 +387,7 @@ async fn managed_rows(
                 format!(
                     "lf auth connect {} {}",
                     account.provider,
-                    account_login(&account)
+                    account_login(account)
                 )
             }),
             observed_plan,
@@ -391,7 +429,7 @@ fn render(report: &AuthReport, width: usize, now: i64) -> String {
             lines.push(format!("{:<12} {identity}", row.provider.as_str()));
             let evidence = match row.verification {
                 Verification::Accepted => "active (verified)",
-                Verification::Rejected => "needs login (verified)",
+                Verification::Rejected => "needs login (identity or credential rejected)",
                 Verification::Unavailable => "verification unavailable",
                 Verification::NotChecked => "not checked",
             };
@@ -446,9 +484,18 @@ fn render(report: &AuthReport, width: usize, now: i64) -> String {
                     Some(reset) => format!("resets {}", timestamp(reset)),
                     None => "reset unknown".into(),
                 };
+                let usage = if window.resets_at.is_some_and(|reset| reset <= now) {
+                    "usage unknown".to_string()
+                } else {
+                    format!(
+                        "{}% used, {}% left",
+                        window.used_percent,
+                        100u8.saturating_sub(window.used_percent)
+                    )
+                };
                 lines.push(format!(
-                    "  {}: {}% · {freshness} · {reset}",
-                    window.window, window.used_percent
+                    "  {}: {usage} · {freshness} · {reset}",
+                    window.window
                 ));
                 if report.browser.is_some() {
                     lines.push(format!(
@@ -587,12 +634,12 @@ mod tests {
             assert!(text.lines().all(|line| line.chars().count() <= width));
             for evidence in [
                 "someone-with-a-very-long-but-valid-username@engineering.department.example.com",
-                "session: 22% · live",
-                "weekly:opus: 96% · cached",
+                "session: 22% used, 78% left · live",
+                "weekly:opus: usage unknown · cached",
                 "reset passed; refresh needed",
                 "reset unknown",
                 "usage: unknown",
-                "needs login (verified)",
+                "needs login (identity or credential rejected)",
                 "verification unavailable",
                 "forwarded from origin",
                 "Forwarded accounts",
@@ -613,7 +660,8 @@ mod tests {
                     "missing {evidence}: {text}"
                 );
             }
-            assert!(!text.contains("0%"));
+            assert!(!text.contains(": 0% used"));
+            assert!(!text.contains("96%"));
             assert!(!text.contains("unlimited"));
             // A decisive rejection renders its verdict, never the pre-verification cache.
             assert!(!text.contains("cached connected · needs login"));

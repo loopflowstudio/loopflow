@@ -821,6 +821,15 @@ Tests that construct session commands must supply their own `LF_BIN` fixture,
 restore it afterward, and serialize environment changes with `test_env_lock`.
 Reuse `TestLfBinGuard` in Task controller tests. Session spawning remains mocked.
 
+For gate runs launched inside a managed Run, clear inherited `LF_*` authority and
+pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
+runner. The materialization wrapper clears only its listed variables; it does not
+clear every inherited pin. The provider harness prepends the selected CLI's parent
+to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
+fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
+this. Keep the failed evidence if this occurs, stop the test group, and verify the
+fixture under the corrected executable context before completing the suite.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed

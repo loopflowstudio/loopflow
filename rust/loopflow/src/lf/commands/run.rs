@@ -170,11 +170,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         flow.cwd.clone(),
         false,
         None,
-        PromptLaunchContext {
-            skill: Some(skill.skill.clone()),
-            user_name: crate::engine::config::launch_user_name()?,
-            ..Default::default()
-        },
+        Some(skill.skill.clone()),
     )?;
     built.subjects = launch.work_subject_selector().into_iter().collect();
     built.work = flow.declared_work();
@@ -315,13 +311,6 @@ struct PromptBuild {
     claim: Option<crate::durable::TaskWorkerClaim>,
 }
 
-#[derive(Debug, Default)]
-struct PromptLaunchContext {
-    surface: Option<Surface>,
-    skill: Option<Skill>,
-    user_name: Option<String>,
-}
-
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = crate::repo::working_directory()?;
@@ -331,19 +320,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         .transpose()?
         .flatten();
     let native = saved.is_none();
-    build_prompt_at(
-        skill,
-        message,
-        cli,
-        repo_root,
-        native,
-        None,
-        PromptLaunchContext {
-            skill: saved,
-            user_name: crate::engine::config::launch_user_name()?,
-            ..Default::default()
-        },
-    )
+    build_prompt_at(skill, message, cli, repo_root, native, None, saved)
 }
 
 fn build_bound_prompt_at(
@@ -366,11 +343,7 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        PromptLaunchContext {
-            skill: resolved_skill,
-            user_name: crate::engine::config::launch_user_name()?,
-            ..Default::default()
-        },
+        resolved_skill,
     )
 }
 
@@ -381,13 +354,9 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_launch: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    launch_context: PromptLaunchContext,
+    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
-    let PromptLaunchContext {
-        surface: surface_override,
-        skill: resolved_skill,
-        user_name,
-    } = launch_context;
+    let user_name = crate::engine::config::launch_user_name()?;
     let config_start = Instant::now();
     let config = load_config_or_default(Some(&repo_root));
     debug!(
@@ -424,14 +393,13 @@ fn build_prompt_at(
     } else {
         config.session.launch
     };
-    let surface =
-        surface_override.unwrap_or(if is_interactive && launch_target == LaunchTarget::Ide {
-            Surface::Ide
-        } else if is_interactive {
-            Surface::Cli
-        } else {
-            Surface::Headless
-        });
+    let surface = if is_interactive && launch_target == LaunchTarget::Ide {
+        Surface::Ide
+    } else if is_interactive {
+        Surface::Cli
+    } else {
+        Surface::Headless
+    };
 
     let wave = cli
         .wave
@@ -862,7 +830,7 @@ fn begin_run_capture(
         work: built.work.clone(),
     };
     let capture = if let Some((token, captured, run_id)) = step.reserved {
-        // The Flow driver reserved this step's Run; the launch publishes it.
+        // The step command reserved this capture; publication retains its claim.
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
         crate::run_record::CaptureHandle::begin_reserved_with_context(
             spec,
@@ -1222,7 +1190,6 @@ mod tests {
         attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
         is_interactive_run, is_interactive_run_with_tty, launch_headless_prompt, launch_prompt,
         should_launch_via_skill, skill_launch_seed, split_skill_args, PromptBuild,
-        PromptLaunchContext,
     };
 
     use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1838,7 +1805,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             true,
             None,
-            PromptLaunchContext::default(),
+            None,
         )
         .unwrap();
 
@@ -1874,10 +1841,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             repo.path().to_path_buf(),
             false,
             None,
-            PromptLaunchContext {
-                skill: Some(skill),
-                ..Default::default()
-            },
+            Some(skill),
         )
         .unwrap();
         assert!(built

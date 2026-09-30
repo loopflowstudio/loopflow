@@ -118,7 +118,7 @@ fn execute(
         flow.id(),
         flow.id()
     );
-    report_outcome(drive_saved(&runtime, store, flow, cli)?)
+    report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
 }
 
 async fn open_flow_store() -> Result<SharedStore> {
@@ -209,7 +209,7 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
             let argv = std::env::args().collect::<Vec<_>>();
             let cwd = flow.cwd.clone();
             journal::with_runtime(&cwd, &argv, || {
-                report_outcome(drive_saved(&runtime, store, flow, cli)?)
+                report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
             })
         }
         _ => anyhow::bail!("not a Flow control: {command:?}"),
@@ -236,37 +236,7 @@ fn active_step() -> Result<flow_run::ActiveStep> {
     flow_run::token()?.ok_or_else(|| anyhow!("this operation requires a Flow step"))
 }
 
-/// Drive a saved Flow from its row with the `lf` launcher.
-fn drive_saved(
-    runtime: &tokio::runtime::Runtime,
-    store: SharedStore,
-    flow: FlowSession,
-    cli: &Cli,
-) -> Result<FlowOutcome> {
-    let mut launch = cli.launch_options();
-    launch.as_work = None;
-    launch.task = flow.task_id.as_ref().map(ToString::to_string);
-    launch.wave = flow
-        .wave_id
-        .as_ref()
-        .map(|id| {
-            store
-                .sqlite
-                .get_wave(id)?
-                .map(|wave| wave.name().to_owned())
-                .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
-        })
-        .transpose()?;
-    if launch.model.is_none() {
-        launch.model = flow.model.clone();
-    }
-    launch.bound_cwd = Some(flow.cwd.clone());
-    runtime.block_on(drive(store, flow, None, &launch))
-}
-
-/// A step ended without a result. The driver releases the position so the
-/// step runs again as a new attempt; `Released` still fails the driver with
-/// its reason, `Interrupted` is a stop the operator asked for.
+/// An operator-requested stop releases the position without recording a failure.
 #[derive(Debug)]
 pub(crate) enum StepEnd {
     Interrupted,
@@ -425,8 +395,8 @@ async fn recover_native_flow(
 
 /// Drive one invocation from its row until it completes, waits or blocks.
 /// `claim` is the Task worker's, held until the driver stops; every write is
-/// fenced by it. The engine owns traversal; the launcher owns how a step's
-/// provider runs and how a review parks.
+/// fenced by it. The engine owns traversal; child commands read their work,
+/// model fallback and captured definition from the selected Flow row.
 pub(crate) async fn drive(
     store: SharedStore,
     flow: FlowSession,
@@ -751,7 +721,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 .as_ref()
                 .is_some_and(crate::durable::FlowAttempt::completed)
             {
-                execute_child(&flow, self.launcher).await?;
+                execute_child(&self.store, &flow, self.launcher).await?;
                 flow = self
                     .store
                     .flow(&self.id)
@@ -809,7 +779,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
             return Ok(());
         }
         eprintln!("op: {}", ops.item.display_name());
-        execute_child(&flow, &Cli::default()).await
+        execute_child(&self.store, &flow, self.launcher).await
     }
 }
 
@@ -860,7 +830,7 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
     })
 }
 
-async fn execute_child(flow: &FlowSession, cli: &Cli) -> Result<()> {
+async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Result<()> {
     let executable = std::env::current_exe().context("locate the executing Flow driver")?;
     let mut command = tokio::process::Command::new(executable);
     command
@@ -891,7 +861,6 @@ async fn execute_child(flow: &FlowSession, cli: &Cli) -> Result<()> {
         return Err(StepEnd::Interrupted.into());
     }
     if !status.success() {
-        let store = open_flow_store().await?;
         let selected = store.flow(flow.id()).await?.context("Flow disappeared")?;
         if let Some(attempt) = selected.current_attempt {
             let events = store.sqlite.input_events(&attempt.run_id)?;

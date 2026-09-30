@@ -4924,8 +4924,11 @@ pub fn task_comment(
     issue: &str,
     wave: Option<&str>,
     message: Option<&str>,
+    steer: bool,
 ) -> OpsResult<super::pm::TaskComments> {
-    block_on_task(super::pm::task_comment_async(repo, wave, issue, message))
+    block_on_task(super::pm::task_comment_async(
+        repo, wave, issue, message, steer,
+    ))
 }
 
 /// Request that the Task end its current turn so the next re-reads its

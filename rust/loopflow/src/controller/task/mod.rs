@@ -479,7 +479,7 @@ async fn run_task_with(
                         let latest = load_task(&store, &task.id).await?;
                         task.pm_writeback = latest.pm_writeback;
                         let _ = harness.stop().await;
-                        finish_capture(capture.as_ref(), "completed");
+                        finish_capture(capture.as_ref(), if status == Lifecycle::Interrupted { "interrupted" } else { "completed" });
                         return finish_claimed_task_boundary(
                             &store,
                             &mut task,
@@ -710,8 +710,17 @@ async fn prepare_task_flow_step(
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await?;
-    let steers = store.task_steers(&task.id).await?;
-    let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
+    let consumed = crate::run_record::completed_step_steer_id(
+        &crate::store::observability_home_dir(),
+        &crate::run_record::RunFlowStep::of(flow, None),
+    )?;
+    let steers: Vec<_> = store
+        .task_steers(&task.id)
+        .await?
+        .into_iter()
+        .filter(|steer| steer.id > consumed)
+        .collect();
+    let seeded_steer_id = steers.last().map_or(consumed, |steer| steer.id);
     let interrupt_id = store.latest_interrupt_id(&work).await?;
     let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
         .ok_or_else(|| anyhow!("Task Flow step is not a skill"))?;
@@ -1170,7 +1179,7 @@ mod planning_tests {
         completed_boundary_failure, execution_blocker_at_handoff, task_seed,
         unhandled_failure_receipt,
     };
-    use crate::chat::types::Lifecycle;
+    use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::durable::{
         Author, FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
@@ -2883,6 +2892,8 @@ mod planning_tests {
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn control_events_after_seed_preparation_remain_live() {
         let _lf_bin = super::TestLfBinGuard::pin();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
         let (store, task, flow) = human_task_fixture().await;
         let work = WorkRef::Task(task.id.clone());
         let seeded = store
@@ -2913,6 +2924,65 @@ mod planning_tests {
         assert_eq!(steer_cursor, late.id);
         assert_eq!(harness.interrupts, 1);
         assert_eq!(interrupt_cursor, late_interrupt);
+
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            home.path(),
+            super::task_run_spec(
+                &task,
+                &super::owning_wave(&store, &task).await.unwrap(),
+                &super::owning_project(&store, &task).await.unwrap(),
+                "fixture".into(),
+                None,
+                "headless",
+                crate::run_record::RunFlowStep::of(&flow, None),
+            ),
+        )
+        .unwrap();
+        capture.record_input("steer_seed_through", &seeded.id.to_string());
+        capture.record_input(
+            &format!("steer_transport_accepted:{}", late.id),
+            "late direction",
+        );
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: "fixture".into(),
+            status: Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+        let unread = store
+            .append_steer(&work, Author::User, "unread direction")
+            .await
+            .unwrap();
+        let repeated = super::prepare_task_flow_step(&store, &task, "human-task-proof", &flow)
+            .await
+            .unwrap();
+        assert!(!repeated.turn.input.contains("seeded direction"));
+        assert!(!repeated.turn.input.contains("late direction"));
+        assert!(repeated.turn.input.contains("unread direction"));
+        assert_eq!(repeated.seeded_steer_id, unread.id);
+
+        let oversized = "Keep café and λ stable.\n".repeat(80_000);
+        let large = store
+            .append_steer(&work, Author::User, &oversized)
+            .await
+            .unwrap();
+        let delivered = crate::ops::child::inject_live_steers(
+            &store,
+            &task.id,
+            &mut harness,
+            &mut steer_cursor,
+        )
+        .await;
+        let input = &delivered.last().unwrap().text;
+        assert_eq!(steer_cursor, large.id);
+        assert!(input.len() <= 128 * 1024);
+        assert!(
+            crate::engine::prompt::count_tokens(input)
+                <= crate::engine::context_budget::GOAL_TOKENS
+        );
+        assert!(input.contains("Full text:"));
+        assert!(std::fs::read_dir(task.worktree.join(".lf/tmp/context"))
+            .unwrap()
+            .any(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap() == large.text));
     }
 
     #[tokio::test]

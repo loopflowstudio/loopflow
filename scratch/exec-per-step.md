@@ -344,9 +344,16 @@ These are proposals for the separate naming commit, not selected schema changes.
 | Current name | Proposed name | Meaning |
 | --- | --- | --- |
 | `flow_sessions.parent_id` | Delete | Jack Heart removed child-pass FlowSessions on 2026-09-30; no replacement name or relation. |
-| `flow_parents` / graph `parents` | `definition_path` | Ordered definition provenance for grouping compiled steps. Display only. |
+| `flow_parents` / graph `parents` | Pending display choice | Swift `TaskFlowView` consumes the `from …` breadcrumb. Jack requested reporting real consumers before removal; the earlier `definition_path` proposal is not selected. |
 | `expand_flow` and equivalent definition-to-graph terms | `compile_flow` / compile | Compile definitions, then capture the compiled graph and step input. |
 | `execs.parent_exec_id` | Keep | The one causal parent relation: an Exec's parent Exec. |
+| `session_events` | `agent_events` | Jack Heart's September 30 proposal ("maybe"): AgentSession history, including captured input and provider outcomes. Not an approved rename. |
+| `flow_events` | Keep | FlowSession history, including mechanical outcomes and consumption of exact agent completions. |
+| `run_events` | `exec_events` (candidate) | Exec-side command journal, currently keyed by trace. Proposed alongside the other two history tables for Jack's review; a name change must preserve trace identity and must not turn each event into a process. |
+
+The three history-table names are presented together at Jack's request. Any
+accepted rename belongs only to the separate naming commit, with forward
+migration and reader updates; this table authorizes no schema change.
 
 ### Measured deletion
 

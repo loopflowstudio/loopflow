@@ -280,3 +280,20 @@ lock → PATH → selected installation → driver as last resort. The accepted 
 is a leading PATH directory (LOO-334), so current resolution honors it through
 the same PATH lookup; `LF_BIN`/`LF_CONTROL_BIN` are historical Home pins, not a
 new lock declaration. Exec `command[0]` records the actual child executable.
+
+2026-09-30 · **Rename session_events to agent_events.** Jack Heart: "btw maybe
+session__events should be agent_events." Tentative ("maybe"). Belongs to the
+naming commit. It pairs AgentSession's history with FlowSession's `flow_events`;
+the command journal `run_events` is the Exec-side equivalent and is the one
+table left with an old word.
+
+2026-09-30 · **Pace changes: decided.** Jack Heart accepted three changes to speed
+LOO-298 and declined parking LOO-334 ("im ok with all these changes except
+parking 334"):
+- Run the full local Rust suite only before the final gate. Between, use focused
+  tests for the changed behavior plus hosted CI.
+- The operator batches new decisions and delivers them at implement boundaries,
+  not mid-step. Decisions already sent stand.
+- One remaining item per implement iteration: finish it, publish, let the loop
+  decide.
+LOO-334 keeps running in parallel.

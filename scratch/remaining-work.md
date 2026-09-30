@@ -23,6 +23,13 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
 - **Where running a skill directly and running it as a Task step disagree,
   the direct behavior wins** (Jack). Task specifics are input to the same command.
 
+## Working rhythm (Jack, 2026-09-30)
+
+One item per implement iteration, then publish and let the loop decide. Prove
+each with focused tests for the changed behavior and hosted CI; run the full
+local Rust suite only before the final gate. New decisions arrive at implement
+boundaries.
+
 ## Order, deepest first
 
 1. **Every step runs its ordinary lf command.** Ops and skills are converted and

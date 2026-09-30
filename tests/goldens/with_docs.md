@@ -89,6 +89,16 @@ terminal output, logs, and chat; follow the repository's secret-management polic
 
 ## Context and durable knowledge
 
+Keep agent progress in local working notes and the final Run response. Do not
+post routine progress to Linear: Task comments are for new direction from people.
+Agent comments published through `lf task comment` carry a progress marker and
+are excluded from steers. Use `--steer` only for deliberate new direction.
+Preserve `<!-- loopflow-progress:... -->` provenance
+when writing progress through another integration.
+
+Launch context has explicit budgets. An excerpt names its complete local source;
+read relevant omitted sections before acting, rather than rereading whole archives.
+
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
 context belongs to that Work. A path in another checkout does not transfer its
@@ -128,7 +138,8 @@ Wave context is included in docs below.
 
 ## Wave memory
 
-Persistent memory at wave/rust/MEMORY.md. Read it before every iteration; its current
+Persistent memory at wave/rust/MEMORY.md. Use the supplied memory; read relevant omitted
+sections when an excerpt names them. Its current
 contents, when any, ride this prompt's wave-memory section.
 Edit it through the ordinary repository workflow; no live Wave is required.
 `realign` reconciles memory with the plan and code. Keep durable observations,

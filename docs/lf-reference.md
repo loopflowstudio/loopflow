@@ -263,6 +263,15 @@ are assembled automatically. Direct launches leave edits for an explicit
 commit. Several Runs may concern the same Task; attribution does not grant
 exclusive ownership of its files.
 
+Launch assembly allows 8,000 tokens of Wave memory, 16,000 across scratch notes,
+and 16,000 for the launch goal/message. Oversized sources become marked excerpts
+with their full local paths; oversized messages are preserved under
+`.lf/tmp/context/`. Read relevant omitted sections before acting. The complete
+assembled input must fit 64,000 cl100k tokens and 512 KiB, otherwise launch reports
+which explicit sources to reduce before contacting the provider. Native provider
+instructions, tools, later file reads and conversation history are outside this
+launch budget. Run context evidence records reductions and original sizes.
+
 Put global options before the command. Command-local options retain their
 meaning after shorthand expansion: `lf commit -m "Fix startup"` supplies a
 commit message, not a model. `--` ends option interpretation where literal
@@ -341,6 +350,7 @@ can move to the default branch after the parent merges.
 lf task edit DES-123 --title "Repair dialog keyboard navigation"
 lf task comment DES-123 "Keep this change inside the dialog"
 lf task comment DES-123 --json       # read the thread
+lf task comment DES-123 --steer "Keep the public API" # direction from an agent Run
 lf task interrupt DES-123            # interrupt the active provider turn
 lf task run DES-123                  # continue after interruption
 lf task restart DES-123 --flow feature

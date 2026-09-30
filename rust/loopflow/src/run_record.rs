@@ -728,6 +728,71 @@ pub(crate) fn read_run_snapshot(dir: &Path) -> std::io::Result<RunSnapshot> {
     project_run(dir, manifest)
 }
 
+/// Successful prior visits to this captured node acknowledge only recorded input.
+/// Missing or damaged evidence deliberately replays direction instead of losing it.
+pub(crate) fn completed_step_steer_id(lf_home: &Path, step: &RunFlowStep) -> std::io::Result<i64> {
+    let mut through = 0;
+    for directory in record_dirs(lf_home)? {
+        match completed_run_steer_id(&directory, step) {
+            Ok(id) => through = through.max(id),
+            Err(error) => {
+                tracing::warn!(%error, record = %directory.display(), "steer consumption unknown; retaining direction")
+            }
+        }
+    }
+    Ok(through)
+}
+
+fn completed_run_steer_id(directory: &Path, step: &RunFlowStep) -> std::io::Result<i64> {
+    let manifest = read_manifest(directory)?;
+    validate_manifest_path(directory, &manifest)?;
+    let Some(RunFlowMembership::Step(prior)) = &manifest.flow else {
+        return Ok(0);
+    };
+    if step.task_id.is_none()
+        || prior.task_id != step.task_id
+        || prior.invocation_id != step.invocation_id
+        || step.node.is_none()
+        || prior.node != step.node
+    {
+        return Ok(0);
+    }
+    let terminal: TerminalReceipt =
+        serde_json::from_slice(&fs::read(directory.join("terminal.json"))?)
+            .map_err(std::io::Error::other)?;
+    if terminal.schema_version != SCHEMA_VERSION || terminal.outcome != "completed" {
+        return Ok(0);
+    }
+    let mut consumed = 0;
+    let mut last_turn = None;
+    for line in BufReader::new(File::open(directory.join("events.jsonl"))?).lines() {
+        let envelope: EventEnvelope =
+            serde_json::from_str(&line?).map_err(std::io::Error::other)?;
+        if envelope.schema_version != SCHEMA_VERSION {
+            return Ok(0);
+        }
+        if let RunEvent::Conversation { event } = &envelope.event {
+            if let ConversationEvent::TurnCompleted { status, .. } = event.as_ref() {
+                last_turn = Some(*status);
+            }
+        }
+        if let RunEvent::UserInput { op, text } = envelope.event {
+            let id = if op == "steer_seed_through" {
+                text.parse::<i64>().ok()
+            } else {
+                op.strip_prefix("steer_transport_accepted:")
+                    .and_then(|id| id.parse().ok())
+            };
+            consumed = consumed.max(id.unwrap_or(0));
+        }
+    }
+    Ok(if last_turn == Some(Lifecycle::Completed) {
+        consumed
+    } else {
+        0
+    })
+}
+
 fn project_run(dir: &Path, manifest: RunManifest) -> std::io::Result<RunSnapshot> {
     let mut evidence_gaps = usize::from(
         !dir.join("prepared").is_file() && !context_ref_is_valid(dir, manifest.context.as_ref()),
@@ -2524,7 +2589,7 @@ mod tests {
         write_provider_client, write_provider_session, CaptureHandle, RunLaunchRequest,
         RunManifest, RunSpec, SubjectAttribution, TerminalReceipt,
     };
-    use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
+    use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
     use crate::engine::stream::{ResultSubtype, StreamEvent};
     use crate::engine::{AgentCapabilities, AgentConfig};
 
@@ -2619,6 +2684,72 @@ mod tests {
             subjects: Vec::new(),
             flow: crate::run_record::RunFlowMembership::Independent,
         }
+    }
+
+    #[test]
+    fn completed_step_consumes_only_its_successful_recorded_steers() {
+        let home = tempfile::tempdir().unwrap();
+        let step = super::RunFlowStep {
+            task_id: Some(crate::durable::TaskId::new()),
+            task_pr_id: None,
+            boundary_key: "0:0".into(),
+            invocation_id: "invocation-one".into(),
+            flow: "pursue".into(),
+            step: "implement".into(),
+            node: Some("0".into()),
+            iterations: Some(vec![vec![0]]),
+        };
+        let record = |step: &super::RunFlowStep, id: i64, status, outcome| {
+            let mut request = spec(home.path());
+            request.flow = super::RunFlowMembership::Step(step.clone());
+            let capture = CaptureHandle::begin_at(home.path(), request).unwrap();
+            capture.record_input("steer_seed_through", &id.to_string());
+            capture.record_input(
+                &format!("steer_transport_accepted:{}", id + 1),
+                "live direction",
+            );
+            capture.record_conversation(ConversationEvent::TurnCompleted {
+                turn_id: "turn".into(),
+                status,
+            });
+            capture.finish(outcome).unwrap();
+            capture.artifact_dir()
+        };
+        assert_eq!(
+            super::completed_step_steer_id(home.path(), &step).unwrap(),
+            0
+        );
+        let successful = record(&step, 10_i64, Lifecycle::Completed, "completed");
+        record(&step, 20, Lifecycle::Failed, "failed");
+        record(&step, 30, Lifecycle::Interrupted, "interrupted");
+        // Old captures incorrectly called interrupted turns completed.
+        record(&step, 40, Lifecycle::Interrupted, "completed");
+        let mut other = step.clone();
+        other.node = Some("1".into());
+        record(&other, 50, Lifecycle::Completed, "completed");
+        other = step.clone();
+        other.invocation_id = "invocation-two".into();
+        record(&other, 60, Lifecycle::Completed, "completed");
+        other = step.clone();
+        other.task_id = Some(crate::durable::TaskId::new());
+        record(&other, 70, Lifecycle::Completed, "completed");
+        assert_eq!(
+            super::completed_step_steer_id(home.path(), &step).unwrap(),
+            11
+        );
+        let mut repeated = step.clone();
+        repeated.iterations = Some(vec![vec![1]]);
+        repeated.boundary_key = "0:1".into();
+        assert_eq!(
+            super::completed_step_steer_id(home.path(), &repeated).unwrap(),
+            11
+        );
+        // Missing input evidence cannot acknowledge unread direction.
+        fs::remove_file(successful.join("events.jsonl")).unwrap();
+        assert_eq!(
+            super::completed_step_steer_id(home.path(), &step).unwrap(),
+            0
+        );
     }
 
     #[test]

@@ -416,7 +416,7 @@ fn build_prompt_at(
                 &harness,
                 surface,
                 skill_name,
-                message,
+                prepared.components.message.as_deref(),
                 prepared.components.operate,
                 wave_memory.as_deref(),
                 prepared.components.user_name.as_deref(),
@@ -436,6 +436,7 @@ fn build_prompt_at(
     let deduplicated_docs = prepared.deduplicated_docs;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
+    crate::engine::context_budget::check_input(&effective_system, &agent_config.task_prompt)?;
     let context = attributed_context(
         &components,
         &effective_system,
@@ -1042,6 +1043,16 @@ pub(crate) fn attributed_context(
         });
     }
 
+    for mut decision in components.budget_decisions.clone() {
+        decision.position = decisions.len() as u32;
+        if decision.kind == Kind::UserMessage {
+            if let Some((kind, scope)) = components.message_context {
+                decision.kind = kind;
+                decision.scope = scope;
+            }
+        }
+        decisions.push(decision);
+    }
     crate::trace::PreparedTurnContext::from_attributed_prompts(
         system_prompt,
         task_prompt,

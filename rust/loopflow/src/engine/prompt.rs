@@ -197,6 +197,8 @@ pub struct PromptComponents {
     pub diff_tier: DiffTier,
     /// Number of files changed on branch (for display)
     pub diff_file_count: usize,
+    /// Source reductions carried into the existing Run context evidence.
+    pub budget_decisions: Vec<crate::trace::ContextDecision>,
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -407,6 +409,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         message_context: None,
         diff_tier,
         diff_file_count,
+        budget_decisions: Vec::new(),
     })
 }
 
@@ -1481,7 +1484,8 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              You are building toward the {} program of work.\n\
              Wave context is included in docs below.\n\n\
              ## Wave memory\n\n\
-             Persistent memory at {}. Read it before every iteration; its current\n\
+             Persistent memory at {}. Use the supplied memory; read relevant omitted\n\
+             sections when an excerpt names them. Its current\n\
              contents, when any, ride this prompt's wave-memory section.\n\
              Edit it through the ordinary repository workflow; no live Wave is required.\n\
              `realign` reconciles memory with the plan and code. Keep durable observations,\n\

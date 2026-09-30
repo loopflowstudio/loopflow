@@ -1005,10 +1005,13 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
-    /// Read the comment thread, or append direction without starting execution
+    /// Read the thread or publish a comment; agent comments default to progress
     Comment {
         issue: String,
         message: Option<String>,
+        /// Deliver new direction even when publishing from an agent Run
+        #[arg(long, requires = "message")]
+        steer: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
         #[arg(long)]
@@ -2491,6 +2494,7 @@ mod tests {
                     message,
                     json,
                     wave: _,
+                    steer: _,
                 },
         }) = steer.command
         else {
@@ -2499,6 +2503,21 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message.as_deref(), Some("take the smaller approach"));
         assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123"]).is_ok());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "lf",
+                "task",
+                "comment",
+                "INF-123",
+                "--steer",
+                "keep the API"
+            ])
+            .unwrap()
+            .command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Comment { steer: true, .. }
+            })
+        ));
         assert!(
             Cli::try_parse_from(["lf", "task", "edit", "INF-123", "--notes", "revised"]).is_ok()
         );

@@ -1227,12 +1227,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             message,
             wave,
             json,
+            steer,
         } => {
             let result = loopflow::ops::task::task_comment(
                 repo,
                 issue,
                 wave.as_deref(),
                 message.as_deref(),
+                *steer,
             )?;
             if *json {
                 println!("{}", serde_json::to_string(&result)?);

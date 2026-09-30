@@ -648,7 +648,10 @@ CLI bytes and empty execution data under B, and continues through ordinary Task
 and Session commands without data overrides. It poisons PATH and inherited binary
 variables with an obsolete CLI, checks the preserved review, and completes one
 actual worker operation through B against A's execution. Tmux transport is
-simulated; the child runs the real CLI with `rebase --plan`. Incompatible drafts
+simulated; the child runs the real CLI with `rebase --plan`. A retained provider
+Session also opens through a real pseudoterminal; simulated OpenCode requires
+terminal stdin/stdout and records input from that terminal. This proves forwarding
+preserves interactive I/O, not configured provider acceptance. Incompatible drafts
 must leave execution DB/WAL bytes untouched, and two execution copies must refuse
 ambiguous continuation. Selection receipts are fixture-authored: this does not
 prove normal promotion, provider shells, recursive locks or delayed-child startup.

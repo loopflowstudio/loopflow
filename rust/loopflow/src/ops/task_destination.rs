@@ -195,12 +195,7 @@ pub(super) fn json<T: DeserializeOwned>(
         .context("read installed Task operation result")
 }
 
-pub(crate) fn execute(
-    context: &ChildExecutionContext,
-    cwd: &Path,
-    args: &[String],
-    input: Option<&str>,
-) -> Result<Vec<u8>> {
+fn command(context: &ChildExecutionContext, cwd: &Path, args: &[String]) -> Command {
     let mut command = Command::new(&context.lf_bin);
     command.current_dir(cwd).args(args).stderr(Stdio::inherit());
     // A different data copy cannot inherit Run, worker, account or switch authority.
@@ -221,6 +216,40 @@ pub(crate) fn execute(
     for name in ["LF_BIN", "LF_CONTROL_BIN"] {
         command.env(name, &context.lf_bin);
     }
+    command
+}
+
+/// Continue in the selected runtime without detaching the caller's terminal.
+pub(crate) fn forward_session(
+    context: &ChildExecutionContext,
+    cwd: &Path,
+    args: &[String],
+) -> Result<()> {
+    let mut command = command(context, cwd, args);
+    #[cfg(unix)]
+    {
+        Err(command.exec()).context("continue Session through installed lf")
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .context("continue Session through installed lf")?;
+        anyhow::ensure!(
+            status.success(),
+            "installed Session operation failed ({status})"
+        );
+        Ok(())
+    }
+}
+
+pub(super) fn execute(
+    context: &ChildExecutionContext,
+    cwd: &Path,
+    args: &[String],
+    input: Option<&str>,
+) -> Result<Vec<u8>> {
+    let mut command = command(context, cwd, args);
     // A file avoids pipe capacity limits for large Task reports.
     if let Some(input) = input {
         let mut stdin = tempfile::tempfile()?;

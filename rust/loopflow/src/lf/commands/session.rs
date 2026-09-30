@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -19,14 +18,11 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     if let Some(id) = id {
         if let Some(destination) = crate::ops::task_destination::existing_session(id)? {
             let args = std::env::args().skip(1).collect::<Vec<_>>();
-            let output = crate::ops::task_destination::execute(
+            return crate::ops::task_destination::forward_session(
                 &destination,
                 &std::env::current_dir()?,
                 &args,
-                None,
-            )?;
-            std::io::stdout().write_all(&output)?;
-            return Ok(());
+            );
         }
     }
     let runtime = tokio::runtime::Runtime::new()?;

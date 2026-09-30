@@ -966,11 +966,14 @@ target/debug/lf task run LOO-321       # continues through the selected installa
 target/debug/lf task status LOO-321    # reads the independent branch copy
 ```
 
-Installed `task status <issue>`, `task run <issue>` and Session open/complete
+Installed `task status <issue>`, `task run <issue>` and Task review/provider Session open/complete
 locate existing execution in the selected and retained installation records.
 After an installation switch, use the same Task or Session identifier. The
 selected CLI continues the recorded invocation and review in place; it does not
-copy execution into the new database. Multiple physical execution copies remain
+copy execution into the new database. Forwarded Session commands retain the
+caller's terminal so provider conversations can receive input and display output.
+Discovery by Ask and ordinary Flow Session identifiers remains unfinished.
+Multiple physical execution copies remain
 an explicit conflict, even when their Task IDs match. Incompatible data reports
 the location and preserves the pending work without migration.
 

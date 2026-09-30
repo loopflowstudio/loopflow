@@ -4,8 +4,9 @@ mod support;
 
 use std::fs;
 use std::io::Write;
+use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use loopflow::machine_install::{
@@ -668,6 +669,79 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .block_on(later_store.get_task(&task.task.id))
         .unwrap()
         .is_none());
+    // Reopening retained provider history must keep the caller's terminal and
+    // input, not turn the interactive conversation into a captured command.
+    let interactive = loopflow::durable::RunId::new().to_string();
+    let interactive_dir = home
+        .path()
+        .join("runs")
+        .join(&interactive[4..6])
+        .join(&interactive);
+    fs::create_dir_all(&interactive_dir).unwrap();
+    let review_dir = home.path().join("runs").join(&review[4..6]).join(review);
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(review_dir.join("manifest.json")).unwrap()).unwrap();
+    manifest["run_id"] = serde_json::json!(interactive);
+    manifest["harness"] = serde_json::json!("opencode");
+    manifest["flow"] = serde_json::Value::Null;
+    fs::write(interactive_dir.join("manifest.json"), manifest.to_string()).unwrap();
+    fs::write(
+        interactive_dir.join("provider-session.json"),
+        r#"{"schema_version":1,"provider_session_id":"ses_retained","account_id":null}"#,
+    )
+    .unwrap();
+    let input_record = later.path().join("received-input");
+    let provider = stale.path().join("opencode");
+    fs::write(&provider, format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n[ -t 0 ] && [ -t 1 ] || exit 17\nIFS= read -r message || exit 18\nprintf '%s' \"$message\" > '{}'\n",
+        input_record.display(),
+    )).unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: openpty initializes both descriptors; null optional arguments
+    // select the system's default terminal configuration.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: successful openpty returned independently owned file descriptors.
+    let (mut master, slave) =
+        unsafe { (fs::File::from_raw_fd(master), fs::File::from_raw_fd(slave)) };
+    master
+        .write_all(b"continue the retained conversation\n")
+        .unwrap();
+    let reopened = command(&later_cli, &["session", "open", &interactive])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                stale.path().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        )
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(
+        reopened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopened.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(input_record).unwrap(),
+        "continue the retained conversation"
+    );
     // Equal Task and Home identities in two physical copies are still separate
     // execution records. A write may not pick one by timestamp or selection.
     let mut divergent = Connection::open(&later_db).unwrap();

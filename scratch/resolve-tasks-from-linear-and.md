@@ -17,6 +17,64 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Slice review — installation continuity, 2026-09-30
+
+Reviewed the active diff from `a3820bf7e` through `b79d3cce4`, concentrating on
+the installed-continuation slice since `01158f839`. **The narrow installed Task
+and review proof passes after a terminal repair; the full Done When is unmet.**
+
+- **Pass:** `uv run python scripts/test_task_installation.py` passed all six
+  disposable cases before the extension and again after the repair. Public Task
+  status/run and review open/complete retain A's identity and invocation while a
+  real B worker completes the saved operation. The test uses fixture-authored
+  installation receipts, simulated tmux and cached planning, not normal promotion
+  or configured providers. Earlier planning/chapter proofs are reused, not rerun.
+- **Fixed:** Session forwarding reused `execute`, which supplied null stdin,
+  captured stdout and detached the process group. Extending the existing case
+  with a real pseudoterminal and simulated OpenCode reproduced provider exit 17
+  because stdin/stdout were not terminals. Session commands now replace the
+  process on Unix through `forward_session`; the shared command builder retains
+  environment sanitization and execution routing. The final case reads the exact
+  supplied terminal input through the public `session open` path. The Session
+  consumer no longer uses captured Task output. This proves terminal I/O, not
+  real provider conversation or recursive runtime locks.
+- **Static proof:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+  and `git diff --check` pass. Initial macOS Clippy rejected the fixture's const
+  null pointers to `openpty`; mutable null pointers corrected that platform
+  signature mismatch. The Linux harness retains the existing unused `complete`
+  warning. Resource preflight passed; no affected-suite or repository gate ran.
+- **Measured replacement:** `01158f839` → `b79d3cce4` is +262/−66 non-test Rust
+  lines across ten files; this corrects the earlier +265/−35/eight-file report.
+  This review adds +37/−12 across two production files; combined slice +292/−71.
+  Counts exclude test modules and inline test-root setup, integration tests,
+  scripts, docs, scratch and generated artifacts. The slice replaces local-only
+  installed Task/Session routing, the current-executable runtime preference and
+  WorkCatalog's Run-ledger prerequisite. The prior chapter pass
+  `44b2ec74e` → `01158f839` replaced archive-only closure. Neither pass is a
+  no-replacement pass; the convergence blocker does not apply.
+
+**Remaining findings and next proof:** the harness's final `Backup` creates an
+identical execution copy and expects refusal; it supplies no evidence of actual
+divergence. `_copy_store_for_candidate` also uses SQLite backup during installation,
+so rejecting every physical copy cannot establish Jack Heart's ordinary-switch
+requirement. Next exercise normal disposable promotion with a pending review and
+two real worker boundaries. Use existing installation succession evidence to
+distinguish continuity from genuine divergent execution without timestamps,
+store merging or a user-facing database choice. Retain a separate divergent-copy
+case. This requires the larger continuation cut, not an equality-based shortcut.
+
+Source review also finds `existing_session` resolves only Task boundary IDs and
+Run manifests: Ask IDs and `flow:<invocation>:<boundary>` cannot locate retained
+Sessions through it. Complete discovery against LOO-298's integrated owners;
+its received contract is still not integrated here. Source-private/remote/legacy
+discovery, recursive locks, delayed startup and acceptance cases 1–15 all remain.
+Local lifecycle, managed validity/ordinary Flows, contextual Waves, creation/link
+hierarchy, execution/action DTOs and the command story are not waived. Relationship
+repair stays with the existing pending Ask; outage/transition/baseline choices
+remain explicit. Return these findings to the saved decision step. Jack Heart's
+code-completion publication boundary is unmet: no publication, landing, Task
+completion, promotion or Flow navigation follows from this review.
+
 ### This slice — installed Task and review continuity
 
 Compression: shared Task identity matching and installed CLI verification; removed
@@ -92,10 +150,11 @@ docs describe these boundaries.
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
   `git diff --check`: passed. No affected-suite/repository gate ran.
 
-Compared with `01158f839`, this slice adds **265** and removes **35** non-test
-physical Rust lines across eight production files. All changed hunks there are
-production code; counts exclude integration tests, scripts, documentation,
-scratch and generated artifacts. The current-executable preference and identity
+Compared with `01158f839`, the implementation through `b79d3cce4` adds **262**
+and removes **66** non-test physical Rust lines across ten production files.
+The review recount excludes test modules and inline test-root setup as well as
+integration tests, scripts, documentation, scratch and generated artifacts.
+The current-executable preference and identity
 reader's Run-ledger prerequisite are removed; existing general Task preparation
 is reused rather than replaced with another execution owner.
 

@@ -41,8 +41,9 @@ supersedes the older Task snapshot and demo boundary, not the technical proofs.
 #1358, #1359 and #1360 already landed the independent resource, publication and
 resident-Wave cuts. The proposed Exec/Chapter splits in `.lf/tmp/landing-groups.md`
 would remove only about 10% and require manual extraction; Jack rejected them.
-Sync this branch by merging main, never rebasing. `94f472815` merged main through
-#1361 without conflicts. Jack Heart's one-item implement cadence remains in
+Jack Heart's latest supervising-session steer reserves main integration for the
+supervisor after LOO-351's patch release, using `lf sync`; do not merge main in
+implementation passes. Never rebase. `94f472815` merged main through #1361. Jack Heart's one-item implement cadence remains in
 force: focused proof, checkpoint publication, then the next Flow boundary. The
 supervising session owns shipping after this list is complete. Hosted CI now
 defers the full matrix while scratch is present; checkpoint publication alone
@@ -59,19 +60,19 @@ will not run that proof.
    restart: reconnect, client replacement and confirmed-loss retry cover the
    recorded needs. [Incident dispositions](incident-dispositions.md) trace
    Task-row/publication, stacking and refused-start cleanup to current owners
-   and focused proofs, including the limits of #1359/#1363. Integrate remaining
-   main changes before the final gate; the attempted merges described there
+   and focused proofs, including the limits of #1359/#1363. The supervisor owns
+   integration before the final gate; the attempted merges described there
    were aborted cleanly. Leave `agent_events` and `exec_events` proposals open;
    neither is a merge prerequisite.
-2. **Docs.** Reconcile `docs/architecture-reference.md`, the short `docs/lf.md`
-   and detailed `docs/lf-reference.md`, affected architecture pages, builtin
-   skills and `TESTING.md` with the final CLI/schema and #1360's removal. Remove
-   stale archive/import, old Run-owner and resident-service instructions; retain
-   the distinction between implemented behavior and configured acceptance.
-   The architecture pages now describe the single cursor/return-counter model,
-   child step Execs, typed blocked decisions and current-state conversion.
-   CLI references, builtin skills and test guidance still need the wider audit.
-   Regenerate affected website pages and the architecture HTML from their source.
+2. **Docs — reconciled locally.** CLI references, builtin skills and `TESTING.md`
+   now describe the final model and implemented command tree. Removed speculative
+   owner moves, deleted Wave recovery/probe/webhook commands, old Run ownership,
+   and nonexistent decision-test instructions. The architecture reference no
+   longer lists deleted `run_events` or historical Started imports. Direct
+   `--as` contributions may run Flows; checkout attribution precedes inherited
+   `LF_AS`. Current-state migration checks and configured-acceptance limits remain
+   explicit. Website copies and architecture HTML were regenerated; prompt goldens
+   were regenerated from the changed shared surface. Verification is recorded below.
 3. **Measurements and behavioral checks.** Measure cold/warm CLI list and detail
    on a representative disposable dense store, separating startup, SQL and
    payload costs; record dataset size and production-code delta against main.
@@ -172,6 +173,24 @@ session needs a supported way to record the merged base before publication.
 LOO-351 owns that repair. Jack Heart's supervising session subsequently
 authorized plain `git push` (never force) for implementation checkpoints while
 it is pending, and retained ownership of the integrated gate and shipping.
+
+Documentation audit, 2026-09-30: source parser review and 88 canonical `--help`
+paths passed in a disposable Home with inherited execution authority removed
+(`.lf/tmp/docs-reconcile/help-check.py`, `help.log`). Help proves command discovery,
+not their external effects. The focused Python architecture/skill checks passed
+25 tests; website portable-architecture and README/index checks passed two tests.
+The focused Rust builtin and prompt-golden check passed all 15 selected tests
+(`.lf/tmp/test-compress/docs-prompt-proof.log`); goldens were generated with
+`tests/goldens/update_goldens.py`. Architecture coverage and `git diff --check`
+passed. Formatting and all-target Clippy passed (`docs-clippy.log`).
+Generated website copies are
+ignored output; architecture HTML remained byte-identical after regeneration.
+Review caught two additional contract errors: the short guide documented nonexistent
+`task list`, and the architecture owner table still named deleted `run_events`.
+Both are corrected. This completes item 2 only; dense-store measurements and the
+consolidated behavior-proof set remain item 3. Main integration, the integrated
+gate and shipping stay with the supervisor. No installed-store write, provider
+acceptance or rendered Desktop proof is claimed.
 
 ## Before a release migrates ~/.lf
 

@@ -62,5 +62,6 @@ pass histories stay in Git.
 Current implementation authorization: work the Before merge list in
 [remaining work](remaining-work.md), one coherent item per implement iteration,
 with focused checks and checkpoint publication. The supervising session owns
-shipping after the list is complete. Merge main, never rebase; neither installed
+shipping after the list is complete. The supervisor owns main integration with
+`lf sync` after LOO-351's patch release; implementation passes do not merge or rebase. Neither installed
 migration nor promotion is part of these implementation passes.

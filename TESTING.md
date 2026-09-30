@@ -106,7 +106,7 @@ uv run python scripts/resource_envelope.py --recover
 ```
 
 The resource preflight names the owner and budget for every worktree build,
-gate-artifact root, the Home-local Run record store, uv cache, Cargo cache, and
+gate-artifact root, the Home-local Session artifact store, uv cache, Cargo cache, and
 free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
 emergency disk reserve, and four
 low-priority verification workers. Total build size is measured, not capped.
@@ -126,7 +126,7 @@ A nonblocking host lock permits only
 one cleaner at a time across parallel workers. Verification prints each cleanup
 result and reclaimed size, including failed pruning attempts, and saves them in
 its resource receipt. All active
-worktrees, source, worktree metadata, gate receipts, Run bundles, and SQLite
+worktrees, source, worktree metadata, gate receipts, captured payloads, and SQLite
 state are retained, including the current checkout's active builds. Only disk
 below the emergency reserve stops product tests;
 low-disk output names the largest inactive build roots. Measurement failures
@@ -178,12 +178,12 @@ Read the same gate evidence through the daily operator flow:
 lf telemetry-daily
 ```
 
-The scorecard joins current Run usage and duration with Task PR landing and pre-land phase records. It
+The scorecard joins recorded Session usage and duration with Task PR landing and pre-land phase records. It
 prints aggregate values and coverage only—never commands, prompts, output, or
 task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.
 
-“Recorded agent attempt → merge” includes earlier and unfinished Runs attributed
+“Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
 to the exact PR. See [metric definitions and coverage limits](performance/README.md).
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
@@ -416,41 +416,28 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-Task decision recovery has a focused public-operation proof:
+Task decision feedback has a focused store-and-driver proof:
 
 ```bash
-cargo test -p loopflow --lib task_decision_public_resume -- --test-threads=1
+cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
 ```
 
-It runs the driver-created Ask through resume, including a later branch-adoption
-refusal, retained feedback and direction, and a fresh Run with the saved agent.
-PM, provider and process-launch effects are simulated; the public resume core,
-account selection, store, prompt and driver execute.
-
-The opt-in `task_decision_live_policy_blocks_two_empty_replacement_passes` test
-uses actual Codex judgment and simulated PM. Run it with `--ignored --nocapture`
-and explicitly set `LOOPFLOW_LIVE_TASK_LF` to the source `lf` built in this checkout,
-`LOOPFLOW_LIVE_CODEX_HOME` to an existing configured account Home, and
-`LOOPFLOW_LIVE_TASK_OUTPUT` to a fresh evidence directory. It retains its isolated
-Home and Run records on failure. This also tests the provider tool shell's
-executable/Home propagation: manually supplying a verdict or rewriting the
-prompt's commands does not satisfy the proof. The test first runs a separate provider tool-shell probe:
-`command -v lf`, `lf task status TEST-1 --json`, and an allowlisted Home/database
-capture must identify the source fixture despite an installed `lf` on PATH.
-It then judges the recorded passes, completes the resulting policy Ask with
-explicitly synthetic feedback, and checks that the same decision Run finishes.
-Keep earlier failed receipts; an automatic failure Ask is not policy acceptance.
+It completes a keyed Ask while the decision is active and verifies that feedback
+returns to the same captured conversation without choosing Flow navigation.
+Provider effects are simulated. The name's `live` refers to the active local
+decision, not configured-provider acceptance. Structured decision output owns
+Advance, Iterate, or Blocked with a required reason; feedback alone is no verdict.
 
 Task stall proof uses `session_record::activity::tests`, `task_live_unblock`, and
 Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
-CPU for the body and descendants in existing Run events. Five quiet minutes
+CPU for the body and descendants in Session events. Five quiet minutes
 requires samples no more than 45 seconds apart; the worker samples every 15
 seconds. Unit proofs advance a simulated clock; the CLI/desktop proof samples a
 real sleeping process with a seeded five-minute history. Neither establishes a
 five-minute configured provider stall. Preserve CPU-active silence, fresh-event,
 missing-sample and PID-reuse counterexamples when changing the projection.
 Repeated samples of a reused body PID must remain Unknown; they cannot replace
-the observer's original body identity and later establish a stall for that Run.
+the observer's original body identity and later establish a stall for that captured input.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
@@ -511,7 +498,7 @@ launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
-control authority, and Run lookup otherwise reads outside the fixture's Home.
+control authority, and Session lookup otherwise reads outside the fixture's Home.
 Clearing inherited authority alone does not isolate a process that falls back
 to its development Home. Give each proof phase a disposable default `LF_HOME`
 and `LF_DB_PATH`; individual fixtures must clear or override both when selecting
@@ -604,7 +591,7 @@ instead of rewriting an applied draft. Preserve populated historical fixtures.
 For manual migration proof in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization
 can change package versions, the lockfile, registry and migration files; another
-Run can commit those temporary changes before cleanup. Keep the assigned checkout
+execution can commit those temporary changes before cleanup. Keep the assigned checkout
 on its authoring schema and leave the live Home untouched. A copy without Git
 metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
 source behavior; otherwise the build defaults to release provenance. It also
@@ -652,7 +639,7 @@ operation routing before branch effects, returned installed snapshots, rejection
 of branch-only Task identities, and preservation of private writes after installed
 failure. Its test-only installation root cannot redirect production installation
 authority. It does not launch an actual Task worker or
-prove installed Session readiness, tmux, or daemon execution.
+prove installed Session readiness, tmux, or provider execution.
 
 Run the real CLI resume regressions with isolated installation authority:
 
@@ -672,10 +659,10 @@ They prove Task continuation’s auto-merge revocation and review continuity, ag
 selection read from the installed database while branch reads remain private, and direct-open
 refusal without changing the owned development database/WAL bytes. Review
 completion rejects branch-only feedback and a stale readiness token, resolves
-both boundary and Run selectors, records the exact installed feedback once,
+both Session and captured-input selectors, records the exact installed feedback once,
 and preserves the branch Flow and events. The same review scenario proves agent
 persistence and repeated `task run` retaining its invocation, cursor and prepared
-review Run. It also rejects a missing replacement Flow before changing the installed
+review Session. It also rejects a missing replacement Flow before changing the installed
 review or committing a restart checkpoint. Managed-operation CLI assertions belong
 in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
 host account's installation authority. Read-only Flow projections stay in the
@@ -684,7 +671,7 @@ ordinary suite.
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
-captured Flow after the template disappears and creates no operation Run.
+captured Flow after the template disappears and records an ordinary child Exec without creating an AgentSession.
 The executable-discovery proof removes `lf` from PATH, exercises driver and
 selected-installation fallback, then puts another `lf` first on PATH. It checks
 the child Exec executable and its Flow store. The declaration proof starts Task Y
@@ -698,14 +685,14 @@ that recommendation after the installed schema changes or executable disappears.
 The focused `incompatible_seed_preserves_source_receipts_and_private_writes`
 unit proof covers a newer source snapshot, its WAL, and reseeding without replacing
 private work. GitHub is
-simulated and review Runs are prepared without launching a provider. These are
+simulated and review Sessions are prepared without launching a provider. These are
 real current-CLI operation proofs, not older-version compatibility, promotion
 or configured worker acceptance.
 The harness keeps Docker build/registry caches, serializes use of its build
 cache, and destroys the account and installation after each attempt.
 
 The `store::branch_data::tests` private-data subprocess fixture checks ordinary
-storage, observation, Run artifacts, and child context with stale control pins,
+storage, observation, captured artifacts, and child context with stale control pins,
 including a relative custom database and malformed inherited control path.
 `global_commands` has focused real-CLI proofs for explicit data-directory
 reads/writes and
@@ -721,7 +708,7 @@ draft stops representing an adoptable Home when another release is appended.
 cargo test -p loopflow --lib installed_development_
 ```
 
-Run records have focused storage, harness, reducer, and reader checks:
+Session history has focused storage, harness, reducer, and reader checks:
 
 ```bash
 cargo test -p loopflow session_record
@@ -734,8 +721,10 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Run-record or schema changes, run `lf runs --json`, `lf usage --json`, and
-`lf doctor --json` against a fresh local Home.
+After Session-history or schema changes, run `lf runs --json`, `lf usage --json`, and
+`lf doctor --json` against a disposable Home with inherited `LF_*` and
+`LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
+Never use the installed store to prove a draft migration.
 
 ## E2E Tests
 
@@ -835,10 +824,25 @@ When adding features that need manual verification, write or extend a script in 
 
 ## Boundary-specific checks
 
-When changing Flow step or prepared Run ownership, include the invocation
-store tests and the public Session lifecycle proofs. Human boundaries prepare their
-Run before provider launch; fixtures must start that Run instead of binding a
-fresh capture.
+Current-state conversion preserves resumable conversations and current planning;
+it does not reconstruct finished history from retired owners. Keep these populated
+migration proofs when changing the three-owner schema, including in the disposable
+release-materialized source tree:
+
+```bash
+cargo test -p loopflow --lib ownership_cutover_keeps_current_task_review_without_importing_history
+cargo test -p loopflow --lib project_status_adoption_preserves_current_identity_and_custom_flow
+```
+
+They check retained review identity/capture and the current Project's custom Flow
+default. Synthetic migration success does not authorize conversion of an installed
+Home or prove configured-provider resumption.
+
+When changing Flow step or prepared-input ownership, include the FlowSession
+store tests and the public Session lifecycle proofs. Review boundaries reserve a
+captured Session event before provider launch; fixtures must start that retained
+input instead of binding a fresh capture. A successful provider completion is
+selected by its exact Session event; an Exec exit alone cannot settle agent work.
 
 ```bash
 cargo test -p loopflow --lib store::sqlite::flows
@@ -846,7 +850,7 @@ cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
 
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
-a human review preserves its invocation and cursor while preparing its Run;
+a human review preserves its invocation and cursor while preparing its captured input;
 assert those facts instead of equality of the entire versioned Flow record.
 
 When changing Task controls, include the GitHub-cache integration tests as well
@@ -871,7 +875,7 @@ Tests that construct session commands must supply their own `LF_BIN` fixture,
 restore it afterward, and serialize environment changes with `test_env_lock`.
 Reuse `TestLfBinGuard` in Task controller tests. Session spawning remains mocked.
 
-For gate runs launched inside a managed Run, clear inherited `LF_*` authority and
+For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
 runner. The materialization wrapper clears only its listed variables; it does not
 clear every inherited pin. The provider harness prepends the selected CLI's parent
@@ -894,7 +898,7 @@ an identity value.
 
 Session fixtures share `AMBIENT_TASK_ENV` in
 `rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Home,
-Run identity/directory, Task authority, and review Session identity under the
+Captured-input identity/directory, Task authority, and review Session identity under the
 suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 

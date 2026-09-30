@@ -27,8 +27,8 @@ use crate::provider_auth::{
 };
 use crate::repository::RepoId;
 use crate::store::{
-    open_existing_store, open_store, PmSnapshotRow, PmTaskRecord, ProviderToken,
-    ProviderTokenReplacement, StorageConfig, Store,
+    open_existing_store, open_store, PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord,
+    ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 
@@ -671,7 +671,7 @@ mod task_comments_tests;
 // ── snapshot freshness policy ────────────────────────────────────────
 
 /// Past this age an Auto read opportunistically refreshes before serving.
-pub(crate) const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
+const PM_SOFT_STALE_SECS: i64 = 60 * 60; // 1 hour
 /// Past this age a failed refresh is an error, not a silent cache fallback.
 const PM_HARD_STALE_SECS: i64 = 7 * 24 * 60 * 60; // 1 week
 /// Ceiling on an opportunistic refresh; exceeding it counts as a failure.
@@ -1685,50 +1685,20 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
 }
 
 /// Read planning under the existing managed freshness policy.
-pub fn read_task_planning(
-    repo: &Path,
-    issue: &str,
-    refresh: PmRefresh,
-) -> OpsResult<TaskPlanningRead> {
-    block_on_pm(read_task_planning_async(repo, issue, refresh))
-}
-
-#[derive(Debug)]
-pub struct TaskPlanningRead {
-    pub record: PmTaskRecord,
-    pub refresh_error: Option<String>,
-}
-
-impl TaskPlanningRead {
-    pub fn is_stale(&self) -> bool {
-        self.refresh_error.is_some()
-            || time::OffsetDateTime::now_utc().unix_timestamp() - self.record.observed_at
-                >= PM_SOFT_STALE_SECS
-    }
-}
-
 pub(crate) async fn read_task_planning_async(
     repo: &Path,
     issue: &str,
     refresh: PmRefresh,
-) -> OpsResult<TaskPlanningRead> {
+) -> OpsResult<PmTaskRecord> {
     let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    let age = read
-        .observation
-        .record
-        .as_ref()
-        .map(|record| time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at);
-    let soft_failure = read.observation.state == crate::store::PlanningState::Unavailable
+    let soft_failure = read.observation.state == PlanningState::Unavailable
         && matches!(
-            plan_snapshot_read(refresh, age),
+            plan_snapshot_read(refresh, read.age()),
             SnapshotPlan::Refresh { hard: false }
         );
-    if read.observation.state == crate::store::PlanningState::Available || soft_failure {
+    if read.observation.state == PlanningState::Available || soft_failure {
         if let Some(record) = read.observation.record {
-            return Ok(TaskPlanningRead {
-                record,
-                refresh_error: read.refresh_error,
-            });
+            return Ok(record);
         }
     }
     Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
@@ -1740,12 +1710,26 @@ pub(crate) async fn read_task_planning_async(
 }
 
 #[derive(Debug)]
-pub struct TaskPlanningInspection {
-    pub observation: crate::store::PmTaskObservation,
+pub(crate) struct TaskPlanningInspection {
+    pub observation: PmTaskObservation,
     pub refresh_error: Option<String>,
 }
 
-pub fn inspect_task_planning(
+impl TaskPlanningInspection {
+    fn age(&self) -> Option<i64> {
+        self.observation
+            .record
+            .as_ref()
+            .map(|record| time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at)
+    }
+
+    pub(crate) fn is_stale(&self) -> bool {
+        self.observation.state != PlanningState::Available
+            || self.age().is_some_and(|age| age >= PM_SOFT_STALE_SECS)
+    }
+}
+
+pub(crate) fn inspect_task_planning(
     repo: &Path,
     issue: &str,
     refresh: PmRefresh,
@@ -1758,7 +1742,6 @@ async fn inspect_task_planning_async(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<TaskPlanningInspection> {
-    use crate::store::PlanningState;
     let scope = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();

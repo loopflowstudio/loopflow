@@ -12,7 +12,6 @@ use loopflow::machine_install::{
 };
 use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::TaskEventKind;
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};

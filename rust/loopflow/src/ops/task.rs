@@ -3805,13 +3805,7 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
-    let task = block_on_task(async {
-        let store = task_store().await?;
-        match issue {
-            Some(issue) => store.get_task_by_issue(issue).await.map_err(task_error),
-            None => task_for_checkout(&store, repo).await,
-        }
-    })?;
+    let task = task_execution_status(repo, issue)?;
     let selector = task
         .as_ref()
         .map(|task| task.plan.id.as_str())
@@ -3832,21 +3826,11 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
         },
         Err(error) => return Err(error),
     };
+    let planning_stale = read.is_stale();
     let planning_state = read.observation.state;
     let planning = read.observation.record;
     let planning_error = read.refresh_error;
-    let planning_stale = planning_state != crate::store::PlanningState::Available
-        || planning.as_ref().is_some_and(|record| {
-            time::OffsetDateTime::now_utc().unix_timestamp() - record.observed_at
-                >= crate::ops::pm::PM_SOFT_STALE_SECS
-        });
-    let execution = task
-        .as_ref()
-        .map(|task| {
-            let task = task_execution_status(Some(task.id.as_str()))?;
-            task_snapshot(&task)
-        })
-        .transpose()?;
+    let execution = task.as_ref().map(task_snapshot).transpose()?;
     Ok(TaskStatus {
         planning,
         planning_error,
@@ -3856,18 +3840,18 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     })
 }
 
-fn task_execution_status(issue: Option<&str>) -> OpsResult<Task> {
+fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<Task>> {
     block_on_task(async move {
         let store = task_store().await?;
-        let mut task = match issue {
+        let task = match issue {
             Some(issue) => store
                 .get_task_by_issue(issue)
                 .await
-                .map_err(|error| task_error(format!("failed to read task status: {error}")))?
-                .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?,
-            None => task_for_checkout(&store, &std::env::current_dir()?)
-                .await?
-                .ok_or_else(|| task_error("this checkout has no Task"))?,
+                .map_err(|error| task_error(format!("failed to read task status: {error}")))?,
+            None => task_for_checkout(&store, repo).await?,
+        };
+        let Some(mut task) = task else {
+            return Ok(None);
         };
         if store
             .task_deletion(&task.wave_id, task.plan.id.as_str())
@@ -3876,7 +3860,7 @@ fn task_execution_status(issue: Option<&str>) -> OpsResult<Task> {
             .is_some()
         {
             return match issue {
-                Some(_) => Ok(task),
+                Some(_) => Ok(Some(task)),
                 None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
             };
         }
@@ -3886,7 +3870,7 @@ fn task_execution_status(issue: Option<&str>) -> OpsResult<Task> {
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
             reconcile_task_pr(&store, &mut task).await?;
         }
-        Ok(task)
+        Ok(Some(task))
     })
 }
 
@@ -5285,7 +5269,8 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
 pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
     let started = Instant::now();
     loop {
-        let task = task_execution_status(Some(issue))?;
+        let task = task_execution_status(Path::new("."), Some(issue))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let status = block_on_task(async {
             let store = task_store().await?;
             task_work_status(&store, &task).await
@@ -6489,18 +6474,19 @@ mod tests {
                     graphql_url: "http://127.0.0.1:1".into(),
                 },
                 || {
-                    let error = super::task_execution_status(None).unwrap_err();
+                    let repo = std::env::current_dir().unwrap();
+                    let error = super::task_status(&repo, None).unwrap_err();
                     assert!(error.to_string().contains("Task was deleted"), "{error}");
-                    let task = super::task_execution_status(Some("HISTORY-1")).unwrap();
+                    let status = super::task_status(&repo, Some("HISTORY-1")).unwrap();
+                    let snapshot = status.execution.as_ref().unwrap();
                     assert_eq!(
-                        super::task_execution_status(Some(task.id.as_str())).unwrap(),
-                        task
+                        super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
+                        status
                     );
                     assert_eq!(
-                        super::task_execution_status(Some(task.plan.id.as_str())).unwrap(),
-                        task
+                        super::task_status(&repo, Some(&snapshot.issue_id)).unwrap(),
+                        status
                     );
-                    let snapshot = super::task_snapshot(&task).unwrap();
                     assert_eq!(snapshot.status, WorkStatus::Done);
                     assert_eq!(
                         snapshot.actions.recommended,

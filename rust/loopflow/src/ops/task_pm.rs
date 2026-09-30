@@ -52,9 +52,7 @@ pub(crate) async fn resolve_task_async(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<ResolvedTask> {
-    let record = crate::ops::pm::read_task_planning_async(repo, issue, refresh)
-        .await?
-        .record;
+    let record = crate::ops::pm::read_task_planning_async(repo, issue, refresh).await?;
     let item = record.item;
     let project = record.project.ok_or_else(|| {
         OpsError::Message(format!(

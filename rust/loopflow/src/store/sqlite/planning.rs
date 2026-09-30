@@ -242,10 +242,9 @@ impl SqliteStore {
     }
 
     pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
-        let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let transaction = connection.transaction()?;
-        let conn = &transaction;
-        let metadata = conn
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let metadata = tx
             .query_row(
                 "SELECT w.repo,s.provider,s.initiative,s.synced_at FROM pm_wave_sync s
              JOIN waves w ON w.id=s.wave_id WHERE s.wave_id=?1",
@@ -263,7 +262,7 @@ impl SqliteStore {
         let Some((repo, provider, initiative, synced_at)) = metadata else {
             return Ok(None);
         };
-        let mut query = conn.prepare(
+        let mut query = tx.prepare(
             "SELECT p.body FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
              WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0 AND p.membership_unresolved=0
              AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
@@ -275,8 +274,8 @@ impl SqliteStore {
             })?
             .map(|row| Ok(serde_json::from_str::<PmProject>(&row?)?))
             .collect::<StoreResult<Vec<_>>>()?;
-        let mut query = conn.prepare(
-            "SELECT i.body FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
+        let mut query = tx.prepare(
+            "SELECT i.body,json_extract(p.body,'$.slug') FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
              JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
              WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
              AND p.archived=0 AND p.membership_unresolved=0
@@ -285,20 +284,17 @@ impl SqliteStore {
                             WHERE w.repo=i.repo AND d.issue_id=i.id)
              ORDER BY m.position,json_extract(i.body,'$.rank'),i.id",
         )?;
-        let mut items = query
+        let items = query
             .query_map(params![wave_id, repo, provider, initiative], |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .map(|row| Ok(serde_json::from_str::<PmItem>(&row?)?))
+            .map(|row| {
+                let (body, slug) = row?;
+                let mut item: PmItem = serde_json::from_str(&body)?;
+                item.project = Some(slug);
+                Ok(item)
+            })
             .collect::<StoreResult<Vec<_>>>()?;
-        for item in &mut items {
-            if let Some(project) = projects
-                .iter()
-                .find(|project| Some(project.id.as_str()) == item.project_id.as_deref())
-            {
-                item.project = Some(project.slug.clone());
-            }
-        }
         Ok(Some(PmSnapshotRow {
             wave_id: wave_id.clone(),
             provider,
@@ -319,6 +315,8 @@ fn validate_project_membership(
     provider: &str,
     project: &PmProject,
 ) -> StoreResult<()> {
+    // Run before the ingestion transaction: disputed ownership must remain
+    // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous: Option<String> = conn
         .query_row(
             "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",

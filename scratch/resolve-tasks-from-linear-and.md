@@ -122,6 +122,36 @@ acceptance matrix remains required and unproven. No affected-suite/repository
 gate, live provider demonstration, installation promotion or Flow navigation is
 claimed here.
 
+Compression follow-through (2026-09-29): managed planning reads now return the
+record directly; inspection owns stale/error reporting. The unused synchronous
+managed reader and its duplicate result wrapper are removed. Status resolves
+execution once, preserving explicit deleted-Task history lookup. Wave list reads
+take Project display names from their existing join rather than searching the
+Project vector for each issue. Membership conflict evidence deliberately stays
+outside the ingestion transaction so rejection cannot erase that uncertainty.
+
+Review reproduced obsolete fixture writes that erased Projects or replaced known
+ownership. The fixtures now use archive/revision evidence or acquire a distinct
+ambiguous Project. Removing duplicate initialization setup then exposed a real
+scope bug: canonical Wave-path repair left normalized facts under the old alias.
+The existing repair now moves all Waves and planning entities under that alias
+atomically. It does not merge conflicting observations or move planning between
+different repositories. The initialization proof passes using the shared fixture.
+
+Focused verification for this reduction: ten planning-reader/writer cases,
+two Wave chapter cases, populated migration and public deleted-history lookup
+(14 library tests); public planning-only CLI status; all eleven Rust DTO tests;
+repository ownership CLI refusals; repeated merged-PR status without completion;
+missing-worktree inspection; and initializing-worktree status/wait/roadmap.
+Project rename assertions cover both joined list and detail display names.
+The repository-alias proof additionally retains populated planning through
+canonicalization. Swift shapes are unchanged, so the recorded Swift proof applies.
+No execution migration, provider mutation, outage-policy selection or full gate
+follows from this reduction. Cross-repository Wave relocation with populated
+normalized planning still needs its own integration proof; the existing relocation
+case uses empty planning for the relocated Wave.
+Formatting, `cargo clippy --all-targets -- -D warnings` and whitespace checks pass.
+
 ### Remaining implementation
 
 1. Acquire ordered Initiative/Team relationship evidence and an explicit repair

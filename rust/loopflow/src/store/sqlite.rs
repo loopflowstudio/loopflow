@@ -1757,10 +1757,15 @@ impl SqliteStore {
                 "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
             )));
         }
-        tx.execute(
-            "UPDATE waves SET repo = ?2 WHERE id = ?1 AND repo = ?3",
-            params![wave_id, target_repo, expected_repo],
-        )?;
+        // Canonicalization changes one repository identity, including every Wave
+        // and shared planning entity under that alias. Move them atomically;
+        // uniqueness conflicts must preserve both observations, never merge them.
+        for table in ["waves", "pm_projects", "pm_items"] {
+            tx.execute(
+                &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
+                params![expected_repo, target_repo],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }

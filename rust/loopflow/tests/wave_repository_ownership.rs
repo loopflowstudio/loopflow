@@ -208,6 +208,20 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             alias.display().to_string(),
         );
         store.create_wave(&legacy).await.unwrap();
+        let sibling = Wave::new(WaveId::new(), "sibling".into(), alias.display().to_string());
+        store.create_wave(&sibling).await.unwrap();
+        let snapshot: loopflow::pm::PmSnapshot =
+            serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
+        store
+            .put_pm_snapshot(PmSnapshotRow {
+                wave_id: legacy.id().clone(),
+                provider: "linear".into(),
+                initiative: "initiative-infrastructure".into(),
+                synced_at: 1,
+                snapshot: snapshot.clone(),
+            })
+            .await
+            .unwrap();
         let resolved = store
             .get_wave_at(&WaveLocator::discover(&repo_a, "legacy").unwrap())
             .await
@@ -221,6 +235,29 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 .display()
                 .to_string()
         );
+        // Resolving one Wave repairs the repository scope for its sibling too.
+        for wave in [&legacy, &sibling] {
+            assert_eq!(
+                store.get_wave(wave.id()).await.unwrap().unwrap().repo(),
+                resolved.repo()
+            );
+        }
+        assert_eq!(
+            store
+                .pm_snapshot(legacy.id())
+                .await
+                .unwrap()
+                .unwrap()
+                .snapshot,
+            snapshot
+        );
+        let detail = store
+            .pm_task(resolved.repo(), "linear", "LOO-2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.item, snapshot.items[0]);
+        assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
     }
 
     let alpha_resolved =

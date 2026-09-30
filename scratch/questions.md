@@ -167,3 +167,11 @@ completion behavior. External archive acquisition/restoration remain unimplement
 The working design owns the focused proof receipts and remaining acceptance work.
 No live-provider, full command-story, coordination reply, publication, promotion or
 Flow-navigation claim follows from these local changes.
+
+Compression retained these boundaries. A reproduced local path-alias failure is
+repaired through the existing repository canonicalization operation: Waves and
+normalized facts move atomically to the same canonical scope. This is not a
+connection transition or cross-repository planning migration. Conflicting stored
+observations remain a transaction failure; no merge policy was selected.
+Populated planning during explicit cross-repository Wave relocation remains
+unproven. The full acceptance matrix and LOO-298 execution-contract blocker remain.

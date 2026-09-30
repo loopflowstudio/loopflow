@@ -338,29 +338,30 @@ fn repository_team_matrix() {
     let reopened = SqliteStore::new(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
-    // Shared entities cannot hold conflicting copies. Model ambiguous ownership
-    // on the Project itself, and refuse it before execution or a Git fetch.
+    // Acquire a Project with ambiguous ownership. Changing a known relationship
+    // would instead invalidate that Project before these readers see it.
     let mut ambiguous = snapshot(
         "initiative-infrastructure",
-        "project-survival",
+        "project-ambiguous",
         "a-real-task",
         "A real task reaches done",
-        "issue-survival",
-        "LOO-1",
+        "issue-ambiguous",
+        "LOO-4",
         false,
     );
     ambiguous.projects[0]
         .initiative_ids
         .push("initiative-survival".into());
-    put_snapshot(
-        &reopened,
-        &repo,
-        "survival/infrastructure",
-        "initiative-infrastructure",
-        ambiguous,
-    );
+    let survival = reopened
+        .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
+        .unwrap()
+        .unwrap();
+    let mut planning = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
+    planning.snapshot.projects.extend(ambiguous.projects);
+    planning.snapshot.items.extend(ambiguous.items);
+    reopened.put_pm_snapshot(&planning).unwrap();
     drop(reopened);
-    let ambiguous = run_lf(&home, &repo, &["task", "checkout", "LOO-1"]);
+    let ambiguous = run_lf(&home, &repo, &["task", "checkout", "LOO-4"]);
     let error = String::from_utf8_lossy(&ambiguous.stderr);
     assert!(!ambiguous.status.success());
     assert!(error.contains("belongs to 2 Initiatives"), "{error}");

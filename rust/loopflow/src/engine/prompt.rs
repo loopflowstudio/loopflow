@@ -2465,7 +2465,7 @@ mod tests {
         let components = PromptComponents::default();
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("Run mode is headless"));
-        assert!(prompt.contains("launch an ordinary Run explicitly"));
+        assert!(prompt.contains("launch an ordinary contribution explicitly"));
         assert!(prompt.contains("opens a durable session"));
         assert!(prompt.contains("If no user authorization is required"));
     }

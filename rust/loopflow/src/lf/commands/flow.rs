@@ -167,8 +167,8 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                     .block_on(store.task_flow(task_id))?
                     .is_some_and(|managed| managed.id() == id)
                 {
-                    // The Task owns launch policy, agent choice and unblock feedback.
-                    // Its worker enters the same driver under the existing claim path.
+                    // A managed Flow resumes through its Task's worker claim.
+                    // The worker enters the same shared driver.
                     let task = runtime
                         .block_on(store.get_task(task_id))?
                         .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;

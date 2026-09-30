@@ -3038,7 +3038,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        apply_through(&conn, "lineage_boundary");
 
         let parents = |process: &str| -> Option<Option<String>> {
             conn.query_row(
@@ -3066,6 +3066,14 @@ mod tests {
             3,
             "the migration retires pointers, never rows"
         );
+        apply_sqlite(&conn).unwrap();
+        assert!(!conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='run_events')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
     }
 
     #[test]

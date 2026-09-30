@@ -11,11 +11,11 @@ current-source inventory. [Architecture](architecture.md) introduces the model;
 
 ## Cutover status
 
-**Accepted contract, implementation in progress.** Exec is one actual lf process;
+**Implemented model; installed acceptance remains open.** Exec is one actual lf process;
 AgentSession is a continuable interactive or headless conversation; FlowSession
 is a captured resumable Flow consuming exact boundary completions. Run has no
-separate product lifetime in this contract. Jack requested the docs-first spec
-before completing the remaining owner conversion.
+separate product lifetime. The SQLite owners, shared driver, CLI readers and
+coordinated Rust/Swift wire types implement this contract.
 
 The implementation has `execs`, `agent_sessions` and `flow_sessions`, with
 captured input and provider outcomes beneath their Session owners. Jack Heart's
@@ -37,19 +37,19 @@ History exposes Session event and provider evidence; `RunSnapshot` and Session
 wire reference does not make Run a target owner or authorize breaking external
 consumers without their coordinated migration.
 
-### Spec to remaining implementation
+### Implementation and acceptance evidence
 
 | Contract | Current evidence and next dependency |
 | --- | --- |
-| One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Installed startup acceptance and final discovery/wire coverage remain open. |
+| One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Public discovery and Rust/Swift wire fixtures cover the current shape; installed startup acceptance remains open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Public Codex connect/client replacement preserves the active turn and sibling in the synthetic-Responses proof. Complete configured account/native Home, stale-client exclusion and shared-engine preservation across every provider path. |
-| Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. All-provider recovery and final retired-owner deletion remain required. |
+| Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. The separate Task provider launcher and retired Run owners are deleted; configured recovery across providers remains open. |
 | One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. The final schema contains no child-pass owner. Runtime progression uses one cursor and return counters; retry retains its pass. Focused migration and progression proofs cover the cut; configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
-| Current-state cutover | Three direct migration groups retain Work, links, account routing and resumable Sessions. Finished history and intermediate branch schemas are discarded. |
-| Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Complete dense cold/warm measurements. History uses captured event sequences and exact native references. |
-| Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. Complete coordinated history/usage conversion and configured Desktop proof remain outstanding. |
-| Status-owned Chapters | Rotation/default-Flow implementation exists with focused fixtures. Complete historical adoption, partial/competing-plan preservation and second-Home proof. No Chapter table or packet belongs in the model. |
+| Current-state cutover | Three direct migration groups retain current database state. Release conversion must also recover resumable native identities from a frozen filesystem snapshot. Finished history and intermediate branch schemas are discarded. |
+| Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Debug measurements at `6d76f74926` used 20,000 Sessions, 5,000 Flows and 100,000 Execs: bounded warm CLI reads were 291–313 ms against a 300 ms empty-store baseline. The broad Exec search miss was 362 ms, with a separate 64 ms SQL control. These are uncontrolled-cache local measurements, not release or Desktop latency. History uses captured event sequences and exact native references. |
+| Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. History and usage use the coordinated Session wire types. Configured Desktop continuity remains unproven. |
+| Status-owned Chapters | Focused fixtures cover rotation/default Flows, populated current-state adoption, partial/competing-plan preservation and second-Home convergence. Configured Linear rotation remains unproven. No Chapter table or packet belongs in the model. |
 | Integrated acceptance | Affected checks, configured provider/Desktop, backed-up current-state conversion and final consistency remain required. Branch fixture passes are neither installed acceptance nor permission to promote. |
 
 Admission preserves saved executable/Home/database handoff and failed-command

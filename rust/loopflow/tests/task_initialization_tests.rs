@@ -13,7 +13,7 @@ use loopflow::machine_install::{
 use loopflow::ops::task::{task_snapshot, task_status};
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
-use loopflow::work::task::TaskEventKind;
+use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -35,12 +35,27 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     let child =
         support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut pr = runtime
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
         .unwrap();
-    pr.parent_pr_id = Some(parent.pr.id.clone());
-    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
 
     let checkout = || {
         loopflow::ops::task::task_checkout(

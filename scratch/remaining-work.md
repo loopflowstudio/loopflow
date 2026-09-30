@@ -85,7 +85,7 @@ will not run that proof.
    no tests were added and no further redundant case was established. All 14
    focused Rust and 18 Swift DTO checks passed, with formatting, Clippy and Ruff;
    the integrated gate and configured acceptance remain separate.
-4. **Integrated gate — next.** The owned sync has merged main through
+4. **Integrated gate — local checks repaired; hosted checks remain.** The owned sync has merged main through
    `12013dae4` (v0.12.27); [integration evidence](sync-resolution.md) records
    translated account/steer behavior and focused proof. The waiting sync caller
    owns postcondition verification and push. After remaining repairs, build
@@ -96,7 +96,9 @@ will not run that proof.
    full local Rust without fail-fast, release-materialized migrations in a
    disposable source copy, affected Python/website/Swift, app build and CLI smoke.
    Reuse results only for identical content and commands. Required hosted CI and
-   merge checks must pass on the final candidate. A missing rendering environment
+   merge checks must pass on the final candidate. [Gate evidence](integrated-gate.md) records the full materialized
+   Rust run, seven repaired fixture failures, Swift repair and other local passes;
+   original failed receipts remain failed. A missing rendering environment
    leaves configured Desktop proof open; it does not create another review wait.
 
 Recorded compression evidence under `.lf/tmp/test-compress/`: `affected.log`

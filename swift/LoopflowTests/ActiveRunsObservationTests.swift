@@ -268,10 +268,10 @@ struct ActiveSessionsObservationTests {
         let directory = home.appendingPathComponent("runs/00/\(id)")
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("provider-clients"), withIntermediateDirectories: true)
         let manifest: [String: Any] = [
-            "schema_version": 1, "run_id": id, "parent_run_id": NSNull(),
+            "schema_version": 1, "artifact_key": id, "caller_artifact_key": NSNull(),
             "created_at": "2020-01-01T00:00:00Z", "harness": "cat", "model": NSNull(),
             "surface": "tui", "cwd": home.path, "repo": NSNull(), "worktree": NSNull(),
-            "skill": NSNull(), "subjects": [], "launch": NSNull(), "context": NSNull(),
+            "skill": NSNull(), "subjects": [], "exec": NSNull(), "context": NSNull(),
             "runtime_path": NSNull(), "runtime_digest": NSNull(), "host": "fixture", "boot_id": NSNull(),
         ]
         try JSONSerialization.data(withJSONObject: manifest).write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
@@ -279,25 +279,39 @@ struct ActiveSessionsObservationTests {
                                       "terminal_id": NSNull(), "started_at": Date().ISO8601Format(.init(includingFractionalSeconds: true))]
         try JSONSerialization.data(withJSONObject: receipt).write(
             to: directory.appendingPathComponent("provider-clients/\(client.processIdentifier).json"), options: .atomic)
-        let native: [String: Any] = ["schema_version": 1, "provider_session_id": "fixture-\(id)", "account_id": NSNull()]
-        try JSONSerialization.data(withJSONObject: native).write(
-            to: directory.appendingPathComponent("provider-session.json"), options: .atomic)
-        let output = home.appendingPathComponent("import-\(id).json")
-        try Data().write(to: output)
-        let handle = try FileHandle(forWritingTo: output)
-        defer { try? handle.close() }
-        let command = fixtureProcess(["session", "import", "--json"], home: home)
-        command.standardOutput = handle
+        let initialize = fixtureProcess(["session", "list", "--json"], home: home)
+        initialize.standardOutput = FileHandle.nullDevice
+        try await runFixture(initialize)
+
+        let capture = try JSONSerialization.data(withJSONObject: [
+            "artifact_key": id, "cwd": home.path, "provider": "cat",
+        ])
+        let payload = try #require(String(data: capture, encoding: .utf8))
+        func literal(_ value: String) -> String {
+            "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+        }
+        let seed = Process()
+        seed.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        seed.arguments = [home.appendingPathComponent("loopflow.db").path, """
+            PRAGMA foreign_keys=ON;
+            BEGIN;
+            INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published)
+            VALUES(\(literal(id)),'Watch','generated',1577836800,'cat',\(literal("fixture-" + id)),\(literal(home.path)),1);
+            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES(\(literal(id)),'captured',\(literal(id)),1577836800,\(literal(payload)));
+            UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=\(literal(id));
+            COMMIT;
+            """]
+        try await runFixture(seed)
+    }
+
+    private func runFixture(_ command: Process) async throws {
         let status: Int32 = try await withCheckedThrowingContinuation { continuation in
             command.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
             do { try command.run() }
             catch { command.terminationHandler = nil; continuation.resume(throwing: error) }
         }
         try #require(status == 0)
-        let report = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: output)) as? [String: Any])
-        let failures = try #require(report["failed"] as? [[String: Any]])
-        try #require(failures.isEmpty, "Import failed: \(failures)")
-        try #require(report["interactive"] as? Int == 1)
     }
 
     private func fixtureProcess(_ arguments: [String], home: URL) -> Process {

@@ -2497,6 +2497,7 @@ mod durable_store_tests {
             summary: "candidate before failure".into(),
         };
         store.test_decision_output(&first_actor, &verdict).unwrap();
+        store.test_finish_flow_turn(&first_actor, "interrupted");
         store
             .release_flow(id, position.version, Some(&first_claim))
             .unwrap();
@@ -2504,6 +2505,8 @@ mod durable_store_tests {
         assert_eq!(failed.cursor.index, position.cursor.index);
         assert_eq!(failed.cursor.iteration, position.cursor.iteration);
         assert!(!failed.has_pending_decision());
+        assert_eq!(failed.current_attempt.as_ref().unwrap().run_id, first);
+        let failed = store.retry_flow(id, None).unwrap();
         let second_claim = claim(&store, &task_id, &failed, 502);
         let second = reserved_capture(&store, &task_id);
         assert_ne!(first, second);

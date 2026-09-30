@@ -59,9 +59,8 @@ pass histories stay in Git.
 - Configured provider/Desktop acceptance and actual quiescent conversion need
   their own proof and authority. Fixture success does not close either.
 
-Current implementation authorization: work the Before merge list in
-[remaining work](remaining-work.md), one coherent item per implement iteration,
-with focused checks and checkpoint publication. The supervising session owns
-shipping after the list is complete. The supervisor owns main integration with
-`lf sync` after LOO-351's patch release; implementation passes do not merge or rebase. Neither installed
-migration nor promotion is part of these implementation passes.
+Current delivery authorization: Jack Heart's latest supervising-session steer
+requests the integrated gate and `lf pr land -c` as one PR after main integration
+at `19d521843`. Local gate repairs and their evidence are in
+[integrated gate](integrated-gate.md). Required hosted checks still govern merge.
+Do not install, promote, or migrate the installed Home.

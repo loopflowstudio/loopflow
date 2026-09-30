@@ -361,8 +361,8 @@ aggregate `tests-result` check:
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-Candidate and merge-group jobs must all pass for `tests-result` to pass. Rust
-collects every test failure in the run instead of stopping at the first failure.
+Candidate and merge-group jobs must all pass for `tests-result` to pass. Both CI
+and the local runner collect every Rust test failure with `--no-fail-fast`.
 `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.

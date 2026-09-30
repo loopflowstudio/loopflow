@@ -4,6 +4,7 @@ use loopflow::ops::{
     continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
     OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
+use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 use support::EnvGuard;
@@ -1059,7 +1060,23 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let child_dir = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let _env = EnvGuard::with_lf_home(
+        &[
+            (
+                "codex",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "claude",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "opencode",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+        ],
+        home.path(),
+    );
     repo.create_branch("parent");
     repo.create_file("shared.txt", "parent\n");
     repo.stage_all();
@@ -1080,12 +1097,27 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     );
     let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut pr = runtime
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
         .unwrap();
-    pr.parent_pr_id = Some(parent.pr.id.clone());
-    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
     std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
     git(&child_path, &["commit", "-am", "Child work"]);
     let child_head = git(&child_path, &["rev-parse", "HEAD"]);

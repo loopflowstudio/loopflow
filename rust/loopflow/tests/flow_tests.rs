@@ -493,6 +493,17 @@ fn publish_stack_fixture_pr(
         merge: None,
     });
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(store.append_task_event(
+            task,
+            &loopflow::work::task::TaskEventKind::PrStarted {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                base_commit: pr.base_commit.clone(),
+            },
+        ))
+        .unwrap();
     pr
 }
 

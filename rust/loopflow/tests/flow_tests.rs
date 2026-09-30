@@ -6,6 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use base64::Engine;
 use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::invocation::QueuedInvocation;
@@ -595,9 +596,16 @@ fn write_executable(path: &Path, content: &str) {
 fn register_codex_account(home: &Path) {
     let account_home = home.join("accounts/codex/fixture");
     fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
     fs::write(
         account_home.join("auth.json"),
-        r#"{"tokens":{"access_token":"synthetic-fixture-token"}}"#,
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
@@ -607,7 +615,10 @@ fn register_codex_account(home: &Path) {
             provider: "codex".into(),
             account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
             home: Some(account_home),
-            login_email: None,
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_plan: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,
             plan: None,

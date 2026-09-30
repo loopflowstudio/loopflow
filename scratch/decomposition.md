@@ -75,3 +75,32 @@ head-pinned merge invalidation and retry behavior without schema or model change
 Both slice PRs target main and carry no LOO-298 Task binding. Installed control
 commands clear inherited Task/Run authority for these independent checkouts;
 source proofs use private Homes. No branch binary accesses the installed Home.
+
+## Remainder integration
+
+`lf rebase --manual` rebased the original branch onto main `00cf9dffe` after
+both merges. Two replay stops touched publication code and its tests; retaining
+the landed final publication ordering resolved them. The immediate comparison of
+all 2,040 non-scratch tracked files against the pre-rebase snapshot has **zero
+differences** (`.lf/tmp/decomposition-rebase-comparison.json`). The 188-commit
+branch history and its name remain intact; LOO-334 was not changed.
+
+The four publication failure/retry tests pass on the rebased model branch
+(`.lf/tmp/cut-i/decomposition-rebase-focused.log`), with simulated GitHub and
+private stores. Formatting and diff checks pass. This is the focused conflict
+proof, not a full local matrix or final gate. Remaining import, documentation,
+configured acceptance, Jack's demo and both proposed event-table names stay open.
+
+Final all-target compilation found an existing v0.12.26 integration gap in the
+model branch's two provider-account fixtures: missing observed identity/plan
+fields. Adding those fields exposed the Codex fixture's missing identity. It now
+supplies an expected email and matching synthetic ID-token claims, following
+main's account contract. These are the only non-scratch differences after the
+byte-identical rebase; production and migration files remain unchanged.
+
+The first fixture run retained three Codex failures and one passing Claude
+failure/retry/review case (`decomposition-account-fixtures.log`). All three
+Codex repairs pass in `decomposition-account-fixtures-final.log`, preserving
+Task Started, history, context and independent managed-Flow assertions. Final
+all-target Clippy with warnings denied passes (`decomposition-final-clippy.log`),
+as do formatting and diff checks. Logs live under `.lf/tmp/cut-i/`.

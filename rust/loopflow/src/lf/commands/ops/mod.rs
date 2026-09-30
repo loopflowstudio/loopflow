@@ -1,6 +1,6 @@
 use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
+use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
@@ -1482,7 +1482,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
-        WtCommand::Remove { name, force } => wt_remove(name, *force),
+        WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
 }
@@ -1750,47 +1750,9 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     Ok(())
 }
 
-fn wt_remove(name: &str, force: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-
-    // Find the worktree by short name or directory name
-    let worktrees = list_worktrees(&main_repo)?;
-    let target = worktrees.iter().find(|wt| {
-        sibling_worktree_name(&wt.path).as_deref() == Some(name)
-            || wt
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy() == name)
-                .unwrap_or(false)
-    });
-
-    let wt = match target {
-        Some(wt) => wt,
-        None => return Err(anyhow!("no worktree found for '{}'", name)),
-    };
-
-    if wt.path == repo_root {
-        return Err(anyhow!("cannot remove the current worktree"));
-    }
-
-    let default_branch = get_default_branch(&main_repo)?;
-    if wt.branch.as_deref() == Some(&default_branch) {
-        return Err(anyhow!("cannot remove the main worktree"));
-    }
-
-    if !force && wt.dirty {
-        return Err(anyhow!(
-            "worktree has uncommitted changes (use --force to override)"
-        ));
-    }
-
-    let branch = wt.branch.clone();
-    crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
-    if let Some(branch) = branch {
-        let _ = delete_local_branch(&main_repo, &branch);
-    }
-    println!("Removed {}", name);
+fn wt_delete(name: &str, force: bool) -> Result<()> {
+    crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
+    println!("Deleted {name}");
     Ok(())
 }
 

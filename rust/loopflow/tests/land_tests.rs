@@ -1904,18 +1904,19 @@ fi"#,
             "land returned without merged evidence: {}",
             String::from_utf8_lossy(&output.stdout)
         );
+        assert!(!worktree.exists());
+        assert!(!local_branch_exists(&repo, "watched-land"));
+        assert!(!remote_branch_exists(&repo, "watched-land"));
         if repair {
             let repaired_head =
                 fs::read_to_string(&repair_proof).expect("repair wrote shared Git metadata");
-            let head = Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .current_dir(&worktree)
-                .output()
+            let connection = rusqlite::Connection::open(&database).unwrap();
+            let merged_head: String = connection
+                .query_row("SELECT observed_head_sha FROM pr_landings", [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
-            assert_eq!(
-                repaired_head.trim(),
-                String::from_utf8_lossy(&head.stdout).trim()
-            );
+            assert_eq!(repaired_head.trim(), merged_head);
             assert!(String::from_utf8_lossy(&output.stderr).contains("Synced the linked worktree"));
         }
     }

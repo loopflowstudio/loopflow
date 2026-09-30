@@ -1160,6 +1160,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             }
             Ok(())
         }
+        TaskCommand::Pr { issue, args } => run_task_operation(repo, issue, "pr", args, agent),
+        TaskCommand::Sync { issue, args } => run_task_operation(repo, issue, "sync", args, agent),
         TaskCommand::Complete {
             issue,
             summary,
@@ -1179,6 +1181,37 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
                 Ok(())
             }
         },
+        TaskCommand::Abandon { issue, force, json } => {
+            let identifier = loopflow::ops::task::task_abandon(repo, issue.as_deref(), *force)?;
+            if *json {
+                println!("{}", serde_json::to_string(&identifier)?);
+            } else {
+                println!("{identifier}: canceled; PRs and branches removed");
+            }
+            Ok(())
+        }
+        TaskCommand::Sweep { apply, json } => {
+            let entries = loopflow::ops::task::task_sweep(repo, *apply)?;
+            let incomplete = entries
+                .iter()
+                .any(|entry| entry.outcome.starts_with("incomplete:"));
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else {
+                for entry in entries {
+                    println!(
+                        "{} / {}: {} — {}",
+                        entry.wave, entry.project, entry.issue, entry.outcome
+                    );
+                }
+            }
+            if incomplete {
+                anyhow::bail!(
+                    "chapter sweep has incomplete cancellations; see the reported retry commands"
+                );
+            }
+            Ok(())
+        }
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: deleted");
@@ -1266,6 +1299,24 @@ fn run_task_command(repo: &Path, command: &TaskCommand, agent: Option<&str>) -> 
             print_task_snapshot(&task, *json)
         }
     }
+}
+
+fn run_task_operation(
+    repo: &Path,
+    issue: &str,
+    operation: &str,
+    args: &[String],
+    agent: Option<&str>,
+) -> anyhow::Result<()> {
+    // Validate using the lower command's parser, before resolving or recovering
+    // placement. There is one flag schema for each operation.
+    Cli::try_parse_from(
+        ["lf", operation]
+            .into_iter()
+            .chain(args.iter().map(String::as_str)),
+    )?;
+    loopflow::ops::task::task_operation(repo, issue, operation, args, agent)?;
+    Ok(())
 }
 
 fn piped_task_report() -> anyhow::Result<Option<String>> {
@@ -1685,9 +1736,13 @@ fn execute_command(
                 | TaskCommand::File { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd, cli.model.as_deref()),
-        Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
-            run_task_command(repo, cmd, cli.model.as_deref())
-        }),
+        Some(Commands::Task { cmd }) => {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
+            with_runtime(&repo, args, || {
+                run_task_command(&repo, cmd, cli.model.as_deref())
+            })
+        }
         Some(Commands::Tokens { json, days }) => loopflow::lf::commands::tokens::run(*json, *days),
         Some(Commands::Usage {
             json,
@@ -2423,12 +2478,12 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "wt", "--force", "rm", "old-tree"]
+        let args: Vec<String> = ["lf", "wt", "--force", "delete", "old-tree"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "wt", "rm", "--force", "old-tree"]
+            vec!["lf", "wt", "delete", "--force", "old-tree"]
         );
     }
 

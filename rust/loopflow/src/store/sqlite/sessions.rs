@@ -1118,7 +1118,6 @@ pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
         .current_checked()
         .ok_or_else(|| invalid("review has no captured step"))?;
     let node = step
-        .policy
         .id
         .ok_or_else(|| invalid("review has no captured node"))?;
     Ok(format!(

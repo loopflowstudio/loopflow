@@ -118,12 +118,8 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
     );
     let mut message = flow.message.clone().unwrap_or_default();
-    if let Some(repeat) = &skill.policy.repeat {
-        let edge = skill
-            .policy
-            .id
-            .as_deref()
-            .expect("repeat occurrence has an id");
+    if let Some(repeat) = &skill.repeat {
+        let edge = skill.id.as_deref().expect("repeat occurrence has an id");
         let traversals = flow
             .cursor
             .leaf()

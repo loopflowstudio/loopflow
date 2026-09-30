@@ -5418,13 +5418,15 @@ mod tests {
             .unwrap();
         let invocation = crate::engine::invocation::QueuedInvocation::new(
             "operation",
-            vec![crate::engine::ConcreteStep::Op(crate::engine::ConcreteOp {
-                item: crate::engine::flow::Op {
-                    command: "rebase".into(),
-                    args: vec!["--plan".into()],
+            vec![crate::engine::ConcreteStep::Command(
+                crate::engine::ConcreteCommand {
+                    item: crate::engine::flow::Command {
+                        command: "rebase".into(),
+                        args: vec!["--plan".into()],
+                    },
+                    flow_parents: vec![],
                 },
-                flow_parents: vec![],
-            })],
+            )],
         )
         .unwrap();
         let position = claim_stop_fixture_for(&fixture, driver.id().unwrap(), invocation).await;

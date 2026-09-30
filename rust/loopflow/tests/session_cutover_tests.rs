@@ -2388,21 +2388,22 @@ fn import_retains_sql_only_members_after_their_artifacts_are_missing() {
 
 #[test]
 fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
-    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use serde_json::json;
 
     let fixture = Fixture::new(false);
     let review = ConcreteStep::Skill(ConcreteSkill {
         skill: Skill::named("review-design"),
-        policy: OccurrencePolicy {
-            human: true,
-            ..Default::default()
-        },
+        human: true,
+        id: None,
+        repeat: None,
         flow_parents: vec![],
     });
     let autonomous = ConcreteStep::Skill(ConcreteSkill {
         skill: Skill::named("implement"),
-        policy: OccurrencePolicy::default(),
+        id: None,
+        human: false,
+        repeat: None,
         flow_parents: vec![],
     });
     let mut saved = Vec::new();
@@ -2480,8 +2481,8 @@ fn import_preserves_unopened_and_finished_review_identity_and_feedback() {
         ),
         (
             uuid::Uuid::new_v4().to_string(),
-            vec![ConcreteStep::Op(loopflow::engine::ConcreteOp {
-                item: loopflow::engine::Op {
+            vec![ConcreteStep::Command(loopflow::engine::ConcreteCommand {
+                item: loopflow::engine::Command {
                     command: "pr publish".into(),
                     args: vec![],
                 },
@@ -2595,7 +2596,7 @@ fn import_keeps_earlier_tui_review_closure_and_membership() {
 }
 
 fn import_tui_closure(flow_member: bool) {
-    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use serde_json::json;
 
     let fixture = Fixture::new(false);
@@ -2618,7 +2619,7 @@ fn import_tui_closure(flow_member: bool) {
                 "id": invocation, "flow": "historical", "cwd": fixture.repo.path(),
                 "steps": [ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named("review-design"),
-                    policy: OccurrencePolicy { human: true, ..Default::default() },
+                    human: true, id: None, repeat: None,
                     flow_parents: vec![]
                 })],
                 "cursor": ExecutionCursor { index: 1, ..Default::default() },
@@ -2711,7 +2712,7 @@ fn import_tui_closure(flow_member: bool) {
 /// One Session of each origin, as an old Home kept them in files.
 #[test]
 fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() {
-    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use serde_json::json;
 
     let fixture = Fixture::new(false);
@@ -2720,7 +2721,9 @@ fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() 
             content: Some("Retained source".into()),
             ..Skill::named("implement")
         },
-        policy: OccurrencePolicy::default(),
+        id: None,
+        human: false,
+        repeat: None,
         flow_parents: vec![],
     });
     let mut paths = Vec::new();
@@ -2794,7 +2797,9 @@ fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() 
         let mut changed = saved.clone();
         changed["steps"][0] = json!(ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named("different"),
-            policy: OccurrencePolicy::default(),
+            id: None,
+            human: false,
+            repeat: None,
             flow_parents: vec![],
         }));
         std::fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
@@ -2840,7 +2845,7 @@ fn import_retains_autonomous_and_finished_captures_and_rejects_changed_graphs() 
 fn import_stores_each_old_session_once_with_its_name() {
     use loopflow::durable::FlowSession;
     use loopflow::engine::invocation::QueuedInvocation;
-    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use serde_json::json;
 
     let fixture = Fixture::new(false);
@@ -2915,11 +2920,10 @@ fn import_stores_each_old_session_once_with_its_name() {
             content: Some("Review the design with the person.".into()),
             ..Skill::named("review-design")
         },
-        policy: OccurrencePolicy {
-            id: Some("review".into()),
-            human: true,
-            ..Default::default()
-        },
+
+        id: Some("review".into()),
+        human: true,
+        repeat: None,
         flow_parents: vec![],
     });
     let invocation = uuid::Uuid::new_v4().to_string();
@@ -3036,7 +3040,7 @@ fn import_stores_each_old_session_once_with_its_name() {
         json!({
             "id": past_flow, "flow": "historical", "cwd": sibling.worktree,
             "steps": [ConcreteStep::Skill(ConcreteSkill {
-                skill: Skill::named("implement"), policy: OccurrencePolicy::default(), flow_parents: vec![]
+                skill: Skill::named("implement"), id: None, human: false, repeat: None, flow_parents: vec![]
             })],
             "cursor": ExecutionCursor { index: 1, ..Default::default() },
             "message": null, "model": "opencode", "wave": null,

@@ -5478,7 +5478,9 @@ mod tests {
             vec![crate::engine::ConcreteStep::Skill(
                 crate::engine::ConcreteSkill {
                     skill: crate::engine::Skill::named("saved-skill"),
-                    policy: Default::default(),
+                    id: None,
+                    human: false,
+                    repeat: None,
                     flow_parents: vec![],
                 },
             )],
@@ -6096,13 +6098,15 @@ mod tests {
         let mechanical = crate::run_record::new_artifact_key();
         let mut operation =
             crate::durable::test_flow_invocation("old-operation", 0, "publish", None, false);
-        operation.steps = vec![crate::engine::ConcreteStep::Op(crate::engine::ConcreteOp {
-            item: crate::engine::Op {
-                command: "publish".into(),
-                args: vec![],
+        operation.steps = vec![crate::engine::ConcreteStep::Command(
+            crate::engine::ConcreteCommand {
+                item: crate::engine::Command {
+                    command: "publish".into(),
+                    args: vec![],
+                },
+                flow_parents: vec![],
             },
-            flow_parents: vec![],
-        })];
+        )];
         conn.execute("INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,position_version,worker_generation,updated_at,state)
             VALUES(?1,?2,'/missing-original-checkout',0,2,4,0,1,'current')",rusqlite::params![operation.id,serde_json::to_string(&operation).unwrap()]).unwrap();
         conn.execute("INSERT INTO runs(id,invocation_id,node,iterations,attempt,created_at,published,cwd,skill,provider,outcome,ended_at)

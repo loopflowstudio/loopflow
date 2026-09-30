@@ -1,7 +1,9 @@
 # lf command reference
 
 > Design preview: the target CLI for this branch, not the installed binary.
-> Other documentation still describes the current CLI.
+> Discovery is implemented; owner moves remain a preview. Session, FlowSession,
+> and history sections use current spellings and the accepted
+> [ownership contract](architecture-reference.md#cutover-status).
 
 For examples ordered by workflow, see [lf CLI](lf.md). This page lists
 individual controls, arguments, and effects.
@@ -237,7 +239,7 @@ lf skill design --tui
 ```
 
 `--task`, `--wave`, and `--as` select the work a direct launch concerns. They
-do not advance a Task's managed Flow. A direct flow has its own invocation.
+do not advance a Task's managed Flow. A direct flow has its own FlowSession.
 Inside a registered Task checkout, an unqualified launch inherits that Task;
 an ordinary branch stays unbound.
 
@@ -260,7 +262,7 @@ an ordinary branch stays unbound.
 
 Repository agent guidance, recursive scratch notes, and selected work context
 are assembled automatically. Direct launches leave edits for an explicit
-commit. Several Runs may concern the same Task; attribution does not grant
+commit. Several AgentSessions may concern the same Task; attribution does not grant
 exclusive ownership of its files.
 
 Put global options before the command. Command-local options retain their
@@ -270,33 +272,148 @@ arguments are accepted.
 
 ### Flow decisions and recovery
 
-```bash
-lf flow resume INVOCATION
-lf flow resume INVOCATION --retry
-lf task run DES-123                  # continue the Task's saved Flow
+```sh
+lf task run DES-123 --flow feature  # create a Task-owned invocation
+lf task run DES-123             # drive its captured graph
+lf task run DES-123 --reason "provider credentials repaired"
+lf task restart DES-123 --flow incident
 ```
 
-Resume an invocation to keep its captured definition, feedback, and position.
-Invoking its name again starts a new invocation. A changed definition applies
-to future invocations; it does not rewrite work already in progress.
+Use `lf flow resume INVOCATION --retry` or `lf task run DES-123 --retry`
+after a command and its native engine both stop before recording completion.
+Retry requires confirmed engine exit and keeps the earlier outcome unknown.
+A surviving engine is observed through completion without sending another turn.
+Task failure reasons and decision-unblock feedback still apply. Automatic provider
+retries retain each turn's history; a failed turn's decision or route is discarded
+when its successor is selected.
 
-Decision steps use the flow's authored edges:
+A **loopflow** is a Flow with one or more backward edges. Each edge names an
+earlier node. There is no pass limit. Steps outside a backward edge's body
+do not repeat when that edge is taken. Advance enters the remaining steps;
+Iterate traverses the declared section again. A slice is a unit of work within
+a pass. Task binding adds context and Task authority.
 
-```bash
-lf flow decide advance "The required proof passed"
-lf flow decide iterate "Fix the remaining parsing case"
-lf flow route PATH
-lf flow blocked "Two attempts failed; need a decision on scope"
+`loop-decide` compares the caller's objective and previous direction with the
+available evidence and feedback. It works with any Flow; its selected native turn supplies
+one typed result from its final answer:
+
+```json
+{"decision":"iterate","summary":"Remaining work, next action, and proof to collect"}
 ```
 
-Blocked opens or rejoins an Ask for that boundary. Completing the Session
-returns feedback to the caller; the decision step chooses the next edge.
-Completing a review does not itself mean Advance or Iterate.
+The captured step declares `advance` or `iterate` with a nonempty `summary`,
+or `blocked` with a nonempty `reason`.
+The provider receives that schema before generation. The Flow consumes only the
+selected successful turn's validated result. Invalid output gets at most two
+corrective turns in the same conversation; exhaustion retains all evidence and
+stops the boundary. To request feedback, end the turn with:
 
-Inspect external effects before retrying an interrupted operation. A failed
-client may already have pushed a branch or changed remote state. An unreadable
-saved invocation remains available for recovery rather than being replaced
-silently. See [Authoring](authoring.md) for loops, branches, and review steps.
+```json
+{"decision":"blocked","reason":"What stalled, what was tried, and which question needs an answer"}
+```
+
+The answer starts another turn in the same conversation for reassessment.
+
+Implement builds the intended behavior and updates the working plan with what
+remains. When replacing a path, move its consumer and delete the predecessor.
+Compress simplifies code related to the change. Refresh rebases, then runs
+realign. Realign edits the plan, corrects clear code mismatches, and reads and
+updates the identified Wave's memory using what the work has taught us. Accepted
+requirements and unresolved evidence stay visible; no per-pass report or
+replacement count is required. Loop-decide reads the current work and evidence
+to decide whether to continue. Pursue publishes after convergence, before demo.
+
+Concept-review is interactive, on request or inside unblock, and does not own
+navigation. Blocked ends the deciding turn and requests feedback. Meaningful learning
+counts as progress; repeating a failure without new evidence calls for help.
+
+A blocked result keys one Ask to its exact captured event and Flow position;
+recovery reuses that question and its saved completion. Its Session
+runs `unblock`, using concept-review with the human by default or addressing a
+specific missing input. Human Complete returns the summary and shared artifact
+changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
+While a live Task decision waits, CLI status and the desktop show Blocked with
+its selected conversation and unblock Session. Complete that Session to return feedback to the
+same caller; no Task resume is needed. Completed or earlier-boundary Asks do
+not keep that caller Blocked. If the blocker remains unresolved, report it
+instead of opening identical Asks.
+An alive Task body shows Stalled after five minutes without an execution event or
+sampled CPU progress in the body and its tool descendants. The Task worker
+samples every 15 seconds; missing samples, a changed body identity, and
+observations older than 45 seconds stay Unknown. Status names the selected execution and the
+same recovery in CLI and desktop: interrupt the Task, then resume it. A live
+unblock Session still shows Blocked. Observation never authorizes termination.
+
+If a Task decision finishes without a valid verdict, its saved Flow becomes
+Blocked, retains its history and failure reason, and opens the same keyed unblock
+Session. CLI status and the desktop use that shared projection. After completing
+the Session, run `lf task run TASK`; its feedback seeds reassessment at the
+failed decision, without choosing Advance or Iterate. Retrying Session launch
+reuses its record, including after a launcher failure.
+A candidate decision takes effect only after its selected native turn succeeds. Inspect any
+operation's effects before choosing `--retry`, since an interrupted operation
+may already have changed external state.
+
+An invocation keeps its definition, cursor and return counts
+in the current Home's SQLite store. Continuation uses those captured facts even
+if source definitions disappear. Completion grants no implicit merge or
+Task-completion authority. Before launch the Task page shows its Flow template;
+after launch it shows the expanded invocation.
+
+Composed templates compile before execution. Taking an Iterate edge moves the
+cursor and increments its return counter in the same FlowSession. Retry retains
+the pass; resume retains the selected boundary, including a pending review.
+Membership names a node and iteration tuple in the
+captured graph; an independent conversation about the same Task does not become
+a Flow step. Graph keys, current/completed nodes, return edges and Session
+membership use captured numeric node IDs, local to that FlowSession. Authored
+occurrence names remain labels; nested containment comes from the graph.
+
+A boundary can fail several times before succeeding. AgentSession history keeps
+each provider start, result and usage receipt; the Flow consumes only its exact
+selected successful completion. A mechanical boundary runs in its own child
+`lf` process and records start and outcome in Flow history. Resume waits for a
+surviving step and consumes its result once. Task stop includes the selected step
+even when its driver has exited. An earlier success, helper completion or stale writer cannot
+advance the current selection. Missing capture data is reported without replacing
+it with today's catalog; missing external-effect evidence requires inspection.
+
+A `human:true` step appears as a Flow Session. The reviewer saves feedback and
+revised artifacts, then calls `lf session ready "feedback and remaining work"`.
+The human ends the conversation with `lf session complete <session-id>`.
+Completion returns feedback to the next step. A following loop-decide interprets
+it and records Advance or Iterate against its own authored edge. Human reviews
+have no implicit revision target. Closing the provider, marking ready, or
+reopening a Session does not complete it.
+Already finished invocations report completion rather than starting again.
+
+Invocations capture all XOR routers and branch definitions at creation. A router returns `{"path":"NAME"}` constrained to its captured paths;
+failed native turns cannot donate that candidate to a retry. Nested paths and review completion use the
+same cursor transition. Recovery fixtures prove these paths locally; live
+provider/desktop review completion → decision → implementation → Ask → reassessment remains a
+separate demonstration.
+
+The `advance` skill also resolves these actions from an ordinary coding
+conversation: complete an exact review, resume a Task, or prepare work from an
+approved design. It reports the actual Task state after the handoff.
+
+### Saved FlowSessions
+
+```bash
+lf flow list --sessions --json --limit 100
+lf flow list --sessions --for-task INF-123 --managed true --json
+lf flow show --sessions --json FLOW_SESSION
+```
+
+List saved progress without starting work. `--after` accepts the previous page's
+`next` ID with the same filters. `--all` includes other repositories and unknown
+historical repository evidence. `--state` selects current, completed or replaced
+records; `--search` matches a literal name or identity. Detail reads the captured
+graph even if its template or checkout is gone. Loop passes share that graph and
+FlowSession; their node and iteration positions distinguish their history.
+
+`lf flow list --json` and `lf flow show TEMPLATE` still inspect reusable templates.
+
 
 ## Task: concrete work and delivery
 
@@ -349,7 +466,7 @@ lf task wait DES-123 --until terminal --timeout 15m
 ```
 
 Comments provide direction without starting an idle Task. The advancing worker
-reads them; independent Task-bound Runs do not receive a broadcast. Use
+reads them; independent Task-bound AgentSessions do not receive a broadcast. Use
 restart to replace a saved workflow after the captured worker stops. Use
 `run --reason` after repairing a reported execution blocker.
 
@@ -489,7 +606,7 @@ not invent another PR when settled work can already complete the Task.
 ```bash
 lf wave list
 lf wave status designer
-lf wave chat --wave designer --follow
+lf --wave designer : "Review the plan"
 lf --wave designer skill wave/operate "Review progress toward keyboard access"
 ```
 
@@ -511,9 +628,9 @@ lf wave status designer --sync
 lf wave status designer --no-sync
 ```
 
-Connection links the Wave to its planning service. Each Wave has one current
-chapter, whose plan holds KRs, metric targets, and Tasks. The provider Project
-is internal; navigate with Waves and Tasks.
+Connection links the Wave to its planning service. Chapter is the repository
+clock; each Wave has one Project per Chapter, holding Tasks, KRs, metric targets
+and its Flow template. Current navigation is Wave → Task; history retains past plans.
 
 Status reads local planning unless asked to refresh. A failed fresh read is
 reported rather than presented as current evidence. Connecting a repository's
@@ -523,17 +640,13 @@ other Waves reuses its Team; `wave connect --all` discovers authored Waves.
 
 ```bash
 lf wave update-plan --wave designer --plan plan.json
-lf wave new-chapter --wave designer --chapter 2026-10 \
-  --plan plan.json --dry-run --json
-lf wave new-chapter --wave designer --chapter 2026-10 \
-  --plan plan.json --json
-lf wave history --wave designer --json
-lf wave status designer --chapter 2026-09
+lf repo new-chapter 2026-10 --dry-run --json
+lf repo new-chapter 2026-10 --json
 ```
 
-Update-plan changes the current chapter's KRs, metric targets, and recommended
-Flow. New-chapter replaces the plan and records a boundary receipt. Started,
-unfinished Tasks retain their identities, worktrees, PRs, and Flow positions.
+Update-plan changes the current Project's KRs, metric targets, and Flow.
+New-chapter advances every Wave together and records a boundary receipt. Started,
+unfinished Tasks retain their identities, worktrees, PRs, and FlowSessions.
 Untouched backlog is abandoned; completed work remains historical. Missing
 evidence stays unresolved.
 
@@ -545,19 +658,16 @@ provider Projects.
 ### Conversations
 
 ```bash
-lf wave chat --wave designer "Prioritize the dialog audit"
-lf wave chat --wave designer --follow
-lf wave chat --wave designer --history --json
-lf wave reply designer "Does this change need a response?"
+lf --wave product : "Which Task should own this change?"
+lf --wave product wave/operate "Review the current blockers"
+doppler run -- lf discord serve product
 ```
 
-Chat posts into the durable Wave thread. `--follow` replays recent turns and
-keeps the conversation open; `/status` reads health and `/quit` leaves.
-`--history` reads saved conversation without starting a listener. Reply makes
-one reply decision and prints only a warranted response.
-
-Select a Wave explicitly outside bound work. A repository may contain several
-Waves; its location alone does not select one.
+Ordinary Sessions retain conversations; `wave/operate` makes one finite planning
+pass. Memory stays in `wave/<name>/MEMORY.md`. The independent Discord bridge
+uses the GOAL.md channel binding, starts a bounded conversation for each new message and
+posts its final answer. Its cursor is in memory and startup skips old messages;
+see [Discord bridge](waves.md#discord-bridge) for the delivery limits.
 
 ### Schedules
 
@@ -601,105 +711,367 @@ cancel one explicitly with `--cancel SEQUENCE --reason TEXT` when appropriate.
 
 ## Session: conversations and reviews
 
-```bash
-lf session list
-lf session ask "Review this proof with me"
-lf session ask --skill unblock "Choose how to resolve this repeated failure"
-lf session open SESSION_ID
-lf session rename SESSION_ID "Keyboard navigation review"
-lf session complete SESSION_ID
-```
-
-Ask opens a conversation and waits for completion. A review step uses the same
-Session surface. Ready, provider exit, and closing a pane do not complete it.
+These examples use current spellings. The lifecycle contract and remaining
+implementation are in [cutover status](architecture-reference.md#cutover-status).
 
 ```bash
-lf session ready "Proof and remaining questions are ready"
-lf session complete SESSION_ID
+lf -b implement
+lf session list --interactive false --task INF-123 --json
+lf session connect SESSION
+lf session rename SESSION "Migration review"
+lf session bind SESSION --task INF-123
+lf session ready "Ready for review"
+lf session complete SESSION
 ```
 
-Complete returns feedback and artifact changes to the waiting caller. In a
-Flow, the following decision step chooses navigation. Complete also finishes
-an ordinary interactive Session while preserving its provider history.
+Every agent conversation has an AgentSession, including headless skills, inline
+prompts, helpers, Asks and reviews. Default lists show interactive conversations;
+explicit filters expose headless and completed history. `--all` retains its
+all-repositories meaning. Interactive mode does not decide Flow membership,
+completion or permission to advance a review.
 
-`session open --json` prepares attachment and returns `open_argv`; execute that
-command to enter the conversation with the recorded binary and data context.
-`--replace` stops Loopflow's owned client before resuming here. `--try` asks
-the provider to arbitrate an already active session.
+List state `unknown` means there is no observed active client, explicit readiness,
+or recorded closure. The conversation remains visible and can be connected;
+Connect validates its current owner and native history. Lists retain recorded
+Flow membership even when its relative position is unknown. They do not open
+captured graphs or transcript/history bodies to fill missing display facts.
 
-Session JSON includes `run_id`; use it to inspect execution rather than parsing
-the Session ID. Agents proposing a title use `session rename --suggest`, which
-preserves a user-assigned name.
+For bounded inventory, use `lf session list --page --json --limit 100` and pass
+`--after NEXT` until `next` is null. Pages use stable Session IDs, so renaming does
+not shift their order. They are separate reads, not a snapshot of concurrent
+insertions or filter changes. Desktop merges partial pages with retained records
+and removes absent Sessions only after the final successful page. A failed page
+keeps the last observations and open terminals.
+
+Use `--interactive all` for both modes in one inventory. In Desktop, the outline
+menu's **Show headless Sessions** reveals headless conversations. Hiding them
+keeps their open terminals and drafts.
+
+Choose **Bind to Task…** beside a Session name, enter an issue identifier or
+stable Task ID, then review the resolved Task before **Bind permanently**.
+`lf session bind SESSION --task INF-123 --dry-run --json` resolves that same
+identity without assigning work. Confirmation submits its stable Task ID;
+existing Wave and Flow constraints are checked by the binding transaction.
+
+Connect uses the live engine where possible and retains conversation identity,
+name, feedback and native history. The new driver receives write authority; the
+old client can remain a passive display. Restart explicitly replaces the exact
+conversation owner. It preserves recorded history and does not kill a shared
+engine or its other conversations. Unsubmitted editor text requires its own
+surface-preservation proof.
+
+Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered
+Task checkout supplies it when no explicit selector is present. A conversation
+can remain unbound. CLI states the permanent bind target and writes; Desktop confirms it. Same-target bind is a no-op; there is no reassignment or unbind.
+Existing Wave ancestry must agree. Done/landed Tasks remain valid without being
+reopened. Flow membership cannot be changed to make an incompatible bind work.
+
+Jack Heart selected prospective attribution: binding affects subsequent work;
+prior usage retains its recorded owner. First assignment, including bind, sets
+Task Started once without rewriting earlier work or usage.
+Inspection commands are still visible in Exec history but do not start Tasks.
+Help, version and rejected arguments retain their actual exit code when a
+compatible process ledger already exists. These early paths do not initialize
+or migrate a Home. Missing storage is reported without changing the command's
+result; agent launch still requires durable admission.
+Rename and bind retain the Session ID, pane, draft and membership. Human names
+survive generated suggestions. A bound Session absent from the visible roadmap
+remains bound.
+
+Ready saves feedback without closing the Session. Complete persists the result
+before teardown; keyed Ask retries return the same answer. Flow reviews pass
+feedback to the following decision, which owns navigation. Closing a pane,
+exiting a provider, or marking ready never completes that review implicitly.
+
+```bash
+lf session import --dry-run
+lf session import
+```
+
+One-time import preserves old interactive/Ask/review conversations, headless
+history, captures, outcomes, usage and unknown evidence. Original identities and
+repeated attempts survive; unrelated conversations never merge by title or path.
+Ordinary reads use SQLite and neither import nor fall back to files. Import
+reports conflicts and unresolved evidence, supports interruption/retry, and does
+not infer an actual lf process from an old provider-launch record alone.
+SQL agent inputs retain their recorded conversation even when an old input link
+is absent. A standalone agent input keeps its original input ID as its Session
+selector; recorded command outcome does not become a successful native turn.
+Named mechanical boundaries with a captured Flow retain their SQL evidence in
+Flow history. The forward migration retains unresolved original SQL in immutable
+`import_evidence`, preserving unknown conversation membership. Captured inputs
+belong to Session history; the input catalog and Run lifecycle table are removed. Import reports each unresolved input
+in `failed`, retaining its original evidence. An operation counts as preserved only when its complete SQL
+evidence, captured boundary and recorded completion match Flow history.
+`lf runs INPUT --json` reads retained input history even when its manifest is
+missing; exact Session IDs select current input. Prefixes must be unambiguous.
 
 ## Monitor: history and live activity
 
-The [proposed overview](lf.md#inspect-work), `lf monitor`,
-combines these observations into work needing a decision, blocked work,
-progress, and results. The commands below inspect the underlying evidence.
+The proposed `monitor` owner is not yet implemented. These examples use the
+current history commands; their retained inputs belong to AgentSession history.
 
 ```bash
-lf mon list
-lf mon list --task DES-123 --json
-lf mon list --parent RUN_ID --json
-lf mon show RUN_ID --final
-lf mon show RUN_ID --events
-lf mon ps                           # one live process/call-tree snapshot
-lf mon ps --json
-lf mon top                          # refresh on a terminal
-lf mon active --task DES-123 --json
-lf mon active --watch --json
-lf mon activity --task DES-123
+lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave list --current --json          # current Waves, including stopped ones
+lf wave status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
+lf roadmap --json               # current plan plus that portfolio on every Wave
+lf activity                     # durable Work changes, newest first
+lf activity --task INF-123 --json # filter before the bounded typed snapshot
+lf runs                         # recent Home-local Run records
+lf runs --active --json          # live Sessions and observation gaps
+lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
+lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
+lf runs --project parser        # one Project's Runs, filtered before the result cap
+lf runs --parent run_ab12 --json # every direct child Run, uncapped
+lf runs run_ab12                 # inspect one Run by unambiguous prefix
+lf runs run_ab12 --final         # print the last durable provider conclusion
+lf runs run_ab12 --events        # print its retained event stream
+lf usage --project parser        # direct Run usage for one Project
+lf usage --task INF-123 --json   # direct Run evidence for one Task
+lf session list                  # Sessions, Work paths, actions and unavailable reasons
+lf session open sess_ab12         # resume an open conversation after provider exit
+lf session open sess_ab12 --try   # let the provider arbitrate an active session
+lf session open sess_ab12 --replace # stop Loopflow's client, then continue here
+lf session open sess_ab12 --json --replace # prepare a takeover command without stopping it yet
+lf session complete sess_ab12     # finish it; provider history remains resumable
+lf replay run_ab12               # launch that request as a child Run
+lf usage --days 30              # direct provider-authored usage per Run
+lf usage --days 0 --json        # all Session history; zero means all time
+lf ci --since 7d                # CI repair attempts, latency, and outcomes
+lf ci --since 7d --json         # complete machine-wide incident receipt
+lf ps                            # one OS-live process and call-tree snapshot
+lf ps --json                     # versioned flat nodes with stable parent ids
+lf top                           # refresh the same snapshot every two seconds on a TTY
+lf top --json                    # emit once; redirected output also emits once without ANSI
+lf prune --dry-run               # list stale receipts and registered orphan process groups
+lf prune                         # remove those receipts and reap those process groups
+lf doctor                       # audit continuity, identity, lineage, coverage, receipts
+lf doctor --json                # machine-readable audit
 ```
 
-`mon` is the short spelling of `monitor`. History reads durable Run records.
-`ps` prints live processes and call trees; `top` refreshes that view on a
-terminal and prints once when redirected or given `--json`. `lf ps` and
-`lf top` are derived shortcuts for these commands.
+Continue a conversation with `lf session connect SESSION`. The obsolete
+`lf runs INPUT --resume` entry is removed; `lf runs` only inspects history.
+`lf replay INPUT` separately launches its immutable recorded request.
 
-Active discovers live Runs, including Task filtering. It is a different view
-from the process/call-tree snapshot. Activity orders Work, Run, PR, and
-direction changes. These views identify their evidence and gaps; an unfinished
-history record is not proof of a live process, and an empty partial observation
-is not proof that nothing is running.
+Session replacement and native client stopping require readable process evidence.
+If inspection fails, retry after it is available; the command leaves termination
+unconfirmed and preserves native history. Saved Ask or Flow feedback survives a
+cleanup failure, which is reported separately from completing the review.
+Native client publication and stopping share exact launch exclusion, so stopping waits
+for an in-flight launcher to publish its client before inspecting it. A Task
+with confirmed deletion cannot start an Ask or resume a native Session. Exact
+`runs --active --task ISSUE` still inspects its retained process evidence.
 
-Run IDs accept unambiguous prefixes. `--parent` returns every direct child Run
-without the recent-history cap. `--final` prints the last durable provider
-conclusion; `--events` prints its event stream. Each command reads the selected
-Home rather than silently aggregating other machines.
-
-Continuous discovery uses `active --watch --json` on macOS. It streams
-newline-delimited snapshots. Linux supports one-shot observation. Live process
-ownership remains distinct from durable attribution and permission to signal it.
-
-### Replay and usage
+`lf wave list` reads the local Wave registry. `--current` excludes abandoned and retired
+registrations. `lf roadmap --all` spans repositories without inheriting the
+launching process's Wave; an explicit `--wave` still scopes the query.
 
 ```bash
-lf mon replay RUN_ID
-lf mon usage --days 30
-lf mon usage --task DES-123 --json
-lf mon usage --days 0 --json
+lf wave forget <wave-id> --dry-run --json
+lf wave forget <wave-id> --json
 ```
 
-Replay starts a child Run from the recorded request, model, account identity,
-and tool boundary. It does not rebuild the prompt from today's configuration.
-It can repeat side effects; inspect the original request before replaying it.
-Use `session open` to resume a conversation instead.
+Forget an abandoned, empty registration after removing its authored
+`GOAL.md`. The command leaves repository files alone and refuses registrations
+with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
+Use installed `lf` to change installed data; development binaries use private
+branch data directories.
 
-Usage reports provider-authored counters from Run records. Missing counters
-remain unknown, and final receipts are distinguished from partial streams.
-`--days 0` includes all retained history. Subscription windows and account
-capacity belong to `identity status`, not this usage report.
-
-### Cleanup
+When a source build inherits the installed data directory from a Session, it
+reports and uses `~/.lf-dev/worktrees/<source-identity>` instead. Its first database open
+starts from a SQLite snapshot of the installed store, including committed WAL
+data. Later invocations keep branch writes; they never copy them back. Explicit
+disposable data directories still work. The snapshot does not copy Run bundles
+or account files, and does not transfer the launching Session's execution authority.
+An explicit private `LF_HOME` also selects the observation and Run destination,
+even when the Session supplied installed control paths. Child processes use
+that same data directory; re-entering it preserves its own Run context.
+`LF_HOME` is the data-directory setting, not a Home placement selector. The
+snapshot retains recorded Home IDs and placements; it does not register a new
+execution Home or move work to another machine.
 
 ```bash
-lf mon prune --dry-run
-lf mon prune
+target/debug/lf task run LOO-321       # reports the installed executable and data directory
+target/debug/lf task status LOO-321    # reads the independent branch copy
 ```
 
-Prune cleans stale receipts and eligible registered orphan process groups. It
-does not infer termination authority from a PID or kill unclaimed providers.
-Worktree cleanup is `task worktree prune`.
+When an installation exists, managed Task operations use its CLI and store from
+the start: `run`, `create --run`, `restart`, and Task review Session completion.
+Preparation, issue creation, checkpoints and worker claims happen there.
+The returned Task state comes from the installed database. Non-launching data
+commands keep using the branch copy. A Task that exists only in the branch is preserved there;
+these commands do not register it in installation. Review completion names the
+exact invocation boundary and consumes the installed Session's readiness, without
+copying branch feedback. Direct branch workers are refused while an installation
+owns execution. With no installation, the source build runs workers against its
+own branch data directory; installation is not a prerequisite for development.
+Later `target/debug/lf task status` reads still show the private branch copy.
+Follow managed execution with the installed executable and data directory reported
+by the operation; the two data copies do not synchronize.
+A private data copy does not isolate external effects such
+as provider issue deletion or shared worktree edits.
+
+`lf wave status` focuses one Wave's local
+planning and runtime projection. `lf roadmap` overlays the current
+Linear-backed plan without creating a second runtime model. `lf activity`
+orders durable Work creation, execution, Task PR, and Steer facts; it reuses
+`WorkRef` identity and does not read reconstructable Task or Project wake
+events. `lf runs --task` selects retained AgentSession input history from the
+Home's SQLite store before decoding its evidence. Each input keeps its original
+Work attribution, provider, usage and outcome across conversation continuation.
+The historical command and JSON names remain during the coordinated wire cutover.
+
+`lf runs --active` retains its command spelling and now returns live AgentSessions.
+Rows use stable Session `id`, `title`, current typed `work`, and verified `processes`;
+input replacement does not change their identity. The JSON collection is `sessions`,
+replacing `runs`. Per-input subjects, harness, model and repository metadata are
+removed from this live projection. Historical input/usage commands are unchanged.
+
+Current SQL drivers attribute exact live Exec/process receipts. Native client
+receipts resolve through retained input membership, including after driver exit.
+Retained provider PID/start evidence keeps earlier engines off a later Session in
+one Exec. A driver, endpoint or idle engine alone never proves activity. Ambiguous
+shared engines or multiple current Sessions stay explicit gaps. This observation
+has no process-control or Flow-settlement authority.
+
+On macOS, `--watch --json` emits bounded newline-delimited snapshots every two
+seconds. Each tick rereads SQL ownership, including a database outside Home;
+filesystem events only invalidate process receipts. Send `{"action":"refresh"}`
+for an immediate read or `{"action":"rescan"}` after sleep/wake. Closing stdin or
+stdout exits only this reader. Notification loss requests a full cold rescan;
+unchanged warm reads avoid enumerating retained input directories. Linux supports
+one-shot reads and reports continuous discovery as unsupported.
+
+JSON requires `discovery` (`scanning`, `ready`, `unavailable`), `home`,
+`observed_at`, optional `task`, `sessions`, and `gaps`. Empty `sessions` confirms
+no observed active conversations only when discovery is ready and gaps are empty.
+Ownership changes during projection yield Scanning; Desktop retains its last good
+frame. A replaced Home requires a fresh reader. Use one unfiltered Home observation
+for several Task views, matching typed `work`, never a checkout or subject string.
+
+The `--parent` drill resolves one exact Run and returns all direct children
+without the seven-day presentation cap. The one-Run `--final` read projects the
+last durable provider conclusion from normalized conversation events in Session
+history. Final and event reads retain their input order after import and work
+without the old artifact directory. Summary and usage reads exclude conversation
+text before loading payloads. Records
+without a phase receipt are labeled and expose streamed prose from their last
+completed provider turn. It does not parse vendor output or invent a conclusion
+for an unsettled Run.
+Replay uses the immutable prompt, agent/model, non-secret provider account ID,
+and tool boundary recorded before spawn; it never reconstructs those inputs
+from current planning or prompt configuration. Managed Claude/Codex replay
+resolves that account ID through the current Home's deterministic credential
+directory or an explicit forwarded lease; replay uses the same validated Run
+creation path as any other launch.
+None of these commands silently queries or aggregates another Home.
+
+```bash
+lf exec list --task LOO-298 --json
+lf exec list --all --search 'pr land' --outcome failed --limit 25 --json
+lf exec list --all --parent EXEC_ID --json
+lf exec show EXEC_ID --json
+```
+
+Exec history records actual `lf` processes and observed command results.
+`list` defaults to the current repository; `--all` includes every repository.
+`--task` and `--wave` select recorded agent or mechanical work, including historical
+Tasks. `--caller` selects commands issued by an AgentSession. These are distinct
+from the command's own recorded Wave context and causal parent.
+
+JSON returns `entries` and an optional `next` cursor. Pass that object as JSON to
+`--after`, retaining the same filters. The default page size is 100; zero is invalid.
+Pages sort by descending start time, then ID. Refresh from page one for new data:
+continuation does not freeze a snapshot across imports or changing outcomes.
+
+Search matches literal command text across argv elements, ignoring ASCII case;
+`%` and `_` are ordinary characters. The original stored command remains in JSON.
+Malformed historical command text remains searchable as recorded. Exact lookup
+accepts a full ID or an unambiguous prefix. An `unknown` outcome means no terminal
+observation, and says nothing about whether the process is alive. Discovery reads
+bounded command rows without loading conversation captures or transcripts.
+
+`lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
+attach `lf` processes to call records; exact ancestry attaches provider
+processes. Completed calls and launches disappear. Unclaimed providers remain
+separate because Loopflow has no exact authority to attach or signal them.
+Elapsed time never implies death.
+
+Both commands read process identity from the selected Exec ledger and ownership
+registry without migration. They do not replay command journals to reconstruct
+Execs or treat a recorded command outcome as current OS liveness. Source builds
+retain the same private-data selection as other commands.
+`lf prune` is the separate write boundary. It removes dead Exec receipts and
+reaps only OpenCode process groups whose registered owner is absent. It never
+kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
+
+```bash
+lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route
+lf --account claude=jack@ --account codex=loopflow-eng@ implement
+lf --only-account codex=manabot-eng@ review             # no fallback login
+```
+
+`--account <email-prefix>` prefers each matching managed login before its
+provider's normal route. The first preferred attempt bypasses stored health;
+a missing credential continues through the healthy fallback route.
+`--only-account` restricts the launch and its children to exactly the
+selected provider accounts. Both flags are repeatable and accept
+`claude=<selector>` or `codex=<selector>`. They cannot be combined.
+
+Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
+into a managed login with a bare `codex login` creates a second session and
+evicts the managed one ("needs re-login"); entering through lf shares one
+session.
+
+Without an account flag, managed Claude and Codex launches use the repository
+route, then the default route. If neither exists, all automatic managed logins
+are eligible and Loopflow skips known cooling or limited accounts. If no
+managed login exists, the provider CLI uses its ambient default credentials.
+
+`lf usage` reads the same Home-local Session history as `lf runs`, newest first.
+`--days` defaults to 30; zero selects all retained history. Original manifest/SQL time selects imported history; new captures use their
+event observation time. Native turns without a captured input use
+their own first observed receipt, preserving missing capture/start membership.
+`--wave`, `--project`, and `--task` select recorded ownership, including native
+turns after a bind. Earlier usage keeps its original owner. Receipts without an
+original start remain unattributed and appear in unfiltered discovery.
+
+JSON returns `SessionHistory` rows with `session_id`, optional `captured`, retained
+`artifact_key`/`caller_artifact_key` selectors, `providers`, and `usage`. A provider
+entry references its exact native thread/turn/start/completion, or older recorded
+attempt evidence beneath a captured event. `recorded_outcome`/`recorded_at` retain
+old recorder results separately from provider outcomes and actual Exec exits.
+These projections have no resumable lifecycle. Rust and Swift use the same shape;
+`RunSnapshot`, string `subjects`, and input-level `outcome`/`ended` are removed.
+
+Cumulative counters are reduced once per stream. Omitted counters stay unknown,
+final receipts and evidence gaps remain explicit. Native thread/turn correlation
+prevents counting recorder checkpoints twice. Without a retained baseline, usage
+reports the observed suffix as partial. A native completion supplies neither
+missing usage nor a command outcome.
+
+Recent `lf runs` summaries select their budget before reading history payloads,
+retaining every eligible unfinished entry. Exact Task and caller drills have no
+presentation cap. Original `run_` selectors remain valid; a Session selector
+reads its current captured event. Unknown historical SQL remains import evidence,
+not an invented conversation. Full populated-import and configured-provider
+acceptance remain cutover obligations.
+
+`lf ci` reads durable CI incidents from the local Home store. One failed head is
+one attempt; later passing and merge observations close every open attempt on
+that PR. `--wave` and `--repo owner/repo` filter the same local report.
+
+`lf doctor` also prints the binary's build provenance, the resolved database
+path, and the latest known and applied migrations. Those fields still print
+when the database is too new or came from a divergent development build.
+
+The `continuity` check reads installed cron activation and scheduled receipts.
+Only the latest due interval for each cron is live: a missing receipt names the
+cron, Home, expected interval, and `lf cron history` command. Pre-activation and
+older ledger gaps remain visible history without keeping every later doctor
+red. A failed target still proves the scheduler fired; its own receipt and
+target error remain the actionable evidence.
 
 ## Identity: accounts, capacity, and routing
 

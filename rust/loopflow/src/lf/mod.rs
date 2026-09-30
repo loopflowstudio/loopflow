@@ -695,11 +695,6 @@ pub enum FlowCommand {
     },
     /// Validate a flow and its review points
     Validate { name: String },
-    /// Open a Session to resolve a blocked decision
-    Blocked {
-        #[arg(required = true, num_args = 1..)]
-        reason: Vec<String>,
-    },
     /// Continue a saved Flow invocation
     Resume {
         invocation: String,

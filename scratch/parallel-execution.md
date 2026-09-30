@@ -22,15 +22,18 @@ SQL, selected Skills come from the captured boundary before catalog lookup,
 and Ask handles reserved Skill names. The short CLI guide remains in
 `docs/lf.md`; detailed contracts live in `docs/lf-reference.md`.
 
-Item 3 is implemented in the current pass, together with Jack Heart's requested
-rebase CI repairs. The forward draft preserves historical caller tokens and
+Item 3 is done at `974f1dfd5`, with fixture simplification at `7beb3600b`,
+together with Jack Heart's requested rebase CI repairs. Main has not moved
+since the reconciliation above; no additional rebase is needed. The forward
+draft preserves historical caller tokens and
 removes the dead column/index; Rust, Swift, fixtures and environment handling
 no longer carry them. Session/provider-generation parent resolution is retained.
 Main's command grammar remains, and shared-command checkpointing now recognizes
 checkout and inherited declarations. [Current evidence](evidence.md#caller-token-removal-and-rebase-repairs--2026-09-30)
-records the requested file suites, focused migration/ancestry proofs and any
-unexecuted installation check. Next is naming, then released-populated import
-and final docs. Naming proposals remain proposals.
+records the requested file suites and focused migration/ancestry proofs. The
+Docker installation check is unexecuted: Docker timed out after ten seconds,
+before creating a container (`.lf/tmp/cut-i/caller-install.log`). Next is naming,
+then released-populated import and final docs. Naming proposals remain proposals.
 
 Jack's current feature Flow uses implement → compress → rebase → realign →
 loop-decide per item, with focused checks and hosted CI. Full local Rust coverage
@@ -51,18 +54,23 @@ This realign checkpoint is authorized to commit, publish and stop.
 - The [evidence ledger](evidence.md) retains earlier full-matrix results,
   counterexamples and repairs. Old runtime-child tests are historical receipts,
   not proof that child FlowSessions should return.
+- Item 3's source/materialized migration and parent-handoff proofs pass, as do
+  18 Swift DTO checks. Compression retains 13 focused Flow/Task passes and
+  all-target Clippy with warnings denied. Real Codex used synthetic local
+  Responses; no configured account or installation acceptance follows.
 - Configured providers/Desktop, complete released-populated public/canonical
   import, dense cold/warm measurements, Chapter preservation, cancellation with
   live work and real-Home conversion remain governed by the remaining matrix.
   Branch binaries must not touch the installed Home.
 
-The realignment changes plans, reference prose and Infrastructure memory only.
-The contract now matches child Exec ownership for mechanical steps. Memory
-records Jack's prospective-bind and structured-Blocked decisions and current
-verification cadence; `questions.md` is unchanged. No new behavioral test was
-needed: code and schema are unchanged from the reconciled checkpoint. Fresh
-architecture coverage, portable-HTML consistency (one test), formatting and diff
-checks pass. All-target Clippy is reused from the unchanged rebase source.
+This realignment changes the remaining plan, this handoff and Infrastructure
+memory only; `questions.md` stays intact. Memory now retains the shared binding
+reader's checkpoint rule and the distinction between causal parent resolution
+and selected-turn authority. Code and schema are unchanged from `7beb3600b`,
+so its focused proofs and all-target Clippy apply without a behavioral rerun.
+Diff whitespace validation passes. No new full suite or hosted result is claimed.
+Naming proposals, released-populated
+import and final documentation remain the next implementation work, in that order.
 
 ## Working boundaries
 

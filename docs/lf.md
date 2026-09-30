@@ -590,16 +590,16 @@ A candidate decision takes effect only after its selected native turn succeeds. 
 operation's effects before choosing `--retry`, since an interrupted operation
 may already have changed external state.
 
-An invocation keeps its definition, cursor, return counts and runtime children
+An invocation keeps its definition, cursor and return counts
 in the current Home's SQLite store. Continuation uses those captured facts even
 if source definitions disappear. Completion grants no implicit merge or
 Task-completion authority. Before launch the Task page shows its Flow template;
 after launch it shows the expanded invocation.
 
-Composed templates expand before execution. Taking an Iterate edge starts a
-child FlowSession for that pass. Retry keeps that child; another Iterate starts
-the next pass. Resuming the root follows its current child, including a pending
-review. Membership names a node and iteration tuple in the
+Composed templates compile before execution. Taking an Iterate edge moves the
+cursor and increments its return counter in the same FlowSession. Retry retains
+the pass; resume retains the selected boundary, including a pending review.
+Membership names a node and iteration tuple in the
 captured graph; an independent conversation about the same Task does not become
 a Flow step. Graph keys, current/completed nodes, return edges and Session
 membership use captured numeric node IDs, local to that FlowSession. Authored
@@ -738,7 +738,6 @@ Tmux remains process containment, not product identity or advancement authority.
 ```bash
 lf flow list --sessions --json --limit 100
 lf flow list --sessions --for-task INF-123 --managed true --json
-lf flow list --sessions --parent FLOW_SESSION --json
 lf flow show --sessions --json FLOW_SESSION
 ```
 
@@ -746,8 +745,8 @@ List saved progress without starting work. `--after` accepts the previous page's
 `next` ID with the same filters. `--all` includes other repositories and unknown
 historical repository evidence. `--state` selects current, completed or replaced
 records; `--search` matches a literal name or identity. Detail reads the captured
-graph even if its template or checkout is gone. A runtime child's parent differs
-from the root FlowSession selected by its Task.
+graph even if its template or checkout is gone. Loop passes share that graph and
+FlowSession; their node and iteration positions distinguish their history.
 
 `lf flow list --json` and `lf flow show TEMPLATE` still inspect reusable templates.
 

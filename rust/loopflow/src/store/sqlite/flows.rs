@@ -2,9 +2,8 @@
 //! by `position_version` for the cursor and `claim_json` for the Task worker.
 //! Navigation belongs to the selected native turn's caller Exec; mechanical
 //! results belong to Flow history. AgentSession owns launch publication and
-//! provider outcomes. A Task selects one root through `tasks.current_invocation_id`;
-//! its active runtime child carries the worker claim. Waiting parents cannot
-//! execute, and successful child return settles in the same transaction.
+//! provider outcomes. A Task selects one Flow through `tasks.current_invocation_id`.
+//! Loop passes advance its cursor and return counters under the same claim.
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
@@ -25,9 +24,8 @@ use super::SqliteStore;
 
 /// The invocation a Task points at: the one its worker advances. Every other
 /// invocation naming the Task is a Flow about it. `?1` is the Task id.
-pub(super) const TASK_INVOCATION: &str = "id IN (SELECT m.flow_id FROM managed_flows m
-    JOIN flow_sessions active ON active.id=m.flow_id
-    WHERE m.task_id=?1 AND active.state='current')";
+pub(super) const TASK_INVOCATION: &str =
+    "id IN (SELECT current_invocation_id FROM tasks WHERE id=?1) AND state='current'";
 
 const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index, f.iteration,
     f.updated_at, f.position_version, f.task_id, f.wave_id, COALESCE(f.cwd, t.worktree),
@@ -39,7 +37,7 @@ const FLOW_SELECT: &str = "SELECT f.invocation_json, f.review_json, f.step_index
             AND done.kind='completed' WHERE start.seq=f.selected_start),
     f.pending_session_id,
     (SELECT ready_summary FROM agent_sessions WHERE id=f.pending_session_id),
-    f.worker_generation, f.claim_json, f.failure_json, f.state, f.parent_id, (SELECT receipt_key FROM session_events WHERE seq=f.current_capture)
+    f.worker_generation, f.claim_json, f.failure_json, f.state, (SELECT receipt_key FROM session_events WHERE seq=f.current_capture)
     FROM flow_sessions f LEFT JOIN tasks t ON t.id=f.task_id";
 
 // Keep the expression identical to index_session_metadata. SQLite reads the
@@ -142,7 +140,6 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
             ))
         })?;
         Ok(FlowSession {
-            parent_id: row.get(20)?,
             cursor,
             version: u64::try_from(version).map_err(invalid)?,
             task_id: task_id
@@ -160,7 +157,7 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
                 .map(|captured| {
                     Ok::<_, StoreError>(FlowAttempt {
                         captured,
-                        run_id: row.get(21)?,
+                        run_id: row.get(20)?,
                         published: published.unwrap_or(false),
                         outcome,
                     })
@@ -229,11 +226,7 @@ pub(super) fn task_flow_in(
     task_id: &TaskId,
 ) -> StoreResult<Option<FlowSession>> {
     conn.query_row(
-        &format!(
-            "{FLOW_SELECT} WHERE f.{TASK_INVOCATION}
-            AND NOT EXISTS(SELECT 1 FROM flow_sessions child
-                WHERE child.parent_id=f.id AND child.state='current')"
-        ),
+        &format!("{FLOW_SELECT} WHERE f.{TASK_INVOCATION}"),
         [task_id.as_str()],
         read_flow,
     )
@@ -256,36 +249,7 @@ fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowSession> {
             "Flow {id} is already finished"
         )));
     }
-    if active_child_in(conn, id)?.is_some() {
-        return Err(StoreError::InvalidAuthority(format!(
-            "Flow {id} is waiting for its runtime child"
-        )));
-    }
     Ok(flow)
-}
-
-fn active_child_in(conn: &Connection, id: &str) -> StoreResult<Option<String>> {
-    Ok(conn
-        .query_row(
-            "SELECT id FROM flow_sessions WHERE parent_id=?1 AND state='current'",
-            [id],
-            |row| row.get(0),
-        )
-        .optional()?)
-}
-
-fn root_in(conn: &Connection, id: &str) -> StoreResult<String> {
-    conn.query_row(
-        "WITH RECURSIVE ancestors(id,parent_id) AS (
-            SELECT id,parent_id FROM flow_sessions WHERE id=?1
-            UNION ALL
-            SELECT f.id,f.parent_id FROM flow_sessions f JOIN ancestors a ON f.id=a.parent_id
-        ) SELECT id FROM ancestors WHERE parent_id IS NULL",
-        [id],
-        |row| row.get(0),
-    )
-    .optional()?
-    .ok_or(StoreError::NotFound)
 }
 
 /// A Task's own Flow reports its progress, failures and completion to the Task.
@@ -293,7 +257,7 @@ fn report_to_task_in(conn: &Connection, id: &str, kind: &TaskEventKind) -> Store
     let task: Option<String> = conn
         .query_row(
             "SELECT id FROM tasks WHERE current_invocation_id=?1",
-            [root_in(conn, id)?],
+            [id],
             |row| row.get(0),
         )
         .optional()?;
@@ -334,9 +298,9 @@ pub(super) fn insert_flow_in(
     conn.execute(
         "INSERT INTO flow_sessions(id, task_id, wave_id, cwd, message, model, invocation_json,
             step_index, iteration, position_version, worker_generation, failure_json,
-            updated_at, review_json, state, parent_id, unbound_repo)
+            updated_at, review_json, state, unbound_repo)
          VALUES(?1,?2,COALESCE(?3,(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id
-            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13,COALESCE(?14,(SELECT unbound_repo FROM flow_sessions WHERE id=?13)))
+            WHERE t.id=?2)),CASE WHEN ?2 IS NULL THEN ?4 END,?5,?6,?7,?8,?9,1,0,?10,?11,?12,'current',?13)
          ON CONFLICT(id) DO NOTHING",
         params![
             flow.invocation.id,
@@ -354,7 +318,6 @@ pub(super) fn insert_flow_in(
                 .transpose()?,
             flow.updated_at.unix_timestamp(),
             serde_json::to_string(&flow.cursor)?,
-            flow.parent_id,
             unbound_repo,
         ],
     )?;
@@ -481,11 +444,6 @@ fn end_flow_in(
     summary: &str,
 ) -> StoreResult<()> {
     let flow = current_flow_in(tx, id)?;
-    if flow.parent_id.is_some() {
-        return Err(StoreError::InvalidAuthority(
-            "a runtime pass completes by returning to its waiting parent".into(),
-        ));
-    }
     if flow.version != version || flow.claim.as_ref() != claim {
         return Err(stale(id));
     }
@@ -715,46 +673,14 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
     current_flow_in(tx, &id)
 }
 
-/// The child owns each repeated pass. Returning and entering the next pass are
-/// in the same transaction as consumption of the selected successful result.
+/// Persist the next position in the same Flow and consume its selected result.
 fn checkpoint_in(
     tx: &Transaction<'_>,
     saved: FlowSession,
     next: &ExecutionCursor,
-    repeated: bool,
     claim: Option<&TaskWorkerClaim>,
     progress: Option<&str>,
 ) -> StoreResult<FlowSession> {
-    if let Some(parent_id) = &saved.parent_id {
-        let parent = flow_in(tx, parent_id)?.ok_or(StoreError::NotFound)?;
-        if saved.cursor.node_key() == parent.cursor.node_key()
-            && position_of(&saved.cursor) != position_of(next)
-        {
-            // The exact child still selected by this waiting parent has
-            // successfully reached the decision that created its pass.
-            if active_child_in(tx, parent_id)?.as_deref() != Some(saved.id()) {
-                return Err(stale(saved.id()));
-            }
-            write_cursor_in(
-                tx,
-                (saved.id(), saved.version),
-                next,
-                None,
-                true,
-                claim,
-                true,
-            )?;
-            tx.execute(
-                "UPDATE flow_sessions SET state='completed',ended_at=?2 WHERE id=?1",
-                params![saved.id(), now_unix()],
-            )?;
-            tx.execute(
-                "UPDATE flow_sessions SET claim_json=?2 WHERE id=?1",
-                params![parent_id, claim.map(serde_json::to_string).transpose()?],
-            )?;
-            return checkpoint_in(tx, parent, next, repeated, claim, progress);
-        }
-    }
     if let Some(summary) = progress.filter(|summary| !summary.trim().is_empty()) {
         report_to_task_in(
             tx,
@@ -763,48 +689,6 @@ fn checkpoint_in(
                 summary: summary.into(),
             },
         )?;
-    }
-    if repeated {
-        let mut waiting = saved.cursor.clone();
-        clear_candidate(&mut waiting);
-        write_cursor_in(
-            tx,
-            (saved.id(), saved.version),
-            &waiting,
-            None,
-            true,
-            claim,
-            true,
-        )?;
-        let child = FlowSession {
-            parent_id: Some(saved.id().to_owned()),
-            invocation: QueuedInvocation::new(
-                &saved.invocation.flow,
-                saved.invocation.steps.clone(),
-            )
-            .map_err(invalid)?,
-            cursor: next.clone(),
-            version: 0,
-            current_attempt: None,
-            pending_session_id: None,
-            ready_summary: None,
-            claim: None,
-            failure: None,
-            finished: false,
-            updated_at: OffsetDateTime::now_utc(),
-            ..saved
-        };
-        insert_flow_in(tx, &child, None)?;
-        let child_claim = claim.filter(|_| !child.is_human());
-        tx.execute(
-            "UPDATE flow_sessions SET claim_json=?2,worker_generation=?3 WHERE id=?1",
-            params![
-                child.id(),
-                child_claim.map(serde_json::to_string).transpose()?,
-                i64::try_from(child.worker_generation).map_err(invalid)?
-            ],
-        )?;
-        return current_flow_in(tx, child.id());
     }
     let moved = position_of(&saved.cursor) != position_of(next);
     let parks = FlowSession {
@@ -982,13 +866,7 @@ impl SqliteStore {
     }
 
     pub fn create_flow(&self, flow: &FlowSession) -> StoreResult<FlowSession> {
-        if flow.parent_id.is_some() {
-            return Err(StoreError::InvalidAuthority(
-                "a runtime child is created by its parent's Iterate settlement".into(),
-            ));
-        }
-        // Observe new launch placement before taking SQLite's writer lock.
-        // Import and runtime children retain their original evidence instead.
+        // Observe new placement before taking SQLite's writer lock.
         let repo = if flow.task_id.is_none() && flow.wave_id.is_none() {
             match crate::repo::discover_repo_root(&flow.cwd).and_then(|root| {
                 root.map(|root| {
@@ -1022,9 +900,9 @@ impl SqliteStore {
         task_id: &TaskId,
         flow: &FlowSession,
     ) -> StoreResult<FlowSession> {
-        if flow.task_id.as_ref() != Some(task_id) || flow.parent_id.is_some() {
+        if flow.task_id.as_ref() != Some(task_id) {
             return Err(StoreError::InvalidAuthority(
-                "the managed Flow must be a root belonging to this Task".to_string(),
+                "the managed Flow must belong to this Task".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1057,21 +935,6 @@ impl SqliteStore {
         let stored = task_flow_in(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(stored)
-    }
-
-    /// The original managed identity also owns the lock for every runtime pass.
-    pub(crate) fn flow_root(&self, id: &str) -> StoreResult<String> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        root_in(&conn, id)
-    }
-
-    pub(crate) fn active_flow(&self, id: &str) -> StoreResult<FlowSession> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut id = root_in(&conn, id)?;
-        while let Some(child) = active_child_in(&conn, &id)? {
-            id = child;
-        }
-        flow_in(&conn, &id)?.ok_or(StoreError::NotFound)
     }
 
     pub fn flow(&self, id: &str) -> StoreResult<Option<FlowSession>> {
@@ -1623,17 +1486,7 @@ impl SqliteStore {
         if moved {
             consume_selected_in(&tx, &saved)?;
         }
-        let repeated = moved
-            && saved
-                .cursor
-                .leaf()
-                .progress
-                .verdict
-                .as_ref()
-                .is_some_and(|verdict| {
-                    verdict.decision == crate::engine::transitions::FlowDecision::Iterate
-                });
-        let saved = checkpoint_in(&tx, saved, &next, repeated, claim, progress)?;
+        let saved = checkpoint_in(&tx, saved, &next, claim, progress)?;
         tx.commit()?;
         Ok(saved)
     }
@@ -2078,7 +1931,6 @@ mod tests {
     fn launched(store: &SqliteStore, steps: Vec<ConcreteStep>, index: usize) -> FlowSession {
         store
             .create_flow(&FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::new("proof", steps).unwrap(),
                 cursor: ExecutionCursor {
                     index,
@@ -2524,7 +2376,6 @@ mod tests {
         ];
         let flow = store
             .create_flow(&FlowSession {
-                parent_id: None,
                 invocation: QueuedInvocation::new("proof", steps.clone()).unwrap(),
                 cursor: ExecutionCursor {
                     index: 1,
@@ -2620,9 +2471,9 @@ mod tests {
             .checkpoint_flow(&id, settled.version, &next, None, None)
             .unwrap();
         let version = moved.version;
-        assert_eq!(moved.parent_id.as_deref(), Some(id.as_str()));
+        assert_eq!(moved.id(), id);
         assert_eq!(moved.cursor, next);
-        assert_eq!(store.flow(&id).unwrap().unwrap().cursor.index, 1);
+        assert_eq!(store.flow(&id).unwrap().unwrap().cursor.index, 0);
         assert!(
             moved.current_attempt.is_none(),
             "a new position has no attempt"
@@ -2854,7 +2705,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_loop_children_preserve_retry_and_settle_the_exact_pass_once() {
+    fn loop_positions_preserve_retry_and_settle_the_exact_pass_once() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -2868,7 +2719,7 @@ mod tests {
             1,
         );
         let child = successful_boundary(&store, &root, Some(FlowDecision::Iterate));
-        assert_eq!(child.parent_id.as_deref(), Some(root.id()));
+        assert_eq!(child.id(), root.id());
         assert_eq!((child.cursor.index, child.cursor.iteration), (0, 1));
         assert_eq!((child.task_id.clone(), child.wave_id.clone()), (None, None));
         assert!(store
@@ -2884,19 +2735,17 @@ mod tests {
         assert!(blocked.failure.is_some());
         drop(store);
 
-        // Restarting the driver changes neither the child nor its waiting parent.
+        // Restarting the driver preserves the same Flow and pass.
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        assert_eq!(store.active_flow(root.id()).unwrap().id(), child.id());
+        assert_eq!(store.flow(root.id()).unwrap().unwrap().id(), child.id());
         let retry = store.retry_flow(child.id(), None).unwrap();
         assert_eq!(retry.id(), child.id());
         let interrupted = store.release_flow(retry.id(), retry.version, None).unwrap();
         assert_eq!(interrupted.id(), child.id());
         let decision = successful_boundary(&store, &interrupted, None);
         let sibling = successful_boundary(&store, &decision, Some(FlowDecision::Iterate));
-        assert_ne!(sibling.id(), child.id());
-        assert_eq!(sibling.parent_id.as_deref(), Some(root.id()));
+        assert_eq!(sibling.id(), child.id());
         assert_eq!(sibling.cursor.iteration, 2);
-        assert!(store.flow(child.id()).unwrap().unwrap().finished);
         assert!(!store.flow(root.id()).unwrap().unwrap().finished);
         assert!(store
             .checkpoint_flow(decision.id(), decision.version, &sibling.cursor, None, None)
@@ -2916,7 +2765,7 @@ mod tests {
             store
                 .checkpoint_flow(saved.id(), saved.version, &next, None, None)
                 .is_err(),
-            "no parent continuation before exact success"
+            "no continuation before exact success"
         );
         store.test_finish_flow_turn(&actor, "completed");
         let returned = store
@@ -2924,7 +2773,6 @@ mod tests {
             .unwrap();
         assert_eq!(returned.id(), root.id());
         assert_eq!((returned.cursor.index, returned.cursor.iteration), (2, 2));
-        assert!(store.flow(sibling.id()).unwrap().unwrap().finished);
         assert!(store
             .checkpoint_flow(saved.id(), saved.version, &next, None, None)
             .is_err());
@@ -2943,11 +2791,11 @@ mod tests {
         store
             .end_flow(finished.id(), finished.version, None, "done")
             .unwrap();
-        assert!(store.active_flow(root.id()).unwrap().finished);
+        assert!(store.flow(root.id()).unwrap().unwrap().finished);
     }
 
     #[test]
-    fn overlapping_runtime_passes_return_to_their_own_parent() {
+    fn overlapping_loops_retain_each_return_counter() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let root = launched(
@@ -2964,8 +2812,7 @@ mod tests {
         let outer = successful_boundary(&store, &root, Some(FlowDecision::Iterate));
         let at_inner = successful_boundary(&store, &outer, None);
         let inner = successful_boundary(&store, &at_inner, Some(FlowDecision::Iterate));
-        assert_eq!(inner.parent_id.as_deref(), Some(outer.id()));
-        assert_eq!(store.flow_root(inner.id()).unwrap(), root.id());
+        assert_eq!(inner.id(), root.id());
         let inner = successful_boundary(&store, &inner, None);
         let inner = successful_boundary(&store, &inner, None);
         let outer_return = successful_boundary(&store, &inner, Some(FlowDecision::Advance));

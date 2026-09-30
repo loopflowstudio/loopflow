@@ -94,7 +94,6 @@ fn execute(
         .enable_all()
         .build()?;
     let flow = FlowSession {
-        parent_id: None,
         invocation: QueuedInvocation::new(flow_name, items.to_vec())?,
         cursor: ExecutionCursor::default(),
         version: 0,
@@ -156,11 +155,6 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
             let flow = runtime
                 .block_on(store.flow(id))?
                 .ok_or_else(|| anyhow!("Flow {id} has no invocation row"))?;
-            let flow = if flow.finished {
-                flow
-            } else {
-                store.sqlite.active_flow(id)?
-            };
             let id = flow.id().to_owned();
             let id = id.as_str();
             if let Some(task_id) = &flow.task_id {
@@ -191,7 +185,7 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                 flow
             };
             let flow = if *retry && flow.failure.is_some() {
-                let _driver = flow_run::driver_lock(&store.sqlite.flow_root(id)?)?;
+                let _driver = flow_run::driver_lock(id)?;
                 runtime.block_on(store.retry_flow(id, None))?
             } else {
                 flow
@@ -251,7 +245,7 @@ pub(crate) async fn prepare_native_retry(
     if store.sqlite.pending_flow_conversation(flow.id())?.is_none() {
         return Ok(flow);
     }
-    let _driver = flow_run::driver_lock(&store.sqlite.flow_root(flow.id())?)?;
+    let _driver = flow_run::driver_lock(flow.id())?;
     let saved = store
         .flow(flow.id())
         .await?
@@ -425,20 +419,18 @@ async fn drive_loop(
     claim: Option<TaskWorkerClaim>,
     launcher: &Cli,
 ) -> Result<FlowOutcome> {
-    let root = store.sqlite.flow_root(flow.id())?;
-    let _driver = flow_run::driver_lock(&root)?;
+    let id = flow.id().to_owned();
+    let _driver = flow_run::driver_lock(&id)?;
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.invocation.flow);
     let mut owned_claim = claim;
     loop {
-        let selected = store.sqlite.active_flow(&root)?;
-        let id = selected.id().to_owned();
         let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;
         if flow.finished {
             return Ok(FlowOutcome::Completed);
         }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
-                "Flow {id} is blocked: {}; resume with `lf flow resume {root} --retry`",
+                "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
                 failure.reason
             );
         }
@@ -680,7 +672,7 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         let flow = self.begin().await?;
         if skill.human {
             // Reaching review releases the claim. The Task's selected Flow,
-            // including its active runtime pass, still owns review preparation.
+            // still owns review preparation.
             let managed_task = match &flow.task_id {
                 Some(task_id)
                     if self

@@ -2468,11 +2468,7 @@ async fn stop_task_worker(
             .await
             .map_err(|error| task_error(error.to_string()))?;
         let replaced = if let Some(current) = &current {
-            store.sqlite.flow_root(current.id()).map_err(task_error)?
-                != store
-                    .sqlite
-                    .flow_root(&claim.invocation_id)
-                    .map_err(task_error)?
+            current.id() != claim.invocation_id
                 || current.claim.as_ref().is_some_and(|active| active != claim)
         } else {
             false
@@ -5340,7 +5336,7 @@ mod tests {
                 &fixture.task.id,
                 crate::durable::FlowSession {
                     task_id: Some(fixture.task.id.clone()),
-                    parent_id: None,
+
                     wave_id: Some(fixture.task.wave_id.clone()),
                     cwd: fixture.task.worktree.clone(),
                     message: None,
@@ -5929,7 +5925,6 @@ mod tests {
             .start_task_flow(
                 &task.id,
                 crate::durable::FlowSession {
-                    parent_id: None,
                     invocation: crate::durable::test_flow_invocation(
                         "task-design",
                         1,

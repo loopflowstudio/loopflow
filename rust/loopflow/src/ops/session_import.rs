@@ -155,7 +155,6 @@ impl FlowFile {
             None => (None, None),
         };
         FlowSession {
-            parent_id: None,
             invocation: QueuedInvocation {
                 id: self.id.clone(),
                 flow: self.flow.clone(),
@@ -916,7 +915,6 @@ mod numeric_node_tests {
             skill(),
         ];
         let flow = FlowSession {
-            parent_id: None,
             invocation: QueuedInvocation::new("historical", steps).unwrap(),
             cursor: Default::default(),
             version: 0,

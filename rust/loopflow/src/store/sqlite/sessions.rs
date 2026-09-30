@@ -162,7 +162,7 @@ fn summary_query(page: &str) -> String {
             WHERE f.id IN (SELECT flow_session_id FROM page))
         SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
         w.name,t.issue_identifier,
-        EXISTS(SELECT 1 FROM managed_flows m WHERE m.task_id=t.id AND m.flow_id=s.flow_session_id),h.id,h.route,
+        COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
@@ -170,7 +170,7 @@ fn summary_query(page: &str) -> String {
         LEFT JOIN flows f ON f.id=s.flow_session_id
         LEFT JOIN waves w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        LEFT JOIN work_placements p ON p.task_id=t.id AND EXISTS(SELECT 1 FROM managed_flows m WHERE m.task_id=t.id AND m.flow_id=s.flow_session_id)
+        LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
         ORDER BY s.title,s.id", super::flows::FLOW_METADATA_COLUMNS)
 }
@@ -942,7 +942,7 @@ impl SqliteStore {
         conn.query_row(
             "SELECT json_extract(invocation_json,'$.flow'), review_json FROM flow_sessions
              WHERE pending_session_id=?1 AND state='current'
-             AND NOT EXISTS(SELECT 1 FROM managed_flows WHERE flow_id=flow_sessions.id)",
+             AND NOT EXISTS(SELECT 1 FROM tasks WHERE current_invocation_id=flow_sessions.id)",
             [session_id],
             |row| Ok((row.get(0)?, row.get::<_, String>(1)?)),
         )
@@ -962,8 +962,8 @@ impl SqliteStore {
         if conn.execute(
             "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
              AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
-             AND NOT EXISTS(SELECT 1 FROM managed_flows m WHERE m.task_id=agent_sessions.task_id
-                 AND m.flow_id=agent_sessions.flow_session_id)",
+             AND NOT EXISTS(SELECT 1 FROM tasks m WHERE m.id=agent_sessions.task_id
+                 AND m.current_invocation_id=agent_sessions.flow_session_id)",
             params![id, expected_capture, crate::store::rows::now_unix()],
         )? != 1
         {

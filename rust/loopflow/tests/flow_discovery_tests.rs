@@ -58,7 +58,6 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         .unwrap();
     let flow = store
         .create_flow(FlowSession {
-            parent_id: None,
             invocation: QueuedInvocation::new(
                 "no-template",
                 vec![ConcreteStep::Skill(ConcreteSkill {

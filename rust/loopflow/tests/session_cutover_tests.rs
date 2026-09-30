@@ -1065,7 +1065,6 @@ fn declared_agent_can_start_another_tasks_flow() {
         .start_task_flow(
             &target.task.id,
             &loopflow::durable::FlowSession {
-                parent_id: None,
                 invocation: loopflow::engine::invocation::QueuedInvocation::load(
                     &y,
                     "switch-proof",
@@ -2947,7 +2946,6 @@ fn import_stores_each_old_session_once_with_its_name() {
             .start_task_flow(
                 &task.task.id,
                 FlowSession {
-                    parent_id: None,
                     invocation: QueuedInvocation::new("captured", vec![review]).unwrap(),
                     cursor: ExecutionCursor::default(),
                     version: 0,
@@ -4065,29 +4063,18 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         String::from_utf8_lossy(&output.stderr)
     );
     let conn = fixture.db();
-    let flows = conn
-        .prepare("SELECT id,parent_id,state,task_id FROM flow_sessions ORDER BY parent_id,id")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
+    let (root, state, iteration, count): (String, String, i64, i64) = conn
+        .query_row(
+            "SELECT id,state,iteration,(SELECT count(*) FROM flow_sessions) FROM flow_sessions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
         .unwrap();
-    assert_eq!(flows.len(), 3);
-    let root = &flows[0].0;
-    assert!(flows[0].1.is_none());
-    assert!(flows[1..]
-        .iter()
-        .all(|(_, parent, _, _)| parent.as_ref() == Some(root)));
-    assert!(flows
-        .iter()
-        .all(|(_, _, state, task)| state == "completed" && task.is_none()));
+    assert_eq!((state.as_str(), iteration, count), ("completed", 2, 1));
+    let positions: i64 = conn.query_row(
+        "SELECT count(DISTINCT iterations) FROM flow_events WHERE kind='consumed' AND flow_id=?1",
+        [&root], |row| row.get(0)).unwrap();
+    assert_eq!(positions, 3);
     assert_eq!(
         conn.query_row(
             "SELECT count(*) FROM flow_events WHERE kind='consumed'",
@@ -4099,7 +4086,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
     );
     assert_eq!(fixture.launches().len(), 6);
     assert_eq!(fixture.retired_run_tables(), 0);
-    assert!(fixture.run(&["flow", "resume", root]).status.success());
+    assert!(fixture.run(&["flow", "resume", &root]).status.success());
     assert_eq!(
         fixture.launches().len(),
         6,

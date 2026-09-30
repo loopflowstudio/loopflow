@@ -56,13 +56,17 @@ stable ordering rather than usage rankings.
 | `home`, `ssh`, `install` | Inspect placement, reach another Home, and install releases |
 | `release`, `ci`, `cron` | Release software, inspect CI, and schedule work |
 
-## Omit an unambiguous owner
+## Address delivery by checkout or Task
 
 ```bash
-lf pr land                          # canonical path
-lf land                             # omit pr
-lf help land                        # explain the canonical operation
+lf pr land                          # operate in this checkout
+lf task pr DES-123 land             # select the Task's checkout by issue ID
+lf task sync DES-123 --plan         # inspect integration for that Task
 ```
+
+Task actions reuse the PR and sync commands, including their flags. Use
+`lf help pr land` for landing options or `lf task status DES-123` for the
+Task's outcome and execution state.
 
 An exact command wins first. Otherwise, Loopflow searches beneath the owner
 already entered. One match expands to its full path. Multiple matches print
@@ -450,10 +454,97 @@ lf task delete DES-123
 ```
 
 Complete planning work directly, or complete a placed Task after its delivery
-obligations settle. Delete removes the connected issue and reconciles the local
-record; it preserves authored files and retained history. Deleting unfinished
-work does not record success. If an operation partially succeeds, its error
+obligations settle. Delete cancels unfinished placed work and removes its PRs
+and branches before trashing the issue. Completed work keeps its successful
+outcome and uses completion cleanup. Both retain delivery history. If an operation partially succeeds, its error
 identifies the retained state and the command to retry.
+
+### Cancel work and sweep old chapters
+
+```bash
+lf task abandon DES-123              # cancel Linear and the Task, close PRs, delete branches
+lf task abandon jack/old-feature     # resolve retained Task identity by branch
+lf task abandon                     # Task in this checkout
+lf task sweep --json                # preview open issues outside current chapters
+lf task sweep --apply               # cancel eligible issues; print exclusions and failures
+lf pr abandon jack/old-feature      # close this PR and delete its checkout; retain Task outcome
+lf wt delete jack/old-feature       # delete checkout and local/remote branches; retain PR/Task
+```
+
+Cancellation retains issue, Task, PR and Run history. It refuses completed work
+and live or unresolved worker ownership. Interrupt the Task and wait for its
+worker to exit first. Pending cancellation prevents new worker claims; retry the
+cancellation after a provider failure. A dirty checkout requires explicit `--force`. Retry the
+same issue ID or full branch after a partial failure, including when the checkout
+or remote branch is already absent. Lower commands state that the Task remains
+open; they never equate a closed PR with an abandoned Task.
+
+Sweep reads every linked Wave's Initiative, including archived Projects, and
+compares issue membership with that Wave's current chapter. Current-chapter and
+terminal issues are excluded. Worker claims, open PRs, unreconciled merges,
+dirty checkouts and unavailable evidence are reported without canceling those
+Tasks. Preview and apply check retained unmerged PRs even after local abandonment.
+Apply rechecks ownership and chapter membership, uses Task abandonment,
+and reports each outcome. A partial cancellation exits with an error and its
+retry command. A preview is not evidence of applied cleanup.
+
+### Lifecycle action inventory
+
+`task pr ISSUE ACTION` selects the Task's checkout and passes the action and
+flags to the existing PR command. `task sync ISSUE` does the same for sync.
+Neither needs a prior `cd`. These use the selected installation for managed
+operations; a source checkout cannot transfer private Task identity implicitly.
+
+| Need | Task action | Composition and owned records |
+|---|---|---|
+| File | `task create` | Linear issue; local planning snapshot |
+| Allocate or recover checkout | `task checkout ISSUE` | Store Task/PR identity + local checkout/branch |
+| Start or resume | `task run ISSUE` | Checkout + saved Flow + worker |
+| Pause | `task interrupt ISSUE` | Interrupt current provider turn; retain saved cursor |
+| Replace workflow | `task restart ISSUE --flow FLOW` | Checkpoint + stop worker + replace Flow + start |
+| Hand off direction | `task comment ISSUE --steer TEXT` | Linear direction + durable steer; does not launch work |
+| Split dependent work | `task create --run --stack-on ISSUE` | New issue, Task, checkout and PR based on parent |
+| Sync with main/parent | `task sync ISSUE` | Existing integration operation in Task checkout |
+| Publish | `task pr ISSUE publish` | Commit/push + GitHub ready PR + Task PR linkage |
+| Open review | `task pr ISSUE open` | Push + draft PR + browser; ready PR stays ready |
+| Submit | `task pr ISSUE submit` | Prepare + user merge request; no automatic merge |
+| Arm | `task pr ISSUE arm` | Prepare + head-specific auto-merge request |
+| Land | `task pr ISSUE land` | Arm + watch/repair + record authoritative merge; keep Task open |
+| Land and complete | `task pr ISSUE land -c` | Land + store Done + Linear completed + cleanup after worker settlement |
+| Record success | `task complete ISSUE --summary TEXT` | Complete settled delivery + cleanup; retry incomplete cleanup by issue ID |
+| Continue serial delivery | `task pr ISSUE next [SLUG]` | Retain prior PR + rotate to next branch, carry follow-up |
+| Cancel | `task abandon ISSUE` | Linear canceled + store abandoned + PR abandonment + checkout deletion |
+| Delete issue | `task delete ISSUE` | Cancel unfinished placed work or clean completed delivery, then Linear trash; retain history |
+| Recover interrupted execution | `task run ISSUE --reason TEXT` | Retry saved boundary after correcting the blocker |
+| Delete checkout | `wt delete BRANCH` | Remote branch + local checkout/branch; retain PR and Task outcomes |
+
+`pr abandon BRANCH` owns closing GitHub and settling its Task PR record, then
+uses the same checkout deletion as `wt delete`. `wt remove` and `wt rm` are
+removed. Prune remains a separate selection policy for eligible clean checkouts.
+`pr land` removes a merged standalone PR's checkout and branches. Task landing
+keeps the Task open and explicitly retains its checkout for the saved Flow or
+next PR; `-c` also completes the Task and cleans up. A running Task worker keeps
+its checkout until its provider stops and its exact claim settles. Cleanup never
+forces dirty files or branch tips beyond the merged head. The primary checkout
+is retained and reported.
+
+`task complete ISSUE --summary "Retry cleanup"` retries partial cleanup without
+reopening the outcome or duplicating completion. Empty successors retain their
+branch identity as abandoned PR history so cleanup can retry after a crash.
+`task delete ISSUE` composes cancellation for unfinished placed Tasks, cleanup
+for completed Tasks, and issue trash. A live or unresolved worker blocks deletion.
+Planning-only deletion allocates no checkout. Provider trash confirmation and
+Task/PR/Run history survive retries.
+
+Recovery restores missing placement (`task checkout ISSUE`), resumes saved
+execution (`task run ISSUE --reason TEXT`), or retries the failed lifecycle
+command. It does not reopen a terminal outcome or undelete a Linear issue.
+
+| Lower layer | Actions | Owned effects |
+|---|---|---|
+| PR | `publish`, `open`, `submit`, `arm`, `land`, `abandon`, `next` | GitHub lifecycle and retained Task PR record; land/abandon use checkout deletion |
+| Worktree | `wt create`, `wt delete` | Local checkout/branch; delete also removes the remote branch |
+| Integration | `sync`, `task sync ISSUE` | Integrate main or the recorded stack parent; preserve Task and PR outcomes |
 
 ### Read and edit another Task's files
 
@@ -482,7 +573,7 @@ lf wt create parser --plan
 lf wt switch parser
 lf wt list
 lf wt prune --dry-run
-lf wt remove parser
+lf wt delete parser
 ```
 
 Create a worktree for ordinary local work, or use `task checkout ISSUE` for a
@@ -499,8 +590,8 @@ separate destructive choice.
 ```bash
 lf commit -m "Fix keyboard navigation in dialogs"
 lf commit --no-add                  # commit only the existing index
-lf sync --plan                    # inspect the integration strategy
-lf sync                           # integrate and publish the branch with a lease
+lf sync --plan                      # inspect the integration strategy
+lf sync                             # integrate and publish the branch with a lease
 ```
 
 Commit stages changes and generates a message unless given explicit options.
@@ -570,7 +661,7 @@ valid reviewer-facing copy and update Task merge consequences.
 ```bash
 lf pr publish --title "Make dialog navigation follow tab order" \
   --body "Keyboard focus now follows the visible controls."
-lf pr land -c                       # merge, then complete the owning Task
+lf task pr DES-123 land -c          # merge, then complete the owning Task
 lf pr land --next focus-ring        # merge, then continue the same Task
 lf pr next focus-ring               # reconcile a merge performed elsewhere
 ```

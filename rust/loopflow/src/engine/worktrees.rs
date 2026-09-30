@@ -811,7 +811,7 @@ fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
 ///
 /// Merged, squash-landed, closed-PR, and remote-gone branches are terminal.
 /// Manual pruning additionally removes branches with no activity for seven days,
-/// unless their current head has an open PR. Explicit `wt remove --force` is the
+/// unless their current head has an open PR. Explicit `wt delete --force` is the
 /// destructive escape hatch; no prune path removes uncommitted files.
 pub fn prune_worktrees(
     repo: &Path,

@@ -1867,34 +1867,58 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn final_skill_completion_removes_the_flow_without_restarting_it() {
-        let (store, task, _) = human_task_fixture().await;
-        let mut position = super::start_task_flow(&task, "task-design").unwrap();
-        position.invocation.steps.truncate(1);
-        position.cursor.iteration = 3;
-        let position = store.start_task_flow(&task.id, position).await.unwrap();
-        let held = claim(&store, &task, &position, 101).await;
-        let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let completed = finish(&mut position).unwrap();
-        assert!(completed);
-        assert_eq!(position.cursor.iteration, 3);
-        store
-            .end_flow(position.id(), position.version, Some(&held), "done")
-            .await
-            .unwrap();
-
-        assert!(store.task_flow(&task.id).await.unwrap().is_none());
-        assert_eq!(
-            store
-                .work_status(&WorkRef::Task(task.id.clone()))
-                .await
-                .unwrap(),
-            crate::durable::WorkStatus::Ready
-        );
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert!(events.iter().any(|event| matches!(
-            &event.kind, TaskEventKind::FlowFinished { summary, .. } if summary == "done"
-        )));
+    async fn finished_task_or_final_skill_retires_the_worker_without_restarting() {
+        for task_done in [false, true] {
+            let (store, task, _) = human_task_fixture().await;
+            let mut position = super::start_task_flow(&task, "task-design").unwrap();
+            if !task_done {
+                position.invocation.steps.truncate(1);
+            }
+            position.cursor.iteration = 3;
+            let position = store.start_task_flow(&task.id, position).await.unwrap();
+            let held = claim(&store, &task, &position, 101).await;
+            let mut position = store.task_flow(&task.id).await.unwrap().unwrap();
+            if task_done {
+                store.complete_task(&task, None).await.unwrap();
+                let launcher = <crate::lf::Cli as clap::Parser>::try_parse_from(["lf"]).unwrap();
+                let result = crate::lf::commands::flow::drive(
+                    store.clone(),
+                    position,
+                    Some(held),
+                    &launcher,
+                )
+                .await;
+                assert!(result.unwrap_err().to_string().contains("unsettled PR"));
+                assert!(task.worktree.exists());
+            } else {
+                assert!(finish(&mut position).unwrap());
+                assert_eq!(position.cursor.iteration, 3);
+                store
+                    .end_flow(position.id(), position.version, Some(&held), "done")
+                    .await
+                    .unwrap();
+            }
+            assert!(store.task_flow(&task.id).await.unwrap().is_none());
+            assert_eq!(
+                store
+                    .work_status(&WorkRef::Task(task.id.clone()))
+                    .await
+                    .unwrap(),
+                if task_done {
+                    crate::durable::WorkStatus::Done
+                } else {
+                    crate::durable::WorkStatus::Ready
+                }
+            );
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
+                    .count(),
+                1
+            );
+        }
     }
 
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {

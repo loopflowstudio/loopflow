@@ -1692,10 +1692,12 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 .as_ref()
                 .and_then(|publication| publication.github.as_ref())
             {
-                eprintln!("Retained PR: {}", github.url);
+                eprintln!("Retained PR history: {}", github.url);
             }
         }
-        eprintln!("Retained authored checkout: {}", task.worktree.display());
+        if task.worktree.exists() {
+            eprintln!("Retained checkout: {}", task.worktree.display());
+        }
     }
     Ok(identifier)
 }
@@ -1704,7 +1706,7 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     block_on_pm(pm_resolve_task_async(repo, issue))
 }
 
-async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     let repository = resolve_repository_context(repo).await?;
     let (wave, initiative_id, mut item, mut project) =
         resolve_owned_issue(repo, &repository, issue).await?;
@@ -2918,6 +2920,95 @@ fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
 
 fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
+}
+
+/// Read every linked Initiative, including archived predecessor Projects.
+pub(crate) async fn chapter_sweep_candidates(
+    repo: &Path,
+) -> OpsResult<Vec<(String, String, PmItem)>> {
+    let store = pm_store().await?;
+    let mut candidates = Vec::new();
+    for name in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &name).await?;
+        let locator = crate::work::wave::WaveLocator::discover(repo, &name)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
+        let chapter = store
+            .chapter(wave.id(), None)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
+        for project in ctx
+            .client
+            .list_projects_including_archived(&ctx.initiative, true)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
+            if project.id == chapter.project_id {
+                continue;
+            }
+            for item in ctx
+                .client
+                .list_items_including_archived(&project.id, true)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+            {
+                if item.completed
+                    || matches!(
+                        item.state.as_deref(),
+                        Some("completed" | "canceled" | "duplicate")
+                    )
+                {
+                    continue;
+                }
+                if item.state.is_none() || item.team_id != ctx.team_id {
+                    return Err(OpsError::Message(format!(
+                        "{} has unresolved state or ownership; sweep was not applied",
+                        item.identifier
+                    )));
+                }
+                candidates.push((name.clone(), project.name.clone(), item));
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+pub(crate) async fn require_outside_current_chapter(
+    repo: &Path,
+    issue: &str,
+) -> OpsResult<PmResolvedTask> {
+    let resolved = pm_resolve_task_async(repo, issue).await?;
+    let store = pm_store().await?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let wave = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
+    let chapter = store
+        .chapter(wave.id(), None)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("current chapter is unavailable".into()))?;
+    if resolved.item.project_id == chapter.project_id
+        || resolved.item.completed
+        || matches!(
+            resolved.item.state.as_deref(),
+            Some("completed" | "canceled" | "duplicate")
+        )
+    {
+        return Err(OpsError::Message(
+            "issue moved to the current chapter or is already terminal".into(),
+        ));
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]

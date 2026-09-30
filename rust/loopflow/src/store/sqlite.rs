@@ -482,7 +482,12 @@ impl SqliteStore {
             })?;
         let store_installation = match installed_selection {
             Some(selection)
-                if super::same_database_file(path, &selection.store).map_err(|error| {
+                if super::same_database_file(
+                    path,
+                    &super::installed_execution_database(&selection)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                )
+                .map_err(|error| {
                     StoreError::InvalidData(format!("resolve installed store identity: {error}"))
                 })? =>
             {
@@ -502,16 +507,47 @@ impl SqliteStore {
                 )));
             }
         }
-        let installed_development = store_installation.is_some_and(|selection| {
+        let addressed_execution = store_installation.as_ref().is_some_and(|selection| {
+            !super::same_database_file(path, &selection.store).unwrap_or(false)
+        });
+        let installed_development = store_installation.as_ref().is_some_and(|selection| {
             selection.source == crate::machine_install::InstallSource::Development
         });
+        if addressed_execution {
+            // Runtime choice grants no migration authority over execution found
+            // elsewhere. Validate before journal mode or any writable connection.
+            let connection =
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let validation = if installed_development {
+                super::migrations::validate_installed_development_sqlite(
+                    &connection,
+                    crate::build_info::migration_draft_manifest(),
+                )
+            } else {
+                super::migrations::validate_sqlite(&connection).and_then(|()| {
+                    if let Some(pending) = super::migrations::pending_shared_migration(&connection)?
+                    {
+                        return Err(StoreError::InvalidData(format!(
+                            "pending migration {pending}"
+                        )));
+                    }
+                    Ok(())
+                })
+            };
+            validation.map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "selected lf cannot continue execution in {}: {error}",
+                    path.display()
+                ))
+            })?;
+        }
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
         // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
         // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
-            .map_err(|error| {
+        let may_apply_migrations = !addressed_execution
+            && super::may_apply_migrations(path, authority, home, advance).map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
         let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))

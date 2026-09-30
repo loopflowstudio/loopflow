@@ -1,3 +1,5 @@
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -8,6 +10,25 @@ use crate::run_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
+    let id = match command {
+        SessionCommand::Open { id, .. }
+        | SessionCommand::Complete { id }
+        | SessionCommand::Rename { id, .. } => Some(id),
+        _ => None,
+    };
+    if let Some(id) = id {
+        if let Some(destination) = crate::ops::task_destination::existing_session(id)? {
+            let args = std::env::args().skip(1).collect::<Vec<_>>();
+            let output = crate::ops::task_destination::execute(
+                &destination,
+                &std::env::current_dir()?,
+                &args,
+                None,
+            )?;
+            std::io::stdout().write_all(&output)?;
+            return Ok(());
+        }
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }

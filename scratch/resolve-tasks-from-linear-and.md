@@ -17,6 +17,105 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### This slice — installed Task and review continuity
+
+Preserved the incoming nullable-issue decoder/test/review edits in checkpoint
+`01158f839`, then implemented the next installation-switch cut. The full
+single-PR Done When remains unfulfilled; all acceptance cases 1–15 remain required.
+
+**Switched consumers:** installed `task status <identifier-or-UUID>`, `task run`,
+and explicit Session open/complete/rename now search selected and retained
+installation stores through the existing WorkCatalog/read-only identity reader
+and Session evidence. One retained execution routes to the selected CLI without
+copying its Task, invocation or review. The WorkCatalog no longer requires the
+unrelated Run-event schema merely to read Work identities. Physical aliases use
+existing filesystem identity comparison; multiple physical matches report their
+locations rather than selecting by timestamp.
+
+The worker-boundary resolver selects and verifies the current installation's CLI,
+independently of the addressed execution database. Installed store opens accept
+explicit execution placement after read-only schema validation and cannot migrate
+that other database. Task children carry ordinary data routing as well as control
+routing. Installation records themselves remain unchanged. This replaces the
+current-executable runtime preference and installed-binary/default-database-only
+path for these consumers. New-work/default routing and branch-only Task refusal
+still exist; they have not been presented as the completed local lifecycle.
+
+**Observed regression and proof:** extended `scripts/test_task_installation.py`
+with `installation_switch_preserves_task_review_without_store_overrides` before
+changing production code. It first failed: after selecting B, status returned
+`execution: null` and unavailable planning while A still held the exact review.
+The final harness command passed all six cases. The new case uses two distinct
+real CLI artifacts, fixture-authored installation selections, cached planning and
+one prepared review. Public status by identifier/UUID, run and Session open find
+the original Task/checkout/review with no data overrides. An obsolete executable
+rejects `session`; fresh discovery returns a usable continuation through B despite
+poisoned PATH, LF_BIN and LF_CONTROL_BIN. Completing the exact ready review then
+runs a real B worker with the saved invocation in A. Its existing Run-event
+commands identify B; the Flow finishes once and B has no duplicate Task. Readiness
+setup addresses the original review directly as fixture preparation; the tested
+post-switch status/run/open/complete calls supply no store settings.
+
+The same case adds an unknown draft to A and verifies the incompatible attempt
+preserves its DB/WAL bytes and exact review, then removes only that fixture draft.
+A second physical execution copy causes explicit ambiguous-continuation refusal.
+Tmux transport is simulated and the child performs `rebase --plan`; no configured
+provider or real installation promotion is exercised. There is one actual worker
+boundary, not the two-boundary case 6. The obsolete saved executable remains
+obsolete: this proves a fresh public continuation, not repair of that binary.
+
+**Self-review:** moved execution addressing out of the initial in-memory
+InstallSelection rewrite so receipts keep their real artifact/store identity.
+Kept source-private status on its local reader: forwarding it to a writable foreign
+status operation would violate the source-isolation acceptance contract. Foreign
+read-only detail inspection remains work. Installed status now checks discovery
+before its local Task read, including conflicts. Removed the normal forwarding
+message that exposed database routing as the user's next action. CLI and testing
+docs describe these boundaries.
+
+**Proof commands:**
+
+- `uv run python scripts/test_task_installation.py`: six passes after the initial
+  expected missing-execution failure. A later fixture extension first failed to
+  compile because it supplied Op instead of ConcreteOp; corrected before the final
+  passing run. The existing Linux-only unused `complete` warning remains.
+- `cargo test -p loopflow --lib ops::task_destination::tests::managed_operations_move_before_branch_effects -- --exact`:
+  one pass, including the final rerun after the store-opener refactor.
+- `cargo test -p loopflow --lib lf::commands::work_catalog::tests`: one pass.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
+  `git diff --check`: passed. No affected-suite/repository gate ran.
+
+Compared with `01158f839`, this slice adds **265** and removes **35** non-test
+physical Rust lines across eight production files. All changed hunks there are
+production code; counts exclude integration tests, scripts, documentation,
+scratch and generated artifacts. The current-executable preference and identity
+reader's Run-ledger prerequisite are removed; existing general Task preparation
+is reused rather than replaced with another execution owner.
+
+**Remaining and integration limits:** discovery currently scans installation
+receipts, not known remote routes, legacy/source layouts or the full requested
+scope. It reports unreadable candidate stores as errors. Source-private status
+still reads its private copy. Identical execution rows copied by normal promotion
+are not distinguished from divergent copies; that continuity remains unproven and
+currently reports a conflict. The fixture switches to an empty B execution store,
+so it cannot settle that case or establish full case 15. A stale already-saved
+open_argv is not rewritten in place. Status does not yet expose runtime policy,
+and explicit recursive locks, provider-shell propagation, delayed startup and
+normal promotion remain unfinished. No pin schema or replacement execution tables
+were added. `git merge-base --is-ancestor d61295196 HEAD` returned 1; LOO-298's
+received contract is still not integrated. This cut uses the existing Session
+reader and needs that integration before dependent owner/migration work.
+
+Next extend the continuity proof to actual promotion/copies and two worker
+boundaries, then implement explicit locks and delayed-child admission against
+LOO-298's integrated owners. Retain local lifecycle, managed-validity/ordinary-Flow
+separation, contextual Wave imports, create/link/hierarchy, DTO/actions, design
+placement/handoff and the full command story. Relationship repair still waits on
+the existing Ask; outage, connection and baseline policies remain open. No duplicate
+Ask, provider mutation, host branch-binary execution, publication, promotion,
+Task completion or Flow navigation occurred in this implementation pass.
+
+
 ### Slice review — 2026-09-30
 
 Reviewed the branch diff from `a3820bf7e` through `dc010b78c`, with the current
@@ -74,7 +173,7 @@ land, complete the Task or choose Flow navigation. Return this evidence to the
 saved decision step; do not repeat the finished planning/chapter slice as the
 next implementation pass.
 
-### This slice — predecessor completion, 2026-09-30
+### Earlier slice — predecessor completion, 2026-09-30
 
 Continued from `44b2ec74e`, preserving the supplied unfinished chapter/Linear
 edits before extending them. `apply_rotation` now completes each predecessor

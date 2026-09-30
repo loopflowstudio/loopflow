@@ -3,6 +3,8 @@ mod installation;
 mod support;
 
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use std::time::Duration;
 
@@ -347,6 +349,347 @@ fn incompatible_branch_data_recommends_only_a_verified_retained_pair() {
             .unwrap(),
         "independent branch work"
     );
+}
+
+#[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn installation_switch_preserves_task_review_without_store_overrides() {
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    repo.create_branch("jack/switch-review");
+    let task = register_unrun_task(
+        home.path(),
+        repo.path(),
+        "jack/switch-review",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut invocation =
+        loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
+    invocation.steps.push(loopflow::engine::ConcreteStep::Op(
+        loopflow::engine::flow::ConcreteOp {
+            item: loopflow::engine::flow::Op {
+                command: "rebase".into(),
+                args: vec!["--plan".into()],
+            },
+            flow_parents: vec!["task-design".into()],
+        },
+    ));
+    let review_index = invocation.steps.iter().position(|step| matches!(step, loopflow::engine::ConcreteStep::Skill(skill) if skill.policy.human)).unwrap();
+    let position = loopflow::durable::FlowPosition {
+        task_id: task.task.id.clone(),
+        invocation,
+        session_run_id: None,
+        ready_summary: None,
+        cursor: loopflow::engine::ExecutionCursor {
+            index: review_index,
+            ..Default::default()
+        },
+        version: 0,
+        worker_generation: 0,
+        claim: None,
+        failure: None,
+        updated_at: time::OffsetDateTime::now_utc(),
+    };
+    runtime
+        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .unwrap();
+    let installation = installation::Installation::new(home.path());
+    let command = |cli: &std::path::Path, args: &[&str]| {
+        let mut command = Command::new(cli);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_") {
+                command.env_remove(name);
+            }
+        }
+        command.current_dir(repo.path()).args(args);
+        command
+    };
+    let started = command(&installation.cli, &["task", "run", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let position = runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let review = position.session_run_id.as_ref().unwrap().as_str();
+    let before = command(&installation.cli, &["session", "open", review, "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        before.status.success(),
+        "{}",
+        String::from_utf8_lossy(&before.stderr)
+    );
+    let before: serde_json::Value = serde_json::from_slice(&before.stdout).unwrap();
+
+    let later = tempfile::tempdir().unwrap();
+    let later_db = later.path().join("loopflow.db");
+    let later_store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &loopflow::store::StorageConfig::sqlite(later_db.clone()),
+        ))
+        .unwrap();
+    retain_installation_and_select_store(&later_db);
+    let root = machine_install::root().unwrap();
+    let MachineInstallState::Settled(mut active) = machine_install::read_state(&root).unwrap()
+    else {
+        panic!("settled switch")
+    };
+    let later_cli = later.path().join("lf");
+    fs::copy(&installation.cli, &later_cli).unwrap();
+    {
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&later_cli)
+            .unwrap()
+            .write_all(b"\nsecond installation\n")
+            .unwrap();
+    }
+    let cli = active
+        .selection
+        .artifact_set
+        .artifacts
+        .iter_mut()
+        .find(|a| a.role == ArtifactRole::Cli)
+        .unwrap();
+    *cli = machine_install::ArtifactIdentity::capture(ArtifactRole::Cli, &later_cli).unwrap();
+    fs::write(
+        root.join("active.json"),
+        serde_json::to_vec(&active).unwrap(),
+    )
+    .unwrap();
+    let stale = tempfile::tempdir().unwrap();
+    let obsolete = stale.path().join("lf");
+    fs::write(
+        &obsolete,
+        "#!/bin/sh\necho 'step or flow not found: session' >&2\nexit 1\n",
+    )
+    .unwrap();
+    {
+        fs::set_permissions(&obsolete, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // A saved obsolete executable cannot understand Session commands. Fresh
+    // public discovery must give the same review a usable continuation.
+    let rejected = command(&obsolete, &["session", "open", review])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("step or flow not found: session"));
+    let invoke = |args: &[&str]| {
+        command(&later_cli, args)
+            .env("LF_BIN", &obsolete)
+            .env("LF_CONTROL_BIN", &obsolete)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    stale.path().display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .output()
+            .unwrap()
+    };
+    for selector in ["INF-123", task.task.plan.id.as_str()] {
+        let status = invoke(&["task", "status", selector, "--json"]);
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(
+            status["execution"]["task_id"],
+            task.task.id.to_string(),
+            "installation switch lost execution: {status}"
+        );
+        assert_eq!(
+            status["execution"]["worktree"],
+            repo.path().display().to_string()
+        );
+    }
+    let resumed = invoke(&["task", "run", "INF-123", "--json"]);
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let opened = invoke(&["session", "open", review, "--json"]);
+    assert!(
+        opened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
+    assert_eq!(opened["id"], before["id"]);
+    assert_eq!(opened["cwd"], before["cwd"]);
+    assert!(
+        opened["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == later_cli.to_str()),
+        "continuation must use the selected runtime: {opened}"
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        position
+    );
+    assert!(
+        runtime
+            .block_on(later_store.get_task(&task.task.id))
+            .unwrap()
+            .is_none(),
+        "discovery must not copy execution"
+    );
+    let original_db = home.path().join("loopflow.db");
+    let original = Connection::open(&original_db).unwrap();
+    original.execute("INSERT INTO development_migrations SELECT COALESCE(MAX(position), -1) + 1, 'future-proof', 'future-proof', 'unknown', 1 FROM development_migrations", []).unwrap();
+    let bytes = || {
+        [original_db.clone(), home.path().join("loopflow.db-wal")].map(|path| fs::read(path).ok())
+    };
+    let preserved = bytes();
+    let incompatible = invoke(&["task", "run", "INF-123", "--json"]);
+    assert!(!incompatible.status.success());
+    assert!(
+        String::from_utf8_lossy(&incompatible.stderr)
+            .contains("selected lf cannot continue execution"),
+        "{}",
+        String::from_utf8_lossy(&incompatible.stderr)
+    );
+    assert_eq!(
+        bytes(),
+        preserved,
+        "incompatible acquisition must not change execution data"
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.flow_position(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        position
+    );
+    original
+        .execute(
+            "DELETE FROM development_migrations WHERE id = 'future-proof'",
+            [],
+        )
+        .unwrap();
+    let worker_log = later.path().join("worker.log");
+    let tmux = stale.path().join("tmux");
+    fs::write(&tmux, format!(
+        "#!/bin/sh\ncase \"$1\" in\nnew-session) for argument do last=$argument; done; sh -c \"$last\" >'{}' 2>&1 & ;;\nhas-session) exit 1 ;;\nesac\n",
+        worker_log.display(),
+    )).unwrap();
+    fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
+    let step = position.current();
+    let loopflow::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
+        panic!("review")
+    };
+    let token = serde_json::json!({"kind":"flow","token":{
+        "task_id":task.task.id, "invocation_id":position.invocation.id,
+        "flow":step.flow, "node_id":step.policy.id, "skill":planned.skill,
+        "iteration":position.cursor.iteration,
+    }});
+    // Readiness comes from the exact existing review, then completion from the
+    // ordinary selected CLI launches the next actual worker in the same store.
+    let ready = command(
+        &installation.cli,
+        &["session", "ready", "Continue this captured Flow"],
+    )
+    .env("LF_HOME", home.path())
+    .env("LF_DB_PATH", home.path().join("loopflow.db"))
+    .env("LF_RUN_ID", review)
+    .env("LF_HUMAN_SESSION", token.to_string())
+    .output()
+    .unwrap();
+    assert!(
+        ready.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ready.stderr)
+    );
+    let complete = invoke(&["session", "complete", review]);
+    assert!(
+        complete.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&complete.stderr),
+        fs::read_to_string(&worker_log).unwrap_or_default()
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .is_some()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worker did not finish: {}",
+            fs::read_to_string(&worker_log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let events = runtime
+        .block_on(task.store.task_events_after(&task.task.id, 0))
+        .unwrap();
+    assert_eq!(events.iter().filter(|event| matches!(&event.kind, TaskEventKind::FlowFinished { invocation_id, .. } if invocation_id == &position.invocation.id)).count(), 1);
+    let conn = Connection::open_with_flags(
+        home.path().join("loopflow.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let commands: Vec<String> = conn
+        .prepare("SELECT DISTINCT command FROM run_events WHERE command LIKE '%__worker%'")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(
+        !commands.is_empty(),
+        "actual worker must publish execution evidence"
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|command| command.contains(later_cli.to_str().unwrap())),
+        "wrong worker executable: {commands:?}"
+    );
+    assert!(runtime
+        .block_on(later_store.get_task(&task.task.id))
+        .unwrap()
+        .is_none());
+    // Equal Task and Home identities in two physical copies are still separate
+    // execution records. A write may not pick one by timestamp or selection.
+    let mut divergent = Connection::open(&later_db).unwrap();
+    Backup::new(&original, &mut divergent)
+        .unwrap()
+        .run_to_completion(100, Duration::from_millis(1), None)
+        .unwrap();
+    let ambiguous = invoke(&["task", "run", "INF-123", "--json"]);
+    assert!(!ambiguous.status.success());
+    assert!(
+        String::from_utf8_lossy(&ambiguous.stderr).contains("multiple distinct locations"),
+        "{}",
+        String::from_utf8_lossy(&ambiguous.stderr)
+    );
+    assert!(runtime
+        .block_on(task.store.flow_position(&task.task.id))
+        .unwrap()
+        .is_none());
+    assert!(runtime
+        .block_on(later_store.flow_position(&task.task.id))
+        .unwrap()
+        .is_none());
 }
 
 #[test]

@@ -1,10 +1,10 @@
-//! Managed operations move as a whole; branch data is never the installed worker's store.
+//! Resolve retained execution before selecting the installed runtime that continues it.
 
 use std::collections::BTreeSet;
 use std::io::{Seek, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
@@ -46,6 +46,110 @@ pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
             .context("installed store has no parent directory")?
             .to_path_buf(),
         db_path: selection.store,
+    }))
+}
+
+/// Locate retained execution through installation receipts, without opening a
+/// foreign store for migration or copying its records into the current store.
+pub(crate) fn existing_task(issue: &str) -> Result<Option<ChildExecutionContext>> {
+    existing_execution(|database| {
+        Ok(WorkCatalog::load_at(database)?
+            .owners
+            .values()
+            .any(|owner| {
+                owner.work.kind() == "task"
+                    && owner.matches(WorkFilter {
+                        task: Some(issue),
+                        wave: None,
+                        project: None,
+                    })
+            }))
+    })
+}
+
+pub(crate) fn existing_session(id: &str) -> Result<Option<ChildExecutionContext>> {
+    if let Some((task, _)) = id
+        .split_once(':')
+        .filter(|(task, _)| task.starts_with("task_"))
+    {
+        return existing_task(task);
+    }
+    existing_execution(|database| {
+        let home = database
+            .parent()
+            .context("execution database has no directory")?;
+        match crate::run_record::resolve_manifest(home, id) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    })
+}
+
+fn existing_execution(
+    contains: impl Fn(&Path) -> Result<bool>,
+) -> Result<Option<ChildExecutionContext>> {
+    #[cfg(test)]
+    let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
+        Some(root) => PathBuf::from(root),
+        None => return Ok(None),
+    };
+    #[cfg(not(test))]
+    let root = machine_install::root()?;
+    let Some(selected) = machine_install::current_selection(&root)? else {
+        return Ok(None);
+    };
+    let mut stores: Vec<PathBuf> = Vec::new();
+    let mut found = Vec::new();
+    for installation in machine_install::known_installations(&root)? {
+        if stores.iter().any(|path| {
+            crate::store::same_database_file(path, &installation.store).unwrap_or(false)
+        }) {
+            continue;
+        }
+        stores.push(installation.store.clone());
+        if !installation.store.exists() {
+            continue;
+        }
+        if contains(&installation.store).with_context(|| {
+            format!(
+                "execution location {} could not be inspected",
+                installation.store.display()
+            )
+        })? {
+            found.push(installation.store);
+        }
+    }
+    let database = match found.as_slice() {
+        [] => return Ok(None),
+        [database] => database,
+        _ => {
+            return Err(anyhow!(
+                "execution exists in multiple distinct locations: {}",
+                found
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+    };
+    let current = crate::store::database_path_from_env()?;
+    if crate::store::same_database_file(database, &current)? {
+        return Ok(None);
+    }
+    let cli = selected
+        .artifact_set
+        .artifact(&ArtifactRole::Cli)
+        .context("selected installation has no CLI")?;
+    cli.verify()?;
+    Ok(Some(ChildExecutionContext {
+        lf_bin: cli.path.clone(),
+        lf_home: database
+            .parent()
+            .context("execution database has no directory")?
+            .to_path_buf(),
+        db_path: database.clone(),
     }))
 }
 
@@ -114,7 +218,7 @@ pub(super) fn json<T: DeserializeOwned>(
         .context("read installed Task operation result")
 }
 
-pub(super) fn execute(
+pub(crate) fn execute(
     context: &ChildExecutionContext,
     cwd: &Path,
     args: &[String],
@@ -149,11 +253,6 @@ pub(super) fn execute(
     } else {
         command.stdin(Stdio::null());
     }
-    eprintln!(
-        "Managed Task execution uses {} with installed data directory {}.",
-        context.lf_bin.display(),
-        context.lf_home.display()
-    );
     #[cfg(unix)]
     command.process_group(0);
     let child = command

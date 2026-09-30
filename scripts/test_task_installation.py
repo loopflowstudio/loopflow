@@ -6,6 +6,7 @@ import tarfile
 from pathlib import Path
 
 PROOFS = {
+    "installation_switch_preserves_task_review_without_store_overrides": "task_initialization_tests",
     "flow_step_executable_falls_back_without_losing_its_store": "flow_tests",
     "declared_agent_can_start_another_tasks_flow": "session_cutover_tests",
     "task_resume_revokes_auto_merge_before_returning_to_human_review": "pr_tests",

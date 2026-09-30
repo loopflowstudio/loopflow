@@ -345,6 +345,14 @@ async fn start_work_session(
             crate::store::CONTROL_HOME_ENV.to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
+        (
+            "LF_DB_PATH".to_string(),
+            execution.db_path.to_string_lossy().to_string(),
+        ),
+        (
+            "LF_HOME".to_string(),
+            execution.lf_home.to_string_lossy().to_string(),
+        ),
     ]);
     if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
         .filter(|value| !value.is_empty())

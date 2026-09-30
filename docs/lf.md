@@ -962,23 +962,33 @@ snapshot retains recorded Home IDs and placements; it does not register a new
 execution Home or move work to another machine.
 
 ```bash
-target/debug/lf task run LOO-321       # reports the installed executable and data directory
+target/debug/lf task run LOO-321       # continues through the selected installation
 target/debug/lf task status LOO-321    # reads the independent branch copy
 ```
 
-When an installation exists, managed Task operations use its CLI and store from
-the start: `run`, `create --run`, `restart`, and Task review Session completion.
-Preparation, issue creation, checkpoints and worker claims happen there.
-The returned Task state comes from the installed database. Non-launching data
-commands keep using the branch copy. A Task that exists only in the branch is preserved there;
-these commands do not register it in installation. Review completion names the
+Installed `task status <issue>`, `task run <issue>` and Session open/complete
+locate existing execution in the selected and retained installation records.
+After an installation switch, use the same Task or Session identifier. The
+selected CLI continues the recorded invocation and review in place; it does not
+copy execution into the new database. Multiple physical execution copies remain
+an explicit conflict, even when their Task IDs match. Incompatible data reports
+the location and preserves the pending work without migration.
+
+New `create --run` operations use the selected installation. Source `task run`
+delegates there or to a discovered retained execution; non-launching source
+data commands keep using the private branch copy. A Task that exists only in the
+branch is preserved there; these commands do not register it in installation.
+Review completion names the
 exact invocation boundary and consumes the installed Session's readiness, without
 copying branch feedback. Direct branch workers are refused while an installation
 owns execution. With no installation, the source build runs workers against its
 own branch data directory; installation is not a prerequisite for development.
 Later `target/debug/lf task status` reads still show the private branch copy.
-Follow managed execution with the installed executable and data directory reported
-by the operation; the two data copies do not synchronize.
+Use ordinary installed `lf task status` to follow managed execution. Worker
+boundaries select the current installed runtime independently of execution
+placement; inherited `LF_BIN` does not lock that selection. The data copies do
+not synchronize. Discovery currently covers installation receipts; source-private
+and remote execution discovery remain separate work.
 A private data copy does not isolate external effects such
 as provider issue deletion or shared worktree edits.
 

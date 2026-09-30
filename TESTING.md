@@ -643,6 +643,15 @@ acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 The installation-authority tests run only through this harness (`task-installation`
 in CI); ordinary Rust runs mark those cases ignored.
+The installation-switch regression prepares a review under A, selects distinct
+CLI bytes and empty execution data under B, and continues through ordinary Task
+and Session commands without data overrides. It poisons PATH and inherited binary
+variables with an obsolete CLI, checks the preserved review, and completes one
+actual worker operation through B against A's execution. Tmux transport is
+simulated; the child runs the real CLI with `rebase --plan`. Incompatible drafts
+must leave execution DB/WAL bytes untouched, and two execution copies must refuse
+ambiguous continuation. Selection receipts are fixture-authored: this does not
+prove normal promotion, provider shells, recursive locks or delayed-child startup.
 They prove Task continuation’s auto-merge revocation and review continuity, agent
 selection read from the installed database while branch reads remain private, and direct-open
 refusal without changing the owned development database/WAL bytes. Review

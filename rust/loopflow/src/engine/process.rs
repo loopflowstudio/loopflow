@@ -209,16 +209,11 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
     })
 }
 
-/// Resolve the current Home's CLI. Installation owns both its executable and
-/// store; ordinary overrides apply only to uninstalled source execution.
+/// Resolve the selected installation at this child boundary, independently of
+/// execution placement. Uninstalled machines retain source execution.
 pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
-    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(cli) = selection
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-        {
-            return cli.path.clone();
-        }
+    if let Ok(Some(cli)) = official_lf_binary() {
+        return cli;
     }
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
@@ -262,6 +257,9 @@ pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
 /// The current Home `lf`, resolved to an absolute path that exists. Mirrors
 /// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
 pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
+    if let Some(cli) = official_lf_binary()? {
+        return Ok(cli);
+    }
     let candidate = resolve_current_home_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
@@ -279,6 +277,25 @@ pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
             candidate.display()
         )
     })
+}
+
+fn official_lf_binary() -> Result<Option<PathBuf>> {
+    #[cfg(test)]
+    let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
+        Some(root) => PathBuf::from(root),
+        None => return Ok(None),
+    };
+    #[cfg(not(test))]
+    let root = crate::machine_install::root()?;
+    let Some(selection) = crate::machine_install::current_selection(&root)? else {
+        return Ok(None);
+    };
+    let cli = selection
+        .artifact_set
+        .artifact(&crate::machine_install::ArtifactRole::Cli)
+        .ok_or_else(|| anyhow!("selected installation has no CLI"))?;
+    cli.verify()?;
+    Ok(Some(cli.path.clone()))
 }
 
 /// Resolve the current Home execution context for launching Work: the

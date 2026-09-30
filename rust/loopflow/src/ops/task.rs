@@ -378,7 +378,13 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
 }
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSnapshot> {
-    if let Some(destination) = super::task_destination::destination().map_err(task_error)? {
+    if let Some(destination) = super::task_destination::existing_task(issue)
+        .and_then(|found| match found {
+            Some(found) => Ok(Some(found)),
+            None => super::task_destination::destination(),
+        })
+        .map_err(task_error)?
+    {
         super::task_destination::check_task(&destination, issue).map_err(task_error)?;
         if let Some(parent) = &options.stack_on {
             super::task_destination::check_task(&destination, parent).map_err(task_error)?;
@@ -3805,6 +3811,26 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
+    // Installed inspection follows retained execution. A source-private read
+    // must not open another installation's data for writable status refreshes.
+    if crate::machine_install::selection_for_current_executable()
+        .map_err(task_error)?
+        .is_some()
+    {
+        if let Some(issue) = issue {
+            if let Some(destination) =
+                super::task_destination::existing_task(issue).map_err(task_error)?
+            {
+                return super::task_destination::json(
+                    &destination,
+                    repo,
+                    vec!["task".into(), "status".into(), issue.into()],
+                    None,
+                )
+                .map_err(task_error);
+            }
+        }
+    }
     let task = task_execution_status(repo, issue)?;
     let selector = task
         .as_ref()

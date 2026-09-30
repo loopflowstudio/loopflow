@@ -227,6 +227,13 @@ fn default_lf_home_dir_for(
 }
 
 pub(crate) fn lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Ok(database) = installed_execution_database(&selection) {
+            if let Some(home) = database.parent() {
+                return home.to_path_buf();
+            }
+        }
+    }
     select_store_env_value(
         crate::build_info::provenance(),
         std::env::var_os(CONTROL_HOME_ENV),
@@ -244,12 +251,7 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     if let Some(selection) = crate::machine_install::selection_for_current_executable()
         .map_err(|error| std::io::Error::other(error.to_string()))?
     {
-        guard_development_database(
-            &selection.store,
-            crate::build_info::provenance(),
-            &machine_home_dir(),
-        )?;
-        return Ok(selection.store);
+        return installed_execution_database(&selection);
     }
     resolve_database_path(
         select_store_env_value(
@@ -268,8 +270,10 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
 /// default) is honored here — the control-plane selection is deliberately not.
 pub(crate) fn current_home_lf_home_dir() -> PathBuf {
     if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(parent) = selection.store.parent() {
-            return parent.to_path_buf();
+        if let Ok(database) = installed_execution_database(&selection) {
+            if let Some(parent) = database.parent() {
+                return parent.to_path_buf();
+            }
         }
     }
     std::env::var_os("LF_HOME")
@@ -286,14 +290,34 @@ pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
     if let Some(selection) = crate::machine_install::selection_for_current_executable()
         .map_err(|error| std::io::Error::other(error.to_string()))?
     {
+        return installed_execution_database(&selection);
+    }
+    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+}
+
+fn installed_execution_database(
+    selection: &crate::machine_install::InstallSelection,
+) -> Result<PathBuf, std::io::Error> {
+    let requested = std::env::var_os("LF_DB_PATH").filter(|value| !value.is_empty());
+    let home = std::env::var_os("LF_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    if requested.is_none() && home.is_none() {
         guard_development_database(
             &selection.store,
             crate::build_info::provenance(),
             &machine_home_dir(),
         )?;
-        return Ok(selection.store);
+        return Ok(selection.store.clone());
     }
-    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+    let home = home.unwrap_or_else(|| {
+        selection
+            .store
+            .parent()
+            .expect("installation store has a directory")
+            .to_path_buf()
+    });
+    resolve_database_path(requested, home)
 }
 
 fn resolve_database_path(

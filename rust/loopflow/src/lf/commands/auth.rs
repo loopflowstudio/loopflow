@@ -1443,13 +1443,19 @@ mod account_first_tests {
             &codex,
             r#"#!/bin/sh
 case "$*" in
-  *app-server*)
-    read -r initialize
-    echo '{"id":1,"result":{}}'
-    read -r initialized
-    read -r account
+  *app-server*) ;;
+  *) exit 90;; # Native login would open a second browser.
+esac
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r request
+case "$request" in
+  *account/read*)
     printf '{"id":2,"result":{"account":{"email":"%s"}}}\n' "$LF_TEST_CODEX_EMAIL"
     exit 0;;
+  *account/login/start*) ;;
+  *) exit 91;;
 esac
 count=0
 if [ -f "$LF_TEST_CODEX_COUNT" ]; then count=$(cat "$LF_TEST_CODEX_COUNT"); fi
@@ -1457,12 +1463,13 @@ count=$((count + 1))
 printf '%s' "$count" > "$LF_TEST_CODEX_COUNT"
 printf '%s\n' "$CODEX_HOME" >> "$LF_TEST_CODEX_HOMES"
 if [ "$LF_TEST_CODEX_FAIL_FIRST" = "1" ] && [ "$count" = "1" ]; then exit 1; fi
-printf '%s\n' 'https://auth.openai.com/oauth/authorize?client_id=test'
+echo '{"id":2,"result":{"type":"chatgpt","loginId":"fixture-login","authUrl":"https://auth.openai.com/oauth/authorize?client_id=test"}}'
 if [ -n "$LF_TEST_CODEX_RELEASE" ]; then
   while [ ! -f "$LF_TEST_CODEX_RELEASE" ]; do sleep 0.05; done
 fi
 mkdir -p "$CODEX_HOME"
 cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
+echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","success":true}}'
 "#,
         )
         .unwrap();
@@ -1941,7 +1948,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         let error = connect_account("codex", "operator@", None)
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("URL"));
+        assert!(error.to_string().contains("disconnected"));
         assert!(TEST_OPENED_CHROME_PROFILES.lock().unwrap().is_empty());
         assert_eq!(
             fs::read_to_string(temp.path().join("codex-count")).unwrap(),
@@ -2121,6 +2128,27 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             Some("user-operator@example.com")
         );
         assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+
+        // Even staged credential bytes cannot substitute for this attempt's success.
+        let provider = temp.path().join("bin/codex");
+        let script = fs::read_to_string(&provider).unwrap();
+        fs::write(
+            &provider,
+            script.replace("\"success\":true", "\"success\":false"),
+        )
+        .unwrap();
+        let error = connect_account("codex", "operator@", Some("Primary"))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Codex login failed"));
+        assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+        assert_eq!(
+            store
+                .get_provider_account("codex", &account.account_id)
+                .await
+                .unwrap(),
+            Some(installed)
+        );
     }
 
     #[test]

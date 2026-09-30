@@ -42,21 +42,22 @@ that owner when moving storage, rather than introduce another catalog.
 
 ## This slice
 
-Switch the real status CLI consumer to live by default, replace `--verify` with
-`--cached`, and migrate repository callers and guidance. Reuse the existing
-poll/validation/persistence path. Preserve the JSON observation contract and
-expired-window rendering. Add public-CLI proof that a full expired window becomes
-the returned fresh window, and that unavailable/omitted windows stay unknown
-without losing their dated evidence. Existing cached proofs must use `--cached`.
+Move Codex connect from the native `login` command to the existing app-server
+auth transport. `account/login/start` returns the callback URL with provider
+browser opening disabled; Loopflow opens it through the saved Chrome profile.
+Keep staged credentials and identity validation. The existing auth handle owns
+the child through the matching `account/login/completed` notification, failure,
+or cancellation. Reuse the same app-server connection for token refresh.
 
-Done when the isolated public auth tests prove default refresh, explicit offline
-reads, stale reset handling, identity rejection and evidence preservation; the
-status render fixture and inspection-command alignment checks pass. These are
-synthetic provider proofs, not live account acceptance. No real reset is used.
+Done when simulated app-server proofs cover a matching successful completion,
+unrelated completion, failure, EOF, timeout and cancellation; managed connect
+proofs retain saved-profile selection, staged reconnect and identity rejection.
+These are synthetic provider/browser proofs, not real OAuth or desktop acceptance.
+No real account or reset is used.
 
 ## Remaining slices
 
-Machine store migration and LOO-334 ownership coordination; browser suppression;
+Machine store migration and LOO-334 ownership coordination;
 Claude cached identity and routing; captured per-provider launch selection and a
 mixed-provider multi-step Flow proof; reset-credit display and explicit redemption
 using a verified provider protocol. Each must replace its existing consumer in
@@ -118,3 +119,51 @@ removed repeated output decoding, an unnecessary window clone and a redundant
 assertion. The isolated public-CLI status regression passed (1 test); formatting,
 all-target Clippy and diff checks passed. Production behavior is unchanged;
 earlier untouched proofs retain their scope. No real accounts or resets were used.
+
+
+### Pass 2 · Codex browser ownership
+
+Switched `CodexAuthBroker::start_auth` from `codex login` plus `BROWSER=echo`
+to `codex app-server` and `account/login/start`. OpenAI's account processor
+sets `open_browser: false`; Loopflow's existing saved-profile opener consumes
+`authUrl`. The returned `loginId` selects completion. Staged installation still
+requires successful completion and the existing live identity validation.
+
+The private auth connection owns the app-server process group and pipes until
+completion, error, timeout or handle cancellation. Token refresh uses this same
+connection; the predecessor spawn/write/read helpers and native login launch
+are deleted. Error messages omit provider payloads and authorization query data.
+The existing account store and browser-binding authority are unchanged.
+
+Comparison: `dcbe062e2cbd32fdd8ee6728da325543efd7eca4` to this working tree.
+Non-test Rust: +190 / −155 lines, including the new module before its test block
+and the production portion of `provider_auth/mod.rs`. Documentation: +9 / −4.
+Excluded: Rust test blocks and fixture edits, scratch, generated files (none).
+Counts split production at the test-module boundary and compare lines with
+`difflib.ndiff`; the new file is included even while untracked.
+
+Executed with inherited `LF_*` removed and `LF_BIN` pinned to this checkout's
+compiled CLI; providers, browsers, credentials and account Homes are fixtures:
+
+- `cargo test -p loopflow --lib provider_auth::codex::tests -- --test-threads=1`:
+  3 passed. Matching success, unrelated notifications, provider failure, EOF,
+  malformed output, secret-safe errors, cancellation and simulated ten-minute
+  timeout. Cancellation/timeout assert actual fixture-child termination.
+- `cargo test -p loopflow --lib lf::commands::auth::account_first_tests -- --test-threads=1`:
+  12 passed. Saved Chrome selection, mismatch refusal and staged preservation
+  remain covered. A failed completion after staging credential bytes preserves
+  the existing account and credential. The fake provider refuses native login.
+- `cargo test -p loopflow --lib provider_auth::tests::codex_refresh -- --test-threads=1`:
+  2 passed; managed refresh and missing-provider behavior remain intact.
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and
+  `git diff --check`: passed. Resource preflight passed with 50.4 GiB free.
+
+Review removed the leftover refresh forwarding wrapper so both auth consumers
+call the single transport directly. The dedicated connection keeps cancellation
+ownership visible; no generic RPC registry or second auth flow was added.
+Protocol source was inspected on 2026-09-30:
+https://github.com/openai/codex/blob/main/codex-rs/app-server/src/request_processors/account_processor.rs
+This establishes source behavior, not an installed-provider or real browser demo.
+No live account, real reset, publication, full gate or Task completion is claimed.
+This closes the marked browser-ownership slice. The remaining slices above
+still require implementation and proof.

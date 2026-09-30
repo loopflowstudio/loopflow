@@ -51,6 +51,12 @@ Connect creates a **local managed identity**, not a new Claude or Codex account:
 5. Loopflow writes the observed email, user identity, plan and operating state to
    `~/.lf/loopflow.db`.
 
+Codex requests a callback URL from `account/login/start` in its app-server,
+which disables Codex's own browser opening. Loopflow opens that URL in the saved
+Chrome profile and waits for the matching login completion before checking and
+installing the staged identity. Cancellation or failed login keeps the existing
+credential.
+
 Claude opens its native browser callback route and completes after approval.
 If the callback cannot reach this terminal, type `m` then Enter to open the
 provider's manual route in the same profile; code input is hidden. Headless
@@ -182,10 +188,9 @@ identities.
 
 The identity core keeps account state in each execution Home. Claude's cached
 status and routing do not yet check live profile identity. Connect stages and
-rejects the wrong identity, but Codex may also open its own browser tab outside
-the saved Chrome profile on macOS. [Account usability follow-ups · LOO-340](https://linear.app/loopflow/issue/LOO-340)
-owns shared account state, current status by default, sole browser ownership,
-Claude cached identity and routing, Flow account bundles, and reset credits.
+rejects the wrong identity. [Account usability follow-ups · LOO-340](https://linear.app/loopflow/issue/LOO-340)
+owns the remaining shared account state, Claude cached identity and routing,
+Flow account bundles, and reset credits.
 
 Control automatic routing per account:
 

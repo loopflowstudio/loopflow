@@ -84,6 +84,9 @@ watches through merge. `submit` performs the same preparation but leaves the exa
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
 
+Scratch cleanup selects landing candidates for this repository's
+[hosted CI](../../TESTING.md); PR readiness alone does not select CI.
+
 Final preparation keeps the existing PR title and body when its published head
 matches the local head. Explicit copy and valid gate output take precedence;
 unpublished changes still generate fresh copy. Task merge-disposition text is

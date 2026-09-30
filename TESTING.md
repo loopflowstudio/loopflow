@@ -1,7 +1,16 @@
 # Testing
 
-PR and merge-group CI run the full proof matrix in parallel. Local work should
-run the smallest proof that can change the next decision.
+Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
+matrix until scratch is clear. `lf pr submit`, `lf pr arm`, and `lf pr land`
+clear scratch before pushing a landing candidate. Scratch-free PRs, including
+small changes and Dependabot updates, run the full proof matrix in parallel.
+Local work should run the smallest proof that can change the next decision.
+
+For checkpoint PRs, `scratch-clear` reports deferred proof and `tests-result`
+and the matrix jobs skip. That is not a passing test result. The required merge
+queue always rejects scratch artifacts and runs full proof before merging.
+Missing scratch, classifier failures, and unexpected skipped candidate jobs
+still fail the aggregate. Restoring scratch on a later PR head defers its proof.
 
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
@@ -14,7 +23,8 @@ restoration alone never skips proof. After a merge, main can reuse a
 successful merge-group CI run for the identical SHA and workflow, linking that
 run in its summary. Missing or unreadable proof runs the full matrix. Main still
 restores the shared caches and runs each job whose cache misses; those jobs
-refresh their caches and must pass. PRs and merge groups always execute every check.
+refresh their caches and must pass. Candidate PRs and merge groups always execute
+every check.
 
 Swift cache keys include the tracked Swift tree, compiler, and SDK. Successful
 main jobs save the build and source hashes/timestamps. After checkout, CI restores
@@ -340,9 +350,9 @@ aggregate `tests-result` check:
 | Job | Runner | Command |
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
-| `scratch-clear` | ubuntu-latest | reject landing-only scratch artifacts |
+| `scratch-clear` | ubuntu-latest | defer checkpoint PR proof; reject scratch artifacts on queue/main |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
-| `rust-test` | ubuntu-latest | `cargo nextest run --all` |
+| `rust-test` | ubuntu-latest | `cargo nextest run --all --no-fail-fast` |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
@@ -351,7 +361,9 @@ aggregate `tests-result` check:
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
+Candidate and merge-group jobs must all pass for `tests-result` to pass. Rust
+collects every test failure in the run instead of stopping at the first failure.
+`.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
 

@@ -57,9 +57,11 @@ LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
    an ancestor's explicit `--as` through `LF_AS`. The current attribution slice
    deletes `agent_work_in`, `LF_TASK_ORIGIN`, claim/manifest Task discovery and
    the `LF_PARENT_RUN_ID` writer; PR/installation checks use the common reader.
-   The public cross-checkout proof passes. The Task-shortcut public proof is
-   authored and included in the disposable installation suite, but local execution
-   is blocked by unavailable Docker. Post-CI repairs now pass the complete
+   The public cross-checkout proof passes. The Task-shortcut public proof failed
+   on hosted `36cbb3d4b`: its inherited OpenCode selection cannot enforce the
+   checkout boundary. The fixture now selects Claude for Y's mechanical Flow;
+   confinement is unchanged. Re-execution remains pending on the disposable
+   runner because local Docker is unavailable. Post-CI repairs pass the complete
    materialized Rust matrix (2,024 passed, 17 skipped); see the retained failures
    and final source receipt in evidence. Keep the dead per-turn token and Flow membership
    provenance audit open. See [evidence](evidence.md).

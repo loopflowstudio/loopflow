@@ -6,9 +6,10 @@ use tokio::sync::Barrier;
 
 use super::test_fixture::{now, Fixture};
 use super::{inspect_task_planning_async, read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
+use crate::id::WaveId;
 use crate::pm::test_server::{json_response, spawn, QueuedResponse};
 use crate::pm::PmSnapshot;
-use crate::store::PmSnapshotRow;
+use crate::store::{PmSnapshotRow, PmTaskRecord};
 
 fn issue(project: serde_json::Value) -> serde_json::Value {
     json!({"data":{"issue":{
@@ -33,6 +34,19 @@ fn project() -> serde_json::Value {
     json!({"id":"project-1", "name":"Chapter", "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
         "initiatives":{"nodes":[{"id":"initiative-1"}]},
         "teams":{"nodes":[{"id":"team-1"}]}})
+}
+
+fn snapshot(wave: &WaveId, record: &PmTaskRecord) -> PmSnapshotRow {
+    PmSnapshotRow {
+        wave_id: wave.clone(),
+        provider: "linear".into(),
+        initiative: "initiative-1".into(),
+        synced_at: record.observed_at,
+        snapshot: PmSnapshot {
+            projects: record.project.clone().into_iter().collect(),
+            items: vec![record.item.clone()],
+        },
+    }
 }
 
 #[tokio::test]
@@ -67,16 +81,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .is_none());
 
             // A list carries membership, not another copy of the Task's title.
-            let mut snapshot = PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative-1".into(),
-                synced_at: record.observed_at,
-                snapshot: PmSnapshot {
-                    projects: vec![record.project.clone().unwrap()],
-                    items: vec![record.item.clone()],
-                },
-            };
+            let mut snapshot = snapshot(wave.id(), &record);
             fixture
                 .store
                 .put_pm_snapshot(snapshot.clone())
@@ -324,16 +329,7 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                 .is_err());
             fixture
                 .store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: original.observed_at,
-                    snapshot: PmSnapshot {
-                        projects: vec![original.project.unwrap()],
-                        items: vec![original.item],
-                    },
-                })
+                .put_pm_snapshot(snapshot(wave.id(), &original))
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -430,16 +426,7 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .await
                 .unwrap();
             let scope = repo.to_string_lossy();
-            let mut list = PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative-1".into(),
-                synced_at: original.observed_at,
-                snapshot: PmSnapshot {
-                    projects: vec![original.project.clone().unwrap()],
-                    items: vec![original.item.clone()],
-                },
-            };
+            let mut list = snapshot(wave.id(), &original);
             fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
             let mut confirmed = original.clone();
             confirmed.item.revision = Some("2026-09-29T12:00:00.124Z".into());
@@ -754,16 +741,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
                 .await
                 .unwrap();
-            let mut list = PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative-1".into(),
-                synced_at: original.observed_at,
-                snapshot: PmSnapshot {
-                    projects: vec![original.project.clone().unwrap()],
-                    items: vec![original.item.clone()],
-                },
-            };
+            let mut list = snapshot(wave.id(), &original);
             fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
             let mut newer = original.clone();
             let project = newer.project.as_mut().unwrap();

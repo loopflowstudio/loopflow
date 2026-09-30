@@ -66,6 +66,13 @@ Proof for this slice:
   mutation or installed-Home source execution occurred. The full Done When is
   unfulfilled. Relationship-repair and outage/transition decisions remain open.
 
+Compression reused snapshot refresh and one store handle, kept only the selected
+completion status across pages, and shared planning-test snapshot setup. Chapter,
+completion-adapter, planning-lookup, OAuth-refresh and PR-identity checks passed
+(16 tests); the PR fixture first failed on its same-revision URL replacement and
+now supplies a newer observation. Formatting, all-target Clippy and whitespace
+checks passed. The full-design acceptance gaps above remain unchanged.
+
 ### Execution contract and recursive locks — 2026-09-30
 
 Jack supplied successful LOO-298 coordination from a bounded read-only contribution

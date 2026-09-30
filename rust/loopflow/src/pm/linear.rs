@@ -1015,7 +1015,7 @@ impl LinearClient {
 
     async fn completed_project_status(&self, current: &ProjectStatusRef) -> PmResult<String> {
         let mut after = None;
-        let mut statuses = Vec::new();
+        let mut selected = None;
         loop {
             let response: ProjectStatusesData = self
                 .graphql(
@@ -1024,10 +1024,18 @@ impl LinearClient {
                 )
                 .await?;
             let page = response.project_statuses;
-            statuses.extend(page.nodes.into_iter().filter(|status| {
-                status.status.r#type == COMPLETED_STATE_TYPE
-                    && status.status.team_id == current.team_id
-            }));
+            selected = selected
+                .into_iter()
+                .chain(page.nodes)
+                .filter(|status| {
+                    status.status.r#type == COMPLETED_STATE_TYPE
+                        && status.status.team_id == current.team_id
+                })
+                .min_by(|left, right| {
+                    left.position
+                        .total_cmp(&right.position)
+                        .then_with(|| left.status.id.cmp(&right.status.id))
+                });
             if !page.page_info.has_next_page {
                 break;
             }
@@ -1041,20 +1049,12 @@ impl LinearClient {
             }
             after = Some(cursor);
         }
-        statuses
-            .into_iter()
-            .min_by(|left, right| {
-                left.position
-                    .total_cmp(&right.position)
-                    .then_with(|| left.status.id.cmp(&right.status.id))
-            })
-            .map(|status| status.status.id)
-            .ok_or_else(|| {
-                PmError::Message(format!(
-                    "Linear has no completed Project status in the scope of status {}",
-                    current.id
-                ))
-            })
+        selected.map(|status| status.status.id).ok_or_else(|| {
+            PmError::Message(format!(
+                "Linear has no completed Project status in the scope of status {}",
+                current.id
+            ))
+        })
     }
 
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {

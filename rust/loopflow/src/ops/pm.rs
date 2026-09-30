@@ -885,17 +885,6 @@ async fn store_pm_snapshot(
     ctx: &PmContext,
     snapshot: &PmSnapshot,
     observed_at: i64,
-) -> OpsResult<()> {
-    let store = pm_store().await?;
-    store_pm_snapshot_with_store(repo, wave, ctx, snapshot, observed_at, &store).await
-}
-
-async fn store_pm_snapshot_with_store(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-    snapshot: &PmSnapshot,
-    observed_at: i64,
     store: &Store,
 ) -> OpsResult<()> {
     let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
@@ -920,8 +909,9 @@ pub(crate) async fn refresh_pm_snapshot(
     ctx: &PmContext,
 ) -> OpsResult<PmSnapshot> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let snapshot = fetch_pm_snapshot(repo, wave, ctx).await?;
-    store_pm_snapshot(repo, wave, ctx, &snapshot, observed_at).await?;
+    let store = pm_store().await?;
+    let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await?;
+    store_pm_snapshot(repo, wave, ctx, &snapshot, observed_at, &store).await?;
     Ok(snapshot)
 }
 
@@ -2265,7 +2255,7 @@ async fn apply_or_plan_repository_reteam(
             let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             let projects = checked_projects_with_store(repo, &ctx, wave, store).await?;
             let snapshot = fetch_pm_snapshot_for_projects(&ctx, projects).await?;
-            store_pm_snapshot_with_store(repo, wave, &ctx, &snapshot, observed_at, store).await?;
+            store_pm_snapshot(repo, wave, &ctx, &snapshot, observed_at, store).await?;
         }
         remove_legacy_pm_sentinels(repo, &waves)?;
         if repo.join(".git").exists() {
@@ -2568,9 +2558,7 @@ async fn pm_sync_async(
                         .map_err(pm_to_ops)?;
                 }
             }
-            let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            let snapshot = fetch_pm_snapshot(repo, wave, &ctx).await?;
-            store_pm_snapshot(repo, wave, &ctx, &snapshot, observed_at).await?;
+            refresh_pm_snapshot(repo, wave, &ctx).await?;
         }
     }
 

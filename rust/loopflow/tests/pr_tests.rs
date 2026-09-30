@@ -874,6 +874,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
         .expect("read PM snapshot")
         .expect("PM snapshot");
     snapshot.snapshot.items[0].url = None;
+    snapshot.snapshot.items[0].revision = Some("2026-09-30T00:00:00Z".into());
     runtime
         .block_on(task.store.put_pm_snapshot(snapshot))
         .expect("remove cached Task URL");

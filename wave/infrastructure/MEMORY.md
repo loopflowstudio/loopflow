@@ -428,40 +428,55 @@ Task event because the Run cannot be queried by Task; every post-launch fact
 reuse the launch resolver, so a bound Session turns into an orphan when its
 Task's PR merges. The store's `runs` table has the Task FK and no writer.
 
-The approved model belongs to LOO-298, outside the LOO-291 delivery. Rewrite
-docs first as the spec, then tables/readers, then research what the new model
-makes deletable and remove it. The
-[decision history](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-native-workspace.md)
-and [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
-preserve Jack's approval and the follow-up split. These are target contracts,
-not claims about tables already implemented:
+LOO-298 (PR #1296) implements the model. Run no longer exists as a product
+object or table. Decisions below are Jack's unless marked; the branch's
+`scratch/questions.md` holds his exact words until landing.
 
-- Repository has Chapters, a repo-wide clock incremented for every Wave at
-  once; Project = (Wave, Chapter), unique, owns Tasks, KRs, metric targets and
-  the Flow template its Tasks run by default; Task ⇒ Project ⇒ Wave.
-- Task owns Flow invocations (0..n, one current) and may invoke any Flow
-  ("trust our users"); the invocation records which. An invocation is one
-  object: unrolled graph + cursor + per-loop return counts + nullable parent
-  for runtime nesting only, never template composition (invocations are
-  always fully unrolled). No step-occurrence object, no path-string node key,
-  no "Flow position", no "recommended Flow".
-- `runs`: nullable `invocation_id ⇒ task_id ⇒ wave_id`, constructor fills
-  upward and refuses a mismatch; node + iteration tuple in an invocation;
-  `work_source` declared|checkout|inherited|bound.
-  A Run may have neither Task nor Wave, or a Wave alone. Task implies Wave;
-  bind preserves invocation membership. The manifest remains launch evidence.
-- `sessions` is a child of `runs` (run_id unique, kind, title + provenance,
-  state, ready_summary). Bind = update the Run's task/wave; rename = update
-  the title; started derived from Runs; bind allowed on done Tasks; usage
-  follows the field.
-  Ask and Flow review Sessions become rows keyed by their existing
-  `session_run_id`, replacing the four-store projection.
-- Every denormalization has a Pydantic-style validator or is deleted. No
-  sidecars, no shim: a one-time migration fills the columns from old
-  subjects and `session-name.json` and drops them ("hack my computer if need
-  be, keep the codebase clean").
-- Method for any model review: derive the user's objects and the APIs between
-  them from the product first, then check the infra for hops.
+- **Three owners.** Exec is one actual lf process. AgentSession is one
+  conversation, interactive or headless, surviving driver and engine
+  replacement. FlowSession is one started Flow. History is subordinate to its
+  owner and has no lifecycle of its own.
+- **Every Flow step is an Exec** (2026-09-29): "why not have lf flows actually
+  launch skill execs?" A skill step runs the same `lf skill` command a person
+  would run; an op runs its own command. Flow running skills without an Exec was
+  "a big leak" that reimplemented skill machinery; close it fully. Where direct
+  and Task-step behavior differ, "run directly seems like it wins there always."
+- **Parents are processes.** An agent-issued lf command's parent is the lf
+  process driving that agent ("to be clear i still want being called by an
+  agent process to give you the right parent-lf process"). The word parent means
+  Exec to Exec only; loop and template relations need other words.
+- **Definitions compile; runs are skills and ops.** A Flow definition may
+  reference other Flows; starting it compiles them into one graph (Jack's word).
+  A subflow is "more of a lens than an operational entity". Loop passes are not
+  child FlowSessions either (2026-09-30, reversing the earlier "runtime nesting
+  creates parents" rule): a pass is a node and iteration position.
+- **An ID names an object.** A captured input is not an object: it is an event
+  in AgentSession history that names its Exec. `RunId` and its side table were
+  deleted. Prefer the word Exec over launch or run where the thing is one agent
+  start under one lf process.
+- **Flow decisions are typed results** of the selected successful turn,
+  modelled on PydanticAI and Jev: the step declares its output schema. The
+  in-turn decide and route commands are removed; Jack said the command "felt
+  wrong". `lf flow blocked` remains, undecided.
+- **Bind** is write-once null to Task, allowed on done Tasks, and sets Started
+  once. Usage after bind is prospective as implemented; Jack leans post-hoc and
+  has not decided, and the design keeps it a single read-time choice.
+- Every denormalization has a validator or is deleted. Method for any model
+  review: derive the user's objects and APIs from the product first, then check
+  the infrastructure for hops.
+
+Lessons from implementing it (2026-09-29):
+
+- Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
+  unrun. Run the full Rust suite locally with no fail-fast before publishing.
+- The pinned 0.12.23 worker's output classifier read a quoted sentence in a
+  scratch note as a capability denial. The source fix is on the branch; resume
+  with the actual cause until workers run a release carrying it.
+- Task workers had no transient retry or account failover, so one hitting a
+  provider limit stopped instead of switching accounts. Converging on the direct
+  path fixes it.
+- A worker's claim named the process that launched it, not the worker, so stop
+  and liveness targeted the wrong pid (fixed in `5bd311697`).
 
 Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/

@@ -144,7 +144,7 @@ This is the concrete ownership plan, not a Run-to-Exec rename.
 | Conversation identity, title, native thread, request/feedback | AgentSession; never copied on reconnect/restart |
 | Current conversational driver | Nullable Exec reference plus a generation fence on AgentSession; old driver loses write authority atomically |
 | Provider PID/start and endpoint | Existing native process/connection evidence linked to AgentSession; engine and terminal client remain distinguishable |
-| Captured input and launch publication | AgentSession launch metadata plus immutable payload; reservation/publication comparison prevents two launches |
+| Captured input and launch publication | A captured event in AgentSession history, naming its Exec, plus the immutable payload; the step Exec owns its capture and only it may publish, which prevents two launches |
 | Flow graph/cursor/claim and pending review | Existing invocation owner evolved to FlowSession; one shared driver |
 | Agent work start, completion, failure, retries, duration and usage | AgentSession history, correlated to provider turn/receipt and driving Exec; idempotent receipt acceptance, missing distinct from zero |
 | Agent-backed Flow step completion | FlowSession references the exact successful AgentSession history entry, validated against its selected boundary and generation |

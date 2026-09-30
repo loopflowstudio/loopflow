@@ -58,6 +58,25 @@ loop-decide owns navigation; this review supplies approval and feedback only.
 
 ## Still open
 
+- **Project relationship repair authority:** public SDK schema inspection at
+  `b37823be308a42f837277671f3ded66d33d92e6c` found Initiative join revisions, but no
+  established deleted-join recovery contract or Project–Team relationship revision.
+  Timestamped Project history has untyped entries with no documented complete
+  replay contract. Webhook documentation does not close these gaps. The
+  [working design](resolve-tasks-from-linear-and.md#relationship-acquisition-contract-gap--2026-09-29)
+  records exact evidence and limits. Request a bound decision: retain strict
+  revision/removal proof and unresolved ownership pending provider guarantees,
+  or explicitly permit a newly acquired complete relationship set to repair it,
+  accepting the documented consistency limits. Request time, Project `updatedAt`,
+  list omission and replay remain insufficient under the currently accepted rule.
+  Dependent implementation is stopped; this is not permission to relax admission.
+  External `archivedAt` acquisition is separately feasible but not implemented;
+  existing chapter archive acknowledgements remain intact.
+  The official `lf ask` opened bound Session
+  `ask_0e28c0a520064375960a1806c5007e3f` for this exact choice. Its waiting command
+  has not returned a decision. Session readiness is not completion; no repair
+  policy may be inferred while it remains pending.
+
 - **Remote-main details and outward sync:** Jack accepted remote main as the shared definition baseline,
   then clarified that this is not a blanket substitution for local main everywhere. The working assumption is last-fetched
   configured remote main, excluding dirty files/unpublished local main commits.

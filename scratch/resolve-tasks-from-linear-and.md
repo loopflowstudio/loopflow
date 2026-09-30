@@ -169,10 +169,67 @@ normalized planning still needs its own integration proof; the existing relocati
 case uses empty planning for the relocated Wave.
 Formatting, `cargo clippy --all-targets -- -D warnings` and whitespace checks pass.
 
+### Relationship acquisition contract gap — 2026-09-29
+
+The next implementation pass inspected Linear's public SDK schema at
+[`b37823be308a42f837277671f3ded66d33d92e6c`](https://github.com/linear/linear/blob/b37823be308a42f837277671f3ded66d33d92e6c/packages/sdk/src/schema.graphql)
+and its [webhook contract](https://linear.app/developers/webhooks). The schema was
+downloaded at that exact revision and compared with the inspected master copy;
+both have SHA-256 `cc4263f66d6e79f188b1e6b08af5f0fe8dd32dd3c0cdae3c070606e8d1e5e0eb`.
+This is public contract research, not authenticated provider behavior or a live
+mutation experiment.
+
+Observations:
+
+- `InitiativeToProject` supplies join identity, endpoints, `createdAt`, `updatedAt`
+  and nullable `archivedAt`. Project-scoped and workspace-wide join connections
+  support pagination and `includeArchived`. The delete mutation returns
+  `DeletePayload`; the schema does not establish that a deleted association remains
+  queryable as an archived join or supplies a recoverable deletion revision.
+- `Project.teams` returns Team entities, without a Project–Team join revision.
+  `Project.history` exposes timestamped records with `entries: JSONObject!`, but
+  the inspected contract does not define those entries' Team/Initiative deltas,
+  retention, completeness or an ordering checkpoint for a current relationship set.
+- Project `archivedAt` is affirmative archive evidence. The existing adapter
+  queries it only on direct Project ownership, then discards it when converting
+  to `PmProject`; issue detail and Project lists do not acquire it. This is a
+  concrete acquisition gap independent of ownership repair. A null value alone
+  does not establish an ordered restoration under the accepted contract.
+- Documented webhooks cover Projects and Initiatives, but do not promise join
+  removal events, Project–Team membership revisions or a replayable complete event
+  log. Delivery IDs/timestamps and mutation `lastSyncId` do not establish a read
+  checkpoint protocol. No documented guarantee was found that Project `updatedAt`
+  orders either relationship set.
+
+Consequently the public contract inspected here does **not establish the required
+repair authority**. This is not a claim that Linear can never supply it. Adding join
+timestamps would handle positive join facts but would not safely replace the whole
+Initiative set or repair Team ownership. Simulated responses cannot fill that gap.
+Current nested connections also stop at 50 without acquiring `pageInfo`; any
+replacement-set proposal must first prove complete acquisition and reject partial
+or failed reads.
+
+Decision requested through `lf ask`: retain strict relationship revision/removal
+proof and keep disputed ownership unresolved pending a provider contract, or
+explicitly revise the requirement to permit a newly acquired complete Project
+relationship set to repair ownership. The latter would need local fencing against
+already-in-flight observations and honest freshness, but still cannot promise
+server-side total ordering or snapshot consistency from the documented API.
+This is a product consistency decision, not an implementation assumption.
+
+Dependent relationship implementation is stopped. No production code, schema or
+tests changed in this pass, and unchanged behavioral tests were not rerun. Existing
+proof receipts remain applicable; legitimate ownership repair, delayed-response
+fencing and external archive acquisition remain unproven. Chapter archive receipts
+and independent Project/issue ordering are unchanged. No shared execution migration,
+provider mutation, publication, promotion or Flow navigation occurred. The complete
+single-PR acceptance matrix and all other remaining scope below are retained.
+
 ### Remaining implementation
 
 1. Acquire ordered Initiative/Team relationship evidence and an explicit repair
-   for unresolved Project ownership. The current writer retains uncertainty
+   for unresolved Project ownership. The public-contract gap above requires a
+   bound decision before choosing repair authority. The current writer retains uncertainty
    instead of replacing membership by acquisition time. External Project archive
    observations also need acquisition; known chapter archive acknowledgements are
    integrated. Wave `synced_at` still does not date newer joined issue facts.

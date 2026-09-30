@@ -26,6 +26,8 @@ on a display session or a person's judgment. One PR; no delivery requested here.
 - Orphan `tests/goldens/with_direction.md`: no YAML case or reader remains.
 - Required permissioned UI-host policy and its five-run acceptance quota.
   Keep explicit hosted diagnostics and failure classification.
+- Repeated display-test opt-in conditions and the headless test's handwritten
+  selection callback. Use one test trait and the production navigator control.
 
 ## Done when
 
@@ -49,10 +51,16 @@ a window-launch capture described as headless. Check-time classification must
 ignore quoted commands and label heredoc batches unclassified. The frozen
 baseline includes both classification and missing-repository coverage.
 
+Command accounting now lives separately from cohort selection. Comparisons omit
+Runs with missing command start times as well as missing command records. The
+headless selection check invokes the workspace navigator's own action; hosted
+diagnostics share one opt-in trait. Runner coverage checks Xcode's compile-only
+command instead of matching a sentence in its summary.
+
 Remaining: affected-suite gate/CI, normal Flow adoption, and a later completed
 implement cohort for runtime comparison. No later cohort is manufactured by
 rerunning implementation. The seven selected skills have almost identical word
 counts; changed obligations and smaller future scratch, not source-size savings,
 are the intended improvement.
 
-Checks: focused Python collector/runner tests and prompt-contract tests passed; prompt goldens regenerated; `scripts/test_desktop.sh` checked production states/selection and related text/files/monitor tests with WindowServer denied; affected suites belong to gate/CI.
+Checks: `uv run pytest python/tests/test_check_cost.py python/tests/test_gate_bounded.py -q` — 49 passed; `scripts/test_desktop.sh -Xswiftc -gnone --jobs 4 --filter 'DesktopHeadlessTests|AppAppearanceTests|TaskFilesTests|TaskMonitorTests'` — build and 16 tests passed, 4 native diagnostics skipped with WindowServer denied; Ruff, `cargo fmt --check`, and all-target Clippy passed; prior prompt-contract/golden results remain applicable; affected suites belong to gate/CI.

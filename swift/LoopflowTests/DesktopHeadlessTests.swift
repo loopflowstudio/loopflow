@@ -41,9 +41,10 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            processActivity: .loading, workActivity: .loading, repos: [])
-        let row = WaveRow(wave: WaveViewModel(api: wave.toWave()), isSelected: false,
-                          onSelect: { model.select(.wave(id: wave.id)) })
-        try row.inspect().button().tap()
+        model.navigation.presentation = .full
+        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        try navigator.inspect()
+            .find(viewWithAccessibilityIdentifier: "workspace-wave-\(wave.id)").button().tap()
 
         #expect(model.selection == .wave(id: wave.id))
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-wave")

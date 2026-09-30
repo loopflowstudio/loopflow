@@ -86,9 +86,9 @@ Runs in the date window name repository paths that no longer exist; their
 repository identity is unavailable and they are excluded, not assigned by name.
 The report counts these separately. Existing checkouts are resolved through Git's
 common directory. Zero recognized check time is not proof of no verification.
-A comparison with missing command records is omitted. Submitted token counts
-exclude provider-native history, cache effects and later file reads. Source
-changes are not a measurement of model behavior.
+A comparison with missing command records or start times is omitted. Submitted
+token counts exclude provider-native history, cache effects and later file reads.
+Source changes are not a measurement of model behavior.
 
 No post-change implement cohort exists yet. Compare settled implement Runs that
 received the revised skills using the same collector, canonical repository,

@@ -13,8 +13,7 @@ import GhosttyKit
 
 /// Opt-in native benchmark. The endpoint is captured native pixels + owned PTY input,
 /// not compositor presentation. Run through scripts/desktop_performance.py.
-@Suite("Desktop experience measurements", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"), .serialized)
+@Suite("Desktop experience measurements", .requiresDisplay, .serialized)
 @MainActor
 struct DesktopPerformanceTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"] != nil))

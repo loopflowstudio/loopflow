@@ -16,8 +16,7 @@ private let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent
 /// focused pane; split, close and zoom answer to keybinds. Every proof mounts
 /// the production `SessionsView` over real Ghostty `/bin/cat` PTYs and checks
 /// the terminal, its unfinished draft and its companion survive.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"), .serialized)
+@Suite(.requiresDisplay, .serialized)
 @MainActor
 struct SessionChromeProofTests {
     @Test("A single pane has no chrome; two panes get a strip whose trio appears only on hover of the focused pane",

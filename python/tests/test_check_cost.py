@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.check_cost import _is_check, compare, summarize
 
 
@@ -58,11 +60,12 @@ def test_report_counts_overlapping_checks_once_and_exposes_missing_runs(tmp_path
     assert step["missing_context_runs"] == 1
 
 
-def test_comparison_does_not_call_missing_commands_an_improvement():
+@pytest.mark.parametrize("gap", ["runs_without_command_records", "commands_without_start"])
+def test_comparison_does_not_call_missing_commands_an_improvement(gap: str):
     baseline = {
         "steps": {"implement": {"settled_runs": 2, "run_seconds": 100, "check_seconds": 30}}
     }
     current = {"steps": {"implement": {"settled_runs": 1, "run_seconds": 100, "check_seconds": 10}}}
     assert compare(baseline, current)["implement"]["change_percentage_points"] == -20
-    current["steps"]["implement"]["runs_without_command_records"] = 1
+    current["steps"]["implement"][gap] = 1
     assert compare(baseline, current) == {}

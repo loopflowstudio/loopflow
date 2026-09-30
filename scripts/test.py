@@ -194,7 +194,7 @@ class Suite:
     # An optional diagnostic that runs only when named explicitly (never under --all),
     # because it needs a permissioned host. Absence of that host is a failure,
     # never a silent skip.
-    host_gate: bool = False
+    explicit_only: bool = False
     # Runs before the suite's commands. A returned string is an immediate,
     # actionable failure (e.g. wrong platform, simulated capability gap).
     precheck: Optional[Callable[[], Optional[str]]] = None
@@ -626,7 +626,7 @@ SUITES: list[Suite] = [
         match=lambda _c: False,
         build=_ui_host_commands,
         proves="optional hosted LoopflowUITests execute on a permissioned display host.",
-        host_gate=True,
+        explicit_only=True,
         precheck=_ui_host_precheck,
         classify=_ui_host_classify,
         machine_lock="ui-host",
@@ -653,7 +653,7 @@ def build_plan(changed: list[str], run_all: bool, forced: set[str]) -> list[Plan
         if suite.name in forced:
             plans.append(Plan(suite, True, f"forced (--{suite.name})", suite.build(changed)))
             continue
-        if suite.host_gate:
+        if suite.explicit_only:
             # Optional host diagnostic: never auto-run (not even under --all); it
             # needs a permissioned host and is named explicitly.
             plans.append(
@@ -1701,7 +1701,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.all:
         kind = "full"
     elif "ui-host" in forced:
-        kind = "required_host"
+        kind = "hosted_ui"
     else:
         kind = "changed"
     return run_plans(plans, kind=kind, reuse_passing=args.reuse_passing)

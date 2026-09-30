@@ -118,10 +118,53 @@ def _context(directory: Path) -> dict[str, int]:
     return dict(result)
 
 
+def _command_cost(directory: Path, created: float, finished: float) -> Counter[str]:
+    result: Counter[str] = Counter()
+    starts: dict[str, float] = {}
+    completed: dict[str, tuple[dict, float]] = {}
+    for line in (directory / "events.jsonl").read_text().splitlines():
+        event = json.loads(line)
+        if event["type"] != "conversation":
+            continue
+        item = event["event"].get("item", {})
+        if item.get("type") != "command":
+            continue
+        observed = _timestamp(event["observed_at"])
+        if event["event"]["type"] == "item_started":
+            starts.setdefault(item["id"], observed)
+        elif event["event"]["type"] == "item_completed":
+            completed[item["id"]] = item, observed
+    spans: dict[str, list[tuple[float, float]]] = {"shell": [], "check": []}
+    if not completed:
+        result["runs_without_command_records"] += 1
+    for identity, (item, observed) in completed.items():
+        result["commands"] += 1
+        try:
+            check = _is_check(item["command"])
+        except ValueError:
+            result["unclassified_commands"] += 1
+            check = False
+        if check:
+            result["check_commands"] += 1
+            if item.get("exit_code") not in (None, 0):
+                result["failed_check_commands"] += 1
+        began = starts.get(identity)
+        if began is None:
+            result["commands_without_start"] += 1
+            continue
+        span = max(created, began), min(finished, observed)
+        spans["shell"].append(span)
+        if check:
+            spans["check"].append(span)
+    for kind, intervals in spans.items():
+        result[f"{kind}_seconds"] += _span_seconds(intervals)
+    return result
+
+
 def summarize(runs: Path, repo: Path, since: str, until: str) -> dict[str, Any]:
     start, end = _timestamp(since), _timestamp(until)
     identities: dict[str, Path] = {}
-    steps: dict[str, Counter] = defaultdict(Counter)
+    steps: dict[str, Counter[str]] = defaultdict(Counter)
     unavailable_repository_runs = 0
     for path in sorted(runs.glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
@@ -150,44 +193,7 @@ def summarize(runs: Path, repo: Path, since: str, until: str) -> dict[str, Any]:
         result["settled_runs"] += 1
         result["run_seconds"] += max(0, finished - created)
         result.update(_context(path.parent))
-        starts: dict[str, float] = {}
-        completed: dict[str, tuple[dict, float]] = {}
-        for line in (path.parent / "events.jsonl").read_text().splitlines():
-            event = json.loads(line)
-            if event["type"] != "conversation":
-                continue
-            item = event["event"].get("item", {})
-            if item.get("type") != "command":
-                continue
-            observed = _timestamp(event["observed_at"])
-            if event["event"]["type"] == "item_started":
-                starts.setdefault(item["id"], observed)
-            elif event["event"]["type"] == "item_completed":
-                completed[item["id"]] = item, observed
-        spans: dict[str, list] = {"shell": [], "check": []}
-        if not completed:
-            result["runs_without_command_records"] += 1
-        for identity, (item, observed) in completed.items():
-            result["commands"] += 1
-            try:
-                check = _is_check(item["command"])
-            except ValueError:
-                result["unclassified_commands"] += 1
-                check = False
-            if check:
-                result["check_commands"] += 1
-                if item.get("exit_code") not in (None, 0):
-                    result["failed_check_commands"] += 1
-            began = starts.get(identity)
-            if began is None:
-                result["commands_without_start"] += 1
-                continue
-            span = max(created, began), min(finished, observed)
-            spans["shell"].append(span)
-            if check:
-                spans["check"].append(span)
-        for kind, intervals in spans.items():
-            result[f"{kind}_seconds"] += _span_seconds(intervals)
+        result.update(_command_cost(path.parent, created, finished))
     return {
         "schema_version": 1,
         "repository": str(repo),
@@ -210,7 +216,11 @@ def compare(baseline: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]
         before = baseline["steps"].get(step, {})
         if not before.get("run_seconds") or not after.get("run_seconds"):
             continue
-        if before.get("runs_without_command_records") or after.get("runs_without_command_records"):
+        if any(
+            report.get(gap)
+            for report in (before, after)
+            for gap in ("runs_without_command_records", "commands_without_start")
+        ):
             continue
         old = 100 * before.get("check_seconds", 0) / before["run_seconds"]
         new = 100 * after.get("check_seconds", 0) / after["run_seconds"]

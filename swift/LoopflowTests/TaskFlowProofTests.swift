@@ -100,8 +100,7 @@ struct TaskFlowTests {
 }
 
 #if canImport(GhosttyKit)
-@Suite("Task Flow native proof", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"), .serialized)
+@Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
     @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")

@@ -8,8 +8,7 @@ import GhosttyKit
 @testable import LoopflowMac
 @testable import Loopflow
 
-@Suite("Embedded terminal input", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"))
+@Suite("Embedded terminal input", .requiresDisplay)
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)

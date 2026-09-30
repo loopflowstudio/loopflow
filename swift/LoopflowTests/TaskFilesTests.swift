@@ -78,8 +78,7 @@ struct TaskFilesTests {
         #expect(!document.editor.hasMarkedText())
     }
 
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic")) func filesystemEventsFollowReplacementRapidWritesDeletionAndBothSaveModes() async throws {
+    @Test(.requiresDisplay) func filesystemEventsFollowReplacementRapidWritesDeletionAndBothSaveModes() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -353,8 +352,7 @@ struct TaskFilesTests {
         #expect(document.recoveries.first?.changed == true)
     }
 
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic")) func draftsKeepUndoSelectionExternalChangesAndGhostty() async throws {
+    @Test(.requiresDisplay) func draftsKeepUndoSelectionExternalChangesAndGhostty() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let registry = SessionsWorkspaceRegistry()

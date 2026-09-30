@@ -10,8 +10,7 @@ import ViewInspector
 
 private final class SessionLaunchBundleMarker: NSObject {}
 
-@Suite("Task Session preparation subprocess proof", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"), .serialized)
+@Suite("Task Session preparation subprocess proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskSessionLaunchProofTests {
     @Test("Delayed preparation and launch failures stay with the requesting Task; retry uses its prepared checkout")

@@ -733,10 +733,11 @@ def test_ui_host_result_bundle_is_per_run_not_a_fixed_path():
     assert str(gate._run_artifact_root()).endswith(f"run-{gate.os.getpid()}")
 
 
-def test_loopflow_summary_says_it_does_not_run_hosted_ui():
-    loopflow = next(s for s in gate.SUITES if s.name == "loopflow")
-    assert loopflow.proves is not None
-    assert "NOT run here" in loopflow.proves
+def test_loopflow_compiles_without_launching_hosted_ui():
+    commands = gate._loopflow_commands([])
+    xcodebuild = next(command for command in commands if command.label == "xcodebuild")
+    assert "build-for-testing" in xcodebuild.argv
+    assert not {"test", "test-without-building"}.intersection(xcodebuild.argv)
 
 
 def test_machine_lock_is_exclusive_and_names_the_holder(tmp_path, monkeypatch):

@@ -10,8 +10,7 @@ import GhosttyKit
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Unified workspace navigation proof", .enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"] == "1",
-                 "Optional display-session diagnostic"))
+@Suite("Unified workspace navigation proof", .requiresDisplay)
 @MainActor
 struct WorkspaceNavigationProofTests {
     @Test("The work list retains its viewport through presentations, refresh and repository return")

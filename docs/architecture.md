@@ -241,10 +241,9 @@ the current boundary. Conversation continuation is separate from Flow retry.
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done
-and landed Tasks remain valid targets. Under the current conservative attribution
-assumption, earlier usage retains its recorded owner; binding affects subsequent
-work, and uncertain mid-turn allocation remains unknown.
+or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+usage retains its recorded owner; binding affects subsequent work, and uncertain
+mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
@@ -254,8 +253,8 @@ explicit target name and stable Project identities. A partially rotated reposito
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts. Run is a historical representation to import and remove, not a
-fourth execution object or a generic attempt type under another name.
+write contracts and the current-state conversion boundary. Exec, AgentSession
+and FlowSession are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
 

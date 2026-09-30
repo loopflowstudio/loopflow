@@ -54,10 +54,9 @@ retains exact current tables, source paths and subprocess edges in one place.
 ## Conversation and process history
 
 Exec records one actual lf process, including agent-issued nested commands.
-Several provider turns or Flow steps may execute in that process. Their results
-must not overwrite each other or become extra synthetic Execs. Command completion
-belongs to the outer process; provider completion belongs to AgentSession history.
-A provider may succeed before a later command operation fails.
+Each executed Flow step has its own child lf Exec. Multiple provider turns may
+belong to that Exec; their results remain distinct in AgentSession history.
+A provider may succeed before its command fails later.
 
 AgentSession identity, name and feedback survive driver replacement. Its current
 driver is a nullable Exec reference with a generation fence. The native engine
@@ -112,8 +111,8 @@ their recorded attribution independently of current assignment or driver.
 Bind assigns an unbound conversation once, including to a done or landed Task.
 Same-target assignment is idempotent; reassignment and clearing are unavailable.
 The exact target is explicit and the transaction rejects competing assignment,
-driver replacement or incompatible Flow membership. The current prospective
-attribution assumption and its limits are in the
+driver replacement or incompatible Flow membership. Prospective usage attribution
+and its limits are in the
 [contract](../architecture-reference.md#attribution-binding-and-started).
 
 Actual work reservation, including first bind, sets Task Started once. Merely

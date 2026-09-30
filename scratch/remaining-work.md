@@ -68,8 +68,9 @@ will not run that proof.
    skills and `TESTING.md` with the final CLI/schema and #1360's removal. Remove
    stale archive/import, old Run-owner and resident-service instructions; retain
    the distinction between implemented behavior and configured acceptance.
-   `docs/architecture/planning.md` still describes runtime child FlowSessions;
-   replace that stale paragraph with the single cursor/return-counter model.
+   The architecture pages now describe the single cursor/return-counter model,
+   child step Execs, typed blocked decisions and current-state conversion.
+   CLI references, builtin skills and test guidance still need the wider audit.
    Regenerate affected website pages and the architecture HTML from their source.
 3. **Measurements and behavioral checks.** Measure cold/warm CLI list and detail
    on a representative disposable dense store, separating startup, SQL and

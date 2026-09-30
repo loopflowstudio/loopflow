@@ -89,6 +89,11 @@ were regenerated. These are content checks, not rendered Desktop acceptance.
 
 Review retained three distinctions that would otherwise overstate the result:
 client replacement versus engine recovery, preflight refusal versus post-create
-failure, and stacking selection versus Git/GitHub integration. Remaining docs
-reconciliation includes a stale runtime-child paragraph in the planning page;
-it stays on the next item's list.
+failure, and stacking selection versus Git/GitHub integration. The subsequent
+compression reconciles the architecture pages with one FlowSession's cursor and
+return counters, ordinary child Execs and current-state conversion. The broader
+documentation audit remains on the next item's list.
+
+Compression verification: architecture coverage, both website documentation
+tests, generated HTML consistency and `git diff --check` passed. Website copies
+were synced. This changes documentation only; runtime proofs were not rerun.

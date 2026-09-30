@@ -84,23 +84,16 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
         }
     }
 
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
+    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
+}
 
-    PathBuf::from("lf")
+fn current_or_sibling_lf_binary() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    if current.file_name().is_some_and(|name| name == "lf") {
+        return Some(current);
+    }
+    let sibling = current.parent()?.join("lf");
+    sibling.exists().then_some(sibling)
 }
 
 /// A recursive executable lock puts its `lf` first on PATH. Ordinary step
@@ -234,22 +227,7 @@ fn uninstalled_lf_binary() -> PathBuf {
     if let Some(installed) = which_on_path(Path::new("lf")) {
         return installed;
     }
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
-    PathBuf::from("lf")
+    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
 }
 
 /// Resolve the selected installation at this child boundary, independently of

@@ -100,6 +100,11 @@ docs and scratch. No runtime owner, migration, compatibility alias or Task
 disposition was added. The earlier mutation-free local Task guard assumption
 is no longer sufficient evidence for promotion preservation.
 
+Compression shares current/sibling executable discovery without changing lookup
+precedence or receipt checks (22 fewer production lines). All ten process tests,
+formatting and all-target Clippy passed; log: `.lf/tmp/loo334-compress-process.log`.
+The installation harness was not rerun; its recorded Flow-state mismatch remains open.
+
 Full-design cases 1–15 remain the publication boundary. Normal-copy
 succession, exact review completion and two worker digests, genuine divergence,
 recursive locking and decoy agent PATH, Session-owner discovery, chapter archive

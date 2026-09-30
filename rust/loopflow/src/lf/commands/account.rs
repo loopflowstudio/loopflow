@@ -21,6 +21,7 @@ use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
+use super::profile::{find_provider_account, parse_managed_provider};
 use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
@@ -67,12 +68,10 @@ pub fn run(
     json: bool,
 ) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(async {
-        match cmd {
-            Some(cmd) => run_async(cmd).await,
-            None => account_status::run(provider, !cached, details, json).await,
-        }
-    })
+    match cmd {
+        Some(cmd) => rt.block_on(run_async(cmd)),
+        None => rt.block_on(account_status::run(provider, !cached, details, json)),
+    }
 }
 
 async fn run_async(cmd: &AccountCommand) -> Result<()> {
@@ -158,7 +157,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
 }
 
 async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+    let provider = raw_provider.parse::<Provider>()?;
     let store = open_account_store().await?;
     let (profiles, remember) = browser_profiles(&store, provider, None, selection).await?;
     let mut failures = Vec::new();
@@ -822,7 +821,7 @@ fn open_chrome_profile(profile: &LocalChromeProfile, _url: &str) -> Result<()> {
 }
 
 async fn disconnect(raw_provider: &str) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+    let provider = raw_provider.parse::<Provider>()?;
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
     println!("Disconnected local {}", provider.display_name());
@@ -832,7 +831,7 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
 async fn disconnect_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
-    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let mut account = find_provider_account(&store, provider, raw_email).await?;
     let account_id = account.account_id.clone();
     let _login_lock = account
         .home
@@ -871,12 +870,12 @@ async fn set_browser_profiles(
     email: Option<&str>,
     selections: &[String],
 ) -> Result<()> {
-    let provider = parse_provider(provider)?;
+    let provider = provider.parse::<Provider>()?;
     let store = open_account_store().await?;
     let account = match email {
         Some(email) => {
             parse_managed_provider(provider.as_str())?;
-            Some(super::profile::find_provider_account(&store, provider, email).await?)
+            Some(find_provider_account(&store, provider, email).await?)
         }
         None => None,
     };
@@ -922,7 +921,7 @@ async fn set_account_lifecycle(
     let plan = update.plan.map(parse_plan).transpose()?;
     let paid_through = update.paid_through.map(parse_paid_through).transpose()?;
     let store = open_account_store().await?;
-    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let mut account = find_provider_account(&store, provider, raw_email).await?;
     if let Some(login_email) = login_email {
         if let Some(home) = &account.home {
             let observed = match provider {
@@ -993,7 +992,7 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
 async fn clear_account_cooldown(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
-    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
+    let account = find_provider_account(&store, provider, raw_email).await?;
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
@@ -1010,17 +1009,6 @@ fn account_store_error(provider: Provider, account: &str, error: StoreError) -> 
     match error {
         StoreError::NotFound => anyhow!("unknown {} account '{}'", provider, account),
         other => anyhow!(other),
-    }
-}
-
-fn parse_managed_provider(raw: &str) -> Result<Provider> {
-    let provider = parse_provider(raw)?;
-    if matches!(provider, Provider::Claude | Provider::Codex) {
-        Ok(provider)
-    } else {
-        Err(anyhow!(
-            "managed OAuth accounts support Claude and Codex only"
-        ))
     }
 }
 
@@ -1061,7 +1049,7 @@ fn format_account(account: &ProviderAccount) -> String {
 }
 
 async fn configure(raw_provider: &str) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+    let provider = raw_provider.parse::<Provider>()?;
     if let Some(message) = provider.api_key_configure_error() {
         return Err(anyhow!(message));
     }
@@ -1111,11 +1099,6 @@ async fn local_store() -> Result<SharedStore> {
         .await
         .map_err(|err| anyhow!("failed to open local credential store: {err}"))?;
     Ok(Arc::new(store))
-}
-
-fn parse_provider(raw: &str) -> Result<Provider> {
-    raw.parse::<Provider>()
-        .map_err(|_| anyhow!("unknown provider: {raw}"))
 }
 
 fn format_relative_delta(seconds: i64) -> String {

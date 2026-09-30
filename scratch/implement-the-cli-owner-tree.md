@@ -681,3 +681,9 @@ its retained extraction: **137 commands below root, 17 hidden, 433 flags,
 141/18/440/95/10. The three fewer flag entries are two removed help flags and
 one duplicate JSON option. --cached replaces --verify without adding a second
 live toggle. These are intermediate implemented counts, not final demo counts.
+
+Compression after `7285df603` shares managed-provider parsing with routing,
+retains typed provider errors and removes redundant async dispatch (19 net Rust
+lines removed). Isolated `auth_tests` (8) and Account-first tests (12), formatting,
+all-target Clippy (four jobs) and diff checks passed. CLI counts and remaining
+scope are unchanged; providers and browsers in these proofs are fixtures.

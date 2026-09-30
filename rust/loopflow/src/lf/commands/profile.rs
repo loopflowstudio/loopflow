@@ -262,9 +262,7 @@ pub(crate) async fn find_provider_account(
 }
 
 pub(crate) fn parse_managed_provider(raw: &str) -> Result<Provider> {
-    let provider = raw
-        .parse::<Provider>()
-        .map_err(|error| anyhow!(error.to_string()))?;
+    let provider = raw.parse::<Provider>()?;
     if matches!(provider, Provider::Claude | Provider::Codex) {
         Ok(provider)
     } else {

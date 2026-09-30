@@ -13,7 +13,7 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 const EXEC_SELECT: &str = "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
-    e.caller_provider_generation,e.caller_flow_turn,e.command,e.repo,e.cwd,
+    e.caller_provider_generation,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,
     (SELECT wave FROM run_events WHERE process_id=e.id AND node='run' AND wave IS NOT NULL
      ORDER BY seq LIMIT 1) FROM execs e";
@@ -26,16 +26,15 @@ fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
         via_agent: row.get(3)?,
         caller_session_id: row.get(4)?,
         caller_provider_generation: row.get(5)?,
-        caller_flow_turn: row.get(6)?,
-        command: row.get(7)?,
-        repo: row.get(8)?,
-        cwd: row.get(9)?,
-        started_at: row.get(10)?,
-        completed_at: row.get(11)?,
-        outcome: row.get(12)?,
-        exit_code: row.get(13)?,
-        signal: row.get(14)?,
-        wave: row.get(15)?,
+        command: row.get(6)?,
+        repo: row.get(7)?,
+        cwd: row.get(8)?,
+        started_at: row.get(9)?,
+        completed_at: row.get(10)?,
+        outcome: row.get(11)?,
+        exit_code: row.get(12)?,
+        signal: row.get(13)?,
+        wave: row.get(14)?,
     })
 }
 
@@ -668,7 +667,7 @@ mod discovery_tests {
             )
             .unwrap();
             conn.execute("UPDATE execs SET parent_exec_id=?2,via_agent=1,caller_session_id='retained-caller',
-                caller_provider_generation=7,caller_flow_turn='original-token',outcome='succeeded',
+                caller_provider_generation=7,outcome='succeeded',
                 completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct]).unwrap();
             conn.execute(
                 "UPDATE execs SET outcome='interrupted',completed_at=7,exit_code=130
@@ -712,7 +711,6 @@ mod discovery_tests {
             Some("retained-caller")
         );
         assert_eq!(success.caller_provider_generation, Some(7));
-        assert_eq!(success.caller_flow_turn.as_deref(), Some("original-token"));
         assert_eq!(success.via_agent, Some(true));
         assert_eq!(page.entries[0].signal, None);
         for (outcome, expected) in [

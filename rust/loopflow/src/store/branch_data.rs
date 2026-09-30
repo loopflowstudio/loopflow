@@ -168,7 +168,6 @@ fn clear_inherited_execution() {
     for name in [
         "LF_BIN",
         "LF_RUN_ID",
-        "LF_PARENT_RUN_ID",
         "LF_RUN_DIR",
         "LF_RUN_CONTEXT",
         "LF_WORK_ADVANCE_CLAIM",

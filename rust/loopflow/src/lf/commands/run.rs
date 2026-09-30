@@ -226,7 +226,7 @@ fn launch_bound(
 /// the caller selected Work explicitly. Otherwise checkout ownership wins over
 /// an ancestor's explicit declaration. An unavailable registry leaves context
 /// unresolved; it never reconstructs Task identity from process ancestry.
-pub(crate) fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
+pub fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
     if cli.work_subject_selector().is_some() {
         return Ok(None);
     }
@@ -1364,7 +1364,7 @@ mod tests {
         std::fs::write(
             &provider,
             r#"#!/bin/sh
-printf '%s\n' "$LF_RUN_ID|$LF_RUN_DIR|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}|${LF_PARENT_RUN_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
+printf '%s\n' "$LF_RUN_ID|$LF_RUN_DIR|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
 if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
   touch "$LF_TEST_ATTEMPT_FILE"
   printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
@@ -1385,7 +1385,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
-            "LF_PARENT_RUN_ID",
             crate::store::CONTROL_HOME_ENV,
             crate::store::CONTROL_DB_PATH_ENV,
         ];
@@ -1409,10 +1408,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var(
             crate::run_record::RUN_DIR_ENV,
             home.path().join("stale-run"),
-        );
-        std::env::set_var(
-            "LF_PARENT_RUN_ID",
-            crate::run_record::new_artifact_key().as_str(),
         );
         std::env::remove_var(crate::store::CONTROL_HOME_ENV);
         std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
@@ -1475,7 +1470,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let provider_identity = std::fs::read_to_string(evidence).unwrap();
         assert_eq!(
             provider_identity.trim(),
-            format!("{}|{}|unset|unset|unset", run_id, run_dir.display())
+            format!("{}|{}|unset|unset", run_id, run_dir.display())
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
@@ -1498,7 +1493,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert_eq!(identities.len(), 2, "transient failure should retry once");
         assert_eq!(identities[0], identities[1], "retry must stay in one Run");
         let fields = identities[0].split('|').collect::<Vec<_>>();
-        assert_eq!(&fields[2..], ["unset", "unset", "unset"]);
+        assert_eq!(&fields[2..], ["unset", "unset"]);
         let implicit_run_id = crate::run_record::parse_artifact_key(fields[0]).unwrap();
         let implicit_run_dir = std::path::Path::new(fields[1]);
         assert_eq!(
@@ -1608,7 +1603,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::run_record::RUN_DIR_ENV,
-            "LF_PARENT_RUN_ID",
             "LF_CONTROL_HOME",
             "LF_CONTROL_DB_PATH",
             "LF_WAVE_ID",

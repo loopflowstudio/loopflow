@@ -29,7 +29,6 @@ struct DTOFixtureTests {
         #expect(page.entries[0].viaAgent == nil)
         #expect(page.entries[1].parentExecID == page.entries[0].id)
         #expect(page.entries[1].outcome == nil)
-        #expect(page.entries[1].callerFlowTurn == "original-turn")
         #expect(page.next?.id == page.entries[1].id)
         #expect(try JSONDecoder().decode(ExecPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {

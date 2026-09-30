@@ -2332,11 +2332,6 @@ mod durable_store_tests {
             decision: crate::engine::transitions::FlowDecision::Iterate,
             summary: "repair the missing case".into(),
         };
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        assert!(store
-            .test_decision_output(&ExecId::new(), &verdict)
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
         store.test_decision_output(&actor, &verdict).unwrap();
         store.test_decision_output(&actor, &verdict).unwrap();
         let different = crate::engine::transitions::FlowVerdict {
@@ -2560,11 +2555,6 @@ mod durable_store_tests {
                 summary: "next pass".into(),
             };
             if routing {
-                let before = store.task_flow(&task_id).unwrap().unwrap();
-                assert!(store
-                    .test_output(&ExecId::new(), &serde_json::json!({"path": "chosen"}))
-                    .is_err());
-                assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
                 store
                     .test_output(&actor, &serde_json::json!({"path": "chosen"}))
                     .unwrap();

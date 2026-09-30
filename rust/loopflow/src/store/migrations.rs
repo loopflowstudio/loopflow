@@ -5717,6 +5717,83 @@ mod tests {
     }
 
     #[test]
+    fn removing_turn_caller_preserves_parentage_and_historical_tokens() {
+        let conn = open();
+        let name = "drop_flow_turn_caller";
+        apply_before_current_draft(&conn, name);
+        for draft in crate::build_info::migration_draft_manifest() {
+            if draft.name == name {
+                break;
+            }
+            if !_draft_is_canonical(draft.name) {
+                conn.execute_batch(&current_draft_sql(draft.name)).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO execs(id,trace_id,started_at) VALUES('driver','trace',1);
+            INSERT INTO execs(id,trace_id,parent_exec_id,started_at,via_agent,
+                caller_session_id,caller_provider_generation,caller_flow_turn,outcome,exit_code,completed_at)
+                VALUES('child','trace','driver',2,1,'retained-session',7,'original-token','succeeded',0,3);
+            INSERT INTO flow_sessions(id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES('flow','{"id":"flow"}',0,0,1,0,1,'current');
+            INSERT INTO agent_sessions(id,title,title_source,created_at,kind,interactive,input_published,cwd)
+                VALUES('retained-session','Retained','human',1,'conversation',0,1,'/repo');
+            INSERT INTO session_events(seq,session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,exec_id,provider_generation)
+                VALUES(101,'retained-session','thread','turn','started','start',2,'{}','driver',7);
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
+                VALUES('flow',1,0,'[]','selected',101,2,'{ "caller_token": "original-token" }');
+        "#).unwrap();
+        let evidence = || {
+            conn.query_row(
+            "SELECT json_array(id,trace_id,parent_exec_id,started_at,via_agent,caller_session_id,
+                caller_provider_generation,outcome,exit_code,completed_at) FROM execs WHERE id='child'",
+            [], |row| row.get::<_, String>(0)).unwrap()
+        };
+        let before = evidence();
+        conn.execute_batch(&current_draft_sql(name)).unwrap();
+        assert_eq!(evidence(), before);
+        let archived: String = conn.query_row(
+            "SELECT payload FROM import_evidence WHERE source='exec_flow_turn' AND selector='child'",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&archived).unwrap(),
+            serde_json::json!({"exec_id":"child","caller_flow_turn":"original-token"})
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM import_evidence WHERE source='exec_flow_turn'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT payload FROM flow_events", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            r#"{ "caller_token": "original-token" }"#
+        );
+        assert!(conn.prepare("SELECT caller_flow_turn FROM execs").is_err());
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='flow_turn_caller'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(conn
+            .execute(
+                "UPDATE import_evidence SET payload='{}' WHERE source='exec_flow_turn'",
+                []
+            )
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn turn_caller_upgrade_preserves_unknown_command_origin_and_selected_history() {
         let conn = open();
         let name = "record_flow_turn_caller";

@@ -257,10 +257,7 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
     })
 }
 
-pub(crate) fn prepare_agent_launch(
-    worktree: &Path,
-    env: &BTreeMap<String, String>,
-) -> OpsResult<()> {
+pub(crate) fn prepare_agent_exec(worktree: &Path, env: &BTreeMap<String, String>) -> OpsResult<()> {
     if absolute_git_dir(worktree).is_err() {
         return Ok(());
     }
@@ -271,10 +268,10 @@ pub(crate) fn prepare_agent_launch(
         .or_else(|| std::env::var(LF_GIT_OPERATION_ID_ENV).ok())
         .map(|value| GitOperationId::parse(&value))
         .transpose()?;
-    fence_agent_launch(worktree, requested_operation.as_ref())
+    fence_agent_exec(worktree, requested_operation.as_ref())
 }
 
-fn fence_agent_launch(
+fn fence_agent_exec(
     worktree: &Path,
     requested_operation: Option<&GitOperationId>,
 ) -> OpsResult<()> {

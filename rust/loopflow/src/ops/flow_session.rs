@@ -7,8 +7,8 @@ use crate::durable::FlowSession;
 use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
 use crate::ops::flow_run::{self, ActiveStep};
 use crate::ops::human_session;
-use crate::run_record::{RunFlowMembership, RunFlowStep};
 use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+use crate::session_record::{SessionFlowMembership, SessionFlowStep};
 use crate::store::SharedStore;
 
 fn current_skill(flow: &FlowSession) -> Result<&ConcreteSkill> {
@@ -31,8 +31,11 @@ pub(crate) fn pinned_skill(session_id: &str, requested: &str) -> Result<Skill> {
     Ok(skill.clone())
 }
 
-pub(crate) async fn membership(store: &SharedStore, session_id: &str) -> Result<RunFlowMembership> {
-    Ok(RunFlowMembership::Step(RunFlowStep::of(
+pub(crate) async fn membership(
+    store: &SharedStore,
+    session_id: &str,
+) -> Result<SessionFlowMembership> {
+    Ok(SessionFlowMembership::Step(SessionFlowStep::of(
         &store.waiting_review(session_id).await?,
     )?))
 }
@@ -56,7 +59,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
                 captured: None,
                 caller_artifact_key: None,
                 id,
-                artifact_key: crate::run_record::new_artifact_key(),
+                artifact_key: crate::session_record::new_artifact_key(),
                 input_published: false,
                 cwd: flow.cwd.clone(),
                 skill: Some(skill.clone()),
@@ -88,7 +91,7 @@ pub(crate) async fn reserve(store: &SharedStore, flow: &FlowSession) -> Result<O
         human_session::publish_prepared_input(
             store,
             &session,
-            RunFlowMembership::Step(RunFlowStep::of(flow)?),
+            SessionFlowMembership::Step(SessionFlowStep::of(flow)?),
         )?
     };
     Ok(session.completed_at.and(session.ready_summary))
@@ -104,8 +107,8 @@ pub(crate) async fn complete(store: &SharedStore, session: &AgentSession) -> Res
     store
         .complete_session(&session.id, session.captured)
         .await?;
-    let launch = flow_run::launch_driver(flow.id()).await;
-    if let Err(error) = human_session::stop_run(&session.artifact_key) {
+    let launch = flow_run::exec_driver(flow.id()).await;
+    if let Err(error) = human_session::stop_session_client(&session.artifact_key) {
         tracing::warn!(run_id = %session.artifact_key, %error, "review completed but provider cleanup failed");
     }
     launch.with_context(|| {
@@ -128,8 +131,8 @@ fn review_message(flow: &FlowSession, session_id: &str) -> String {
     message
 }
 
-/// The review's launch: the Flow's Work, its pinned Skill and step.
-pub(crate) async fn launch(
+/// The review's Exec: the Flow's Work, its pinned Skill and step.
+pub(crate) async fn prepare_exec(
     store: &SharedStore,
     command: &mut tokio::process::Command,
     session_id: &str,
@@ -196,12 +199,12 @@ mod tests {
                         id: Some("demo".into()),
                         human: true,
                         repeat: None,
-                        flow_parents: Vec::new(),
+                        sources: Vec::new(),
                     })],
                     description: "saved review".into(),
                 },
             )]),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
         })];
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = std::sync::Arc::new(

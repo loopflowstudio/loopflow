@@ -19,9 +19,9 @@ pub struct ContextSourceOverrides {
     pub clipboard: Option<bool>,
 }
 
-/// Canonical launch-prep input shared by CLI and Work-runner call sites.
+/// Canonical Exec preparation input shared by CLI and Work-runner call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LaunchPromptInput {
+pub struct ExecPromptInput {
     pub repo_root: PathBuf,
     pub skill: Option<String>,
     pub resolved_skill: Option<Skill>,
@@ -43,21 +43,21 @@ pub struct LaunchPromptInput {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
-/// Canonical launch-prep output.
+/// Canonical Exec preparation output.
 #[derive(Debug, Clone)]
-pub struct PreparedLaunchPrompt {
+pub struct PreparedExecPrompt {
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplicated_docs: Vec<Document>,
     pub prompt: String,
 }
 
-/// Build context + launch config from canonical launch-prep input.
-pub fn prepare_launch_prompt(
+/// Build context + Exec config from canonical Exec preparation input.
+pub fn prepare_exec_prompt(
     config: &Config,
-    input: LaunchPromptInput,
-) -> Result<PreparedLaunchPrompt, CoreError> {
-    let LaunchPromptInput {
+    input: ExecPromptInput,
+) -> Result<PreparedExecPrompt, CoreError> {
+    let ExecPromptInput {
         repo_root,
         skill,
         resolved_skill,
@@ -155,7 +155,7 @@ pub fn prepare_launch_prompt(
         .into(),
     };
 
-    Ok(PreparedLaunchPrompt {
+    Ok(PreparedExecPrompt {
         config: launch,
         components,
         deduplicated_docs,
@@ -266,9 +266,9 @@ Test skill body.
                 Surface::Iphone,
                 Surface::Headless,
             ] {
-                let prepared = prepare_launch_prompt(
+                let prepared = prepare_exec_prompt(
                     &default_test_config(),
-                    LaunchPromptInput {
+                    ExecPromptInput {
                         repo_root: tmp.path().to_path_buf(),
                         surface,
                         agent: Some(agent.into()),
@@ -302,53 +302,53 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_skill_agent_when_no_override() {
+    fn prepare_exec_prompt_prefers_skill_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_prefers_explicit_agent_override() {
+    fn prepare_exec_prompt_prefers_explicit_agent_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]
-    fn prepare_launch_prompt_includes_loopflow_by_default() {
+    fn prepare_exec_prompt_includes_loopflow_by_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -361,17 +361,17 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_omits_loopflow_when_disabled() {
+    fn prepare_exec_prompt_omits_loopflow_when_disabled() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
                 no_loopflow: true,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -380,7 +380,7 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_default_agent_when_no_user_config() {
+    fn prepare_exec_prompt_uses_default_agent_when_no_user_config() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -395,16 +395,16 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = None;
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
@@ -412,16 +412,16 @@ Test skill body.
     #[test]
     fn unmarked_builtin_skill_defaults_to_codex() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &Config::default(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
     }
@@ -429,22 +429,22 @@ Test skill body.
     #[test]
     fn marked_builtin_skill_keeps_claude_default() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &Config::default(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("kickoff".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
     }
 
     #[test]
-    fn prepare_launch_prompt_user_config_overrides_default_agent() {
+    fn prepare_exec_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -459,22 +459,22 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = Some("codex:o3".to_string());
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_config_docs() {
+    fn prepare_exec_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
         fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
@@ -483,14 +483,14 @@ Test skill body.
             ..default_test_config()
         };
 
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert!(prepared
             .components
@@ -500,22 +500,22 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_injects_structured_replies_for_ui_context() {
+    fn prepare_exec_prompt_injects_structured_replies_for_ui_context() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 client_context: ClientContext {
                     has_ui: true,
                     compact: true,
                 },
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(prepared.config.structured_replies.len(), 1);
         assert_eq!(
@@ -537,12 +537,12 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_uses_resolved_skill_skill_without_loading_by_name() {
+    fn prepare_exec_prompt_uses_resolved_skill_skill_without_loading_by_name() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("npx/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
@@ -553,10 +553,10 @@ Test skill body.
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
-        .expect("prepare launch prompt");
+        .expect("prepare Exec prompt");
 
         assert_eq!(
             prepared
@@ -570,16 +570,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_rejects_unsupported_opencode_variants() {
+    fn prepare_exec_prompt_rejects_unsupported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let err = prepare_launch_prompt(
+        let err = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect_err("unsupported OpenCode model should fail");
@@ -590,15 +590,15 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_rejects_unknown_harnesses() {
+    fn prepare_exec_prompt_rejects_unknown_harnesses() {
         let tmp = create_repo_fixture();
-        let err = prepare_launch_prompt(
+        let err = prepare_exec_prompt(
             &default_test_config(),
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("retired-agent".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect_err("unknown harness should fail");
@@ -609,16 +609,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_accepts_supported_opencode_variants() {
+    fn prepare_exec_prompt_accepts_supported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("supported OpenCode model should pass");
@@ -630,16 +630,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_launch_prompt_accepts_the_users_opencode_default() {
+    fn prepare_exec_prompt_accepts_the_users_opencode_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_launch_prompt(
+        let prepared = prepare_exec_prompt(
             &config,
-            LaunchPromptInput {
+            ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
-                ..LaunchPromptInput::default()
+                ..ExecPromptInput::default()
             },
         )
         .expect("bare OpenCode should defer to the user's default");

@@ -1004,7 +1004,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             let task = loopflow::ops::task::task_run(
                 repo,
                 issue,
-                loopflow::ops::task::TaskLaunchOptions {
+                loopflow::ops::task::TaskExecOptions {
                     retry: *retry,
                     reason: reason.clone(),
                     agent: agent.map(str::to_string),
@@ -1035,7 +1035,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                 wave.as_deref(),
                 title.clone(),
                 report,
-                run.then(|| loopflow::ops::task::TaskLaunchOptions {
+                run.then(|| loopflow::ops::task::TaskExecOptions {
                     retry: false,
                     reason: None,
                     agent: agent.map(str::to_string),

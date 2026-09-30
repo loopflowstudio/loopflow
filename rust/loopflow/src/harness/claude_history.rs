@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(events[1].payload["value"], value);
         let answer = store
             .input_final_answer(
-                &crate::run_record::parse_artifact_key("run_00000000000000000000000000000001")
+                &crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
                     .unwrap(),
             )
             .unwrap()

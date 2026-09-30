@@ -159,7 +159,7 @@ pub(crate) struct LiveSessionProcesses {
 /// without loading the Exec event ledger or provider output.
 pub(crate) fn live_exec_providers(
     snapshot: &ProcessSnapshot,
-    clients: &[(String, crate::run_record::ProviderClientRef)],
+    clients: &[(String, crate::session_record::ProviderClientRef)],
 ) -> LiveSessionProcesses {
     let mut native = Vec::new();
     let by_pid: HashMap<_, _> = snapshot.processes.iter().map(|p| (p.pid, p)).collect();

@@ -408,7 +408,7 @@ mod tests {
     use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
-    use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::{open_store, storage_config_from_env};
     use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::work::wave::Wave;
@@ -431,7 +431,7 @@ mod tests {
         let repo = tempfile::tempdir().expect("temp repo");
         let capture = CaptureHandle::begin_at(
             ledger.home(),
-            RunSpec {
+            SessionCaptureSpec {
                 harness: "codex".to_string(),
                 model: None,
                 surface: "headless".to_string(),
@@ -441,7 +441,7 @@ mod tests {
                 skill: Some("implement".to_string()),
                 subjects: Vec::new(),
                 work: None,
-                flow: RunFlowMembership::Independent,
+                flow: SessionFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -479,7 +479,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
 
         execute_flow_command(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
-        let runs: Vec<crate::run_record::SessionHistory> = serde_json::from_str(
+        let runs: Vec<crate::session_record::SessionHistory> = serde_json::from_str(
             &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
         )
         .unwrap();

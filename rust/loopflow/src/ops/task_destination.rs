@@ -14,7 +14,7 @@ use crate::child::ChildExecutionContext;
 use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::machine_install::{self, ArtifactRole};
-use crate::ops::task::TaskLaunchOptions;
+use crate::ops::task::TaskExecOptions;
 
 pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
     // Unit tests own ephemeral stores, never the account's real installation.
@@ -83,7 +83,7 @@ pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result
     Ok(())
 }
 
-pub(super) fn launch_args(operation: &str, options: &TaskLaunchOptions) -> Vec<String> {
+pub(super) fn exec_args(operation: &str, options: &TaskExecOptions) -> Vec<String> {
     let mut args = vec!["task".into(), operation.into()];
     for (flag, value) in [
         ("--model", &options.agent),
@@ -191,7 +191,7 @@ mod tests {
         ArtifactSet, InstallSelection, InstallSource,
     };
     use crate::ops::task::{
-        task_create, task_restart, task_run, TaskCreateResult, TaskLaunchOptions,
+        task_create, task_restart, task_run, TaskCreateResult, TaskExecOptions,
     };
 
     const TEST: &str =
@@ -356,7 +356,7 @@ mod tests {
         // No Git checkout, PM account or usable execution schema exists here.
         // Every operation must reach installation before needing any of them.
         assert_eq!(
-            task_run(&root, "LOO-1", TaskLaunchOptions::default()).unwrap(),
+            task_run(&root, "LOO-1", TaskExecOptions::default()).unwrap(),
             snapshot
         );
         let TaskCreateResult::Started(created) = task_create(
@@ -364,7 +364,7 @@ mod tests {
             None,
             Some("Title".into()),
             Some("Report".into()),
-            Some(TaskLaunchOptions::default()),
+            Some(TaskExecOptions::default()),
         )
         .unwrap() else {
             panic!("create --run must return the installed snapshot")
@@ -395,7 +395,7 @@ mod tests {
         local.execute_batch("INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'local', 1);
             INSERT INTO projects VALUES ('project_local', '00000000-0000-0000-0000-000000000001', 'local', 'project-external', 1);
             INSERT INTO tasks VALUES ('task_local', 'project_local', 'LOO-2', 'issue-local', 1);").unwrap();
-        assert!(task_run(&root, "LOO-2", TaskLaunchOptions::default())
+        assert!(task_run(&root, "LOO-2", TaskExecOptions::default())
             .unwrap_err()
             .to_string()
             .contains("no Task was transferred"));

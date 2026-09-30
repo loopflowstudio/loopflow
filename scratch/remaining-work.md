@@ -88,13 +88,14 @@ No new full-suite or configured acceptance result follows from this realignment.
    out before creating a container (`caller-install.log`). These local proofs
    do not close configured acceptance, broader Flow membership provenance or
    full-design import obligations.
-4. **One naming commit** (Jack). Exec instead of launch or run for one agent
-   start under one lf process; Session names for conversation things; "compile"
-   for turning a definition into its graph; "parent" only for Exec to Exec, so
-   template provenance is removed unless a real consumer needs it. Swift's
-   `TaskFlowView` currently displays its `from …` breadcrumb; this consumer is
-   reported in the audit for Jack, not renamed. Proposals go in a before and
-   after table for Jack.
+4. **One naming commit — implemented.** The [before/after table](naming.md)
+   records Exec process APIs, Session capture/recorder types and `compile_flow`.
+   Manifest and saved-graph encodings retain their historical fields. The real
+   Desktop breadcrumb consumer retains definition provenance as `sources` in
+   Rust/Swift/current wire fixtures. `session_events` → `agent_events` and
+   `run_events` → `exec_events` remain proposals only. Focused proof and measured
+   production changes are in [evidence](evidence.md). Jack's acceptance remains
+   separate; no history-table migration or new lifecycle owner is introduced.
 5. **Released-populated import**, executed through the public binary and on a
    materialized copy. Obligations: [import-preservation.md](import-preservation.md).
 6. **Docs, skills and generated pages** for final behavior after the remaining

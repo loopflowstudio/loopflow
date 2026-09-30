@@ -578,3 +578,56 @@ processes with simulated GitHub/provider effects and isolated data; no hosted or
 configured acceptance follows. All-target Clippy with warnings denied
 (`naming-land-clippy.log`), formatting and diff checks pass. Production delta is
 zero; the one-line fixture change preserves the authoritative-merge assertions.
+
+## Execution and capture naming · 2026-09-30
+
+Jack Heart requested item 4 as its own commit after the landing repair
+`f02565d8d`. [Before/after names and the two unselected table proposals](naming.md)
+record the complete boundary. Process entry APIs use Exec; captures and recorder
+history use Session names; Flow definition compilation uses `compile_*`.
+`TaskFlowView` needs definition provenance for its `from …` breadcrumb, so that
+data remains as `sources` in Rust, Swift and current DTO fixtures. Historical
+saved graphs still encode `flow_parents`; manifest Rust fields now describe
+artifact/caller/request facts while serde preserves `run_id`, `parent_run_id`
+and `launch`. No SQL, environment encoding, old selector or execution owner is
+replaced by an alias, parallel writer or new lifecycle.
+
+Focused evidence under `.lf/tmp/cut-i/`:
+
+- `naming-focused.log`: **31 passed**, no fail-fast. Covers saved codec equality,
+  source compilation and graph projection, Rust DTOs, reserved publication and
+  conflicting-input refusal, replay, completed keyed Ask import, populated
+  historical captures/SQL-only members, exact taskless completion and the
+  authoritative-merge landing scenario. One nextest leaky-handle diagnostic on
+  the saved-skill codec test is retained; this is not a clean-handle claim.
+- `naming-session.log`: **7 passed** after the final Session helper and diagnostic
+  renames. Public interactive Session and Ask lifecycles, malformed-caller
+  admission refusal, replay, manifest encoding, prepared capture and completed
+  keyed Ask preservation. `naming-admission.log` separately retains the earlier
+  one-case admission pass. These selections overlap; do not sum them as unique
+  scenarios. Providers and terminal transport are scripted, data isolated.
+- `naming-swift.log`: **19 passed**, DTO fixtures plus Flow catalog decoding with
+  a direct `sources` assertion. The app compiles; no rendered Desktop or real
+  terminal continuity acceptance follows.
+- `naming-final-static.log`: final all-target Clippy with warnings denied passes.
+  Formatting and diff checks pass. Architecture coverage passes in
+  `naming-architecture.log`; `naming-docs.log` records documentation sync,
+  architecture HTML regeneration and its freshness check. No migration changed.
+
+Review caught stale manifest-field references during compilation and one
+remaining admission assertion using the old wording; these were corrected before
+the final focused proofs. It also caught cached website Markdown rendering old
+model prose; sync now precedes regeneration. The retained provenance consumer
+prevents deletion; the saved codec prevents a rename from rewriting immutable
+capture bytes. Public graph wire changes have no defaults or compatibility alias.
+No behavioral or authority change was selected.
+
+Rename-aware production comparison against `f02565d8d`: **+938/−890, net +48
+Rust/Swift lines** (`naming-lines.log`). Excludes inline `cfg(test)` items, test
+files/modules, DTO fixtures, docs, generated output and scratch; no SQL is added.
+Moved modules are compared to their original paths rather than counted as deletion.
+Longer names reflow signatures and literals; the figure is not a reduction claim.
+
+No full local suite ran. This checkpoint does not establish configured-provider,
+rendered Desktop, released-populated public/canonical import, installed-Home
+conversion, merge or Task completion. Item 5 remains the next implementation cut.

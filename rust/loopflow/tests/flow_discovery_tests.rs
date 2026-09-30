@@ -62,7 +62,7 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
                 "no-template",
                 vec![ConcreteStep::Skill(ConcreteSkill {
                     skill: Skill::named("saved-skill"),
-                    flow_parents: vec![],
+                    sources: vec![],
                     id: None,
                     human: false,
                     repeat: None,

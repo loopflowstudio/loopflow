@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, format_int, truncate, Colors};
-use crate::run_record::SessionHistory;
+use crate::session_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;

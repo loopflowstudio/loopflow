@@ -1,4 +1,4 @@
-use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
@@ -9,8 +9,8 @@ use crate::engine::worktrees::{
     WorktreePrunePolicy, WorktreeSegment,
 };
 use crate::engine::{
-    prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
-    SkillSyncOptions, Surface,
+    prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
+    Surface,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, resolve_definition, Target};
@@ -419,7 +419,7 @@ fn resolve_rebase_conflict(
     }
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
-        launch_skill_agent(
+        exec_skill_agent(
             repo_root,
             "rebase-conflicts",
             Some(&context),
@@ -2130,7 +2130,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., rebase conflicts that need conflict resolution.
-fn launch_skill_agent(
+fn exec_skill_agent(
     repo_root: &Path,
     skill_name: &str,
     context: Option<&str>,
@@ -2140,9 +2140,9 @@ fn launch_skill_agent(
     let skill = discover_skill(repo_root, skill_name)?;
 
     let message = context.map(|value| value.to_string());
-    let prepared = prepare_launch_prompt(
+    let prepared = prepare_exec_prompt(
         config,
-        LaunchPromptInput {
+        ExecPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
@@ -2160,7 +2160,7 @@ fn launch_skill_agent(
                 diff: Some(false),
                 ..Default::default()
             },
-            ..LaunchPromptInput::default()
+            ..ExecPromptInput::default()
         },
     )?;
 
@@ -2175,8 +2175,8 @@ fn launch_skill_agent(
         &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
-    let capture = crate::run_record::CaptureHandle::begin_with_context(
-        crate::run_record::RunSpec {
+    let capture = crate::session_record::CaptureHandle::begin_with_context(
+        crate::session_record::SessionCaptureSpec {
             harness: provider,
             model,
             surface: "headless".to_string(),
@@ -2185,11 +2185,11 @@ fn launch_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
+            flow: crate::session_record::SessionFlowMembership::Independent,
             work: None,
         },
         &context,
-        Some(crate::run_record::RunLaunchRequest::from_prepared(
+        Some(crate::session_record::AgentExecRequest::from_prepared(
             &prepared.config,
             &AgentCapabilities {
                 chrome: config.chrome,
@@ -2210,7 +2210,7 @@ fn launch_skill_agent(
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&launch, &process, &capabilities);
+    let result = exec_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

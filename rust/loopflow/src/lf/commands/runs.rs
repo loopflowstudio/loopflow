@@ -10,8 +10,8 @@ use anyhow::{anyhow, Result};
 use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
-pub use crate::run_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
-pub use crate::run_record::{SessionHistory, SessionUsage};
+pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
+pub use crate::session_record::{SessionHistory, SessionUsage};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -39,7 +39,7 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         return super::runs_watch::run(&home, &store, task, &runtime);
     }
     runtime.block_on(async {
-        let snapshot = crate::run_record::active::snapshot(&home, &store, task).await;
+        let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
         if json {
             println!("{}", serde_json::to_string(&snapshot)?);
         } else {
@@ -126,7 +126,7 @@ pub fn list(
         project,
         task,
     };
-    // A Task's Runs and a Run's children list whole; other drills are recent.
+    // A Task's history and a capture's callers list whole; other drills are recent.
     let runs = match (parent, task) {
         (Some(parent), _) => {
             let database = crate::store::observability_database_path()?;
@@ -203,9 +203,9 @@ pub fn list(
 }
 
 pub fn observe_provider_session() -> Result<()> {
-    let run_dir = std::env::var_os(crate::run_record::RUN_DIR_ENV)
+    let run_dir = std::env::var_os(crate::session_record::RUN_DIR_ENV)
         .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("provider session callback has no active Run"))?;
+        .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
     let mut payload = String::new();
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
@@ -215,12 +215,12 @@ pub fn observe_provider_session() -> Result<()> {
         .and_then(serde_json::Value::as_str)
         .filter(|session_id| !session_id.is_empty())
         .ok_or_else(|| anyhow!("provider session callback has no session_id"))?;
-    let account_id = std::env::var(crate::run_record::PROVIDER_ACCOUNT_ID_ENV)
+    let account_id = std::env::var(crate::session_record::PROVIDER_ACCOUNT_ID_ENV)
         .ok()
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::run_record::write_provider_session(&run_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&run_dir, provider_session_id, account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
@@ -230,9 +230,9 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
     let snapshot = store
         .input_history(selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let input = crate::run_record::parse_artifact_key(snapshot.selector())?;
-    let dir = crate::run_record::record_dir(&home, &input)
+        .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
+    let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
+    let dir = crate::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if events {
         for event in store.input_events(&input)? {
@@ -246,23 +246,23 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
     if final_answer {
         let answer = store
             .input_final_answer(&input)
-            .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
+            .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {
                 if !answer.exact {
                     eprintln!(
-                        "warning: this Run has no final-answer receipt; showing all streamed prose from its last completed provider turn"
+                        "warning: this capture has no final-answer receipt; showing all streamed prose from its last completed provider turn"
                     );
                 }
                 println!("{}", answer.text);
                 Ok(())
             }
             None if snapshot.recorded_outcome.is_none() => Err(anyhow!(
-                "Run {} is not settled and has no final answer",
+                "Capture {} is not settled and has no final answer",
                 snapshot.selector()
             )),
             None => Err(anyhow!(
-                "Run {} settled as {} without a final answer",
+                "Capture {} settled as {} without a final answer",
                 snapshot.selector(),
                 snapshot.status()
             )),
@@ -289,12 +289,12 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         "Working directory: {}",
         snapshot.worktree.as_deref().unwrap_or("unknown")
     );
-    let manifest = crate::run_record::read_manifest(&dir).ok();
+    let manifest = crate::session_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",
         match manifest
             .as_ref()
-            .and_then(|manifest| manifest.launch.as_ref())
+            .and_then(|manifest| manifest.exec.as_ref())
         {
             Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
             Some(_) | None => "unavailable",

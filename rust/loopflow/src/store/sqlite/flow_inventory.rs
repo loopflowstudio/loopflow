@@ -276,7 +276,7 @@ mod tests {
                     "removed-template",
                     vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: Skill::named("removed-skill"),
-                        flow_parents: vec![],
+                        sources: vec![],
                         id: None,
                         human: false,
                         repeat: None,

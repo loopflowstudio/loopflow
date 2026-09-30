@@ -392,7 +392,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
-        user_name: crate::engine::config::launch_user_name()?,
+        user_name: crate::engine::config::participant_name()?,
         docs,
         diff,
         diff_files,
@@ -1713,7 +1713,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
+/// File format: `{timestamp}-{run_id}-{sources}.{skill}.md`, with the
 /// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
@@ -1722,7 +1722,7 @@ pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
     skill_name: &str,
-    flow_parents: Option<&[String]>,
+    sources: Option<&[String]>,
 ) -> Result<PathBuf, CoreError> {
     let prompts_dir = repo_root.join(".lf/prompts");
     fs::create_dir_all(&prompts_dir)?;
@@ -1731,9 +1731,9 @@ pub fn write_prompt_log(
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     // Replace / with . so namespaced skills (e.g., garden/scan) don't create subdirectories.
     let safe_skill = skill_name.replace('/', ".");
-    let name_part = match flow_parents {
-        Some(parents) if !parents.is_empty() => {
-            format!("{}.{}", parents.join("."), safe_skill)
+    let name_part = match sources {
+        Some(sources) if !sources.is_empty() => {
+            format!("{}.{}", sources.join("."), safe_skill)
         }
         _ => safe_skill,
     };
@@ -2833,7 +2833,7 @@ mod tests {
     }
 
     #[test]
-    fn write_prompt_log_with_flow_parents() {
+    fn write_prompt_log_with_sources() {
         let repo = init_repo();
         let path = write_prompt_log(
             repo.path(),

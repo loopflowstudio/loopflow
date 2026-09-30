@@ -416,7 +416,7 @@ It then judges the recorded passes, completes the resulting policy Ask with
 explicitly synthetic feedback, and checks that the same decision Run finishes.
 Keep earlier failed receipts; an automatic failure Ask is not policy acceptance.
 
-Task stall proof uses `run_record::activity::tests`, `task_live_unblock`, and
+Task stall proof uses `session_record::activity::tests`, `task_live_unblock`, and
 Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
 CPU for the body and descendants in existing Run events. Five quiet minutes
 requires samples no more than 45 seconds apart; the worker samples every 15
@@ -703,7 +703,7 @@ cargo test -p loopflow --lib installed_development_
 Run records have focused storage, harness, reducer, and reader checks:
 
 ```bash
-cargo test -p loopflow run_record
+cargo test -p loopflow session_record
 cargo test -p loopflow journal
 cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests

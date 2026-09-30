@@ -12,11 +12,11 @@ impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::run_record::ProviderSessionRef>> {
+    ) -> StoreResult<Option<crate::session_record::ProviderSessionRef>> {
         let Some(session) = self.session_for_artifact(input)? else {
             return Ok(None);
         };
-        crate::run_record::provider_session_from_history(
+        crate::session_record::provider_session_from_history(
             self.summary_for_input(&session.id, input)?
                 .into_iter()
                 .map(|event| event.payload),
@@ -41,7 +41,7 @@ impl SqliteStore {
     pub(crate) fn input_final_answer(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::run_record::FinalAnswer>> {
+    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
@@ -65,9 +65,12 @@ impl SqliteStore {
                     })?
                     .to_owned(),
             };
-            return Ok(Some(crate::run_record::FinalAnswer { text, exact: true }));
+            return Ok(Some(crate::session_record::FinalAnswer {
+                text,
+                exact: true,
+            }));
         }
-        crate::run_record::final_answer(self.input_events(input)?)
+        crate::session_record::final_answer(self.input_events(input)?)
             .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
@@ -331,7 +334,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let retain = |source: &str, evidence: serde_json::Value| {
             store
@@ -422,7 +426,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         assert_eq!(
             store
@@ -484,7 +489,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let text = "retained transcript ".repeat(4096);
         let events = [
@@ -670,7 +676,7 @@ mod tests {
         assert_eq!(history.providers.len(), 1);
         let provider = &history.providers[0];
         assert!(
-            matches!(&provider.reference, crate::run_record::ProviderHistoryReference::NativeTurn {
+            matches!(&provider.reference, crate::session_record::ProviderHistoryReference::NativeTurn {
             turn, start_seq: None, completion_seq: Some(_), .. } if turn == "recent")
         );
         assert!(provider.exec_id.is_none());
@@ -728,7 +734,8 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         let first_input =
-            crate::run_record::parse_artifact_key("run_00000000000000000000000000000001").unwrap();
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
         let first = crate::id::ExecId::new();
         let second = crate::id::ExecId::new();
@@ -763,7 +770,7 @@ mod tests {
             )
             .unwrap();
         let mut replacement = session.clone();
-        replacement.artifact_key = crate::run_record::new_artifact_key();
+        replacement.artifact_key = crate::session_record::new_artifact_key();
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
@@ -937,7 +944,7 @@ mod tests {
     fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let input = crate::run_record::new_artifact_key();
+        let input = crate::session_record::new_artifact_key();
         store.test_session("conversation", &input);
         let counts = |value| {
             json!({"inputTokens":value,"outputTokens":0,

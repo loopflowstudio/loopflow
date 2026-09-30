@@ -8,8 +8,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::ActiveSessionReader;
 
-use crate::run_record::active::DiscoveryState;
-use crate::run_record::{resolve_manifest, write_provider_client, CaptureHandle, RunSpec};
+use crate::session_record::active::DiscoveryState;
+use crate::session_record::{
+    resolve_manifest, write_provider_client, CaptureHandle, SessionCaptureSpec,
+};
 use crate::store::{open_store, SharedStore, StorageConfig};
 
 struct Client(Child);
@@ -45,7 +47,7 @@ async fn store(home: &Path) -> SharedStore {
 fn prepare(home: &Path) -> String {
     CaptureHandle::begin_at(
         home,
-        RunSpec {
+        SessionCaptureSpec {
             harness: "cat".into(),
             model: None,
             surface: "tui".into(),
@@ -54,12 +56,12 @@ fn prepare(home: &Path) -> String {
             worktree: None,
             skill: None,
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
+            flow: crate::session_record::SessionFlowMembership::Independent,
             work: None,
         },
     )
     .unwrap()
-    .run_id()
+    .artifact_key()
 }
 
 async fn visible(reader: &mut ActiveSessionReader, store: &SharedStore, ids: &[String]) {
@@ -148,7 +150,7 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
     reader.pending.invalidate(); // deterministic loss at the real feed boundary
     let recovered = reader.observe(&store, None).await;
     assert_eq!(reader.cost.rescans, 1);
-    let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
+    let cold = crate::session_record::active::snapshot(home.path(), &store, None).await;
     assert_eq!(recovered.discovery, DiscoveryState::Ready);
     assert_eq!(recovered.sessions, cold.sessions);
     assert_eq!(recovered.gaps, cold.gaps);
@@ -202,8 +204,8 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     let home = parent.path().join("observed-home");
     let store = store(parent.path()).await;
     let base = prepare(&home);
-    let input = crate::run_record::new_artifact_key();
-    let dir = crate::run_record::record_dir(&home, &input).unwrap();
+    let input = crate::session_record::new_artifact_key();
+    let dir = crate::session_record::record_dir(&home, &input).unwrap();
     fs::create_dir_all(&dir).unwrap();
     let client = Client::start();
     // Retained receipt precedes SQL import; the launch writer correctly refuses this state.
@@ -211,7 +213,7 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     fs::create_dir_all(&receipt_dir).unwrap();
     fs::write(
         receipt_dir.join(format!("{}.json", client.0.id())),
-        serde_json::to_vec(&crate::run_record::ProviderClientRef {
+        serde_json::to_vec(&crate::session_record::ProviderClientRef {
             schema_version: 1,
             pid: client.0.id(),
             terminal_id: None,
@@ -278,7 +280,7 @@ async fn corrupt_manifest_does_not_hide_a_native_client_or_keep_it_after_exit() 
     loop {
         let observed = reader.observe(&store, None).await;
         if observed.discovery == DiscoveryState::Ready {
-            let cold = crate::run_record::active::snapshot(home.path(), &store, None).await;
+            let cold = crate::session_record::active::snapshot(home.path(), &store, None).await;
             assert_eq!(observed.sessions, cold.sessions);
             assert_eq!(
                 observed.gaps, cold.gaps,
@@ -305,7 +307,7 @@ async fn discovery_cost_matrix() {
     let client = Client::start();
     write_provider_client(&live_dir, client.0.id()).unwrap();
     manifest.created_at = time::OffsetDateTime::UNIX_EPOCH;
-    let stale = crate::run_record::ProviderClientRef {
+    let stale = crate::session_record::ProviderClientRef {
         schema_version: 1,
         pid: 4_000_000,
         terminal_id: None,
@@ -336,16 +338,17 @@ async fn discovery_cost_matrix() {
             .unwrap();
         historical.id = format!("historical-{index}");
         historical.artifact_key =
-            crate::run_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
+            crate::session_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
         store.create_session(historical, None).await.unwrap();
     }
     let mut previous = 0;
     for population in [100, 10_000, 100_000] {
         for index in previous..population {
-            let id = crate::run_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
-            let dir = crate::run_record::record_dir(home.path(), &id).unwrap();
+            let id =
+                crate::session_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
+            let dir = crate::session_record::record_dir(home.path(), &id).unwrap();
             fs::create_dir_all(dir.join("provider-clients")).unwrap();
-            manifest.run_id = id.clone();
+            manifest.artifact_key = id.clone();
             fs::write(
                 dir.join("manifest.json"),
                 serde_json::to_vec(&manifest).unwrap(),
@@ -396,9 +399,10 @@ async fn discovery_cost_matrix() {
                 );
                 assert_eq!(reader.cost.retained, 1);
             }
-            let old = crate::run_record::parse_artifact_key("run_00000000000000000000000000000000")
-                .unwrap();
-            let dir = crate::run_record::record_dir(home.path(), &old).unwrap();
+            let old =
+                crate::session_record::parse_artifact_key("run_00000000000000000000000000000000")
+                    .unwrap();
+            let dir = crate::session_record::record_dir(home.path(), &old).unwrap();
             let resumed = Client::start();
             let start = Measurement::start();
             write_provider_client(&dir, resumed.0.id()).unwrap();
@@ -430,10 +434,12 @@ async fn discovery_cost_matrix() {
                 // Publish after process sampling while a real long scan is
                 // in flight. Preserve the timing so this cannot pass merely
                 // by publishing before subscription or after enumeration.
-                let racing_id =
-                    crate::run_record::parse_artifact_key("run_00000000000000000000000000000001")
-                        .unwrap();
-                let racing_dir = crate::run_record::record_dir(home.path(), &racing_id).unwrap();
+                let racing_id = crate::session_record::parse_artifact_key(
+                    "run_00000000000000000000000000000001",
+                )
+                .unwrap();
+                let racing_dir =
+                    crate::session_record::record_dir(home.path(), &racing_id).unwrap();
                 reader.invalidate();
                 let start = Measurement::start();
                 let (started, scanning) = std::sync::mpsc::sync_channel(1);

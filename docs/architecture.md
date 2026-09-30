@@ -229,11 +229,11 @@ A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.
 
 A Task selects one managed FlowSession and permits other attributed Flows.
-Taskless and Task-owned Flows use the same captured graph and driver. Runtime
-loop nesting creates child FlowSessions; template composition only expands the
-graph. Each agent-backed step references the exact successful AgentSession
+Taskless and Task-owned Flows use the same captured graph and driver. Loop
+passes are positions in that one FlowSession; template composition compiles into
+the graph. Each agent-backed step references the exact successful AgentSession
 history entry that fulfilled it. Mechanical results stay in FlowSession history;
-an in-process step creates neither a fake Exec nor an agent conversation.
+each step uses a real child Exec, and mechanical work creates no agent conversation.
 Failed or interrupted work remains visible, and stale results cannot advance
 the current boundary. Conversation continuation is separate from Flow retry.
 

@@ -358,7 +358,11 @@ An invocation keeps its definition, cursor and return counts
 in the current Home's SQLite store. Continuation uses those captured facts even
 if source definitions disappear. Completion grants no implicit merge or
 Task-completion authority. Before launch the Task page shows its Flow template;
-after launch it shows the expanded invocation.
+after starting it shows the compiled graph.
+
+The graph JSON field `sources` lists each step's source definitions, outermost
+first. Desktop uses it for the `from …` breadcrumb. These labels grant no
+execution authority.
 
 Composed templates compile before execution. Taking an Iterate edge moves the
 cursor and increments its return counter in the same FlowSession. Retry retains

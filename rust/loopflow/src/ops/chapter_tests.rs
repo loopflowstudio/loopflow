@@ -497,7 +497,7 @@ async fn local_started_task(
                     "captured",
                     vec![ConcreteStep::Skill(ConcreteSkill {
                         skill: Skill::named("implement"),
-                        flow_parents: Vec::new(),
+                        sources: Vec::new(),
                         id: Some("implement".into()),
                         human: false,
                         repeat: None,

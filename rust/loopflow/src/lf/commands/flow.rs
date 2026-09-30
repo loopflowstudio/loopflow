@@ -1,7 +1,7 @@
 use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{
-    expand_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
+    compile_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
     ExecutionCursor, Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
@@ -28,7 +28,7 @@ pub fn run(
         None
     };
     let binding = binding.or(checkout.as_ref());
-    let items = expand_flow(flow, repo)?;
+    let items = compile_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding
         .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
@@ -45,7 +45,7 @@ pub fn run(
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
     let flow = crate::engine::flow::load_authored_flow(name, repo)?;
-    let items = expand_flow(&flow, repo)?;
+    let items = compile_flow(&flow, repo)?;
     for line in render_pipeline_lines(&items) {
         println!("{line}");
     }
@@ -168,7 +168,7 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                     crate::ops::task::task_run(
                         &task.worktree,
                         &task.plan.identifier,
-                        crate::ops::task::TaskLaunchOptions {
+                        crate::ops::task::TaskExecOptions {
                             retry: *retry,
                             agent: cli.model.clone(),
                             ..Default::default()
@@ -320,7 +320,7 @@ async fn recover_native_flow(
         let Some(session_id) = store.sqlite.pending_flow_conversation(id)? else {
             break;
         };
-        if retry && crate::run_record::conversation_engine_exited(&store.sqlite, &session_id)? {
+        if retry && crate::session_record::conversation_engine_exited(&store.sqlite, &session_id)? {
             // Missing native completion remains unknown. Explicit retry releases
             // only the fenced boundary after exact engine exit evidence.
             return Ok(store.release_flow(id, flow.version, claim).await?);
@@ -957,7 +957,7 @@ mod tests {
         ).unwrap();
         let flow = crate::engine::load_flow("tend", temp.path()).unwrap();
 
-        let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
+        let items = crate::engine::compile_flow(&flow, temp.path()).unwrap();
         let lines = render_pipeline_lines(&items);
 
         assert_eq!(
@@ -977,7 +977,7 @@ mod tests {
     fn rendered_pipeline_lists_human_node_identity() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let flow = crate::engine::load_flow("task-design", &repo).unwrap();
-        let items = crate::engine::expand_flow(&flow, &repo).unwrap();
+        let items = crate::engine::compile_flow(&flow, &repo).unwrap();
 
         let lines = render_pipeline_lines(&items);
         assert_eq!(
@@ -1002,7 +1002,7 @@ mod tests {
         let flow = crate::engine::load_flow("choice", repo.path()).unwrap();
         let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
         assert_eq!(human, vec!["review_choice"]);
-        let items = crate::engine::expand_flow(&flow, repo.path()).unwrap();
+        let items = crate::engine::compile_flow(&flow, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));

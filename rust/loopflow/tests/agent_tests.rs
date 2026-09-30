@@ -4,7 +4,7 @@ use base64::Engine;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use loopflow::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use loopflow::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use loopflow::engine::error::CoreError;
 use loopflow::profile::{ProviderRoute, RouteScope};
 use loopflow::provider_auth::Provider;
@@ -51,7 +51,7 @@ fn claude_batch_reads_large_context_without_argv_limits() {
             stream,
             ..base_process()
         };
-        let result = launch_agent(&launch, &process, &AgentCapabilities::default())
+        let result = exec_agent(&launch, &process, &AgentCapabilities::default())
             .expect("large context launch");
         assert_eq!(result.exit_code, 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), prompt);
@@ -61,7 +61,7 @@ fn claude_batch_reads_large_context_without_argv_limits() {
 #[test]
 fn launch_returns_exit_code() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 0\n")]);
-    let result = launch_agent(
+    let result = exec_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
@@ -73,7 +73,7 @@ fn launch_returns_exit_code() {
 #[test]
 fn launch_captures_stdout() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\necho hello\n")]);
-    let result = launch_agent(
+    let result = exec_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
@@ -85,7 +85,7 @@ fn launch_captures_stdout() {
 #[test]
 fn launch_captures_stderr() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\necho error 1>&2\n")]);
-    let result = launch_agent(
+    let result = exec_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
@@ -102,7 +102,7 @@ fn launch_scopes_process_environment_to_child() {
         ..base_launch()
     };
 
-    let result = launch_agent(&launch, &base_process(), &AgentCapabilities::default())
+    let result = exec_agent(&launch, &base_process(), &AgentCapabilities::default())
         .expect("launch with scoped environment");
 
     assert_eq!(result.stdout, "owned");
@@ -111,7 +111,7 @@ fn launch_scopes_process_environment_to_child() {
 #[test]
 fn launch_nonzero_exit() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nexit 7\n")]);
-    let result = launch_agent(
+    let result = exec_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
@@ -218,7 +218,7 @@ while read -r line; do :; done
         skip_permissions: true,
         ..Default::default()
     };
-    let result = launch_agent(&launch, &base_process(), &AgentCapabilities::default())
+    let result = exec_agent(&launch, &base_process(), &AgentCapabilities::default())
         .expect("route failover");
 
     assert_eq!(result.exit_code, 0);
@@ -237,7 +237,7 @@ while read -r line; do :; done
 #[test]
 fn launch_missing_binary_returns_error() {
     let _env = EnvGuard::new_isolated(&[]);
-    let result = launch_agent(
+    let result = exec_agent(
         &base_launch(),
         &base_process(),
         &AgentCapabilities::default(),
@@ -255,7 +255,7 @@ fn launch_with_cwd() {
     let mut launch = base_launch();
     launch.cwd = Some(cwd.path().to_path_buf());
     let result =
-        launch_agent(&launch, &base_process(), &AgentCapabilities::default()).expect("launch");
+        exec_agent(&launch, &base_process(), &AgentCapabilities::default()).expect("launch");
     assert!(result.stdout.contains(&cwd.path().display().to_string()));
 }
 
@@ -268,7 +268,7 @@ fn launch_streaming_mode() {
         ..Default::default()
     };
     let result =
-        launch_agent(&base_launch(), &process, &AgentCapabilities::default()).expect("launch");
+        exec_agent(&base_launch(), &process, &AgentCapabilities::default()).expect("launch");
     assert!(result.stdout.contains("first"));
     assert!(result.stdout.contains("second"));
 }
@@ -283,7 +283,7 @@ fn launch_batch_times_out() {
         ..Default::default()
     };
 
-    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default());
+    let result = exec_agent(&base_launch(), &process, &AgentCapabilities::default());
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"
@@ -300,7 +300,7 @@ fn launch_streaming_times_out() {
         ..Default::default()
     };
 
-    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default());
+    let result = exec_agent(&base_launch(), &process, &AgentCapabilities::default());
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
         "expected timeout error, got: {result:?}"

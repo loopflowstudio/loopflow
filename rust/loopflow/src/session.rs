@@ -107,9 +107,9 @@ pub enum TitleSource {
     Human,
 }
 
-/// The Work a launch names. Admission fills a Task's Wave.
+/// The Work a conversation names. Admission fills a Task's Wave.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunWork {
+pub struct SessionWork {
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     pub source: WorkSource,

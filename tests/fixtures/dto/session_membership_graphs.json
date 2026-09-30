@@ -9,7 +9,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -19,7 +19,7 @@
         "kind": "skill",
         "human": true,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       }
     ]
@@ -34,7 +34,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -44,7 +44,7 @@
         "kind": "skill",
         "human": true,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -54,7 +54,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       }
     ]
@@ -69,7 +69,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -79,7 +79,7 @@
         "kind": "skill",
         "human": true,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -89,7 +89,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -99,7 +99,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -109,7 +109,7 @@
         "kind": "xor",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": [
           {
             "name": "fix",
@@ -122,7 +122,7 @@
                 "kind": "skill",
                 "human": false,
                 "returns_to": null,
-                "parents": [],
+                "sources": [],
                 "paths": []
               },
               {
@@ -132,7 +132,7 @@
                 "kind": "skill",
                 "human": false,
                 "returns_to": null,
-                "parents": [],
+                "sources": [],
                 "paths": []
               }
             ]
@@ -151,7 +151,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -161,7 +161,7 @@
         "kind": "skill",
         "human": false,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       },
       {
@@ -171,7 +171,7 @@
         "kind": "skill",
         "human": true,
         "returns_to": null,
-        "parents": [],
+        "sources": [],
         "paths": []
       }
     ]

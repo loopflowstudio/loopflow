@@ -53,19 +53,18 @@ pub(crate) fn token() -> Result<Option<ActiveStep>> {
         .transpose()
 }
 
-/// The step a launch inside a Flow executes and the Run its driver reserved
-/// for it. A launch that finds the step's attempt already published is a
-/// helper inside the step, and a review's Run is prepared with its Session:
-/// both are independent.
-pub(crate) struct StepLaunch {
-    pub membership: crate::run_record::RunFlowMembership,
+/// The captured Flow position selected for this Exec and its reserved input.
+/// Helpers and prepared reviews retain their independent admission paths.
+#[derive(Debug)]
+pub(crate) struct StepExec {
+    pub membership: crate::session_record::SessionFlowMembership,
     pub reserved: Option<(ActiveStep, i64, String)>,
 }
 
-pub(crate) fn capture_membership() -> Result<StepLaunch> {
-    use crate::run_record::{RunFlowMembership, RunFlowStep};
-    let independent = StepLaunch {
-        membership: RunFlowMembership::Independent,
+pub(crate) fn capture_membership() -> Result<StepExec> {
+    use crate::session_record::{SessionFlowMembership, SessionFlowStep};
+    let independent = StepExec {
+        membership: SessionFlowMembership::Independent,
         reserved: None,
     };
     let Some(token) = token()? else {
@@ -86,15 +85,15 @@ pub(crate) fn capture_membership() -> Result<StepLaunch> {
         }
         _ => return Ok(independent),
     };
-    Ok(StepLaunch {
-        membership: RunFlowMembership::Step(RunFlowStep::of(&flow)?),
+    Ok(StepExec {
+        membership: SessionFlowMembership::Step(SessionFlowStep::of(&flow)?),
         reserved: Some((token, reserved.0, reserved.1)),
     })
 }
 
 /// Request the existing Home process supervisor to continue this saved invocation.
 #[cfg(not(test))]
-pub(crate) async fn launch_driver(id: &str) -> Result<()> {
+pub(crate) async fn exec_driver(id: &str) -> Result<()> {
     let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
     let flow = store
         .flow(id)
@@ -112,6 +111,6 @@ pub(crate) async fn launch_driver(id: &str) -> Result<()> {
 }
 
 #[cfg(test)]
-pub(crate) async fn launch_driver(_id: &str) -> Result<()> {
+pub(crate) async fn exec_driver(_id: &str) -> Result<()> {
     Ok(())
 }

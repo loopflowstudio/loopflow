@@ -51,7 +51,7 @@ pub enum WorkActivityFact {
     ProviderHistoryRecorded {
         session_id: String,
         captured: Option<i64>,
-        reference: crate::run_record::ProviderHistoryReference,
+        reference: crate::session_record::ProviderHistoryReference,
         exec_id: Option<crate::id::ExecId>,
         status: Option<String>,
     },

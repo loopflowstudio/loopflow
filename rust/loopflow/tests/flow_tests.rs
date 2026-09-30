@@ -9,7 +9,7 @@ use std::process::Command;
 use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::{expand_flow, load_flow};
+use loopflow::engine::{compile_flow, load_flow};
 use loopflow::id::{ExecId, TraceId};
 use support::codex_app_server_script;
 use tempfile::TempDir;
@@ -562,7 +562,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
 
 fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let flow = load_flow(name, repo).unwrap();
-    expand_flow(&flow, repo).unwrap()
+    compile_flow(&flow, repo).unwrap()
 }
 
 fn assert_skill_name(item: &ConcreteStep, expected: &str) {
@@ -2470,7 +2470,7 @@ fn command_item_parses_and_expands() {
         other => panic!("expected command item, got {other:?}"),
     }
 
-    let expanded = expand_flow(&flow, repo).unwrap();
+    let expanded = compile_flow(&flow, repo).unwrap();
     assert!(matches!(&expanded[1], ConcreteStep::Command(_)));
 }
 
@@ -2514,7 +2514,7 @@ fn scheduled_release_flow_propagates_the_operation_failure() {
 }
 
 #[test]
-fn expand_flow_tracks_parents() {
+fn compile_flow_tracks_sources() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -2534,11 +2534,11 @@ fn expand_flow_tracks_parents() {
     );
 
     let flow = load_flow("parent", repo).unwrap();
-    let items = expand_flow(&flow, repo).unwrap();
+    let items = compile_flow(&flow, repo).unwrap();
     match &items[0] {
         ConcreteStep::Skill(skill) => {
             assert_eq!(skill.skill.name, "implement");
-            assert_eq!(skill.flow_parents, vec!["parent", "child"]);
+            assert_eq!(skill.sources, vec!["parent", "child"]);
         }
         _ => panic!("expected expanded skill"),
     }
@@ -2547,7 +2547,7 @@ fn expand_flow_tracks_parents() {
 /// Plain string items in flow YAML that match a sub-flow name should be
 /// expanded as sub-flows, not treated as skill names.
 #[test]
-fn expand_flow_resolves_plain_string_as_subflow() {
+fn compile_flow_resolves_plain_string_as_subflow() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
 
@@ -2564,14 +2564,14 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     match &items[1] {
         ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-a");
-            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+            assert_eq!(s.sources, vec!["parent", "publish"]);
         }
         _ => panic!("expected skill from publish sub-flow"),
     }
     match &items[2] {
         ConcreteStep::Skill(s) => {
             assert_eq!(s.skill.name, "skill-b");
-            assert_eq!(s.flow_parents, vec!["parent", "publish"]);
+            assert_eq!(s.sources, vec!["parent", "publish"]);
         }
         _ => panic!("expected skill from publish sub-flow"),
     }

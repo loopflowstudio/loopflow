@@ -263,7 +263,7 @@ mod tests {
     use super::{inherited_store, is_owned_store, isolate_branch_data, seed_store};
     use crate::engine::process::{current_home_execution_context, pinned_execution_context};
     use crate::id::WaveId;
-    use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::migrations::{
         apply_installed_development_sqlite, development_store_diagnostic,
     };
@@ -306,7 +306,7 @@ mod tests {
                 .any(|row| row.subject == "private-proof"));
 
             let capture = CaptureHandle::begin_with_context(
-                RunSpec {
+                SessionCaptureSpec {
                     harness: "proof".into(),
                     model: None,
                     surface: "headless".into(),
@@ -315,7 +315,7 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: Vec::new(),
-                    flow: RunFlowMembership::Independent,
+                    flow: SessionFlowMembership::Independent,
                     work: None,
                 },
                 &PreparedTurnContext::from_prompts("", "private data proof"),
@@ -336,13 +336,13 @@ mod tests {
                 assert_eq!(context.lf_bin, std::env::current_exe().unwrap());
             }
             // Re-entering the same private data directory keeps its own Run and lease.
-            std::env::set_var("LF_RUN_ID", capture.run_id().as_str());
+            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
             std::env::set_var("LF_ACCOUNT_LEASE", "private-lease");
             isolate_branch_data().unwrap();
             assert_eq!(
                 std::env::var("LF_RUN_ID").unwrap(),
-                capture.run_id().as_str()
+                capture.artifact_key().as_str()
             );
             assert_eq!(std::env::var("LF_ACCOUNT_LEASE").unwrap(), "private-lease");
             return;

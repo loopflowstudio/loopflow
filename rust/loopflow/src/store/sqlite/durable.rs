@@ -742,7 +742,7 @@ mod durable_store_tests {
         AgentSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
-            artifact_key: crate::run_record::new_artifact_key(),
+            artifact_key: crate::session_record::new_artifact_key(),
             caller_artifact_key: None,
             input_published: false,
             cwd: "/repo".into(),
@@ -933,7 +933,7 @@ mod durable_store_tests {
     }
 
     /// Reserve the input explicitly when the fixture starts work.
-    fn reserved_run(store: &SqliteStore, task: &TaskId) -> String {
+    fn reserved_capture(store: &SqliteStore, task: &TaskId) -> String {
         let flow = store.task_flow(task).unwrap().unwrap();
         store
             .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
@@ -973,7 +973,7 @@ mod durable_store_tests {
         let session_id = crate::ops::human_session::flow_id(&flow).unwrap();
         let run = store.session(&session_id).unwrap().unwrap().artifact_key;
         store
-            .publish_review_run(
+            .publish_review_capture(
                 &session_id,
                 store.captured_sequence(&run).unwrap().unwrap(),
                 flow.version,
@@ -1026,7 +1026,7 @@ mod durable_store_tests {
         crate::session::AgentSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string(),
-            artifact_key: crate::run_record::new_artifact_key(),
+            artifact_key: crate::session_record::new_artifact_key(),
             caller_artifact_key: None,
             input_published: false,
             cwd: "/repo".into(),
@@ -1453,7 +1453,7 @@ mod durable_store_tests {
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),
-                artifact_key: crate::run_record::new_artifact_key(),
+                artifact_key: crate::session_record::new_artifact_key(),
                 input_published: true,
                 cwd: "/repo".into(),
                 skill: None,
@@ -1479,7 +1479,7 @@ mod durable_store_tests {
                 first.captured,
                 crate::session::AgentSession {
                     caller_artifact_key: None,
-                    artifact_key: crate::run_record::new_artifact_key(),
+                    artifact_key: crate::session_record::new_artifact_key(),
                     ..first.clone()
                 },
             )
@@ -1571,7 +1571,7 @@ mod durable_store_tests {
                 replacement.captured,
                 crate::session::AgentSession {
                     caller_artifact_key: None,
-                    artifact_key: crate::run_record::new_artifact_key(),
+                    artifact_key: crate::session_record::new_artifact_key(),
                     ..bound.clone()
                 },
             )
@@ -1807,7 +1807,7 @@ mod durable_store_tests {
         assert!(!run.input_published);
 
         store
-            .publish_review_run(
+            .publish_review_capture(
                 &session_id,
                 run.captured.unwrap(),
                 reserved.version,
@@ -1875,7 +1875,7 @@ mod durable_store_tests {
                 .complete_task_review(&task_id, &stale, "late completion")
                 .is_err());
             assert!(store
-                .publish_review_run(
+                .publish_review_capture(
                     &session_id,
                     store
                         .captured_sequence(runs.last().unwrap())
@@ -1887,7 +1887,7 @@ mod durable_store_tests {
                 )
                 .is_err());
             store
-                .publish_review_run(
+                .publish_review_capture(
                     &session_id,
                     run.captured.unwrap(),
                     reserved.version,
@@ -1896,7 +1896,7 @@ mod durable_store_tests {
                 )
                 .unwrap();
             assert!(store
-                .publish_review_run(
+                .publish_review_capture(
                     &session_id,
                     run.captured.unwrap(),
                     reserved.version,
@@ -2324,7 +2324,7 @@ mod durable_store_tests {
         position.cursor.index = find_decision_index(&position.invocation.steps);
         let position = store.start_task_flow(&task_id, &position).unwrap();
         let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_run(&store, &task_id);
+        let run = reserved_capture(&store, &task_id);
         publish(&store, &position, &run, &first).unwrap();
         let actor = store.test_flow_turn(&run);
         let id = position.id();
@@ -2381,7 +2381,7 @@ mod durable_store_tests {
             .start_task_flow(&task_id, &autonomous_position(&task_id))
             .unwrap();
         let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_run(&store, &task_id);
+        let run = reserved_capture(&store, &task_id);
         publish(&store, &position, &run, &first).unwrap();
         let replacement = store
             .reclaim_task_worker(
@@ -2433,7 +2433,7 @@ mod durable_store_tests {
                 )]
                 .into_iter()
                 .collect(),
-                flow_parents: vec![],
+                sources: vec![],
             }),
             position.invocation.steps[0].clone(),
         ];
@@ -2505,7 +2505,7 @@ mod durable_store_tests {
                         )
                     })
                     .collect(),
-                flow_parents: Vec::new(),
+                sources: Vec::new(),
             });
             let steps = if routing { vec![branch] } else { body };
             position.invocation.steps = vec![ConcreteStep::Xor(ConcreteXor {
@@ -2519,7 +2519,7 @@ mod durable_store_tests {
                 )]
                 .into_iter()
                 .collect(),
-                flow_parents: Vec::new(),
+                sources: Vec::new(),
             })];
             position.cursor.iteration = 7;
             position.cursor.progress.repeats.insert("root".into(), 3);
@@ -2547,7 +2547,7 @@ mod durable_store_tests {
             assert_eq!(saved.cursor, position.cursor);
             let id = saved.id();
             let held = claim(&store, &task_id, &saved, 501);
-            let run = reserved_run(&store, &task_id);
+            let run = reserved_capture(&store, &task_id);
             publish(&store, &saved, &run, &held).unwrap();
             let actor = store.test_flow_turn(&run);
             let verdict = FlowVerdict {
@@ -2660,7 +2660,7 @@ mod durable_store_tests {
             &position.cursor,
         );
         let first_claim = claim(&store, &task_id, &position, 501);
-        let first = reserved_run(&store, &task_id);
+        let first = reserved_capture(&store, &task_id);
         publish(&store, &position, &first, &first_claim).unwrap();
         let first_actor = store.test_flow_turn(&first);
         let verdict = FlowVerdict {
@@ -2676,7 +2676,7 @@ mod durable_store_tests {
         assert_eq!(failed.cursor.iteration, position.cursor.iteration);
         assert!(!failed.has_pending_decision());
         let second_claim = claim(&store, &task_id, &failed, 502);
-        let second = reserved_run(&store, &task_id);
+        let second = reserved_capture(&store, &task_id);
         assert_ne!(first, second);
         publish(&store, &failed, &second, &second_claim).unwrap();
         let second_actor = store.test_flow_turn(&second);
@@ -2753,7 +2753,7 @@ mod durable_store_tests {
             .unwrap()
             .current_attempt
             .is_none());
-        reserved_run(&store, &work);
+        reserved_capture(&store, &work);
         let conn = store.conn.lock().unwrap();
         let reserved: i64 = conn
             .query_row(
@@ -2956,7 +2956,7 @@ mod durable_store_tests {
             .start_task_flow(&work, &autonomous_position(&work))
             .unwrap();
         let held = claim(&store, &work, &position, 111);
-        reserved_run(&store, &work);
+        reserved_capture(&store, &work);
         let final_position = store.task_flow(&work).unwrap().unwrap();
 
         assert!(store
@@ -3009,7 +3009,7 @@ mod durable_store_tests {
 
         assert_eq!(replacement.generation, 2);
         let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = reserved_run(&store, &work);
+        let run = reserved_capture(&store, &work);
         assert!(publish(&store, &flow, &run, &first).is_err());
         publish(&store, &flow, &run, &replacement).unwrap();
         let failure = TaskFlowBlocker {

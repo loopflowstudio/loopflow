@@ -43,7 +43,7 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Flow captures its expanded graph, all routing alternatives and every Skill
+A Flow captures its compiled graph, all routing alternatives and every Skill
 before execution. A direct conversation captures its selected Skill or inline
 prompt. Reconnect retains that conversation; a new Flow invocation captures new
 source. Current credentials and checkout contents remain live inputs to execution,

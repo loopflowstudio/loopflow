@@ -1,7 +1,7 @@
 //! Captured invocation identity and selected steps shared by durable Flows.
 
 use crate::engine::flow::RepeatPolicy;
-use crate::engine::{expand_flow, load_flow, ConcreteStep};
+use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
@@ -117,7 +117,7 @@ impl QueuedInvocation {
 
     pub fn load(repo: &Path, flow: &str) -> Result<Self> {
         let definition = load_flow(flow, repo)?;
-        let steps = expand_flow(&definition, repo)?;
+        let steps = compile_flow(&definition, repo)?;
         Self::new(definition.name, steps)
     }
 }
@@ -195,27 +195,27 @@ where
 }
 
 fn legacy_step(step: LegacyStepPlan) -> ConcreteStep {
-    let flow_parents = vec![LEGACY_STEP_PLAN.to_string()];
+    let sources = vec![LEGACY_STEP_PLAN.to_string()];
     match step.kind {
         StepKind::Skill => ConcreteStep::Skill(crate::engine::ConcreteSkill {
             skill: crate::engine::Skill::named(&step.name),
             id: step.id,
             human: step.human,
             repeat: step.repeat,
-            flow_parents,
+            sources,
         }),
         StepKind::Op => ConcreteStep::Command(crate::engine::ConcreteCommand {
             item: crate::engine::Command {
                 command: step.name,
                 args: Vec::new(),
             },
-            flow_parents,
+            sources,
         }),
         StepKind::Xor | StepKind::And | StepKind::Or | StepKind::Loop => {
             ConcreteStep::Xor(crate::engine::ConcreteXor {
                 router: crate::engine::Skill::named(&step.name),
                 paths: Default::default(),
-                flow_parents,
+                sources,
             })
         }
     }

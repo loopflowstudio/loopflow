@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, rev_parse};
 use crate::engine::load_skill;
@@ -557,7 +557,7 @@ pub fn generate_pr_copy(
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&launch, &process, &capabilities)
+    let result = exec_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(

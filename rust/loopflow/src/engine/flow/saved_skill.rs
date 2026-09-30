@@ -1,4 +1,4 @@
-//! Preserve the nested settings layout in captured Flow plans and journals.
+//! Preserve the historical settings and provenance keys in captured Flow plans.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,8 @@ use super::{ConcreteSkill, RepeatPolicy, Skill};
 pub(super) struct SavedSkill {
     skill: Skill,
     policy: Settings,
-    flow_parents: Vec<String>,
+    #[serde(rename = "flow_parents")]
+    sources: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,7 +31,7 @@ impl From<ConcreteSkill> for SavedSkill {
                 human: step.human,
                 repeat: step.repeat,
             },
-            flow_parents: step.flow_parents,
+            sources: step.sources,
         }
     }
 }
@@ -42,7 +43,7 @@ impl From<SavedSkill> for ConcreteSkill {
             id: step.policy.id,
             human: step.policy.human,
             repeat: step.policy.repeat,
-            flow_parents: step.flow_parents,
+            sources: step.sources,
         }
     }
 }

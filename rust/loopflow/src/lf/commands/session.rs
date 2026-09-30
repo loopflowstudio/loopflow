@@ -4,7 +4,7 @@ use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
 use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
-use crate::run_record::SessionTitleSource;
+use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
@@ -197,7 +197,9 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_ask(&store, run_id).await
         }
-        SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
+        SessionCommand::StopRun { run_id } => {
+            crate::ops::human_session::stop_session_client(run_id)
+        }
     }
 }
 

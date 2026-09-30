@@ -74,7 +74,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
             for message in batch {
                 if let Some(prompt) = prompt(&message) {
                     let binding = binding.clone();
-                    let cli = cli.launch_options();
+                    let cli = cli.exec_options();
                     let answer = tokio::task::spawn_blocking(move || {
                         crate::lf::commands::run::answer_bound(&prompt, &cli, &binding)
                     })

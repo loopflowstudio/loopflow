@@ -77,18 +77,21 @@ pub(crate) async fn task_execution_and_flow(
             .and_then(|flow| flow.current_attempt.as_ref())
         {
             let captured = attempt.captured;
-            match crate::run_record::activity::read(&crate::store::lf_home_dir(), &attempt.run_id)
-                .await
+            match crate::session_record::activity::read(
+                &crate::store::lf_home_dir(),
+                &attempt.run_id,
+            )
+            .await
             {
-                crate::run_record::activity::Activity::Stalled => {
+                crate::session_record::activity::Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
                 }
-                crate::run_record::activity::Activity::Unknown => {
+                crate::session_record::activity::Activity::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
                     snapshot.reason = format!("Session event {captured} is active; activity samples are unavailable or stale. Inspect its Session before recovery.");
                 }
-                crate::run_record::activity::Activity::Running => {}
+                crate::session_record::activity::Activity::Running => {}
             }
         }
     }
@@ -257,7 +260,7 @@ mod tests {
         });
         position.current_attempt = Some(FlowAttempt {
             captured: 1,
-            run_id: crate::run_record::new_artifact_key(),
+            run_id: crate::session_record::new_artifact_key(),
             published: true,
             outcome: None,
         });

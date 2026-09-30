@@ -123,6 +123,11 @@ waits for a surviving step before replacing the driver claim; a missing result
 after process death still requires inspection before retry. Cursor movement
 cannot prove exactly-once external effects.
 
+A successful `blocked` decision opens a keyed Ask after its turn ends. Recovery
+reuses the same question and answer. Consuming the answer retains the cursor and
+pass, then captures a new input in the same conversation. A later blocked turn
+can ask another question; answering never supplies an Advance or Iterate verdict.
+
 Usage keeps provider-authored stream/receipt identity. Reduce cumulative samples
 once; never add checkpoints as independent consumption. Retries retain separate
 outcomes and measurements. Missing counters and unknown finality stay missing.
@@ -130,8 +135,8 @@ The shared typed history reader selects captured events and unlinked native turn
 before decoding payloads. Native receipts without a start stay discoverable with
 unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
 separate from provider completion and Exec exit.
-Under the supervisor's prospective-attribution assumption, binding affects later
-work and preserves earlier usage ownership. Active-turn allocation uses recorded
+Binding affects later work and preserves earlier usage ownership, as Jack Heart
+decided on 2026-09-30. The history reader owns this single attribution choice. Active-turn allocation uses recorded
 start/assignment evidence; uncertainty never becomes an invented token split.
 
 ## Read indexed history

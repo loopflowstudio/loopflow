@@ -529,12 +529,18 @@ one typed result from its final answer:
 {"decision":"iterate","summary":"Remaining work, next action, and proof to collect"}
 ```
 
-The captured step declares `advance` or `iterate`, with a nonempty `summary`.
+The captured step declares `advance` or `iterate` with a nonempty `summary`,
+or `blocked` with a nonempty `reason`.
 The provider receives that schema before generation. The Flow consumes only the
 selected successful turn's validated result. Invalid output gets at most two
 corrective turns in the same conversation; exhaustion retains all evidence and
-stops the boundary. To request feedback, use `lf flow blocked "What stalled,
-what was tried, and what needs human judgment"` and reassess when it returns.
+stops the boundary. To request feedback, end the turn with:
+
+```json
+{"decision":"blocked","reason":"What stalled, what was tried, and which question needs an answer"}
+```
+
+The answer starts another turn in the same conversation for reassessment.
 
 Implement builds the intended behavior and updates the working plan with what
 remains. When replacing a path, move its consumer and delete the predecessor.
@@ -546,12 +552,11 @@ replacement count is required. Loop-decide reads the current work and evidence
 to decide whether to continue. Pursue publishes after convergence, before demo.
 
 Concept-review is interactive, on request or inside unblock, and does not own
-navigation. Blocked is
-a stopped execution outcome, separate from Advance/Iterate. Meaningful learning
+navigation. Blocked ends the deciding turn and requests feedback. Meaningful learning
 counts as progress; repeating a failure without new evidence calls for help.
 
-`lf flow blocked` keys one Ask to the exact invocation, node, and iteration tuple;
-duplicate calls join it and retries recover its saved completion. Its Session
+A blocked result keys one Ask to its exact captured event and Flow position;
+recovery reuses that question and its saved completion. Its Session
 runs `unblock`, using concept-review with the human by default or addressing a
 specific missing input. Human Complete returns the summary and shared artifact
 changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
@@ -671,9 +676,8 @@ lf ask --skill unblock "Two passes repeated the same failure; reconsider the dir
 Ask owns the Session and wait; `unblock` guides the conversation inside it,
 using concept-review by default. The selected skill name is saved with the Ask
 so reopening keeps that choice. Completing this conversation returns
-direction to the blocked caller for reassessment. The
-`lf flow blocked` command uses this path and retains the Ask result
-across retries of the same decision boundary.
+direction to the blocked caller for reassessment. A Flow decision
+with `blocked` uses this path and retains the Ask result across driver recovery.
 
 A human Flow step uses the same Session surface. Its saved invocation owns
 the exact boundary and captured Skill:

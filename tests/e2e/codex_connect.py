@@ -34,6 +34,7 @@ class Responses(ThreadingHTTPServer):
         self.fail_request: int | None = None
         self.commands: dict[int, str] = {}
         self.invalid_decision_output = False
+        self.decision_outputs: list[dict] = []
         self.held = threading.Event()
         self.release = threading.Event()
         self.command = (
@@ -105,7 +106,10 @@ class Handler(BaseHTTPRequestHandler):
                     schema = output_format["schema"]
                     assert schema["additionalProperties"] is False
                     text = json.dumps(
-                        {"decision": "unknown"} if self.server.invalid_decision_output
+                        self.server.decision_outputs.pop(0)
+                        if self.server.decision_outputs
+                        else {"decision": "unknown"}
+                        if self.server.invalid_decision_output
                         else {"decision": "advance", "summary": "Native output proof"}
                     )
             item = {
@@ -216,6 +220,7 @@ def main() -> None:
     parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--live-handoff", action="store_true")
     parser.add_argument("--flow-retry", action="store_true")
+    parser.add_argument("--flow-blocked", action="store_true")
     parser.add_argument("--flow-engine-loss", action="store_true")
     parser.add_argument("--flow-automatic-retry", action="store_true")
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace", "late"))
@@ -289,6 +294,9 @@ enabled = false
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
                 )
                 try:
+                    if args.flow_blocked:
+                        _flow_blocked_contract(binary, work, env, server, results)
+                        return
                     if args.flow_decision_retry:
                         _flow_decision_retry_contract(
                             binary,
@@ -908,6 +916,136 @@ def _init_repo(work: Path, env: dict[str, str]) -> None:
     )
 
 
+def _flow_blocked_contract(
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+    results: dict,
+) -> None:
+    _init_repo(work, env)
+    for directory in ("skills", "flows"):
+        (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
+    (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
+    (work / ".lf/flows/native-proof.yaml").write_text(
+        "- step:\n    id: work\n    name: native-proof\n"
+        "- step:\n    id: decide\n    name: native-proof\n    repeat:\n      from: work\n"
+    )
+    # The Ask is completed through public commands below. No interactive terminal
+    # is opened: this transport stub supplies no conversation or completion.
+    tmux = binary.parent / "tmux"
+    tmux.write_text("#!/bin/sh\nexit 0\n")
+    tmux.chmod(0o700)
+    server.decision_outputs = [
+        {"decision": "blocked", "reason": "Which policy applies?"},
+        {"decision": "blocked", "reason": "Which remaining scope is accepted?"},
+        {"decision": "advance", "summary": "Both answers received"},
+    ]
+    log = (work / "flow.log").open("w+")
+    driver = subprocess.Popen(
+        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        cwd=work,
+        env=env,
+        stdout=log,
+        stderr=log,
+    )
+    database = env["LF_DB_PATH"]
+
+    def pending_question() -> tuple:
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if driver.poll() is not None:
+                log.seek(0)
+                raise AssertionError(log.read())
+            if Path(database).exists():
+                with sqlite3.connect(database) as db:
+                    if db.execute(
+                        "SELECT 1 FROM sqlite_master WHERE name='agent_sessions'"
+                    ).fetchone():
+                        question = db.execute(
+                            "SELECT s.id,e.receipt_key,s.request FROM agent_sessions s "
+                            "JOIN session_events e ON e.seq=s.current_capture "
+                            "WHERE s.kind='ask' AND s.completed_at IS NULL AND s.input_published=1"
+                        ).fetchone()
+                        if question:
+                            return question
+            time.sleep(0.05)
+        raise AssertionError("Flow did not open its question")
+
+    try:
+        question = pending_question()
+        with sqlite3.connect(database) as db:
+            flow_id, cursor = db.execute("SELECT id,review_json FROM flow_sessions").fetchone()
+            starts = db.execute(
+                "SELECT COUNT(*) FROM session_events WHERE kind='started'"
+            ).fetchone()[0]
+        assert starts == 2, starts
+        driver.terminate()
+        driver.wait(timeout=10)
+        driver = subprocess.Popen(
+            [str(binary), "flow", "resume", flow_id],
+            cwd=work,
+            env=env,
+            stdout=log,
+            stderr=log,
+        )
+        assert pending_question() == question, "driver recovery replaced the keyed question"
+        for index in range(2):
+            if index:
+                question = pending_question()
+            with sqlite3.connect(database) as db:
+                current = db.execute(
+                    "SELECT review_json FROM flow_sessions WHERE id=?", (flow_id,)
+                ).fetchone()[0]
+                assert json.loads(current)["index"] == json.loads(cursor)["index"]
+            answer_env = {
+                **env,
+                "LF_RUN_ID": question[1],
+                "LF_HUMAN_SESSION": json.dumps({"kind": "ask", "id": question[0]}),
+            }
+            ready = _command(
+                [str(binary), "session", "ready", f"Accepted answer {index + 1}"],
+                work,
+                answer_env,
+                20,
+            )
+            assert ready.returncode == 0, ready.stderr
+            complete = _command([str(binary), "session", "complete", question[0]], work, env, 20)
+            assert complete.returncode == 0, complete.stderr
+        assert driver.wait(timeout=60) == 0
+        with sqlite3.connect(database) as db:
+            assert db.execute("SELECT state,failure_json FROM flow_sessions").fetchone() == (
+                "completed",
+                None,
+            )
+            asks = db.execute(
+                "SELECT id,request,ready_summary,completed_at FROM agent_sessions WHERE kind='ask'"
+            ).fetchall()
+            assert len(asks) == 2 and all(row[3] for row in asks), asks
+            turns = db.execute(
+                "SELECT e.session_id,e.provider_thread,e.provider_turn FROM session_events e "
+                "JOIN agent_sessions s ON s.id=e.session_id "
+                "WHERE s.node=1 AND e.kind='started' ORDER BY e.seq"
+            ).fetchall()
+            assert len(turns) == 3 and len({row[:2] for row in turns}) == 1, turns
+            assert len({row[2] for row in turns}) == 3, turns
+            assert db.execute(
+                "SELECT COUNT(*) FROM flow_events WHERE kind='consumed'"
+            ).fetchone() == (4,)
+            results.update(
+                blocked_asks=asks, deciding_turns=turns, blocked_driver_recovery="passed"
+            )
+        assert "Accepted answer 1" in json.dumps(server.requests)
+        assert "Accepted answer 2" in json.dumps(server.requests)
+    finally:
+        if driver.poll() is None:
+            driver.terminate()
+            driver.wait(timeout=10)
+        log.seek(0)
+        results["blocked_driver_log"] = log.read()
+        log.close()
+
+
 def _flow_decision_retry_contract(
     binary: Path,
     work: Path,
@@ -1005,7 +1143,11 @@ def _flow_decision_retry_contract(
         for seq, kind, _, payload in results["history"]
         if kind == "completed"
     ]
-    assert [status for _, status in completed] == (["completed", "failed", "completed"] if replace else ["completed", "failed", "completed", "completed", "completed"])
+    assert [status for _, status in completed] == (
+        ["completed", "failed", "completed"]
+        if replace
+        else ["completed", "failed", "completed", "completed", "completed"]
+    )
     consumed = [seq for kind, seq in results["flow_events"] if kind == "consumed"]
     if replace:
         assert command.returncode == 0 and results["flow"][0] == "completed", results
@@ -1092,7 +1234,9 @@ def _flow_automatic_retry_contract(
     results["public_usage"] = rows
     assert len(rows) == 1, rows
     assert rows[0]["recorded_outcome"] == "completed", rows
-    native = [record for record in rows[0]["providers"] if record["reference"]["kind"] == "native_turn"]
+    native = [
+        record for record in rows[0]["providers"] if record["reference"]["kind"] == "native_turn"
+    ]
     assert [record["outcome"] for record in native] == ["failed", "completed"], native
     assert rows[0]["usage"]["input_tokens"] == 40, rows
     assert rows[0]["usage"]["output_tokens"] == 10, rows

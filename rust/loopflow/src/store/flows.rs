@@ -250,20 +250,6 @@ impl Store {
         .await
     }
 
-    pub async fn flow_blocker_key(
-        &self,
-        id: &str,
-        version: u64,
-        actor: &crate::id::ExecId,
-    ) -> StoreResult<String> {
-        let id = id.to_string();
-        let actor = actor.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.flow_blocker_key(&id, version, &actor)
-        })
-        .await
-    }
-
     pub async fn waiting_review(&self, session_id: &str) -> StoreResult<FlowSession> {
         let session_id = session_id.to_string();
         run_sqlite(&self.sqlite, move |store| store.waiting_review(&session_id)).await

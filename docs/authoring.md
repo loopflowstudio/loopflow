@@ -202,7 +202,8 @@ also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence"}`
-or `{"decision":"iterate","summary":"next action and proof"}`. The provider receives
+or `{"decision":"iterate","summary":"next action and proof"}`, or
+`{"decision":"blocked","reason":"question and evidence"}`. The provider receives
 this schema before generation. The Flow validates and consumes the exact selected
 successful completion; invalid output gets at most two corrective turns in the
 same conversation. Failed turns, older results and command exit cannot navigate.
@@ -210,9 +211,8 @@ same conversation. Failed turns, older results and command exit cannot navigate.
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
-execution outcome: report it with
-`lf flow blocked "reason, attempted direction, evidence, and question"`.
-The runtime keys one Ask to the exact invocation, occurrence, and pass. Retries
+decision: return it with a required reason in the final structured result.
+The runtime keys one Ask to that captured event and Flow position. Retries
 join that Ask or recover its saved completion. Its Session runs `unblock`, using
 concept-review with the human by default. Completion returns evidence to
 loop-decide for reassessment without choosing a navigation decision. If the blocker

@@ -182,8 +182,9 @@ are local fixture proofs; configured-provider/Desktop acceptance remains open.
   history/discovery measurements remain owed; earlier 314–339ms Exec p50 readings
   had uncontrolled OS caches and do not establish final product latency.
 
-Prospective usage attribution and retained `flow blocked` feedback are operating
-assumptions for Jack's review. No slice establishes Task completion or shipment.
+Jack Heart resolved prospective attribution and structured blocked output on
+2026-09-30. The earlier assumptions are superseded; no slice establishes Task
+completion or shipment.
 
 ## Common Task context and PATH steps · 2026-09-30
 
@@ -228,3 +229,35 @@ Final static checks for this common-command slice: `cargo fmt`,
 `cargo clippy --all-targets -- -D warnings` (`common-command-clippy-final.log`)
 and `git diff --check` passed. Review caught the two snapshot races and the
 lost inline provider error above; the public proof was rerun after each repair.
+
+## Structured blocked decisions · 2026-09-30
+
+Jack Heart selected a required reason on the structured blocked result and
+same-conversation continuation after the keyed Ask. The command and its separate
+agent-issued authority path are deleted.
+
+- `blocked-public-final.log` passed through public lf commands and a real Codex
+  engine against a credential-free local Responses fixture. Two blocked turns
+  open two Asks; interruption and `flow resume` recover the first Ask; public
+  ready/complete returns feedback to three turns in the same AgentSession and
+  native thread. Four completions, including the initial work, consume once.
+  Final binary SHA-256: `1a4480b309c52a9d2e7c95da9615ff38e2ffce0be907a22572e4ca303a2dfb3f`.
+  Results live in `.lf/tmp/cut-i/blocked-public-final-results/results.json`.
+- The first public proof failed after driver restart: projecting Blocked into
+  the navigation cursor bypassed its Ask. Only Advance/Iterate now project
+  there. Blocked remains selected until exact answered feedback is consumed.
+  The final key uses only the immutable capture sequence, preserving identity
+  through the still-pending child-pass migration.
+- `blocked-regressions.log`: five tests passed for output validation, captured
+  route restrictions, same-pass blocked consumption, keyed Ask recovery and
+  malformed-output correction. Store proof rejects missing completion,
+  unanswered feedback and stale reconsumption, and retains the conversation.
+
+The public fixture stubs terminal transport and supplies synthetic feedback;
+it proves neither a real interactive Ask nor configured provider acceptance.
+A subsequent managed-status wording edit changes “Run” to “conversation” only.
+No materialized full matrix, publication, installation or Task completion follows.
+
+Final slice checks passed: formatting, all-target Clippy with warnings denied
+(`blocked-clippy-final.log`), Ruff on both touched public fixtures, and diff
+whitespace validation. The Chapter fixture change in this slice is formatting only.

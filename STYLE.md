@@ -219,8 +219,8 @@ Flow history. Do not replace Run with another generic attempt object.
 
 Main records have one SQLite owner. Task implies Wave; constructors fill omitted
 ancestors and reject mismatches. Bind assigns an unassigned conversation once,
-including to done/landed Tasks. The current prospective-attribution assumption
-preserves earlier usage owners. Actual work
+including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
+owns that single choice. Actual work
 reservation sets Started once; logging an inspection Exec does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
 process control nor Flow settlement. Current driver and provider generations

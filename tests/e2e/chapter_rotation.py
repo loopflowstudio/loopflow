@@ -195,10 +195,21 @@ def _provider() -> None:
                 if os.environ.get("CHAPTER_CREDENTIAL_REVOKED") == "1":
                     with lock:
                         state["status"] = "failed"
-                    socket.send(json.dumps({"method": "turn/completed", "params": {
-                        "threadId": thread_id,
-                        "turn": {"id": "chapter-turn", "status": "failed", "error": {"message": "token_invalidated"}},
-                    }}))
+                    socket.send(
+                        json.dumps(
+                            {
+                                "method": "turn/completed",
+                                "params": {
+                                    "threadId": thread_id,
+                                    "turn": {
+                                        "id": "chapter-turn",
+                                        "status": "failed",
+                                        "error": {"message": "token_invalidated"},
+                                    },
+                                },
+                            }
+                        )
+                    )
                     return
                 for method, params in (
                     (
@@ -346,7 +357,9 @@ def _run(
             )
             + "\n"
         )
-    assert (result.returncode == 0) == success, f"{shlex.join(argv)}\n{result.stdout}\n{result.stderr}"
+    assert (result.returncode == 0) == success, (
+        f"{shlex.join(argv)}\n{result.stdout}\n{result.stderr}"
+    )
     return result
 
 
@@ -477,7 +490,10 @@ def _exercise_step_controls(
                 assert resume.poll() in (None, 0), output.read_text()
                 waiting = _snapshot(Path(env["LF_DB_PATH"]))
                 assert waiting["flow"]["failure_json"] is None, waiting["flow"]
-                assert waiting["flow"]["selected_start"] == saved["flow"]["selected_start"], (saved, waiting)
+                assert waiting["flow"]["selected_start"] == saved["flow"]["selected_start"], (
+                    saved,
+                    waiting,
+                )
                 # tmux closes the worker's terminal on death. If that also ends
                 # the skill client, resume observes the same surviving engine.
                 os.kill(json.loads((root / "engine.json").read_text())[0], 0)
@@ -706,7 +722,12 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         try:
             _run([str(lf), *command], checkout, command_env, logs)
             rendered = json.dumps(json.loads((proof / "provider.json").read_text())["request"])
-            for required in ("Fixture Operator", "Linear Task FIX-1", "Retain execution.", "lf:task-workspace"):
+            for required in (
+                "Fixture Operator",
+                "Linear Task FIX-1",
+                "Retain execution.",
+                "lf:task-workspace",
+            ):
                 assert required in rendered, f"{label} lost common context {required}"
             assert "current Task worker" not in rendered, "context must not appoint a second worker"
             _preserved(before, _snapshot(first / "loopflow.db"))
@@ -716,15 +737,23 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     proof = root / "revoked-account"
     proof.mkdir()
     try:
-        _run([str(lf), "-b", "flow", "successor-proof"], checkout, {
-            **env,
-            "CHAPTER_PROVIDER_RECEIPT": str(proof / "provider.json"),
-            "CHAPTER_ENGINE_RECEIPT": str(proof / "engine.json"),
-            "CHAPTER_STEP_CONTROLS": "0",
-            "CHAPTER_CREDENTIAL_REVOKED": "1",
-        }, logs, success=False)
+        _run(
+            [str(lf), "-b", "flow", "successor-proof"],
+            checkout,
+            {
+                **env,
+                "CHAPTER_PROVIDER_RECEIPT": str(proof / "provider.json"),
+                "CHAPTER_ENGINE_RECEIPT": str(proof / "engine.json"),
+                "CHAPTER_STEP_CONTROLS": "0",
+                "CHAPTER_CREDENTIAL_REVOKED": "1",
+            },
+            logs,
+            success=False,
+        )
         with sqlite3.connect(first / "loopflow.db") as db:
-            assert db.execute("SELECT credential_state FROM provider_accounts WHERE account_id='fixture'").fetchone() == ("missing",)
+            assert db.execute(
+                "SELECT credential_state FROM provider_accounts WHERE account_id='fixture'"
+            ).fetchone() == ("missing",)
         status = _cli("auth", "status", "--json")
         assert "missing" in status.stdout and "fixture" in status.stdout
         _preserved(before, _snapshot(first / "loopflow.db"))

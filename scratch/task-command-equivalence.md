@@ -11,12 +11,13 @@ behavior or permissions compared with the same Flow in X's checkout.
 | --- | --- | --- |
 | Task seed in `run_flow_skill` | Shared `build_prompt_at`, explicit Task selection or existing checkout binding | Implemented; direct skill and ordinary Flow use `ops/task_input` for seed, steers, interrupts and attachment |
 | Task lookup requires active PR / undeleted Task | Existing checkout binding and latest historical PR | Removed from context resolution; mutation eligibility remains with its operation |
-| Name supplied separately by launch callers | `gather_context` calls `launch_user_name` | Implemented for shared prompt preparation; public three-path proof in progress |
+| Name supplied separately by launch callers | `gather_context` calls `launch_user_name` | Implemented for shared prompt preparation; public scripted three-path proof passed |
 | `claim.is_some()` sets worktree scope, execution boundary and skipped permissions | One `confine_checkout_agent(task_checkout, interactive)` predicate | Implemented for the intersection: unattended execution in a Task checkout. Both direct and managed commands use it |
 | Task-specific account preflight error classification | `provider_account::preflight_agent_account` and shared agent selection | Moved; inherited account leases and shared failover retain their owners |
 | Task-specific writable roots and probe | Agent execution boundary | Moved; Task preflight delegates before allocating work |
 | Current binary starts Flow children | PATH resolves `lf` at each step | Implemented; recursive executable lock remains LOO-334's responsibility |
 | Child migration followed by old-driver settlement | Read-only schema compatibility check before any Flow settlement | Implemented; incompatible driver exits with selected result retained |
+| In-turn `lf flow blocked` command | Selected successful structured result with a required reason | Removed; keyed Ask completion starts another turn in the same conversation |
 | Task worker claim and managed Flow selection | Driver admission/settlement | Retained mechanics; no longer select step permissions |
 | `agent_work_in` supplies calling Session Task | Must become `--as` / checkout | Outstanding item 3; causal parent lookup stays |
 | `LF_TASK_ORIGIN`, claim/manifest-derived Task origin | Must become `--as` / checkout | Outstanding item 3, including managed PR and installation guards, cross-Home forwarding |

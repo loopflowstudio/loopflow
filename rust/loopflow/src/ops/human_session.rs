@@ -288,6 +288,7 @@ pub(crate) async fn ask(
 
 /// Reuse one Ask for an exact Flow boundary, including its completed result.
 /// The key names the Session, so a retry finds the first request's row.
+#[cfg(test)]
 pub(crate) async fn ask_once(
     store: &SharedStore,
     key: &str,
@@ -304,6 +305,79 @@ pub(crate) async fn ask_once(
         report_ask_wait(&id);
     }
     wait_for_ask(store, &id).await
+}
+
+fn flow_unblock_key(flow: &FlowSession) -> Result<String> {
+    let capture = flow
+        .current_attempt
+        .as_ref()
+        .context("blocked turn has no captured input")?
+        .captured;
+    // Captured-event identity survives folding legacy child passes into their root.
+    Ok(format!("flow-blocked:captured:{capture}"))
+}
+
+/// A successful blocked result ends its turn before the driver asks for feedback.
+/// Reopening the same result reuses the question and its completed answer.
+pub(crate) async fn flow_unblock(
+    store: &SharedStore,
+    flow: &FlowSession,
+    reason: &str,
+) -> Result<String> {
+    anyhow::ensure!(
+        store.flow(flow.id()).await?.as_ref() == Some(flow),
+        "Flow changed before opening its question"
+    );
+    let attempt = flow
+        .current_attempt
+        .as_ref()
+        .context("blocked turn has no selected completion")?;
+    let caller = store
+        .session_for_artifact(&attempt.run_id)
+        .await?
+        .context("blocked conversation is missing")?;
+    let id = keyed_ask_id(&flow_unblock_key(flow)?)?;
+    let ask = launch_keyed_ask(store, id.clone(), |id| async move {
+        let binding = crate::ops::resolve_checkout_binding(store, &flow.cwd).await?;
+        let mut session = caller;
+        session.captured = None;
+        session.id = id;
+        session.artifact_key = crate::run_record::new_artifact_key();
+        session.caller_artifact_key = Some(attempt.run_id.clone());
+        session.input_published = false;
+        session.cwd = flow.cwd.clone();
+        session.skill = Some("unblock".into());
+        session.node = None;
+        session.iterations = None;
+        session.task_id = binding.as_ref().and_then(|binding| match &binding.work {
+            WorkRef::Task(id) => Some(id.clone()),
+            _ => None,
+        });
+        session.wave_id = binding.as_ref().map(|binding| binding.wave_id.clone());
+        session.work_source = binding.as_ref().map(|_| WorkSource::Checkout);
+        session.flow_session_id = None;
+        session.bound_at = None;
+        session.kind = crate::session::SessionKind::Ask;
+        session.interactive = true;
+        session.title = question_title(reason);
+        session.title_source = crate::session::TitleSource::Generated;
+        session.request = Some(reason.to_owned());
+        session.ready_summary = None;
+        session.completed_at = None;
+        session.created_at = crate::store::rows::now_unix();
+        let session = store.create_session(session, None).await?;
+        publish_prepared_input(
+            store,
+            &session,
+            crate::run_record::RunFlowMembership::Independent,
+        )
+    })
+    .await?;
+    if ask.completed_at.is_none() {
+        report_ask_wait(&id);
+    }
+    wait_for_ask(store, &id).await?;
+    Ok(id)
 }
 
 /// Open the keyed Session once: the first caller stores it, every caller
@@ -354,7 +428,7 @@ fn keyed_ask_id(key: &str) -> Result<String> {
 }
 
 /// The unblock Session of a Task decision that failed: the same Session the
-/// deciding Run opens with `lf flow blocked`, keyed by the position. Returns
+/// failed decision recovery uses, keyed by the position. Returns
 /// its id and, once the human completed it, the feedback.
 pub(crate) async fn task_unblock(
     store: &SharedStore,
@@ -409,7 +483,7 @@ pub(crate) fn task_unblock_key(position: &FlowSession) -> Result<String> {
     position.blocker_key()
 }
 
-/// The unblock Session the current decision Run waits on, if one is open.
+/// The unblock Session the selected decision waits on, if one is open.
 pub(crate) async fn task_waiting_unblock(
     store: &SharedStore,
     position: &FlowSession,
@@ -424,15 +498,18 @@ pub(crate) async fn task_waiting_unblock(
     else {
         return Ok(None);
     };
-    let Some(session) = store
-        .session(&keyed_ask_id(&task_unblock_key(position)?)?)
-        .await?
-    else {
+    let key = if matches!(store.sqlite.flow_output(position.id()), Ok(Ok(crate::engine::SkillOutcome::Decided(verdict))) if verdict.decision == crate::engine::transitions::FlowDecision::Blocked)
+    {
+        flow_unblock_key(position)?
+    } else {
+        task_unblock_key(position)?
+    };
+    let Some(session) = store.session(&keyed_ask_id(&key)?).await? else {
         return Ok(None);
     };
     Ok((session.caller_artifact_key.as_ref() == Some(run) && session.completed_at.is_none()).then(|| {
         format!(
-            "Run {run} is waiting for unblock Session {}: {}. Complete the Session; the same decision Run receives feedback and reassesses without Task resume.",
+            "Decision is waiting for unblock Session {}: {}. Complete the Session; the same conversation receives feedback and reassesses without Task resume.",
             session.id, session.title
         )
     }))

@@ -147,23 +147,6 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 
 pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
     match command {
-        FlowCommand::Blocked { reason } => {
-            let reason = reason.join(" ");
-            anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
-            let actor =
-                journal::current_exec_id().ok_or_else(|| anyhow!("command Exec is unavailable"))?;
-            let step = active_step()?;
-            block_on_store(|store| async move {
-                let key = store
-                    .flow_blocker_key(&step.invocation, step.version, &actor)
-                    .await?;
-                let summary =
-                    crate::ops::human_session::ask_once(&store, &key, &reason, Some("unblock"))
-                        .await?;
-                println!("Session complete: {summary}\nReassess the current evidence before choosing Advance or Iterate. This returned feedback, not a navigation decision.");
-                Ok(())
-            })
-        }
         FlowCommand::Resume { invocation, retry } => {
             let id = invocation.as_str();
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -237,10 +220,6 @@ where
         );
         operation(store).await
     })
-}
-
-fn active_step() -> Result<flow_run::ActiveStep> {
-    flow_run::token()?.ok_or_else(|| anyhow!("this operation requires a Flow step"))
 }
 
 /// An operator-requested stop releases the position without recording a failure.
@@ -753,6 +732,23 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
                 self.observe(&flow);
             }
             match self.store.sqlite.flow_output(&self.id)? {
+                Ok(SkillOutcome::Decided(verdict))
+                    if verdict.decision == crate::engine::transitions::FlowDecision::Blocked =>
+                {
+                    let ask = crate::ops::human_session::flow_unblock(
+                        &self.store,
+                        &flow,
+                        &verdict.summary,
+                    )
+                    .await?;
+                    flow = self.store.sqlite.answer_flow_blocker(
+                        &self.id,
+                        self.version(),
+                        self.claim().as_ref(),
+                        &ask,
+                    )?;
+                    self.observe(&flow);
+                }
                 Ok(outcome) => {
                     if let Some(attempt) = &flow.current_attempt {
                         *self.progress.lock().expect("Flow progress mutex poisoned") = self

@@ -13,7 +13,7 @@ pub enum FlowOutput {
 
 impl FlowOutput {
     pub fn instructions(&self) -> String {
-        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Flow decision or router commands. The selected successful completion supplies the decision. If blocked, `lf flow blocked REASON` requests feedback; reassess after it returns.", self.schema())
+        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Flow decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That ends this turn; the answer starts another turn in this conversation for reassessment.", self.schema())
     }
 
     pub fn decode_receipt(&self, payload: &Value) -> Result<SkillOutcome, String> {
@@ -54,10 +54,16 @@ impl FlowOutput {
             Self::Decision => json!({
                 "type": "object",
                 "properties": {
-                    "decision": {"type": "string", "enum": ["advance", "iterate"]},
-                    "summary": {"type": "string", "pattern": "\\S"}
+                    "decision": {"type": "string", "enum": ["advance", "iterate", "blocked"]},
+                    "summary": {"type": "string", "pattern": "\\S"},
+                    "reason": {"type": "string", "pattern": "\\S"}
                 },
-                "required": ["decision", "summary"],
+                "required": ["decision"],
+                "maxProperties": 2,
+                "anyOf": [
+                    {"properties": {"decision": {"enum": ["advance", "iterate"]}}, "required": ["summary"]},
+                    {"properties": {"decision": {"const": "blocked"}}, "required": ["reason"]}
+                ],
                 "additionalProperties": false
             }),
             Self::Route(paths) => json!({
@@ -77,17 +83,27 @@ impl FlowOutput {
         match self {
             Self::Decision => {
                 if object.len() != 2 {
-                    return Err("expected exactly decision and summary".into());
+                    return Err(
+                        "expected exactly decision and its summary or blocked reason".into(),
+                    );
                 }
                 let decision = match value["decision"].as_str() {
                     Some("advance") => FlowDecision::Advance,
                     Some("iterate") => FlowDecision::Iterate,
-                    _ => return Err("decision must be advance or iterate".into()),
+                    Some("blocked") => FlowDecision::Blocked,
+                    _ => return Err("decision must be advance, iterate or blocked".into()),
                 };
-                let summary = value["summary"]
+                let field = if decision == FlowDecision::Blocked {
+                    "reason"
+                } else {
+                    "summary"
+                };
+                let summary = value[field]
                     .as_str()
                     .filter(|text| !text.trim().is_empty())
-                    .ok_or("summary must contain evidence or direction")?;
+                    .ok_or_else(|| {
+                        format!("{field} must contain evidence, direction or a question")
+                    })?;
                 Ok(SkillOutcome::Decided(FlowVerdict {
                     decision,
                     summary: summary.to_owned(),
@@ -122,6 +138,9 @@ mod tests {
             json!({"decision":"advance","summary":"  "}),
             json!({"decision":"advance","summary":"proven","confidence":0.9}),
             json!({"decision":"advance"}),
+            json!({"decision":"blocked","summary":"wrong field"}),
+            json!({"decision":"blocked","reason":"  "}),
+            json!({"decision":"blocked"}),
             json!("advance"),
         ] {
             assert!(output.decode(&invalid).is_err());
@@ -134,6 +153,14 @@ mod tests {
         };
         assert_eq!(verdict.decision, FlowDecision::Iterate);
         assert_eq!(verdict.summary, "repair the failed proof");
+        let SkillOutcome::Decided(blocked) = output
+            .decode(&json!({"decision":"blocked","reason":"Which policy applies?"}))
+            .unwrap()
+        else {
+            panic!("typed blocker")
+        };
+        assert_eq!(blocked.decision, FlowDecision::Blocked);
+        assert_eq!(blocked.summary, "Which policy applies?");
     }
 
     #[test]

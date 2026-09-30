@@ -209,7 +209,9 @@ fn project_output(conn: &Connection, mut flow: FlowSession) -> StoreResult<FlowS
             .is_some_and(FlowAttempt::completed)
     {
         match selected_output_in(conn, &flow)? {
-            Ok(crate::engine::SkillOutcome::Decided(verdict)) => {
+            Ok(crate::engine::SkillOutcome::Decided(verdict))
+                if verdict.decision != crate::engine::transitions::FlowDecision::Blocked =>
+            {
                 flow.cursor.leaf_mut().progress.verdict = Some(verdict)
             }
             Ok(crate::engine::SkillOutcome::Routed(path)) => {
@@ -616,7 +618,8 @@ fn consume_selected_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<
     }
     match selected_output_in(tx, flow)?.map_err(invalid)? {
         crate::engine::SkillOutcome::Decided(verdict)
-            if flow.cursor.leaf().progress.verdict.as_ref() != Some(&verdict) =>
+            if verdict.decision != crate::engine::transitions::FlowDecision::Blocked
+                && flow.cursor.leaf().progress.verdict.as_ref() != Some(&verdict) =>
         {
             return Err(stale(flow.id()))
         }
@@ -710,26 +713,6 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
     failure.captured = Some(attempt.captured);
     fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
     current_flow_in(tx, &id)
-}
-
-fn require_turn_authority(
-    conn: &Connection,
-    flow: &FlowSession,
-    version: u64,
-    actor: &crate::id::ExecId,
-) -> StoreResult<()> {
-    let valid: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN execs caller ON caller.id=?2
-             AND caller.via_agent=1 AND caller.caller_session_id=s.id
-             AND caller.caller_provider_generation=s.provider_generation
-         WHERE s.flow_session_id=?1 AND s.current_capture=(SELECT current_capture FROM flow_sessions WHERE id=?1)
-             AND s.driver_exec_id IS NOT NULL)", params![flow.id(),actor], |row| row.get(0))?;
-    if flow.version != version || flow.failure.is_some() || !valid {
-        return Err(StoreError::InvalidAuthority(
-            "feedback requires the current conversation's provider".into(),
-        ));
-    }
-    Ok(())
 }
 
 /// The child owns each repeated pass. Returning and entering the next pass are
@@ -1415,6 +1398,50 @@ impl SqliteStore {
         selected_output_in(&conn, &current_flow_in(&conn, id)?)
     }
 
+    /// Consume a blocked turn and its exact Ask feedback without moving the pass.
+    pub(crate) fn answer_flow_blocker(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+        ask_id: &str,
+    ) -> StoreResult<FlowSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        if flow.version != version || flow.claim.as_ref() != claim {
+            return Err(stale(id));
+        }
+        let Ok(crate::engine::SkillOutcome::Decided(verdict)) = selected_output_in(&tx, &flow)?
+        else {
+            return Err(stale(id));
+        };
+        if verdict.decision != crate::engine::transitions::FlowDecision::Blocked {
+            return Err(stale(id));
+        }
+        let attempt = flow.current_attempt.as_ref().ok_or_else(|| stale(id))?;
+        let ask = super::sessions::session_in(&tx, ask_id)?.ok_or(StoreError::NotFound)?;
+        if ask.kind != crate::session::SessionKind::Ask
+            || ask.caller_artifact_key.as_ref() != Some(&attempt.run_id)
+            || ask.completed_at.is_none()
+        {
+            return Err(stale(id));
+        }
+        let feedback = ask
+            .ready_summary
+            .ok_or_else(|| invalid("the selected blocker has no completed Ask feedback"))?;
+        consume_selected_in(&tx, &flow)?;
+        let mut cursor = flow.cursor.clone();
+        clear_candidate(&mut cursor);
+        cursor.leaf_mut().progress.direction = Some(format!(
+            "Question from the previous turn: {}\n\nReturned feedback: {feedback}\n\nReassess and return a new decision; this feedback does not choose navigation.", verdict.summary
+        ));
+        write_cursor_in(&tx, (id, version), &cursor, None, true, claim, false)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
     /// Correct invalid output in the same conversation, with two corrective turns
     /// at most. Persisted selections count across interruption and driver recovery.
     pub(crate) fn correct_flow_output(
@@ -1439,7 +1466,9 @@ impl SqliteStore {
              JOIN session_events done ON done.session_id=start.session_id
                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
                AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'
-             WHERE selected.flow_id=?1 AND selected.node=?2 AND selected.iterations=?3 AND selected.kind='selected'",
+             WHERE selected.flow_id=?1 AND selected.node=?2 AND selected.iterations=?3 AND selected.kind='selected'
+               AND selected.seq>COALESCE((SELECT MAX(consumed.seq) FROM flow_events consumed
+                 WHERE consumed.flow_id=?1 AND consumed.node=?2 AND consumed.iterations=?3 AND consumed.kind='consumed'),0)",
              params![id,node,serde_json::to_string(&iterations)?], |row| row.get(0))?;
         if count >= 3 {
             return Err(invalid(format!(
@@ -1787,27 +1816,6 @@ impl SqliteStore {
         };
         tx.commit()?;
         Ok(claim)
-    }
-
-    /// The Ask key of a loop blocker raised by the selected deciding turn:
-    /// `flow:<invocation>:<node>:<iterations>`.
-    pub fn flow_blocker_key(
-        &self,
-        id: &str,
-        version: u64,
-        actor: &crate::id::ExecId,
-    ) -> StoreResult<String> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let flow = current_flow_in(&conn, id)?;
-        require_turn_authority(&conn, &flow, version, actor)?;
-        let deciding = matches!(flow.current_step(), Some(ConcreteStep::Skill(skill))
-            if skill.policy.repeat.is_some() && !skill.policy.human);
-        if !deciding {
-            return Err(StoreError::InvalidAuthority(
-                "this step cannot report a loop blocker".into(),
-            ));
-        }
-        flow.invocation.blocker_key(&flow.cursor).map_err(invalid)
     }
 
     /// The saved Flow waiting on this review Session.
@@ -2646,6 +2654,109 @@ mod tests {
         store
             .checkpoint_flow(flow.id(), saved.version, &next, None, None)
             .unwrap()
+    }
+
+    #[test]
+    fn blocked_feedback_retains_conversation_and_pass_and_consumes_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let flow = launched(
+            &store,
+            vec![
+                step("work", None),
+                step("decide", Some("work")),
+                step("after", None),
+            ],
+            1,
+        );
+        let original = attempt(&store, flow.id(), None, "proof");
+        let actor = store.test_flow_turn(&original.artifact_key);
+        store
+            .test_output(
+                &actor,
+                &serde_json::json!({"decision":"blocked","reason":"Which policy?"}),
+            )
+            .unwrap();
+        assert!(
+            store.flow_output(flow.id()).is_err(),
+            "output before completion is not authority"
+        );
+        store.test_finish_flow_turn(&actor, "completed");
+        let saved = store.flow(flow.id()).unwrap().unwrap();
+        let mut ask = original.clone();
+        ask.id = "ask-policy".into();
+        ask.captured = None;
+        ask.artifact_key = crate::run_record::new_artifact_key();
+        ask.caller_artifact_key = Some(original.artifact_key.clone());
+        ask.flow_session_id = None;
+        ask.node = None;
+        ask.iterations = None;
+        ask.kind = crate::session::SessionKind::Ask;
+        ask.interactive = true;
+        ask.request = Some("Which policy?".into());
+        ask.ready_summary = None;
+        ask.completed_at = None;
+        let ask = store.create_session(ask, None, None).unwrap();
+        assert!(store
+            .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
+            .is_err());
+        store
+            .ready_session(&ask.id, ask.captured, "Retain the existing policy")
+            .unwrap();
+        store.complete_session(&ask.id, ask.captured).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let answered = store
+            .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
+            .unwrap();
+        assert_eq!(answered.cursor.index, saved.cursor.index);
+        assert_eq!(answered.cursor.iteration, saved.cursor.iteration);
+        assert_eq!(
+            answered.cursor.progress.repeats,
+            saved.cursor.progress.repeats
+        );
+        assert!(answered.cursor.progress.verdict.is_none());
+        assert!(answered
+            .cursor
+            .progress
+            .direction
+            .as_deref()
+            .unwrap()
+            .contains("Retain the existing policy"));
+        assert!(
+            store
+                .answer_flow_blocker(flow.id(), saved.version, None, &ask.id)
+                .is_err(),
+            "stale driver cannot consume twice"
+        );
+        let next = attempt(&store, flow.id(), None, "proof");
+        assert_eq!(
+            next.id, original.id,
+            "feedback starts another turn in the same conversation"
+        );
+        assert_ne!(next.artifact_key, original.artifact_key);
+        let actor = store.test_flow_turn(&next.artifact_key);
+        store
+            .test_decision_output(&actor, &verdict(FlowDecision::Advance))
+            .unwrap();
+        store.test_finish_flow_turn(&actor, "completed");
+        let saved = store.flow(flow.id()).unwrap().unwrap();
+        let mut cursor = saved.cursor.clone();
+        cursor.finish(&saved.invocation.steps).unwrap();
+        let advanced = store
+            .checkpoint_flow(flow.id(), saved.version, &cursor, None, None)
+            .unwrap();
+        assert_eq!(advanced.cursor.index, 2);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let consumed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM flow_events WHERE kind='consumed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(consumed, 2);
     }
 
     #[test]

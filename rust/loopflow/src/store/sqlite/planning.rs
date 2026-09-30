@@ -474,7 +474,7 @@ mod tests {
     use serde_json::json;
 
     use crate::id::WaveId;
-    use crate::store::{open_ephemeral_store, StorageConfig};
+    use crate::store::{open_ephemeral_store, PlanningState, StorageConfig};
 
     #[tokio::test]
     async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
@@ -509,11 +509,12 @@ mod tests {
         let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
-        let detail = store
-            .pm_task("/repo", "linear", "fix-1")
+        let observation = store
+            .pm_task_observation("/repo", "linear", "fix-1")
             .await
-            .unwrap()
             .unwrap();
+        assert_eq!(observation.state, PlanningState::Available);
+        let detail = observation.record.unwrap();
         let list = store.pm_snapshot(&wave).await.unwrap().unwrap();
         assert_eq!(detail.observed_at, 42);
         assert_eq!(detail.item, list.snapshot.items[0]);
@@ -542,11 +543,12 @@ mod tests {
             .await
             .unwrap();
         store.put_pm_snapshot(list).await.unwrap();
-        assert!(store
-            .pm_task("/repo", "linear", "FIX-1")
+        let removed = store
+            .pm_task_observation("/repo", "linear", "FIX-1")
             .await
-            .unwrap()
-            .is_none());
+            .unwrap();
+        assert_eq!(removed.state, PlanningState::Removed);
+        assert_eq!(removed.record, Some(detail));
         assert!(store
             .pm_snapshot(&wave)
             .await

@@ -251,11 +251,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
                 .snapshot,
             snapshot
         );
-        let detail = store
-            .pm_task(resolved.repo(), "linear", "LOO-2")
+        let observation = store
+            .pm_task_observation(resolved.repo(), "linear", "LOO-2")
             .await
-            .unwrap()
             .unwrap();
+        assert_eq!(observation.state, loopflow::store::PlanningState::Available);
+        let detail = observation.record.unwrap();
         assert_eq!(detail.item, snapshot.items[0]);
         assert_eq!(detail.project.as_ref(), Some(&snapshot.projects[0]));
     }

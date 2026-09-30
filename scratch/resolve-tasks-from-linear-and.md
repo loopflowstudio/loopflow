@@ -169,6 +169,14 @@ normalized planning still needs its own integration proof; the existing relocati
 case uses empty planning for the relocated Wave.
 Formatting, `cargo clippy --all-targets -- -D warnings` and whitespace checks pass.
 
+The next compression removed `Store::pm_task`, a second filtered reader used
+only by tests. Revision/webhook and unresolved-ownership proofs now exercise
+`read_task_planning_async`, the actual managed reader. Store migration and alias
+proofs inspect `pm_task_observation` directly; removal retains dated facts while
+excluding them from current lists. The public CLI case keeps its inspection and
+allocation assertions and drops the duplicate filtered-store check. No acquisition,
+admission, storage, DTO or relationship-repair policy changes accompany this removal.
+
 ### Relationship acquisition contract gap — 2026-09-29
 
 The next implementation pass inspected Linear's public SDK schema at

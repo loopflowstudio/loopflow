@@ -90,12 +90,6 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         assert_eq!(status.planning_error.is_some(), error);
         assert_eq!(status.planning_stale, state != PlanningState::Available);
     }
-    for selector in ["FIX-3", "FIX-4"] {
-        assert!(runtime
-            .block_on(store.pm_task(&scope.to_string_lossy(), "linear", selector))
-            .unwrap()
-            .is_none());
-    }
     assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
     assert!(runtime
         .block_on(store.list_projects(None))

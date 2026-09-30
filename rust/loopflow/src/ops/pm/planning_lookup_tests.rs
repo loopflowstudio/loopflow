@@ -186,9 +186,10 @@ async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
                 assert!(error.to_string().contains(diagnostic), "{error}");
                 assert!(fixture
                     .store
-                    .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                    .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
                     .await
                     .unwrap()
+                    .record
                     .is_none());
                 assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
             })
@@ -403,12 +404,10 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
                 record
             );
             assert_eq!(
-                fixture
-                    .store
-                    .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
-                Some(record)
+                record
             );
         })
         .await;
@@ -455,12 +454,10 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
             list.synced_at += 10;
             fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
             assert_eq!(
-                fixture
-                    .store
-                    .pm_task(&scope, "linear", "FIX-1")
+                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
-                Some(confirmed.clone())
+                confirmed
             );
             assert_eq!(
                 fixture
@@ -481,12 +478,10 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .await
                 .is_err());
             assert_eq!(
-                fixture
-                    .store
-                    .pm_task(&scope, "linear", "FIX-1")
+                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
-                Some(confirmed.clone())
+                confirmed
             );
             let change = json!({"type":"Issue","action":"update","data":{"id":"issue-1",
             "updatedAt":"2026-09-29T12:00:00.125Z"},"updatedFrom":{"stateId":"old"}});
@@ -506,12 +501,9 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .put_pm_task(&scope, "linear", delayed)
                 .await
                 .unwrap();
-            assert!(fixture
-                .store
-                .pm_task(&scope, "linear", "FIX-1")
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
-                .unwrap()
-                .is_none());
+                .is_err());
             assert!(fixture
                 .store
                 .pm_snapshot(wave.id())
@@ -544,12 +536,10 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .unwrap();
             }
             assert_eq!(
-                fixture
-                    .store
-                    .pm_task(&scope, "linear", "issue-1")
+                read_task_planning_async(&repo, "issue-1", PmRefresh::Never)
                     .await
                     .unwrap(),
-                Some(confirmed.clone())
+                confirmed
             );
             // A content edit without ordering evidence still invalidates planning.
             let unknown = json!({"type":"Issue","action":"update",
@@ -567,24 +557,19 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .unwrap(),
                 crate::webhook::WebhookOutcome::PlanningInvalidated
             );
-            assert!(fixture
-                .store
-                .pm_task(&scope, "linear", "FIX-1")
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
-                .unwrap()
-                .is_none());
+                .is_err());
             fixture
                 .store
                 .put_pm_task(&scope, "linear", confirmed.clone())
                 .await
                 .unwrap();
             assert_eq!(
-                fixture
-                    .store
-                    .pm_task(&scope, "linear", "FIX-1")
+                read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await
                     .unwrap(),
-                Some(confirmed.clone())
+                confirmed
             );
             let mut removal = change;
             removal["action"] = json!("remove");
@@ -604,12 +589,9 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .await
                 .unwrap();
             fixture.store.put_pm_snapshot(list).await.unwrap();
-            assert!(fixture
-                .store
-                .pm_task(&scope, "linear", "FIX-1")
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
-                .unwrap()
-                .is_none());
+                .is_err());
             assert!(fixture
                 .store
                 .pm_snapshot(wave.id())
@@ -638,12 +620,9 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .put_pm_task(&scope, "linear", uncached)
                 .await
                 .unwrap();
-            assert!(fixture
-                .store
-                .pm_task(&scope, "linear", "FIX-2")
+            assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
                 .await
-                .unwrap()
-                .is_none());
+                .is_err());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
@@ -801,11 +780,8 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             // The list arrived later but its provider revision is older.
             list.synced_at += 60;
             fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
-            let stored = fixture
-                .store
-                .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+            let stored = read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
-                .unwrap()
                 .unwrap();
             assert_eq!(stored.project, newer.project);
             assert_eq!(stored.item.project.as_deref(), Some("renamed-chapter"));
@@ -867,12 +843,9 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             }
             // Replaying old membership cannot clear the explicit uncertainty.
             fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
-            assert!(fixture
-                .store
-                .pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
-                .unwrap()
-                .is_none());
+                .is_err());
             assert!(fixture
                 .store
                 .pm_snapshot(wave.id())

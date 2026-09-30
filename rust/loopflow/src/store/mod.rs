@@ -494,18 +494,6 @@ impl Store {
         .await
     }
 
-    pub async fn pm_task(
-        &self,
-        repo: &str,
-        provider: &str,
-        selector: &str,
-    ) -> StoreResult<Option<PmTaskRecord>> {
-        let observation = self.pm_task_observation(repo, provider, selector).await?;
-        Ok(observation
-            .record
-            .filter(|_| observation.state == PlanningState::Available))
-    }
-
     pub async fn pm_task_observation(
         &self,
         repo: &str,

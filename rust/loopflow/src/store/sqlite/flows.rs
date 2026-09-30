@@ -123,16 +123,10 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
     let decode = || -> StoreResult<FlowSession> {
         let invocation: QueuedInvocation = serde_json::from_str(&invocation_json)?;
         let updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(invalid)?;
-        let mut failure = failure_json
+        let failure = failure_json
             .map(|failure| serde_json::from_str::<TaskFlowBlocker>(&failure))
             .transpose()?;
-        let cursor = decode_flow_cursor(
-            review_json.as_deref(),
-            step_index,
-            iteration,
-            &mut failure,
-            updated_at,
-        )?;
+        let cursor = decode_flow_cursor(review_json.as_deref(), step_index, iteration)?;
         let cwd = cwd.ok_or_else(|| {
             invalid(format!(
                 "Flow {} has no launch record on its row",
@@ -760,78 +754,7 @@ fn claim_task_worker_in(
     Ok(TaskWorkerClaimOutcome::Claimed(claim))
 }
 
-pub(super) fn import_flow_in(conn: &Connection, flow: &FlowSession) -> StoreResult<bool> {
-    if let Some(saved) = flow_in(conn, flow.id())? {
-        if saved.invocation != flow.invocation
-            || saved.task_id != flow.task_id
-            || saved.wave_id != flow.wave_id
-            || saved.cwd != flow.cwd
-            || saved.message != flow.message
-            || saved.model != flow.model
-        {
-            return Err(invalid(format!(
-                "Flow {} conflicts with its recorded capture",
-                flow.id()
-            )));
-        }
-        return Ok(false);
-    }
-    if flow.claim.is_some() {
-        return Err(invalid(
-            "historical capture cannot acquire a live worker claim",
-        ));
-    }
-    if let Some(task) = &flow.task_id {
-        let wave = super::durable::task_wave_in(conn, task)?;
-        if flow.wave_id.as_ref() != Some(&wave) {
-            return Err(invalid("historical Flow Task and Wave disagree"));
-        }
-    }
-    conn.execute(
-        "INSERT INTO flow_sessions(id,task_id,wave_id,cwd,message,model,invocation_json,
-            step_index,iteration,position_version,worker_generation,failure_json,
-            updated_at,review_json,state,ended_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11,?12,?13,?14,?15)",
-        params![
-            flow.id(),
-            flow.task_id.as_ref().map(TaskId::as_str),
-            flow.wave_id.as_ref().map(WaveId::as_str),
-            flow.task_id.is_none().then(|| flow.cwd.to_string_lossy()),
-            flow.message,
-            flow.model,
-            serde_json::to_string(&flow.invocation)?,
-            i64::try_from(flow.cursor.index).map_err(invalid)?,
-            flow.cursor.iteration,
-            i64::try_from(flow.version).map_err(invalid)?,
-            flow.failure
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?,
-            flow.updated_at.unix_timestamp(),
-            serde_json::to_string(&flow.cursor)?,
-            if flow.finished {
-                "completed"
-            } else {
-                "current"
-            },
-            flow.finished.then_some(flow.updated_at.unix_timestamp())
-        ],
-    )?;
-    Ok(true)
-}
-
 impl SqliteStore {
-    /// Historical capture is independent of today's cursor and launch eligibility.
-    pub(crate) fn import_flow(&self, flow: &FlowSession, dry_run: bool) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = import_flow_in(&tx, flow)?;
-        if !dry_run {
-            tx.commit()?;
-        }
-        Ok(changed)
-    }
-
     pub fn create_flow(&self, flow: &FlowSession) -> StoreResult<FlowSession> {
         // Observe new placement before taking SQLite's writer lock.
         let repo = if flow.task_id.is_none() && flow.wave_id.is_none() {
@@ -1673,83 +1596,21 @@ impl SqliteStore {
     }
 }
 
-fn decode_flow_progress(
-    json: Option<&str>,
-    failure: &mut Option<TaskFlowBlocker>,
-    observed_at: OffsetDateTime,
-) -> StoreResult<crate::engine::transitions::FlowProgress> {
-    let Some(json) = json else {
-        return Ok(Default::default());
-    };
-    let mut value: serde_json::Value = serde_json::from_str(json)?;
-    if let Some(node) = value
-        .get("node_id")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-    {
-        let count = value
-            .get("completed_passes")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        value = serde_json::json!({
-            "repeats": {node: count}, "direction": value.get("direction"),
-            "verdict": value.get("verdict"),
-        });
-    }
-    // Blocked was historically serialized as a navigation verdict. Preserve
-    // its evidence as a retryable stop without inventing a forward decision.
-    if value.pointer("/verdict/decision").and_then(|v| v.as_str()) == Some("blocked") {
-        let reason = value
-            .pointer("/verdict/summary")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| StoreError::InvalidData("blocked Flow verdict has no summary".into()))?;
-        let reason = if reason.trim().is_empty() {
-            "legacy Flow verdict is blocked without evidence"
-        } else {
-            reason
-        };
-        match failure {
-            Some(existing) if existing.reason != reason => {
-                existing
-                    .reason
-                    .push_str(&format!("\nLegacy Flow blocker: {reason}"));
-            }
-            Some(_) => {}
-            None => {
-                *failure = Some(TaskFlowBlocker {
-                    captured: None,
-                    reason: reason.into(),
-                    restart_required: false,
-                    observed_at,
-                })
-            }
-        }
-        value["verdict"] = serde_json::Value::Null;
-    }
-    Ok(serde_json::from_value(value)?)
-}
-
 pub(super) fn decode_flow_cursor(
     review_json: Option<&str>,
     step_index: i64,
     iteration: i64,
-    failure: &mut Option<TaskFlowBlocker>,
-    updated_at: OffsetDateTime,
 ) -> StoreResult<ExecutionCursor> {
     let root_index = usize::try_from(step_index).map_err(invalid)?;
     let root_iteration = u32::try_from(iteration).map_err(invalid)?;
-    let saved = review_json
-        .map(serde_json::from_str::<serde_json::Value>)
-        .transpose()?;
-    let cursor = match saved {
-        Some(value) if value.get("index").is_some() => serde_json::from_value(value)?,
-        _ => ExecutionCursor {
+    let cursor = review_json
+        .map(serde_json::from_str::<ExecutionCursor>)
+        .transpose()?
+        .unwrap_or_else(|| ExecutionCursor {
             index: root_index,
             iteration: root_iteration,
-            progress: decode_flow_progress(review_json, failure, updated_at)?,
             ..Default::default()
-        },
-    };
+        });
     if cursor.index != root_index || cursor.iteration != root_iteration {
         return Err(StoreError::InvalidData(
             "stored Flow cursor does not match its root projection".into(),

@@ -295,7 +295,7 @@ mod tests {
             let store = SqliteStore::new(&expected_db).unwrap();
             let wave = Wave::new(WaveId::new(), "private-proof".into(), "/repo".into());
             store.create_wave(&wave).unwrap();
-            let observer = SqliteStore::open_run_ledger_read_only(
+            let observer = SqliteStore::open_execs_read_only(
                 &crate::store::observability_database_path().unwrap(),
             )
             .unwrap();

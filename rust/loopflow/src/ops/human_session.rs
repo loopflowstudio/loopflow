@@ -2105,7 +2105,7 @@ fn stop_native_client(run_id: &String) -> Result<()> {
     if action_test::stop(run_id) {
         return Ok(());
     }
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
         &crate::store::observability_database_path()?,
     )
     .context("cannot resolve the provider for this Session input")?;
@@ -2782,79 +2782,6 @@ mod tests {
 
     fn run_dir(run: &AgentSession) -> std::path::PathBuf {
         super::local_session_run_dir(&run.artifact_key).unwrap()
-    }
-
-    #[test]
-    fn imported_completed_keyed_ask_replays_without_preparation_or_provider_launch() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let key = "old-invocation/decision/visit-3";
-            let id = keyed_id(key);
-            let parent = std::env::var("LF_RUN_ID").unwrap();
-            let path = home
-                .home
-                .path()
-                .join("human-sessions")
-                .join(format!("{id}.json"));
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            let mut saved = serde_json::json!({
-                "id": id, "parent_run_id": parent, "work": null, "title": "Choose a policy",
-                "prompt": "Which policy?", "skill": "unblock", "cwd": home.home.path(),
-                "model": "codex:test", "session_run_id": null, "ready_summary": null,
-                "status": {"completed": {"summary": "Keep the recorded choice"}}
-            });
-            std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
-            let first = crate::ops::session_import::import(&store, false)
-                .await
-                .unwrap();
-            assert_eq!(first.ask, 1, "{:?}", first.failed);
-            let imported = store.session(&id).await.unwrap().unwrap();
-            assert_eq!(
-                imported.caller_artifact_key.as_deref(),
-                Some(parent.as_str())
-            );
-            assert!(!imported.input_published);
-            assert!(imported.completed_at.is_some());
-            store
-                .rename_session(
-                    &id,
-                    None,
-                    "Retained name",
-                    crate::session::TitleSource::Human,
-                )
-                .await
-                .unwrap();
-            let again = crate::ops::session_import::import(&store, false)
-                .await
-                .unwrap();
-            assert_eq!(again.unchanged, 1, "{:?}", again.failed);
-            assert_eq!(
-                store.session_inputs(&id).await.unwrap(),
-                vec![imported.artifact_key]
-            );
-            saved["status"]["completed"]["summary"] = serde_json::json!("Changed answer");
-            std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
-            let rejected = crate::ops::session_import::import(&store, false)
-                .await
-                .unwrap();
-            assert_eq!(rejected.failed.len(), 1);
-            assert!(rejected.failed[0].reason.contains("conflicts"));
-            std::fs::remove_file(path).unwrap();
-            assert_eq!(
-                ask_once(&store, key, "different retry", Some("missing-skill"))
-                    .await
-                    .unwrap(),
-                "Keep the recorded choice"
-            );
-            assert_eq!(
-                store.session(&id).await.unwrap().unwrap().title,
-                "Retained name"
-            );
-            assert!(ASK_LAUNCHERS.lock().unwrap().is_empty());
-            store.sqlite.assert_no_historical_runs();
-        });
     }
 
     #[test]

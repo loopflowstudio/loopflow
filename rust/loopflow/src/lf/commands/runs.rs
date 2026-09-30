@@ -65,7 +65,7 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, b
     if !database.exists() {
         return Ok((Vec::new(), false));
     }
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
     Ok(store.recent_conversation_history(
         filter.wave,
         filter.project,
@@ -100,7 +100,7 @@ fn collect_runs_at(
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(database)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(database)?;
     Ok(store.conversation_history(
         filter.wave,
         filter.project,
@@ -130,7 +130,7 @@ pub fn list(
     let runs = match (parent, task) {
         (Some(parent), _) => {
             let database = crate::store::observability_database_path()?;
-            let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+            let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
             let parent = store.resolve_history_input(parent)?;
             collect_runs_at(&home, &database, filter, Some(&parent), 0)?
         }
@@ -227,7 +227,7 @@ pub fn observe_provider_session() -> Result<()> {
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
     let home = crate::store::observability_home_dir();
     let database = crate::store::observability_database_path()?;
-    let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
     let snapshot = store
         .input_history(selector)
         .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;

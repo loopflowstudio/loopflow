@@ -9,8 +9,6 @@ use serde_yaml_ng::Value;
 use crate::engine::error::LoadError;
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
 
-mod saved_skill;
-
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -162,7 +160,6 @@ pub struct GoalRenderContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(from = "saved_skill::SavedSkill", into = "saved_skill::SavedSkill")]
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
@@ -183,7 +180,6 @@ impl ConcreteSkill {
 pub struct ConcreteXor {
     pub router: Skill,
     pub paths: HashMap<String, ConcretePath>,
-    #[serde(rename = "flow_parents")]
     pub sources: Vec<String>,
 }
 
@@ -198,15 +194,12 @@ pub struct ConcretePath {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteCommand {
     pub item: Command,
-    #[serde(rename = "flow_parents")]
     pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConcreteStep {
     Skill(ConcreteSkill),
-    // Persisted execution plans retain their existing operation tag.
-    #[serde(rename = "Op")]
     Command(ConcreteCommand),
     Xor(ConcreteXor),
 }
@@ -1127,9 +1120,8 @@ mod tests {
 
     use super::{
         build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcretePath,
-        ConcreteStep, ConcreteXor, DefinitionLoader, Flow, Goal, GoalRenderContext, Skill, Step,
-        XorDef, XorPath,
+        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcreteStep,
+        DefinitionLoader, Flow, Goal, GoalRenderContext, Skill, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -2189,23 +2181,6 @@ Design the feature.
                 });
             assert!(result.unwrap_err().to_string().contains("not found"));
         }
-    }
-
-    #[test]
-    fn xor_legacy_unresolved_records_fail_without_loading_sources() {
-        for router in [serde_json::Value::Null, serde_json::json!("old-router")] {
-            let old = serde_json::json!({
-                "router": router,
-                "paths": {"branch": {"flow": "mutable-flow", "skill": null, "description": "Old"}},
-                "flow_parents": ["old-flow"]
-            });
-            assert!(serde_json::from_value::<ConcreteXor>(old).is_err());
-        }
-        let unresolved = serde_json::json!({"flow": "mutable-flow", "skill": null, "steps": [], "description": "Old"});
-        let error = serde_json::from_value::<ConcretePath>(unresolved)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("unknown field"), "{error}");
     }
 
     #[test]

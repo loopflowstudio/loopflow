@@ -17,13 +17,11 @@ is a captured resumable Flow consuming exact boundary completions. Run has no
 separate product lifetime in this contract. Jack requested the docs-first spec
 before completing the remaining owner conversion.
 
-The implementation currently has `execs`, `agent_sessions` and `flow_sessions`,
-with immutable input evidence, capture files and transitional Run-named readers.
-The old `runs` and `agent_session_inputs` tables are removed; unclassified
-historical SQL remains in immutable `import_evidence`, without invented Sessions. Renaming Session/invocation tables did not complete the conversion. The checked inventory
-below describes those current source dependencies, including historical wire
-names; it must remain accurate until their consumers are removed together.
-Other architecture prose describes the target contract, not a shipment claim.
+The implementation has `execs`, `agent_sessions` and `flow_sessions`, with
+captured input and provider outcomes beneath their Session owners. Jack Heart's
+2026-09-30 compression decision removes historical import, intermediate draft
+schemas and old format readers. The cutover retains current Work and links,
+accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf session connect` has `open` as
 an alias; `--replace` replaces an owned client. The explicit conversation/engine
@@ -44,30 +42,19 @@ consumers without their coordinated migration.
 | One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Installed startup acceptance and final discovery/wire coverage remain open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Complete recorded account/native Home, public restart, stale-client exclusion and shared-engine preservation across every provider path. |
 | Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. All-provider recovery and final retired-owner deletion remain required. |
-| One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. The forward migration folds child history and active selection into the root, retaining original rows as immutable import evidence. Runtime progression uses one cursor and return counters; retry retains its pass. Focused migration and progression proofs cover the cut; configured acceptance remains open. |
+| One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. The final schema contains no child-pass owner. Runtime progression uses one cursor and return counters; retry retains its pass. Focused migration and progression proofs cover the cut; configured acceptance remains open. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
-| Lossless import and final owner deletion | The offline importer exists but complete four-origin/headless/command import, repeated attempts, conflict/interruption preservation and final Run removal remain required. Ordinary reads must not import or reconstruct identity from old files. |
-| Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Complete full historical import and dense cold/warm measurements. History uses captured event sequences and exact native references. |
+| Current-state cutover | Three direct migration groups retain Work, links, account routing and resumable Sessions. Finished history and intermediate branch schemas are discarded. |
+| Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Complete dense cold/warm measurements. History uses captured event sequences and exact native references. |
 | Desktop and wire agreement | Off-roadmap ancestry and pane/draft retention pass unit and mounted native-terminal fixtures. Graph and membership wire use captured numeric IDs in Rust/Swift. Complete coordinated history/usage conversion and configured Desktop proof remain outstanding. |
 | Status-owned Chapters | Rotation/default-Flow implementation exists with focused fixtures. Complete historical adoption, partial/competing-plan preservation and second-Home proof. No Chapter table or packet belongs in the model. |
-| Integrated acceptance | Affected checks, configured provider/Desktop, backed-up real-Home import and final consistency remain required. Branch fixture passes are neither installed acceptance nor permission to promote. |
+| Integrated acceptance | Affected checks, configured provider/Desktop, backed-up current-state conversion and final consistency remain required. Branch fixture passes are neither installed acceptance nor permission to promote. |
 
-The admission checkpoint preserves saved executable/Home/database handoff and
-launch-failure diagnostics. Populated canonical migration, Ask/review recovery,
-refusal before provider launch and automatic-retry fixtures cover their stated
-boundaries. The forward migration removes `runs` after retaining every original
-SQL row as immutable input evidence, including unknown conversation attachment.
-Import reports unresolved inputs without inventing conversations or processes.
-History lists and native thread/account lookup read Session observations. Fresh native publications outrank imported legacy sidecars;
-JSONL fallback uses original input order. Import classification reads its parsed
-source before writing SQL. Saved Ask/review continuation, input-prefix selection and
-active process metadata now use that store without reopening manifests. Exact
-PID/start receipts still establish process identity; input history and current
-Session Work remain separate. Initial prepared launch and process receipts retain
-file dependencies. Native-only usage and complete historical import still need
-their final proof. Configured-provider recovery and the remaining import/owner-removal gaps prevent code-complete acceptance. Detailed
-receipts and unresolved import obligations remain with the active Task; no
-full-green hosted, configured-provider or installed-migration result is asserted.
+Admission preserves saved executable/Home/database handoff and failed-command
+diagnostics. Exec owns command outcome and error; Session events own provider
+outcomes. Exact PID/start receipts establish process identity. Passive readers
+acquire no process or Flow authority. Configured-provider and Desktop acceptance
+remain open; fixture results establish only their exercised boundaries.
 
 ## The system grows outward from a direct Skill launch
 
@@ -309,12 +296,9 @@ sidecars or live PRs to reconstruct identity. Bound conversations remain bound e
 when absent from the visible roadmap. Desktop panes key on AgentSession identity,
 so bind, rename and driver replacement retain the surface and draft.
 
-One-time import preserves four conversational origins, headless history, command
-journal evidence, captures, feedback, old IDs, repeated failures/successes and
-unknown facts. It never invents an Exec from a Run without process evidence or
-merges unrelated conversations by title/path/provider. Conflict/interruption
-recovery and idempotence must preserve the source evidence. Ordinary reads neither
-import nor fall back to old files. Runtime Run ownership disappears after migration.
+Current-state conversion keeps resumable native identities and selected captures.
+Finished conversations, old command events and unresolved historical SQL are
+not imported. Runtime readers use only the final schema and current encodings.
 
 ### Chapters
 
@@ -375,13 +359,13 @@ provider, and literal subprocess edge must appear exactly once.
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, `lf ask`, interactive `lf` | — |
 | **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to rebase. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
-| **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; immutable import evidence retains historical SQL with unknown membership explicitly. Original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf runs`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
+| **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf runs`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Exec** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ExecId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/exec.rs) | `execs`, `run_events` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf exec`; ordinary parsed CLI commands | — |
 | **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Home-local Exec receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf prune`, `lf doctor` | `exec:/bin/ps`, `exec:ps`, `exec:lsof`, `exec:kill`, `exec:which` |
 | **Provider account / route** — credential authority and ordered provider selection on one Home | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage, Doppler, or forwarded foreground leases. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Home | `lf auth` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `exec:claude`, `exec:codex`, `exec:doppler`, `exec:opencode`, `exec:security`, `exec:secret-tool` |
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
-| **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files; immutable `import_evidence` preserves original SQL and unresolved selectors through cutover | Store open validates/applies; release cut publishes | `lf release` | `exec:sh` (release hooks) |
+| **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `exec:sh` (release hooks) |
 <!-- architecture-map:end -->
 
 The public API column covers top-level command families, not every subcommand or
@@ -409,8 +393,7 @@ kernel locks                 live local exclusion authority
 | --- | --- | --- |
 | Planning | `waves`, `projects`, `project_events`, `tasks`, `task_issue_identities`, `task_deletions`, `task_events` | Linear Project statuses, Wave plans, Work identity, corrections, historical evidence |
 | Execution | `flow_sessions`, `flow_events`, `agent_sessions`, `session_events` | Saved execution, selected captures and native completions, conversations and turn receipts |
-| Historical import | `import_evidence` | Immutable original SQL, selectors and unknown membership retained through migration; no runtime reservation or lifecycle writer |
-| CLI processes | `execs` | Indexed command lifecycle and immutable causal ancestry, written with the journal event transaction |
+| CLI processes | `execs` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Home placement |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained earlier exchange/publication facts; current Ask conversation state is in `agent_sessions` |
@@ -418,16 +401,13 @@ kernel locks                 live local exclusion authority
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head supervision and repair generations |
 | Home and provider authority | `homes`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, delivery receipts |
-| Local observation/cache | `run_events`, `blob_tokens` | Outer command events and deterministic Git-blob token counts |
+| Local observation/cache | `blob_tokens` | Deterministic Git-blob token counts |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
-Released migration files are immutable history. A forward migration creates the
-new schema. A one-time Home import moves historical Run, Session, invocation and
-planning facts into it before ordinary readers switch. Chapter IDs are discarded;
-existing Linear Projects and their Task evidence survive. Imported records retain
-identity and evidence; ambiguous mappings remain explicit migration findings.
-Runtime reads never fall back to historical files. Retired files are removed
-only after verified import and a recoverable backup.
+Released migration files remain immutable. Three direct draft groups establish
+the final Exec, Project-status and Session schema. Current Work, links, accounts,
+routes and resumable conversations survive the cutover. Migration rehearsal uses
+a disposable copy; it never grants permission to mutate the installed Home.
 
 ### Filesystem state
 
@@ -506,9 +486,8 @@ Wave, Ask, helper and direct callers.
    whether its conversation or parked Flow remains open.
 
 Payloads may remain large immutable files. SQLite owns identity, attribution,
-current control and searchable history. Old `runs/` manifests, JSONL, terminal
-receipts and sidecars are import inputs with their original bytes preserved until
-verified migration; ordinary readers do not consult them as alternate identity.
+current control and searchable history. Current capture payloads may use files; ordinary readers select their exact
+artifact through SQL, never by scanning retired layouts.
 The retained operational process evidence is not a new lifecycle object.
 
 ## Tracked Work and bounded Task advancement
@@ -605,11 +584,9 @@ create FlowSessions, claims or lifecycles.
 Exact completion and continuation settle in the existing version/claim
 transaction. Execution, review and driver locking use the same FlowSession that
 the Task selects. Task and taskless execution use one driver and need no synthetic
-planning records. The forward `fold_flow_passes` migration archives original
-root/child rows, moves history and conversation membership to the root, and
-retains the deepest current pass's selection. Child rows and their ownership
-machinery are removed; configured acceptance and complete historical import
-remain open in the cutover-status table.
+planning records. The direct ownership migration creates this final schema;
+there are no intermediate child-pass owners or archives. Configured acceptance
+and the machine's current-state cutover remain separate from schema verification.
 
 A decision returns Advance, Iterate or Blocked from its selected successful
 agent completion. Blocked requires a reason and opens a keyed Ask; answered
@@ -921,7 +898,7 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
 - Store copies preserve evidence without acquiring process authority. Promotion
   and historical-writer continuity remain separate proof obligations.
 - Reads are Home-local unless explicitly routed by `lf ssh`. Indexed summaries
-  precede payload IO; historical files are import inputs, never identity fallback.
+  precede payload IO; retired files are never identity fallback.
 - DTO fields are required unless explicitly optional; Rust/Swift consumers and
   fixtures migrate together.
 

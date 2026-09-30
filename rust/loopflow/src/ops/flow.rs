@@ -451,7 +451,7 @@ mod tests {
             cache_read_tokens: None,
         });
         capture.finish("completed").unwrap();
-        let store = crate::store::sqlite::SqliteStore::open_run_ledger_read_only(
+        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
             &ledger.home().join("loopflow.db"),
         )
         .unwrap();

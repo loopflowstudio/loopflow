@@ -7,7 +7,7 @@ separate slice or concept-review step. Publication is a checkpoint. This ledger 
 Prior results, failures and exact log references remain in
 [the preceding committed ledger](https://github.com/loopflowstudio/loopflow/blob/d6dc8c43b73872b8b6e71b0996468d2432b23102/scratch/evidence.md)
 and [handoff](parallel-execution.md). This replaces chronology, not obligations.
-The complete [remaining matrix](remaining-work.md), [import contract](import-preservation.md),
+The complete [remaining matrix](remaining-work.md), [import contract](compress-history.md),
 [Chapters](chapters.md) and [native tradeoff](native-turn-retry-tradeoff.md) remain binding.
 
 ## Mechanical Flow step checkpoint
@@ -640,3 +640,8 @@ collision with the public membership projection was reverted. All ten focused
 capture/replay/codec/history checks pass (`naming-compress-focused.log`); final
 all-target Clippy, formatting and diff checks pass (`naming-compress-clippy-verified.log`).
 No full suite or configured acceptance was run.
+
+## Deep current-state compression · 2026-09-30
+
+Jack Heart removed historical-import and intermediate-draft obligations. Three direct migrations replace 38 drafts; old Run/import readers, archives, codecs and tests are deleted. Final affected Rust run: **363 passed**, no fail-fast (`deep-affected-green.log`); Swift DTO: **18 passed**. Build, fmt, all-target Clippy with `-D warnings`, architecture, migration history and generated-doc checks pass. Earlier failed fixtures and their repairs remain in `deep-*` logs; no full repository gate is claimed.
+Fresh and copied-database rehearsals pass; original operating columns match, 59 resumable Sessions and 20 Flows decode, and foreign keys hold. Live filesystem changes prevent an atomic-snapshot claim; actual conversion still requires quiescence. Installed data was never opened for writing. [Inventory and cutover boundary](compress-history.md). Net **7,884** lines removed, including tests/docs and new migrations, relative to `c7fcd31ec`.

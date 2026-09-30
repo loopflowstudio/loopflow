@@ -486,14 +486,6 @@ fn assert_recorded_exit(home: &Path, code: i32) {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
-    let events: Vec<String> = conn
-        .prepare("SELECT event FROM run_events WHERE node='run' ORDER BY seq")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(events, ["started", "errored"]);
     let work: (i64, i64) = conn
         .query_row(
             "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
@@ -539,14 +531,6 @@ fn obstructed_file_journal_preserves_command_start_and_completion_in_sql() {
             );
         }
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let events: Vec<String> = conn
-            .prepare("SELECT event FROM run_events WHERE node='run' ORDER BY seq")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(events, ["started", "completed"]);
         let facts: (i64, i64) = conn.query_row("SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),(SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs')", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(facts, (1, 0));
         let recorded_cwd: String = conn

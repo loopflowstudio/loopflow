@@ -175,8 +175,8 @@ fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     );
     let manifest: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["run_id"], run_id.as_str());
-    assert_eq!(manifest["parent_run_id"], CALLER);
+    assert_eq!(manifest["artifact_key"], run_id.as_str());
+    assert_eq!(manifest["caller_artifact_key"], CALLER);
     let opened = run(home.path(), &["session", "open", &id, "--json"]);
     assert!(
         opened.status.success(),
@@ -250,22 +250,15 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         // The native history belongs to this isolated fixture. The executable below
         // stands in for the provider; both opens exercise the real CLI and locks.
         if resume {
-            std::fs::write(
-                dir.join("provider-session.json"),
-                serde_json::json!({
-                    "schema_version": 1, "provider_session_id": "ses_resume-proof",
-                    "account_id": null
-                })
-                .to_string(),
+            let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            db.execute(
+                "UPDATE agent_sessions SET provider_thread='ses_resume-proof' WHERE id=?1",
+                [id],
             )
             .unwrap();
-            let imported = command(home.path(), &["session", "import", "--json"])
-                .output()
-                .unwrap();
-            assert!(imported.status.success(), "{imported:?}");
-            let report: serde_json::Value = serde_json::from_slice(&imported.stdout).unwrap();
-            assert_eq!(report["failed"], serde_json::json!([]), "{report}");
-            std::fs::remove_file(dir.join("provider-session.json")).unwrap();
+            db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                SELECT id,'observed','fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         let bin = home.path().join("bin");
@@ -330,11 +323,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let selector = if resume {
-            &run_id.strip_prefix("run_").unwrap_or(run_id)[..12]
-        } else {
-            id
-        };
+        let selector = id;
         let mut second = command(home.path(), &["session", "open", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -362,7 +351,9 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         assert!(reopened.status.success(), "{:?}", reopened);
         let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
         assert!(reopened.get("run_id").is_none());
-        assert_eq!(std::fs::read_to_string(evidence).unwrap(), run_id);
+        let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
+            .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
+        assert_eq!(std::fs::read_to_string(evidence).unwrap(), selected);
         assert_eq!(reopened["state"], "active");
         assert!(active.status.success(), "{:?}", active);
         let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
@@ -376,13 +367,13 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         if !resume {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-            assert_eq!(manifest["run_id"], run_id);
+            assert_eq!(manifest["artifact_key"], run_id);
             assert!(manifest["context"].is_object());
             assert!(!dir.join("prepared").exists());
             let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
             let failure: String = database
                 .query_row(
-                    "SELECT error FROM run_events WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
+                    "SELECT error FROM execs WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
                     [],
                     |row| row.get(0),
                 )
@@ -420,10 +411,10 @@ fn prepare_ask(
     let caller = home.join("runs").join(&CALLER[4..6]).join(CALLER);
     std::fs::create_dir_all(&caller).unwrap();
     let manifest = serde_json::json!({
-        "schema_version": 1, "run_id": CALLER, "parent_run_id": null,
+        "schema_version": 1, "artifact_key": CALLER, "caller_artifact_key": null,
         "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
         "surface": "headless", "cwd": cwd, "repo": null, "worktree": null,
-        "skill": "proof", "subjects": [], "flow": null, "launch": null, "context": null,
+        "skill": "proof", "subjects": [], "flow": null, "exec": null, "context": null,
         "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
     });
     std::fs::write(caller.join("manifest.json"), manifest.to_string()).unwrap();

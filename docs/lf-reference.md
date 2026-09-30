@@ -787,28 +787,9 @@ before teardown; keyed Ask retries return the same answer. Flow reviews pass
 feedback to the following decision, which owns navigation. Closing a pane,
 exiting a provider, or marking ready never completes that review implicitly.
 
-```bash
-lf session import --dry-run
-lf session import
-```
-
-One-time import preserves old interactive/Ask/review conversations, headless
-history, captures, outcomes, usage and unknown evidence. Original identities and
-repeated attempts survive; unrelated conversations never merge by title or path.
-Ordinary reads use SQLite and neither import nor fall back to files. Import
-reports conflicts and unresolved evidence, supports interruption/retry, and does
-not infer an actual lf process from an old provider-launch record alone.
-SQL agent inputs retain their recorded conversation even when an old input link
-is absent. A standalone agent input keeps its original input ID as its Session
-selector; recorded command outcome does not become a successful native turn.
-Named mechanical boundaries with a captured Flow retain their SQL evidence in
-Flow history. The forward migration retains unresolved original SQL in immutable
-`import_evidence`, preserving unknown conversation membership. Captured inputs
-belong to Session history; the input catalog and Run lifecycle table are removed. Import reports each unresolved input
-in `failed`, retaining its original evidence. An operation counts as preserved only when its complete SQL
-evidence, captured boundary and recorded completion match Flow history.
-`lf runs INPUT --json` reads retained input history even when its manifest is
-missing; exact Session IDs select current input. Prefixes must be unambiguous.
+Session identity and captured-input selection come from SQLite. Exact Session
+IDs select their current input; `lf runs INPUT --json` reads its recorded history
+without requiring the payload file. There is no legacy Home import command.
 
 ## Monitor: history and live activity
 
@@ -1057,10 +1038,8 @@ missing usage nor a command outcome.
 
 Recent `lf runs` summaries select their budget before reading history payloads,
 retaining every eligible unfinished entry. Exact Task and caller drills have no
-presentation cap. Original `run_` selectors remain valid; a Session selector
-reads its current captured event. Unknown historical SQL remains import evidence,
-not an invented conversation. Full populated-import and configured-provider
-acceptance remain cutover obligations.
+presentation cap. A Session selector reads its current captured event. Historical records from
+retired owners are not imported; configured-provider acceptance remains separate.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on

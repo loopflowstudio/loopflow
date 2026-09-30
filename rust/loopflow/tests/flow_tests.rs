@@ -1471,23 +1471,14 @@ fn agent_step_survives_driver_death_without_another_turn() {
          WHERE used.kind='consumed' AND done.kind='completed'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
     ).unwrap();
     assert_eq!(consumed, (1, step.clone(), "completed".into()));
-    let skill_events: i64 = conn.query_row(
-        "SELECT count(*) FROM run_events WHERE process_id=?1 AND node='skill' AND event IN ('started','completed')",
-        [&step], |r| r.get(0),
-    ).unwrap();
-    assert_eq!(skill_events, 2, "the skill child owns its journal events");
     let resumed: i64 = conn
         .query_row(
-            "SELECT count(*) FROM run_events event JOIN execs e ON e.id=event.process_id
-         WHERE e.command LIKE '%resume%' AND event.node='flow' AND event.event='completed'",
+            "SELECT count(*) FROM execs WHERE command LIKE '%resume%' AND outcome='succeeded'",
             [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(
-        resumed, 2,
-        "each resume command journals its observed completion"
-    );
+    assert_eq!(resumed, 2);
 
     assert_eq!(
         conn.query_row(

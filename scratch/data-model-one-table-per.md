@@ -2,6 +2,12 @@
 
 LOO-298 · Jack Heart · Accepted contract consolidated 2026-09-28.
 
+Jack Heart's 2026-09-30 directive supersedes this document's historical-import,
+old-ID and old-format preservation requirements: “Whatever history or extra state
+we don't need, toss it now.” Keep current Work and links, accounts/routes and
+resumable Sessions. [The compression inventory](compress-history.md) governs the
+cutover; earlier history requirements below are superseded, not remaining work.
+
 The finish line is **code-complete implementation**: the accepted model works end
 to end, affected checks pass on integrated bytes, replaced owners are deleted,
 and the usage/ownership/deletion evidence is ready for Jack Heart's demo and
@@ -10,7 +16,7 @@ step. Tables, renames or a passing slice alone do not qualify. Configured
 provider/Desktop and installed migration proofs stay explicit; no branch binary may touch the installed Home.
 
 Read [current work](parallel-execution.md), [remaining work](remaining-work.md),
-[import obligations](import-preservation.md) and [evidence](evidence.md) beside
+[current-state cutover](compress-history.md) and [evidence](evidence.md) beside
 this contract. [Chapters](chapters.md) owns the accepted Project model.
 [Control and archive](parallel-work.md) records publication, ownership and history.
 Older Run-based proposals and their intermediate exceptions are superseded here.

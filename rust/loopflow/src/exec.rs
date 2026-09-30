@@ -22,8 +22,7 @@ pub struct Exec {
     pub outcome: Option<String>,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
-    /// Recorded command context from its trace, not work assigned to its caller later.
-    pub wave: Option<String>,
+    pub error: Option<String>,
 }
 
 /// Command discovery filters. Work means recorded work, never today's caller binding.
@@ -59,7 +58,7 @@ pub enum ExecWorkFilter {
 }
 
 /// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
-/// A cursor is not a cross-request snapshot: late imports or changed outcomes may
+/// A cursor is not a cross-request snapshot: late observations or changed outcomes may
 /// change membership. Refresh from the first page to observe those changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecCursor {

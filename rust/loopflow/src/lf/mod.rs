@@ -814,14 +814,6 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Store the Session files an older Home kept beside its Runs; run once
-    Import {
-        /// Report what would be stored and store nothing
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Mark the active session ready for your review
     Ready {
         #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]

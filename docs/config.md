@@ -20,6 +20,9 @@ Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
 preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
 carries the caller's name rather than reading the destination owner's name.
+A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
+empty or whitespace-only value falls through to personal configuration and Git.
+Steering comments prefer their recorded requester, then Linear's author name.
 Names describe people; they do not grant authority or establish who wrote an
 older request. Unattributed background Task and Wave work remains unattributed.
 
@@ -32,10 +35,9 @@ already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
 `lf user name --json` resolves the name without provider or PM access.
-The Mac chat composer uses this local query when sending a message; CLI chat
-captures the caller's name before posting to a listener. The name travels with
-the message and survives replay. Old messages without names stay anonymous.
-Bare interrupts do not load a name, so a preference-read failure cannot block them.
+Session prompts carry the selected participant name. Stored transcripts retain
+their original wording; unnamed historical messages remain anonymous.
+
 Discord and Linear retain their provider author IDs alongside display names;
 a shared publisher account never substitutes for an explicitly named requester.
 
@@ -295,7 +297,7 @@ Set the default harness, with an optional model.
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
 
 ```yaml
 agent: codex          # harness default
@@ -305,9 +307,9 @@ agent: codex          # harness default
 Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
-`review-design`, `review-slice`, and `prompt`. Every other unconfigured
-built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
-an explicit override.
+`review-design`, `realign`, and `prompt`. Every other unconfigured
+built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
+CLI `-m` or authored `agent:` config remains an explicit override.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
@@ -433,7 +435,7 @@ than `config.yaml`:
 
 ```bash
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf route set claude primary@ engineering@
+lf auth route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 

@@ -310,7 +310,7 @@ fn resolve_selectors(
                 .map(|provider| format!("{provider} "))
                 .unwrap_or_default();
             return Err(ProviderAccountError::Runtime(format!(
-                "no managed {provider}account matches '{}'; see `lf auth accounts`",
+                "no managed {provider}account matches '{}'; see `lf auth status`",
                 selector.account
             )));
         }
@@ -1250,9 +1250,14 @@ mod tests {
         ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV, ACCOUNT_SELECTION_ENV,
     };
     use crate::profile::{ProviderRoute, RouteScope};
-    use crate::provider_account::{new_account, parse_account_id, RateLimitSignal};
+    use crate::provider_account::{
+        inspect_provider_route, new_account, parse_account_id, resolve_provider_account,
+        ProviderAccountRoute, RateLimitSignal,
+    };
     use crate::provider_auth::Provider;
-    use crate::store::{CredentialState, ProviderAccount, ProviderAccountId, StorageConfig};
+    use crate::store::{
+        CredentialState, ProviderAccount, ProviderAccountId, SharedStore, StorageConfig,
+    };
     use tempfile::tempdir;
     fn id(value: &str) -> ProviderAccountId {
         parse_account_id(value).unwrap()
@@ -1467,6 +1472,23 @@ mod tests {
         );
     }
 
+    async fn inspect_and_select(store: &SharedStore) -> ProviderAccountRoute {
+        let before = store.list_provider_accounts(None).await.unwrap();
+        let inspected = inspect_provider_route(Some(store), None, Provider::Claude)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!inspected.is_empty());
+        assert_eq!(store.list_provider_accounts(None).await.unwrap(), before);
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the inspected candidate should be selectable");
+        assert_eq!(route.account_id(), &inspected[0].0.account_id);
+        assert_eq!(!route.uses_native_home(), inspected[0].1);
+        route
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn target_selection_uses_one_merged_local_and_forwarded_catalog() {
@@ -1573,20 +1595,14 @@ mod tests {
         .unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_env_value().unwrap());
 
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the target-local route should be available");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
         let codex_preference =
             AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
         std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("a Codex preference should leave the Claude route available");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
@@ -1596,10 +1612,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             target_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the forwarded account should be selectable on the target");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &forwarded.account_id);
         assert!(!route.uses_native_home());
 
@@ -1609,10 +1622,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             shared_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the target-local copy should win for a shared identity");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
         assert!(route.uses_native_home());
 
@@ -1622,10 +1632,7 @@ mod tests {
             ACCOUNT_SELECTION_ENV,
             missing_preference.env_value().unwrap(),
         );
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("a missing target preference should fall through to the local route");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
@@ -1636,10 +1643,7 @@ mod tests {
             .await
             .unwrap();
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
-        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
-            .await
-            .unwrap()
-            .expect("the local copy should precede the forwarded origin route");
+        let route = inspect_and_select(&target_store).await;
         assert_eq!(route.account_id(), &shared.account_id);
         assert!(route.uses_native_home());
 

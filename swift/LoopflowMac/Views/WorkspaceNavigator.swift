@@ -26,7 +26,7 @@ struct WorkspaceNavigator: View {
     }
 
     private var rows: [WorkspaceOutlineRow] {
-        model.workspace.outline(
+        model.visibleWorkspace.outline(
             presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
             search: model.navigation.search,
             planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
@@ -132,6 +132,10 @@ struct WorkspaceNavigator: View {
                         Text(presentation.rawValue).tag(presentation)
                     }
                 }
+                Toggle("Show headless Sessions", isOn: Binding(
+                    get: { navigation.showsHeadlessSessions },
+                    set: { navigation.showsHeadlessSessions = $0 }))
+                    .accessibilityIdentifier("workspace-headless-sessions")
                 if let onShowTerminals {
                     Divider()
                     Button("Show retained terminals", action: onShowTerminals)
@@ -287,7 +291,7 @@ struct WorkspaceNavigator: View {
 
     // MARK: - Orphan Sessions
 
-    private var orphans: [SessionRecord] { model.workspace.orphanSessions(search: model.navigation.search) }
+    private var orphans: [SessionRecord] { model.visibleWorkspace.orphanSessions(search: model.navigation.search) }
 
     /// Collapsed beside planned Work; open when orphans are all this repository
     /// shows, and while a search names them.
@@ -435,12 +439,8 @@ struct WorkspaceNavigator: View {
     private func taskTone(_ row: WorkspaceOutlineRow) -> WorkspaceTone? {
         guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
               case .pinned(let pinned) = found.task.flow.record else { return nil }
-        switch pinned.execution {
-        case .running, .starting: return .running
-        case .human: return .human
-        case .blocked: return .blocked
-        case .idle, .unknown: return nil
-        }
+        let state = pinned.execution.presentation
+        return state.label == nil ? nil : state.tone
     }
 
     private func warning(_ text: String) -> some View {

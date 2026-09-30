@@ -26,7 +26,7 @@ lf --version || echo "not installed"
 ## Caller Authority
 
 An external harness opened by a person acts as a Loopflow **User**. It may read
-status and use `lf chat` when the user asks it to inspect or steer a Wave. It
+status and start a Session when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
@@ -45,10 +45,11 @@ lf rebase --plan                     # show strategy; bare `lf rebase` applies i
 lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
-Three commitment levels: **publish** (work in flight — the default "make a
-PR" verb), **submit** (done, the user merges it), **land** (done, loopflow
-lands it). `lf pr open` opens a browser — only when a person asked to see the
-PR.
+**Publish** makes a PR ready for review without opening a browser. **Submit**
+prepares it for the user's merge click; **arm/land** request auto-merge.
+`lf pr open` creates or updates a draft and opens its page when a person asks
+to see it. Existing ready PRs stay ready; opening a draft does not publish it.
+Publish/submit/arm/land make drafts ready.
 
 Stay in the worktree loopflow placed for this run. Never use raw
 `git worktree`; the sibling naming convention (`<repo>.<name>`) is
@@ -63,14 +64,14 @@ Delegation must make the problem smaller: delegate only a strict subset that
 can finish independently; never hand off the whole seed or the one blocker
 between you and completion.
 
-Use `lf task`, `lf project`, `lf wave`, and `lf pm` only when the active skill
+Use `lf task`, `lf wave`, and `lf repo` only when the active skill
 or the user explicitly asks for orchestration. Do not inspect planning state,
 guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
 lf task run <issue-id>                       # durable Task Work, own worktree
-lf task steer <issue-id> "smaller approach"  # redirect its active turn
+lf task comment <issue-id> "smaller approach" # post direction for the Task advancer
 lf task status <issue-id> --json             # inspect durable state
 lf task wait <issue-id> --until terminal
 ```
@@ -84,12 +85,12 @@ When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
+lf wave list --json              # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
-These are read surfaces. `lf status` is the focused operational view;
+These are read surfaces. `lf wave status` is the focused operational view;
 `lf roadmap` is the planning overlay, not a second runtime model.
 
 ## Place And Run
@@ -99,11 +100,10 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # only while no Run is live
-lf start <wave>                                 # start it on this machine
-lf stop <wave>                                  # stop it on this machine
+lf wave place <wave-id> <home-id>          # only while no Run is live
+lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
-lf ssh <home-id> start <wave>                   # start it on that Home
+lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
@@ -120,13 +120,13 @@ summaries extracted from them use names. Use known preferred names and preserve
 unknown attribution instead of guessing who made a request.
 
 Answer the user's message in turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+through durable Task facts and targeted Ask Sessions.
 
-`lf chat` is the User surface. Work Steer is the live correction path. When the
+Sessions are the conversation surface. Work Steer is the live correction path. When the
 active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
 through the ordinary repository workflow. Keep it curated rather than appending
-a transcript. `update-wave` owns deliberate end-of-work memory curation; no
-live Wave is required.
+a transcript. `realign` reconciles memory with the plan and code; no live Wave
+is required.
 
 ## Where To Write
 

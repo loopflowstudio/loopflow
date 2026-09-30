@@ -1,7 +1,7 @@
-use loopflow::controller::wave::metrics::MetricPortfolioDto;
 use loopflow::durable::WorkStatus;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
+use loopflow::work::wave::metrics::MetricPortfolioDto;
 
 const PM_SHOW: &str = include_str!("../../../tests/fixtures/dto/pm_show.json");
 const WAVE_DETAIL: &str = include_str!("../../../tests/fixtures/dto/wave_detail.json");
@@ -9,26 +9,29 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
-fn active_runs_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::runs::ActiveRunsSnapshot;
+fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
+    use loopflow::lf::commands::runs::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
-    let snapshot: ActiveRunsSnapshot = serde_json::from_str(json).unwrap();
+    let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
         loopflow::lf::commands::runs::DiscoveryState::Ready
     );
-    assert_eq!(snapshot.runs[0].work, snapshot.task);
-    assert_eq!(snapshot.runs[0].processes[0].state, ActivityState::Waiting);
+    assert_eq!(snapshot.sessions[0].work, snapshot.task);
+    assert_eq!(
+        snapshot.sessions[0].processes[0].state,
+        ActivityState::Waiting
+    );
     assert_eq!(snapshot.gaps.len(), 1);
     assert_eq!(
-        serde_json::from_str::<ActiveRunsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
+        serde_json::from_str::<ActiveSessionsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
             .unwrap(),
         snapshot
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
     missing.as_object_mut().unwrap().remove("discovery");
-    assert!(serde_json::from_value::<ActiveRunsSnapshot>(missing).is_err());
+    assert!(serde_json::from_value::<ActiveSessionsSnapshot>(missing).is_err());
 }
 
 #[test]
@@ -41,7 +44,7 @@ fn task_comments_keep_authorship_and_require_every_field() {
         thread.comments[2].author,
         TaskCommentAuthor::Person { name: None }
     );
-    // What `lf pm task comments --json` prints is exactly what Swift decodes,
+    // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
         serde_json::to_value(&thread).unwrap(),
@@ -65,10 +68,7 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         ["initiative-infrastructure"]
     );
     assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(
-        snapshot.projects[0].flows.as_ref().unwrap().recommended,
-        None
-    );
+    assert_eq!(snapshot.projects[0].flow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
     assert_eq!(snapshot.items[0].project_id, "project-gmail");
@@ -94,46 +94,37 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 }
 
 #[test]
-fn wave_detail_requires_machine_and_turn_controls() {
+fn wave_detail_preserves_flow_and_requires_home() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
+        panic!("fixture contains recorded Runs");
+    };
+    assert_eq!(runs[0].first_provider_attempt_at, Some(1784052010));
     assert_eq!(
-        snapshot
-            .chapter
-            .as_ref()
-            .unwrap()
-            .flows
-            .recommended
-            .as_deref(),
-        Some("task-design")
+        runs[0].task_pr_id.as_ref().map(|id| id.as_str()),
+        Some("pr_33333333333333333333333333333333")
     );
-    assert!(!snapshot.wave.paused);
-    assert!(snapshot.wave.enabled);
+
+    let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
+        panic!("missing Projects")
+    };
+    assert_eq!(items[0].flow, "task-design");
+    assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
-    assert!(!decoded.wave.paused);
-    assert!(decoded.wave.enabled);
     assert_eq!(
-        decoded.chapter.as_ref().unwrap().flows,
-        snapshot.chapter.as_ref().unwrap().flows
+        serde_json::to_value(&decoded.projects).unwrap(),
+        serde_json::to_value(&snapshot.projects).unwrap()
     );
 
-    let mut legacy: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    legacy["wave"].as_object_mut().unwrap().remove("paused");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(legacy).unwrap_err();
-    assert!(error.to_string().contains("paused"));
-
-    let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_enabled["wave"]
-        .as_object_mut()
-        .unwrap()
-        .remove("enabled");
-    let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
-    assert!(error.to_string().contains("enabled"));
+    let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    missing_home["wave"].as_object_mut().unwrap().remove("home");
+    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_home).is_err());
 }
 
 #[test]
-fn status_preserves_stranded_tasks_without_a_project_layer() {
+fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(snapshot.unavailable_tasks[0].status, WorkStatus::Ready);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
@@ -141,7 +132,7 @@ fn status_preserves_stranded_tasks_without_a_project_layer() {
     };
     assert_eq!(items[0].runtime.as_ref().unwrap().reason, "ready");
     let encoded = serde_json::from_str::<serde_json::Value>(WAVE_DETAIL).unwrap();
-    assert!(encoded.get("projects").is_none());
+    assert_eq!(encoded["projects"]["items"][0]["status"], "started");
 }
 
 #[test]
@@ -150,7 +141,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     assert!(matches!(
         detail.metric_portfolio.metrics.as_slice(),
         [metric] if metric.identity.metric_id == "task-loop-trust"
-            && matches!(metric.evidence, loopflow::controller::wave::metrics::MetricEvidenceDto::Met { .. })
+            && matches!(metric.evidence, loopflow::work::wave::metrics::MetricEvidenceDto::Met { .. })
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
@@ -159,8 +150,8 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     };
     assert!(!items.is_empty());
     assert_eq!(
-        roadmap.waves[0].chapter.as_ref().unwrap().flows.recommended,
-        Some("feature".to_string())
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["flow"],
+        "feature"
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,
@@ -210,7 +201,16 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
 #[test]
 fn metric_portfolio_fixture_locks_every_tagged_payload() {
     let portfolio: MetricPortfolioDto = serde_json::from_str(METRIC_PORTFOLIO).unwrap();
-    assert_eq!(portfolio.metrics.len(), 10);
+    assert_eq!(portfolio.metrics.len(), 11);
+    assert!(matches!(
+        &portfolio.metrics[10].evidence,
+        loopflow::work::wave::metrics::MetricEvidenceDto::Unknown {
+            cause: loopflow::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                ..
+            }
+        }
+    ));
     assert_eq!(portfolio.contract_issues.len(), 5);
     assert_eq!(
         portfolio.metrics[0].description,
@@ -237,6 +237,7 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
             "unknown",
             "unavailable",
             "untargeted",
+            "unknown",
         ]
     );
 
@@ -254,29 +255,65 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn chapter_history_keeps_dated_task_evidence() {
-    let snapshot: loopflow::work::chapter::ChapterSnapshot = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/chapter_snapshot.json"
+fn session_history_retains_receipts_and_unknown_driver() {
+    let input = include_str!("../../../tests/fixtures/dto/session_history.json");
+    let events: Vec<loopflow::session::SessionEvent> = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        events[1].kind,
+        loopflow::session::SessionEventKind::Completed
+    );
+    assert!(events[1].exec_id.is_none());
+    assert_eq!(events[0].payload["total"]["inputTokens"], 40);
+    assert_eq!(
+        events[2].kind,
+        loopflow::session::SessionEventKind::Observed
+    );
+    assert!(events[2].provider_turn.is_none());
+    assert!(events[2].provider_thread.is_none());
+    assert_eq!(
+        serde_json::to_value(events).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}
+
+#[test]
+fn exec_page_retains_outcomes_unknowns_and_continuation() {
+    let json = include_str!("../../../tests/fixtures/dto/exec_page.json");
+    let page: loopflow::exec::ExecPage = serde_json::from_str(json).unwrap();
+    assert_eq!(page.entries[0].exit_code, Some(42));
+    assert_eq!(page.entries[0].via_agent, None);
+    assert_eq!(
+        page.entries[1].parent_exec_id.as_ref(),
+        Some(&page.entries[0].id)
+    );
+    assert_eq!(page.entries[1].outcome, None);
+    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    assert!(serde_json::from_str::<loopflow::exec::ExecPage>("{}").is_err());
+}
+
+#[test]
+fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
+    let value: loopflow::lf::commands::runs::SessionHistory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_history_summary.json"
     ))
     .unwrap();
-    assert_eq!(snapshot.closed_at, Some(snapshot.observed_at));
-    assert_eq!(snapshot.metrics_evaluated_at, 100);
-    assert_eq!(snapshot.content.metric_targets.len(), 1);
+    assert_eq!(value.providers.len(), 2);
+    assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
+    assert!(value.providers[0].exec_id.is_none());
+    assert_eq!(value.providers[0].usage.input_tokens, None);
+    assert_eq!(value.providers[1].usage.input_tokens, Some(0));
+    assert_eq!(value.status(), "failed → completed");
+    let encoded = serde_json::to_value(&value).unwrap();
+    assert!(encoded.get("subjects").is_none());
+    assert!(encoded.get("outcome").is_none());
     assert_eq!(
-        snapshot.content.metric_targets[0].target,
-        snapshot.metrics.metrics[0].target.clone().unwrap()
+        serde_json::from_value::<loopflow::lf::commands::runs::SessionHistory>(encoded).unwrap(),
+        value
     );
-    assert!(!snapshot.tasks[0].task.completed);
-    assert_eq!(
-        snapshot.tasks[0].disposition,
-        loopflow::work::chapter::TaskDisposition::Move
-    );
-    let history: Vec<loopflow::work::chapter::ChapterHistoryEntry> = serde_json::from_str(
-        include_str!("../../../tests/fixtures/dto/chapter_history.json"),
-    )
-    .unwrap();
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0].source_project_id, snapshot.source_project_id);
 }
 
 #[test]

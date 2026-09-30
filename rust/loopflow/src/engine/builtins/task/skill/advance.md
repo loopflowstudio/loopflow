@@ -26,7 +26,7 @@ does not become a Task by being closed.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`, then use `lf task advance <issue>`.
+Read `lf task status <issue> --json`, then use `lf task run <issue>`.
 It continues the saved Flow or reports the current driver. An interactive review
 waits for its Session's completion. A blocker needs its stated recovery,
 and completed work is not restarted. If there is no active Flow, select one using
@@ -37,18 +37,18 @@ alone is not a request to run it again.
 ## An approved design has no Task
 
 Use the owning repository, not whichever repository hosted the conversation.
-Inspect `lf ls --json` and the relevant Wave status to place the work. Reuse an
+Inspect `lf wave list --json` and the relevant Wave status to place the work. Reuse an
 existing matching Task when there is one. Otherwise create and prepare a Task
-through `lf pm task create` and `lf task prepare`, carrying the complete approved
+through `lf task create` and `lf task checkout`, carrying the complete approved
 scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
-directly to the `pursue` Flow (implement → compress → review-slice → concept-review
-→ loop-decide, repeated on Iterate, then human demo and another loop-decide).
+directly to the `pursue` Flow (implement → compress → refresh
+→ loop-decide, repeated on Iterate, then pr-publish, human demo, and another loop-decide).
 Both decisions have explicit edges to implementation. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, use the complete feature Flow. Preserve any explicit User choice
-to perform implement → compress → review-slice → concept-review directly in this conversation.
+to perform implement → compress → refresh directly in this conversation.
 Ask only when intent or placement cannot be resolved from available evidence.
 
 ## Verify the handoff

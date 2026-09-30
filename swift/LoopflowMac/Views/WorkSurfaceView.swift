@@ -42,7 +42,7 @@ struct WorkSurfaceView: View {
         }
         .background(palette.background)
         .sheet(item: $model.historyWave) { wave in
-            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
         .sheet(item: $editingTask) { selection in
             TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
@@ -117,9 +117,6 @@ struct WorkSurfaceView: View {
                             .font(Typography.display)
                             .foregroundStyle(palette.text)
                             .accessibilityIdentifier("wave-title")
-                        if roadmap.wave.paused {
-                            pausedChip(roadmap.wave.id)
-                        }
                         Spacer()
                     }
                     if !roadmap.wave.goal.isEmpty {
@@ -132,7 +129,7 @@ struct WorkSurfaceView: View {
 
                 section {
                     WorkspaceSectionHeading(title: "Current KRs") {
-                        Button("Chapter history") {
+                        Button("Project history") {
                             model.historyReference = nil
                             model.historyWave = roadmap.wave
                         }
@@ -141,14 +138,14 @@ struct WorkSurfaceView: View {
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("wave-chapter-history")
                     }
-                    if let chapter = roadmap.chapter {
+                    if let chapter = roadmap.currentProject {
                         WaveChapterView(chapter: chapter)
                     } else {
                         Text("No current chapter plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                     }
                 }
 
-                if let name = roadmap.chapter?.flows.recommended {
+                if let name = roadmap.currentProject?.flow {
                     section {
                         WorkspaceSectionHeading("Flow · \(name)")
                         if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),
@@ -214,7 +211,8 @@ struct WorkSurfaceView: View {
             let task = found.task
             let sessions = model.sessions.value.map { records in
                 records.filter { record in
-                    task.runtime.map { record.work == .task(id: $0.workId) } ?? false
+                    guard model.navigation.showsHeadlessSessions || record.interactive else { return false }
+                    return task.runtime.map { record.work == .task(id: $0.workId) } ?? false
                 }
             }
             scrollingDetail(identifier: "podium-detail-task") {
@@ -379,6 +377,7 @@ struct WorkSurfaceView: View {
 
     private func sessionTone(_ state: SessionState) -> WorkspaceTone {
         switch state {
+        case .unknown: .neutral
         case .active: .running
         case .waiting, .ready: .human
         case .closed: .stopped
@@ -427,16 +426,11 @@ struct WorkSurfaceView: View {
     }
 
     /// The plan row's state, read from the shared Task projection. Only running,
-    /// done, human and blocked earn a chip; stopped and unstarted rows keep the dot.
+    /// done, human, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
     private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
         if task.task.completed { return ("Completed", .done) }
         if case .pinned(let pinned) = task.flow.record {
-            switch pinned.execution {
-            case .running, .starting: return ("Running", .running)
-            case .human: return ("Your review", .human)
-            case .blocked: return ("Blocked", .blocked)
-            case .idle, .unknown: return (nil, .stopped)
-            }
+            return pinned.execution.presentation
         }
         return (nil, .neutral)
     }
@@ -503,10 +497,6 @@ struct WorkSurfaceView: View {
         }
     }
 
-    private func pausedChip(_ waveId: String) -> some View {
-        WorkspaceChip(text: "paused", tone: .neutral)
-            .accessibilityIdentifier("wave-paused-\(waveId)")
-    }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {

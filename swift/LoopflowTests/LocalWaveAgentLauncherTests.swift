@@ -29,15 +29,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
-    @Test("stop command uses the single-wave lifecycle verb")
-    func stopCommandShape() {
-        #expect(LocalWaveAgentLauncher.waveStopCommand(
-            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
-            waveName: "product"
-        ) == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "stop", "product",
-        ])
-    }
 
     @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {
@@ -46,18 +37,18 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "run", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskStartCommand(
+        #expect(LocalWaveAgentLauncher.taskCreateCommand(
             lfPath: lf,
             title: "Refine LOOPFLOW.md 5e41e69b",
             wave: "context-lab",
             directive: "Refine text for LOOPFLOW.md."
         ) == [
-            lf, "task", "start", "--wave", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
-            "--directive", "Refine text for LOOPFLOW.md.",
+            lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
+            "--notes", "Refine text for LOOPFLOW.md.",
             "--json",
         ])
-        #expect(LocalWaveAgentLauncher.taskResumeCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "resume", "W2-131",
+        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
+            lf, "task", "run", "W2-131",
         ])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
@@ -77,8 +68,8 @@ struct LocalWaveAgentLauncherTests {
     }
 
     @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskStartReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskStartReceipt("""
+    func taskCreateReceiptDecodes() throws {
+        let receipt = try LocalWaveAgentLauncher.taskCreateReceipt("""
         {
           "issue_identifier": "W2-201",
           "project": "auditability",
@@ -86,7 +77,7 @@ struct LocalWaveAgentLauncherTests {
         }
         """)
 
-        #expect(receipt == TaskStartReceipt(
+        #expect(receipt == TaskCreateReceipt(
             issueIdentifier: "W2-201",
             project: "auditability",
             wave: "product"
@@ -94,14 +85,14 @@ struct LocalWaveAgentLauncherTests {
     }
 
     @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
-    func taskPrepareUsesReceiptWorktree() throws {
-        #expect(LocalWaveAgentLauncher.taskPrepareCommand(lfPath: "/bin/lf", issue: "LOO-291")
-            == ["/bin/lf", "task", "prepare", "LOO-291", "--json"])
-        let worktree = try LocalWaveAgentLauncher.taskPrepareWorktree("""
+    func taskCheckoutUsesReceiptWorktree() throws {
+        #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
+            == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])
+        let worktree = try LocalWaveAgentLauncher.taskCheckoutWorktree("""
         {"id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
         """)
         #expect(worktree == "/src/loopflow.main-view-task")
-        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskPrepareWorktree("not json") }
+        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorktree("not json") }
     }
 
     // MARK: - Bundled binary boundary
@@ -156,17 +147,6 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Not-running copy
 
-    @Test("start hint keeps the launch command intact as inline code")
-    func startHintFormatsCommandAsCode() {
-        let hint = waveStartHint(waveName: "goals")
-
-        #expect(
-            String(hint.characters)
-                == "Start it here, or run lf start goals in a terminal — its conversation appears here live."
-        )
-
-        let codeRuns = hint.runs.filter { $0.inlinePresentationIntent == .code }
-        #expect(codeRuns.map { String(hint.characters[$0.range]) } == ["lf start goals"])
-    }
 }
+
 #endif

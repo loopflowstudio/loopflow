@@ -1,4 +1,4 @@
-//! `lf runs` — read Home-local Run records.
+//! `lf runs` — read retained AgentSession input and provider history.
 
 use std::{
     io::Read,
@@ -7,12 +7,11 @@ use std::{
 
 use anyhow::{anyhow, Result};
 
-use crate::controller::wave::journal::short_id;
-use crate::lf::commands::work_catalog::WorkCatalog;
+use crate::lf::commands::util::short_id;
 use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
-pub use crate::run_record::active::{ActiveRun, ActiveRunsSnapshot, DiscoveryState};
-pub use crate::run_record::{AttributionSource, RunSnapshot, RunUsage, SubjectAttribution};
+pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
+pub use crate::session_record::{SessionHistory, SessionUsage};
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
@@ -25,15 +24,13 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
             crate::store::StorageConfig::sqlite(crate::store::observability_database_path()?);
         let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
         let task = match task {
-            Some(task) => Some(
-                crate::ops::resolve_work_binding(
-                    &store,
-                    &std::env::current_dir()?,
-                    &format!("task:{task}"),
-                )
-                .await?
-                .work,
-            ),
+            Some(task) => Some(crate::durable::WorkRef::Task(
+                store
+                    .get_task_by_issue(task)
+                    .await?
+                    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?
+                    .id,
+            )),
             None => None,
         };
         Ok::<_, anyhow::Error>((home, store, task))
@@ -42,83 +39,76 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         return super::runs_watch::run(&home, &store, task, &runtime);
     }
     runtime.block_on(async {
-        let snapshot = crate::run_record::active::snapshot(&home, &store, task).await;
+        let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
         if json {
             println!("{}", serde_json::to_string(&snapshot)?);
         } else {
-            for run in &snapshot.runs {
-                println!("{}  {}  {}", run.id, run.harness, run.label);
+            for session in &snapshot.sessions {
+                println!("{}  {}", session.id, session.title);
             }
             for gap in &snapshot.gaps {
                 println!("Unavailable: {gap}");
             }
-            if snapshot.runs.is_empty() && snapshot.gaps.is_empty() {
-                println!("No active Runs.");
+            if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
+                println!("No active Sessions.");
             }
         }
         Ok(())
     })
 }
 
-/// The Runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
-/// can never disagree on what a run is.
-pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<RunSnapshot>, bool)> {
+/// Shared Session history, newest input first. SQL selects the recent budget
+/// before decoding; exact Task and caller-input drills remain complete.
+pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let mut runs = collect_runs_started_since(filter, since)?;
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
-}
-
-fn collect_child_runs_at(lf_home: &Path, parent: &str) -> Result<Vec<RunSnapshot>> {
-    let (_, manifest) = crate::run_record::resolve_manifest(lf_home, parent)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let parent_id = manifest.run_id.to_string();
-    crate::run_record::scan_runs_since(lf_home, 0)
-        .map_err(|error| anyhow!("Run records unavailable: {error}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| run.parent_run_id.as_deref() == Some(parent_id.as_str()))
-                .collect()
-        })
-}
-
-fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<RunSnapshot>> {
-    collect_runs_started_since_at(
-        &crate::store::observability_home_dir(),
-        filter,
+    let database = crate::store::observability_database_path()?;
+    if !database.exists() {
+        return Ok((Vec::new(), false));
+    }
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+    Ok(store.recent_conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
         since,
-        &WorkCatalog::load()?,
+        MAX_RUNS,
+    )?)
+}
+
+pub(crate) fn collect_runs_started_since(
+    filter: WorkFilter,
+    since: i64,
+) -> Result<Vec<SessionHistory>> {
+    let path = crate::store::observability_database_path()?;
+    collect_runs_at(
+        &crate::store::observability_home_dir(),
+        &path,
+        filter,
+        None,
+        since,
     )
 }
 
-pub(crate) fn collect_runs_started_since_at(
-    lf_home: &Path,
+/// Select conversations in SQL before reading their subordinate history.
+fn collect_runs_at(
+    _lf_home: &Path,
+    database: &Path,
     filter: WorkFilter,
+    parent: Option<&str>,
     since: i64,
-    catalog: &WorkCatalog,
-) -> Result<Vec<RunSnapshot>> {
-    crate::run_record::scan_runs_since(lf_home, since)
-        .map_err(|err| anyhow!("Run records unavailable: {err}"))
-        .map(|runs| {
-            runs.into_iter()
-                .filter(|run| catalog.matches_run(run, filter))
-                .collect()
-        })
-}
-
-/// The filtered Run definition without a presentation cap. Compound activity
-/// surfaces include both starts and finishes inside their requested window,
-/// then cap only after joining Runs to their other durable facts.
-pub(crate) fn collect_run_activity_since(
-    filter: WorkFilter,
-    since: i64,
-    catalog: &WorkCatalog,
-) -> Result<Vec<RunSnapshot>> {
-    let mut runs =
-        collect_runs_started_since_at(&crate::store::observability_home_dir(), filter, 0, catalog)?;
-    runs.retain(|run| run.started >= since || run.ended.is_some_and(|end| end >= since));
-    Ok(runs)
+) -> Result<Vec<SessionHistory>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(database)?;
+    Ok(store.conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        parent,
+        since,
+        false,
+    )?)
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent harness
@@ -130,16 +120,22 @@ pub fn list(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
-    let runs = match parent {
-        Some(parent) => collect_child_runs_at(&crate::store::observability_home_dir(), parent)?,
-        None => {
-            let (runs, _truncated) = collect_runs(WorkFilter {
-                wave,
-                project,
-                task,
-            })?;
-            runs
+    let home = crate::store::observability_home_dir();
+    let filter = WorkFilter {
+        wave,
+        project,
+        task,
+    };
+    // A Task's history and a capture's callers list whole; other drills are recent.
+    let runs = match (parent, task) {
+        (Some(parent), _) => {
+            let database = crate::store::observability_database_path()?;
+            let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+            let parent = store.resolve_history_input(parent)?;
+            collect_runs_at(&home, &database, filter, Some(&parent), 0)?
         }
+        (None, Some(_)) => collect_runs_started_since(filter, 0)?,
+        (None, None) => collect_runs(filter)?.0,
     };
 
     if json {
@@ -149,18 +145,20 @@ pub fn list(
 
     if runs.is_empty() {
         match (parent, wave, project, task) {
-            (Some(parent), _, _, _) => println!("No child Runs recorded for {parent}."),
+            (Some(parent), _, _, _) => println!("No caller-input history recorded for {parent}."),
             (None, _, _, Some(task)) => {
-                println!("No Runs recorded for {task} in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded for {task}.")
             }
             (None, _, Some(project), None) => {
-                println!("No Runs recorded for project/{project} in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded for project/{project} in the last {WINDOW_DAYS} days.")
             }
             (None, Some(wave), None, None) => {
-                println!("No Runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
+                println!(
+                    "No Session history recorded for wave/{wave} in the last {WINDOW_DAYS} days."
+                )
             }
             (None, None, None, None) => {
-                println!("No Runs recorded in the last {WINDOW_DAYS} days.")
+                println!("No Session history recorded in the last {WINDOW_DAYS} days.")
             }
         }
         return Ok(());
@@ -168,13 +166,13 @@ pub fn list(
 
     let colors = Colors::default();
     println!(
-        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  RUN{reset}",
+        "{bold}{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  INPUT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
         repo = "REPO",
         wave = "WAVE",
-        label = "RUN",
+        label = "HISTORY",
         tokens = "TOKENS",
         cost = "COST",
         agent = "AGENT",
@@ -183,9 +181,9 @@ pub fn list(
     for run in &runs {
         println!(
             "{time:<12}  {repo:<14}  {wave:<10}  {label:<22}  {tokens:>10}  {cost:>8}  {agent:<18}  {status:<12}  {id}",
-            time = format_time(run.started),
+            time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), 14),
-            wave = truncate(run.subject("wave").unwrap_or("-"), 10),
+            wave = truncate(run.wave_name.as_deref().unwrap_or("-"), 10),
             label = truncate(run.label(), 22),
             tokens = run
                 .total_tokens()
@@ -198,33 +196,16 @@ pub fn list(
                 .unwrap_or_else(|| "-".to_string()),
             agent = truncate(&format_agent(Some(&run.harness), run.model.as_deref()), 18),
             status = run.status(),
-            id = short_id(&run.id),
+            id = short_id(run.selector()),
         );
     }
     Ok(())
 }
 
-pub fn resume_run(selector: &str) -> Result<()> {
-    let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
-    let provider_session = crate::run_record::read_provider_session(&dir)
-        .map_err(|error| anyhow!("Run events unavailable: {error}"))?
-        .ok_or_else(|| anyhow!("Run {} has no provider session to resume", manifest.run_id))?;
-    crate::lf::commands::util::resume_session(
-        &manifest.harness,
-        manifest.model.as_deref(),
-        &manifest.cwd,
-        &manifest.run_id,
-        &dir,
-        &provider_session,
-    )
-}
-
 pub fn observe_provider_session() -> Result<()> {
-    let run_dir = std::env::var_os(crate::run_record::RUN_DIR_ENV)
+    let run_dir = std::env::var_os(crate::session_record::RUN_DIR_ENV)
         .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("provider session callback has no active Run"))?;
+        .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
     let mut payload = String::new();
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
@@ -234,50 +215,56 @@ pub fn observe_provider_session() -> Result<()> {
         .and_then(serde_json::Value::as_str)
         .filter(|session_id| !session_id.is_empty())
         .ok_or_else(|| anyhow!("provider session callback has no session_id"))?;
-    let account_id = std::env::var(crate::run_record::PROVIDER_ACCOUNT_ID_ENV)
+    let account_id = std::env::var(crate::session_record::PROVIDER_ACCOUNT_ID_ENV)
         .ok()
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::run_record::write_provider_session(&run_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&run_dir, provider_session_id, account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
 pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
     let home = crate::store::observability_home_dir();
-    let (dir, manifest) = crate::run_record::resolve_manifest(&home, selector)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
+    let database = crate::store::observability_database_path()?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+    let snapshot = store
+        .input_history(selector)
+        .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
+    let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
+    let dir = crate::session_record::record_dir(&home, &input)
+        .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
     if events {
-        match std::fs::read_to_string(dir.join("events.jsonl")) {
-            Ok(contents) => print!("{contents}"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(anyhow!("Run events unavailable: {error}")),
+        for event in store.input_events(&input)? {
+            match event.get("unparsed").and_then(serde_json::Value::as_str) {
+                Some(bytes) => println!("{bytes}"),
+                None => println!("{}", serde_json::to_string(&event)?),
+            }
         }
         return Ok(());
     }
-    let snapshot = crate::run_record::read_run_snapshot(&dir)
-        .map_err(|error| anyhow!("Run record unavailable: {error}"))?;
     if final_answer {
-        let answer = crate::run_record::read_final_answer(&dir)
-            .map_err(|error| anyhow!("Run final answer unavailable: {error}"))?;
+        let answer = store
+            .input_final_answer(&input)
+            .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
         return match answer {
             Some(answer) => {
                 if !answer.exact {
                     eprintln!(
-                        "warning: this Run has no final-answer receipt; showing all streamed prose from its last completed provider turn"
+                        "warning: this capture has no final-answer receipt; showing all streamed prose from its last completed provider turn"
                     );
                 }
                 println!("{}", answer.text);
                 Ok(())
             }
-            None if snapshot.outcome.is_none() => Err(anyhow!(
-                "Run {} is not settled and has no final answer",
-                snapshot.id
+            None if snapshot.recorded_outcome.is_none() => Err(anyhow!(
+                "Capture {} is not settled and has no final answer",
+                snapshot.selector()
             )),
             None => Err(anyhow!(
-                "Run {} settled as {} without a final answer",
-                snapshot.id,
-                snapshot.outcome.as_deref().unwrap_or("unknown")
+                "Capture {} settled as {} without a final answer",
+                snapshot.selector(),
+                snapshot.status()
             )),
         };
     }
@@ -285,8 +272,12 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         println!("{}", serde_json::to_string(&snapshot)?);
         return Ok(());
     }
-    println!("Run {}", snapshot.id);
-    if let Some(parent) = &snapshot.parent_run_id {
+    println!(
+        "Session {} · input {}",
+        snapshot.session_id,
+        snapshot.selector()
+    );
+    if let Some(parent) = &snapshot.caller_artifact_key {
         println!("Parent: {parent}");
     }
     println!("Status: {}", snapshot.status());
@@ -294,36 +285,23 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         "Agent: {}",
         format_agent(Some(&snapshot.harness), snapshot.model.as_deref())
     );
-    println!("Working directory: {}", manifest.cwd.display());
+    println!(
+        "Working directory: {}",
+        snapshot.worktree.as_deref().unwrap_or("unknown")
+    );
+    let manifest = crate::session_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",
-        match manifest.launch.as_ref() {
+        match manifest
+            .as_ref()
+            .and_then(|manifest| manifest.exec.as_ref())
+        {
             Some(launch) if launch.replay_unavailable_reason().is_none() => "available",
             Some(_) | None => "unavailable",
         }
     );
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     Ok(())
-}
-
-fn cap_runs(runs: &mut Vec<RunSnapshot>) -> bool {
-    let truncated = runs.len() > MAX_RUNS;
-    if !truncated {
-        return false;
-    }
-    let unterminated = runs.iter().filter(|run| run.is_unterminated()).count();
-    let mut budget = MAX_RUNS.saturating_sub(unterminated);
-    runs.retain(|run| {
-        if run.is_unterminated() {
-            return true;
-        }
-        if budget == 0 {
-            return false;
-        }
-        budget -= 1;
-        true
-    });
-    true
 }
 
 fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
@@ -367,113 +345,7 @@ pub(crate) fn format_tokens(value: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_child_runs_at, collect_runs_started_since_at, format_tokens};
-    use crate::lf::commands::WorkFilter;
-    use crate::run_record::{
-        CaptureHandle, RunLaunchRequest, RunManifest, RunSpec, SubjectAttribution,
-    };
-
-    #[test]
-    fn work_drill_reads_record_subjects_without_a_sql_ledger() {
-        let home = tempfile::tempdir().unwrap();
-        for task in ["LOO-265", "LOO-999"] {
-            let capture = CaptureHandle::begin_at(
-                home.path(),
-                RunSpec {
-                    harness: "codex".to_string(),
-                    model: None,
-                    surface: "headless".to_string(),
-                    cwd: home.path().to_path_buf(),
-                    repo: Some(home.path().to_path_buf()),
-                    worktree: Some(home.path().to_path_buf()),
-                    skill: Some("implement".to_string()),
-                    subjects: vec![SubjectAttribution::declared(format!("task:{task}"))],
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-            )
-            .unwrap();
-            capture.finish("completed").unwrap();
-        }
-
-        let runs = collect_runs_started_since_at(
-            home.path(),
-            WorkFilter {
-                wave: None,
-                project: None,
-                task: Some("LOO-265"),
-            },
-            0,
-            &super::WorkCatalog::default(),
-        )
-        .unwrap();
-
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].subject("task"), Some("LOO-265"));
-    }
-
-    #[test]
-    fn child_drill_reads_the_exact_parent_without_time_or_count_caps() {
-        let home = tempfile::tempdir().unwrap();
-        let parent = CaptureHandle::begin_at(
-            home.path(),
-            RunSpec {
-                harness: "codex".to_string(),
-                model: None,
-                surface: "headless".to_string(),
-                cwd: home.path().to_path_buf(),
-                repo: Some(home.path().to_path_buf()),
-                worktree: Some(home.path().to_path_buf()),
-                skill: Some("review-chapter".to_string()),
-                subjects: Vec::new(),
-                flow: crate::run_record::RunFlowMembership::Independent,
-            },
-        )
-        .unwrap();
-        let parent_id = parent.run_id();
-        let mut expected = Vec::new();
-        for _ in 0..=super::MAX_RUNS {
-            let child = CaptureHandle::begin_replay_at(
-                home.path(),
-                RunSpec {
-                    harness: "codex".to_string(),
-                    model: None,
-                    surface: "headless".to_string(),
-                    cwd: home.path().to_path_buf(),
-                    repo: Some(home.path().to_path_buf()),
-                    worktree: Some(home.path().to_path_buf()),
-                    skill: Some("project/review-chapter".to_string()),
-                    subjects: Vec::new(),
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-                RunLaunchRequest {
-                    system_prompt: "system".to_string(),
-                    task_prompt: "task".to_string(),
-                    agent: "codex".to_string(),
-                    account_id: None,
-                    max_turns: None,
-                    write_scope: crate::engine::AgentWriteScope::Configured,
-                    execution_boundary: None,
-                    skip_permissions: false,
-                    chrome: false,
-                },
-                parent_id.clone(),
-            )
-            .unwrap();
-            let manifest_path = child.artifact_dir().join("manifest.json");
-            let mut manifest: RunManifest =
-                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
-            manifest.created_at -= time::Duration::days(super::WINDOW_DAYS + 1);
-            std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-            expected.push(child.run_id().to_string());
-        }
-
-        let children = collect_child_runs_at(home.path(), parent_id.as_str()).unwrap();
-
-        let mut actual: Vec<_> = children.into_iter().map(|child| child.id).collect();
-        actual.sort();
-        expected.sort();
-        assert_eq!(actual, expected);
-    }
+    use super::format_tokens;
 
     #[test]
     fn tokens_keep_the_compact_human_format() {

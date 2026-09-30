@@ -254,7 +254,7 @@ fn short_hash(value: &str, chars: usize) -> String {
     hash
 }
 
-/// Stable flat placement name for a Wave resident. Nested locators keep a
+/// Stable flat placement name for a Wave worktree. Nested locators keep a
 /// readable prefix and a hash of the complete slug so sanitization cannot
 /// collapse distinct Waves onto one checkout.
 pub fn wave_agent_segment(wave: &str) -> Result<WorktreeSegment, PlacementError> {
@@ -1404,7 +1404,12 @@ pub fn schedule_upstream_sync(worktree: PathBuf, branch: String) {
             if backoff_secs > 0 {
                 thread::sleep(Duration::from_secs(backoff_secs));
             }
-            if upstream_branch(&worktree).is_some() {
+            if crate::engine::git::origin_branch(&worktree)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(branch.as_str())
+            {
                 return;
             }
             if push_branch_with_upstream(&worktree, &branch).is_ok() {

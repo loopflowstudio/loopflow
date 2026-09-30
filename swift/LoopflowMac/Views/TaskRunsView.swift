@@ -2,32 +2,31 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-/// Recent Runs for one Task, disclosed on demand. The list comes from the
-/// shared `lf runs --task` reader for the Task's exact identifier; nothing is
-/// read until the human expands it. A Run's recorded outcome is shown as-is:
-/// history never claims a Run is live.
+/// Complete Task-attributed Session history, disclosed on demand. The list comes from the
+/// shared `lf runs --task` reader; loading begins on expansion. Provider outcomes
+/// remain separate from recorded input completion and command exit.
 struct TaskRunsView: View {
     let model: PodiumModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
-    private var reading: PodiumReading<[RunSnapshot]> { model.recentRuns[task.id] }
-    private var runs: [RunSnapshot]? { reading.value }
+    private var reading: PodiumReading<[SessionHistory]> { model.recentRuns[task.id] }
+    private var runs: [SessionHistory]? { reading.value }
     private var expanded: Bool { model.navigation.expandedRuns.contains(task.id) }
     private var inFlight: Bool { model.recentRuns.inFlight.contains(task.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkspaceDisclosureHeading(
-                title: "Recent runs",
+                title: "Session history",
                 count: expanded ? runs?.count : nil,
                 expanded: expanded,
                 inFlight: inFlight,
                 failure: expanded && reading.errorMessage != nil ? runs != nil : nil,
                 identifier: "task-runs",
                 accessibilityLabel: "Recent runs, \(expanded ? "expanded" : "collapsed")",
-                help: "Newest 50 Runs recorded for \(task.task.identifier) in the last 7 days",
+                help: "Complete recorded Session history for \(task.task.identifier)",
                 toggle: {
                     let navigation = model.navigation
                     if navigation.expandedRuns.remove(task.id) == nil {
@@ -46,14 +45,14 @@ struct TaskRunsView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        Text(reading.errorMessage.map { "Runs could not be read: \($0)" } ?? "Reading runs…")
+        Text(reading.errorMessage.map { "History could not be read: \($0)" } ?? "Reading history…")
             .font(Typography.body(12))
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
             .accessibilityIdentifier("task-runs-status")
     }
 
-    private func list(_ runs: [RunSnapshot]) -> some View {
+    private func list(_ runs: [SessionHistory]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let reason = reading.errorMessage {
                 Text("Latest read failed: \(reason)")
@@ -64,15 +63,10 @@ struct TaskRunsView: View {
                     .accessibilityIdentifier("task-runs-status")
             }
             if runs.isEmpty {
-                Text("No Runs recorded for this Task in the last 7 days.")
+                Text("No Session history recorded for this Task.")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-runs-empty")
-            }
-            if runs.count == 50 {
-                Text("Showing the newest 50 Runs from the last 7 days.")
-                    .font(Typography.meta)
-                    .foregroundStyle(palette.textTertiary)
             }
             ForEach(runs) { run in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -83,10 +77,10 @@ struct TaskRunsView: View {
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textSecondary)
                     Spacer(minLength: Spacing.sm)
-                    Text(Self.started(run.started))
+                    Text(Self.started(run.observedAt))
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textTertiary)
-                    Text(run.outcome ?? "No outcome recorded")
+                    Text(run.status)
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textSecondary)
                         .frame(minWidth: 72, alignment: .trailing)
@@ -104,7 +98,7 @@ struct TaskRunsView: View {
         .accessibilityIdentifier("task-runs-list")
     }
 
-    static func agent(_ run: RunSnapshot) -> String {
+    static func agent(_ run: SessionHistory) -> String {
         run.model.map { "\(run.harness):\($0)" } ?? run.harness
     }
 

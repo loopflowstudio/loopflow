@@ -110,9 +110,9 @@ func renameFixtureRecord(
 ) throws -> SessionRecord {
     let workJSON = String(decoding: try JSONEncoder().encode(work), as: UTF8.self)
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-    {"id":"\(id)","run_id":"run_\(id)","kind":"interactive","work":\(workJSON),"title":"\(title)",
+    {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"closed","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(kind: "interactive", state: "closed")),
+     "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "closed")),
      "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
      "terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
     """.utf8))
@@ -167,7 +167,7 @@ private actor RenameSource {
         }
         switch verb {
         case "list":
-            return String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+            return #"{"entries":\#(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)),"next":null}"#
         case "rename":
             renames.append(args)
             if let rejection { throw RegistryQueryError(rejection) }

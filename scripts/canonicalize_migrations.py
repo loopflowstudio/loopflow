@@ -47,7 +47,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 PACKAGE_MANIFEST = REPO_ROOT / "Cargo.toml"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
 # `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
@@ -117,7 +117,7 @@ def _read_drafts() -> list[Draft]:
             _draft_fail(
                 "invalid_filename",
                 f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
-                "— run scripts/new_migration.py"
+                "— run scripts/new_migration.py",
             )
         name, file_id = match.group(1), match.group(2)
         text = path.read_text()
@@ -142,7 +142,7 @@ def _read_drafts() -> list[Draft]:
             _draft_fail(
                 "invalid_id",
                 f"draft {path.name} id {header_id!r} is not a 128-bit token "
-                "(32 hex chars) — run scripts/new_migration.py"
+                "(32 hex chars) — run scripts/new_migration.py",
             )
         if header_id != file_id:
             _draft_fail(
@@ -172,7 +172,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
             _draft_fail(
                 "duplicate_name",
                 f"two drafts share the readable name {draft.name!r} in this cut "
-                "— rename one before releasing"
+                "— rename one before releasing",
             )
         by_name[draft.name] = draft
 
@@ -191,7 +191,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
             _draft_fail(
                 "missing_dependency",
                 f"draft {draft.name} depends on {dependency!r}, which is neither a "
-                "draft in this cut nor an already-released migration"
+                "draft in this cut nor an already-released migration",
             )
 
     indegree = {
@@ -216,9 +216,7 @@ def _order(drafts: list[Draft]) -> list[Draft]:
 
     if len(order) != len(drafts):
         stuck = sorted(set(by_name) - set(order))
-        _draft_fail(
-            "cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}"
-        )
+        _draft_fail("cycle", f"draft dependencies form a cycle among: {', '.join(stuck)}")
     return [by_name[name] for name in order]
 
 
@@ -249,7 +247,7 @@ def _batch_sql(drafts: list[Draft]) -> str:
 
 
 def _new_registry_text(entries: str) -> str:
-    """The full migrations.rs source with `entries` appended to the registry."""
+    """The full migration_catalog.rs source with `entries` appended to the registry."""
     source = MIGRATIONS_RS.read_text()
     start = source.find("const MIGRATIONS: &[Migration] = &[")
     if start == -1:

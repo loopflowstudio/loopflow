@@ -81,7 +81,6 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         executables=(
             swift / ".build" / "release" / "LoopflowMac",
             cargo_release / "lf",
-            cargo_release / "lfd",
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
@@ -260,7 +259,6 @@ def _stage_binaries(local_bin: Path) -> None:
     """Copy freshly built control binaries into this worktree's local-bin/."""
     local_bin.mkdir(parents=True, exist_ok=True)
     _atomic_install(ROOT / "target" / "release" / "lf", local_bin / "lf")
-    _atomic_install(ROOT / "target" / "release" / "lfd", local_bin / "lfd")
 
 
 # --- Loopflow bundle ---
@@ -467,7 +465,7 @@ def local(
             executable_names = ", ".join(path.name for path in spec.executables)
             typer.echo(f"  Contents/MacOS/: {executable_names}")
         else:
-            typer.echo(f"Would stage lf + lfd into {LOCAL_BIN}")
+            typer.echo(f"Would stage lf into {LOCAL_BIN}")
         typer.echo("Would keep the validation-only build under local-bin/")
         if use_install:
             typer.echo("Would promote it into a disposable installed development Home")
@@ -483,7 +481,7 @@ def local(
             _install_loopflow(spec, version)
             typer.echo(f"Built {spec.app_path}")
         else:
-            typer.echo(f"Built lf + lfd into {LOCAL_BIN}")
+            typer.echo(f"Built lf into {LOCAL_BIN}")
         if use_install:
             _promote_local_build(
                 spec,
@@ -511,10 +509,6 @@ def _promote_local_build(spec: BundleSpec, install_dir: Path, fresh: bool) -> No
         str(candidate),
         "--cli-target",
         str(install_dir / "lf"),
-        "--daemon-source",
-        str(LOCAL_BIN / "lfd"),
-        "--daemon-target",
-        str(install_dir / "lfd"),
         "--sync-skills",
     ]
     if fresh:

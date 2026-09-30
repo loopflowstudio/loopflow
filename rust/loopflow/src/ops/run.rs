@@ -13,10 +13,9 @@ use crate::work::wave::Wave;
 
 use super::{OpsError, OpsResult};
 
-pub(crate) const TASK_ACCOUNT_ID_ENV: &str = "LF_TASK_ACCOUNT_ID";
-
 #[derive(Debug, Clone)]
 pub struct WorkBinding {
+    pub source: crate::session::WorkSource,
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub wave_name: String,
@@ -170,12 +169,13 @@ pub async fn resolve_work_selection(
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
         let pr = store
-            .active_task_pr(&task.id)
+            .task_prs(&task.id)
             .await
             .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Task {} has no active PR", task.id)))?;
+            .pop()
+            .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
         let context = render_task_context(&task, &project.plan, &pr, wave.name(), &steers);
-        let cwd = if crate::engine::git::origin_branch(repo)
+        let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
             .as_deref()
@@ -186,6 +186,7 @@ pub async fn resolve_work_selection(
             task.worktree.clone()
         };
         return Ok(WorkBinding {
+            source: crate::session::WorkSource::Declared,
             subjects: vec![
                 format!("wave:{}", wave.name()),
                 format!("project:{}", project.plan.slug),
@@ -196,11 +197,7 @@ pub async fn resolve_work_selection(
             wave_name: wave.name().to_string(),
             cwd,
             context,
-            agent: Some(
-                crate::engine::config::load_config_or_default(Some(&task.worktree))
-                    .agent()
-                    .to_string(),
-            ),
+            agent: task.agent,
         });
     }
 
@@ -217,6 +214,7 @@ pub async fn resolve_work_selection(
         let cwd = PathBuf::from(wave.repo());
         let context = render_wave_context(&cwd, &cwd, wave.name(), &metric_context);
         return Ok(WorkBinding {
+            source: crate::session::WorkSource::Declared,
             subjects: vec![format!("wave:{}", wave.name())],
             work: WorkRef::Wave(wave.id().clone()),
             wave_id: wave.id().clone(),
@@ -230,12 +228,29 @@ pub async fn resolve_work_selection(
     Err(run_error("select a Task or Wave"))
 }
 
-/// The Task whose current PR branch this checkout tracks, bound exactly as
-/// `--task` binds it. Jack decided on 2026-09-26 that an `lf` launch inside a
-/// Task worktree belongs to that Task; a branch no Task owns stays unbound, and
-/// so does a branch whose PR already landed with no PR after it (the checkout
-/// no longer tracks that Task's work). The binding's cwd is the checkout that
-/// proved it, never the registered path.
+/// Resolve checkout ownership before an ancestor's explicit declaration.
+/// This command's --as is resolved by the CLI before reaching this fallback.
+pub async fn resolve_execution_binding(
+    store: &SharedStore,
+    cwd: &Path,
+) -> OpsResult<Option<WorkBinding>> {
+    if crate::repo::discover_repo_root(cwd)
+        .map_err(run_error)?
+        .is_some()
+    {
+        if let Some(binding) = resolve_checkout_binding(store, cwd).await? {
+            return Ok(Some(binding));
+        }
+    }
+    if let Ok(selector) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
+        let mut binding = resolve_work_binding(store, cwd, &selector).await?;
+        binding.cwd = cwd.to_path_buf();
+        return Ok(Some(binding));
+    }
+    Ok(None)
+}
+
+/// Resolve checkout attribution independently of Task or PR execution eligibility.
 pub async fn resolve_checkout_binding(
     store: &SharedStore,
     repo: &Path,
@@ -243,14 +258,6 @@ pub async fn resolve_checkout_binding(
     let Some(task) = crate::ops::task::task_for_checkout(store, repo).await? else {
         return Ok(None);
     };
-    if store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(run_error)?
-        .is_none()
-    {
-        return Ok(None);
-    }
     let id = task.id.to_string();
     let mut binding = resolve_work_selection(
         store,
@@ -261,6 +268,7 @@ pub async fn resolve_checkout_binding(
         },
     )
     .await?;
+    binding.source = crate::session::WorkSource::Checkout;
     binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     Ok(Some(binding))
 }
@@ -291,7 +299,7 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
 }
 
 #[derive(Debug)]
-pub(crate) struct TaskWorkerLaunch {
+pub(crate) struct TaskWorkerExec {
     pub task_id: TaskId,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
@@ -299,15 +307,8 @@ pub(crate) struct TaskWorkerLaunch {
     pub environment: Vec<(String, String)>,
 }
 
-pub(crate) async fn launch_task_worker(request: TaskWorkerLaunch) -> OpsResult<()> {
-    let environment = request.environment.clone();
-    start_work_session(&request, environment).await
-}
-
-async fn start_work_session(
-    request: &TaskWorkerLaunch,
-    mut environment: Vec<(String, String)>,
-) -> OpsResult<()> {
+pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
+    let mut environment = request.environment;
     let execution = current_home_execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)
@@ -320,6 +321,10 @@ async fn start_work_session(
         request.task_id.to_string(),
     ];
     environment.extend([
+        (
+            crate::lf::WORK_DECLARATION_ENV.to_string(),
+            format!("task:{}", request.task_id),
+        ),
         (
             crate::work::wave::context::WAVE_ID_ENV.to_string(),
             request.wave_id.as_str().to_string(),
@@ -342,6 +347,15 @@ async fn start_work_session(
             switch_id.to_string_lossy().into_owned(),
         ));
     }
+    environment.push((
+        crate::engine::config::USER_NAME_ENV.to_string(),
+        crate::engine::config::participant_name()
+            .map_err(run_error)?
+            .unwrap_or_default(),
+    ));
+    if let Ok(options) = std::env::var(crate::lf::TASK_SKILL_OPTIONS_ENV) {
+        environment.push((crate::lf::TASK_SKILL_OPTIONS_ENV.to_string(), options));
+    }
     let environment = environment
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -361,7 +375,7 @@ mod tests {
     use crate::durable::{ProjectId, TaskId, WorkRef};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::pm::{PmKr, PmProject, PmSnapshot, ProjectFlowPlan};
+    use crate::pm::{PmKr, PmProject, PmSnapshot};
     use crate::store::SharedStore;
     use crate::store::{PmSnapshotRow, StorageConfig};
     use crate::work::project::Project;
@@ -384,6 +398,8 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new(planning_id).unwrap(),
                 slug: slug.to_string(),
                 name: slug.to_string(),
@@ -414,6 +430,7 @@ mod tests {
             project_id: project.id.clone(),
             worktree,
             workspace_slug: "runtime-research".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -511,7 +528,160 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_run_drill_includes_named_workers_and_opaque_helpers() {
+    #[allow(clippy::await_holding_lock)] // Isolates the native Session and Ask environment.
+    async fn deleted_task_retains_context_and_run_attribution() {
+        let _environment = crate::journal::test_env_lock();
+        let (directory, store) = test_store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("jack/runtime-research");
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".into(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let project = project(&wave, "runtime", "project-runtime");
+        store.create_project(&project).await.unwrap();
+        let task = task(&store, &wave, &project, repo.path().to_path_buf()).await;
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
+        let work = WorkRef::Task(task.id.clone());
+        let pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        std::fs::write(repo.path().join("authored.txt"), "keep this work").unwrap();
+
+        // Context and attribution survive retirement and provider deletion.
+        store.abandon(&work, "fixture retirement").await.unwrap();
+        assert!(super::resolve_checkout_binding(&store, repo.path())
+            .await
+            .unwrap()
+            .is_some());
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
+                rusqlite::params![wave.id().as_str(), task.plan.id.as_str(), task.plan.identifier],
+            )
+            .unwrap();
+
+        for selector in [
+            task.id.as_str(),
+            task.plan.id.as_str(),
+            &task.plan.identifier,
+        ] {
+            let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
+                .await
+                .unwrap();
+            assert_eq!(binding.work, work);
+            let previous_db = std::env::var_os("LF_DB_PATH");
+            std::env::set_var("LF_DB_PATH", directory.path().join("registry.db"));
+            let capture = crate::session_record::CaptureHandle::begin_at(
+                directory.path(),
+                crate::session_record::SessionCaptureSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: repo.path().to_path_buf(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![crate::session_record::SubjectAttribution::declared(
+                        format!("task:{selector}"),
+                    )],
+                    flow: crate::session_record::SessionFlowMembership::Independent,
+                    work: Some(crate::session::SessionWork {
+                        task_id: Some(task.id.clone()),
+                        wave_id: Some(wave.id().clone()),
+                        source: crate::session::WorkSource::Declared,
+                    }),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                store
+                    .session_for_artifact(&capture.artifact_key())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .task_id,
+                Some(task.id.clone())
+            );
+            let previous = [
+                "LF_CONTROL_DB_PATH",
+                "LF_CONTROL_HOME",
+                "LF_HOME",
+                "LF_RUN_DIR",
+                "LF_RUN_ID",
+                crate::lf::WORK_DECLARATION_ENV,
+            ]
+            .map(|name| (name, std::env::var_os(name)));
+            std::env::set_var("LF_CONTROL_DB_PATH", directory.path().join("registry.db"));
+            std::env::set_var("LF_CONTROL_HOME", directory.path());
+            std::env::set_var("LF_HOME", directory.path());
+            std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
+            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
+            std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
+            crate::session_record::write_provider_session(
+                &capture.artifact_dir(),
+                "saved-session",
+                None,
+            )
+            .unwrap();
+            let history = crate::session_record::read_provider_session(&capture.artifact_dir())
+                .unwrap()
+                .unwrap();
+            let resumed = crate::lf::commands::util::resume_session(
+                "codex",
+                None,
+                repo.path(),
+                &capture.artifact_key(),
+                &capture.artifact_dir(),
+                &history,
+            );
+            let asked = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                crate::ops::human_session::ask(&store, "Continue removed work", None),
+            )
+            .await;
+            assert!(resumed.unwrap_err().to_string().contains("was deleted"));
+            assert!(asked
+                .expect("Ask must refuse before waiting")
+                .unwrap_err()
+                .to_string()
+                .contains("was deleted"));
+            assert!(
+                crate::session_record::read_provider_clients(&capture.artifact_dir())
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                crate::session_record::read_provider_session(&capture.artifact_dir())
+                    .unwrap()
+                    .is_some()
+            );
+            for (name, value) in previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+            match previous_db {
+                Some(value) => std::env::set_var("LF_DB_PATH", value),
+                None => std::env::remove_var("LF_DB_PATH"),
+            }
+        }
+        assert!(super::resolve_checkout_binding(&store, repo.path())
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
+        assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(pr));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("authored.txt")).unwrap(),
+            "keep this work"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_run_drill_selects_rows_by_any_name_of_the_task() {
         let (directory, store) = test_store().await;
         let wave = Wave::new(
             WaveId::new(),
@@ -522,75 +692,139 @@ mod tests {
         let mut project = project(&wave, "desktop", "project-desktop");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // Historical Run labels remain unchanged when the Project is renamed.
+        // Input ancestry names its Task by id, so Project renaming preserves history.
         project.plan.slug = "desktop-renamed".into();
         store.update_project(&project).await.unwrap();
-        let catalog = crate::lf::commands::work_catalog::WorkCatalog::load_at(
-            &directory.path().join("registry.db"),
-        )
-        .unwrap();
-        let home = tempfile::tempdir().unwrap();
-        for subject in [
-            format!("task:{}", task.plan.identifier),
-            format!("task:{}", task.id),
-            "task:LOO-999".into(),
-        ] {
-            let mut subjects = vec![crate::run_record::SubjectAttribution::declared(
-                subject.clone(),
-            )];
-            if subject == format!("task:{}", task.plan.identifier) {
-                subjects.extend(["wave:runtime", "project:desktop"].map(|selector| {
-                    crate::run_record::SubjectAttribution::declared(selector.into())
-                }));
+        let session = |task_id: Option<TaskId>, caller: Option<String>| {
+            let inherited = caller.is_some();
+            crate::session::AgentSession {
+                captured: None,
+                id: uuid::Uuid::new_v4().to_string(),
+                artifact_key: crate::session_record::new_artifact_key(),
+                caller_artifact_key: caller,
+                input_published: true,
+                cwd: directory.path().to_path_buf(),
+                skill: Some("implement".into()),
+                provider: Some("codex".into()),
+                model: None,
+                node: None,
+                iterations: None,
+                work_source: task_id.as_ref().map(|_| {
+                    if inherited {
+                        crate::session::WorkSource::Inherited
+                    } else {
+                        crate::session::WorkSource::Declared
+                    }
+                }),
+                task_id,
+                wave_id: None,
+                flow_session_id: None,
+                bound_at: None,
+                kind: crate::session::SessionKind::Conversation,
+                interactive: false,
+                repo: None,
+                title: "Investigation".into(),
+                title_source: crate::session::TitleSource::Generated,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
             }
-            let capture = crate::run_record::CaptureHandle::begin_at(
-                home.path(),
-                crate::run_record::RunSpec {
-                    harness: "codex".into(),
-                    model: None,
-                    surface: "headless".into(),
-                    cwd: directory.path().to_path_buf(),
-                    repo: None,
-                    worktree: None,
-                    skill: Some("implement".into()),
-                    subjects,
-                    flow: crate::run_record::RunFlowMembership::Independent,
-                },
-            )
+        };
+        let worker = store
+            .create_session(session(Some(task.id.clone()), None), None)
+            .await
             .unwrap();
-            capture.finish("completed").unwrap();
-        }
+        // Reader fixture: inherited admission is separately proved through public
+        // child commands. A causal input reference does not itself assign Work.
+        let helper = store
+            .create_session(
+                session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(helper.wave_id, Some(wave.id().clone()));
+        assert_eq!(
+            helper.work_source,
+            Some(crate::session::WorkSource::Inherited)
+        );
+        store
+            .create_session(session(None, None), None)
+            .await
+            .unwrap();
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
             task.plan.id.as_str(),
         ] {
-            let runs = crate::lf::commands::runs::collect_runs_started_since_at(
-                home.path(),
-                crate::lf::commands::WorkFilter {
-                    task: Some(selector),
-                    project: Some(project.id.as_str()),
-                    wave: Some(wave.name()),
-                },
+            let rows = store
+                .sqlite
+                .conversation_history(
+                    Some(wave.name()),
+                    Some(project.id.as_str()),
+                    Some(selector),
+                    None,
+                    0,
+                    false,
+                )
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            for snapshot in &rows {
+                assert_eq!(snapshot.task_id.as_ref(), Some(&task.id));
+            }
+            assert!(store
+                .sqlite
+                .conversation_history(None, Some("other"), Some(selector), None, 0, false)
+                .unwrap()
+                .is_empty());
+        }
+        let children = store
+            .sqlite
+            .conversation_history(
+                None,
+                None,
+                None,
+                Some(worker.artifact_key.as_str()),
                 0,
-                &catalog,
+                false,
             )
             .unwrap();
-            assert_eq!(runs.len(), 2);
-            for run in &runs {
-                assert_eq!(
-                    catalog.resolve_run(run).unwrap().work,
-                    WorkRef::Task(task.id.clone())
-                );
-                assert!(!catalog.matches_run(
-                    run,
-                    crate::lf::commands::WorkFilter {
-                        project: Some("other"),
-                        ..Default::default()
-                    }
-                ));
-            }
+        assert_eq!(
+            children[0].artifact_key.as_deref(),
+            Some(helper.artifact_key.as_str())
+        );
+        for _ in 0..55 {
+            store
+                .create_session(
+                    session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
+                    None,
+                )
+                .await
+                .unwrap();
         }
+        let children = store
+            .sqlite
+            .conversation_history(
+                None,
+                None,
+                None,
+                Some(worker.artifact_key.as_str()),
+                0,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            children.len(),
+            56,
+            "exact parent history has no presentation cap"
+        );
+        assert!(children
+            .iter()
+            .all(|snapshot| snapshot.caller_artifact_key.as_deref()
+                == Some(worker.artifact_key.as_str())
+                && snapshot.task_id.as_ref() == Some(&task.id)));
+        store.sqlite.assert_no_historical_runs();
     }
 
     #[tokio::test]
@@ -612,7 +846,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         store.create_wave(&other_wave).await.unwrap();
         let primary_project = project(&wave, "loopflow-api", "project-api");
-        let other_project = project(&wave, "other", "project-other");
+        let other_project = project(&other_wave, "other", "project-other");
         store.create_project(&primary_project).await.unwrap();
         store.create_project(&other_project).await.unwrap();
         let task = task(&store, &wave, &primary_project, worktree).await;
@@ -665,7 +899,8 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                flows: Some(ProjectFlowPlan::empty()),
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 krs: vec![PmKr {
                     text: "One model everywhere".to_string(),
                     holds: false,

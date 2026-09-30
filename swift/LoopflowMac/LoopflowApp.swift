@@ -17,6 +17,7 @@ struct LoopflowApp: App {
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @State private var didOpenCaptureView = false
+    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
@@ -57,6 +58,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appSettings) {
+                Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
                 Picker("Appearance", selection: Binding(
                     get: { appearanceMode },
                     set: { appearanceMode = $0 }
@@ -188,7 +190,12 @@ struct LoopflowApp: App {
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let mainRepo = portfolioService.addRepo(url) else {
-            NSSound.beep()
+            let alert = NSAlert()
+            alert.messageText = "“\(url.lastPathComponent)” isn’t a Git repository"
+            alert.informativeText =
+                "Loopflow works inside a project that uses Git. "
+                + "Choose a folder that already does, or run “git init” in this one first."
+            alert.runModal()
             return
         }
         openWindow(id: "repo", value: mainRepo)

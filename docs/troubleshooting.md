@@ -3,19 +3,18 @@
 Each section: symptom, cause, fix. Commands are complete and runnable as
 written.
 
-## A Wave is not running
+## A Wave has no active conversation
 
-**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
-listener.
-
-**Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf start`, or a cron wake.
+Wave operations are finite. Read its plan and invoke the next pass explicitly,
+or inspect its cron schedule:
 
 ```bash
-lf status <wave> --json    # current registry + runtime evidence
-lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on this machine
+lf wave status <wave> --json
+lf --wave <wave> wave/operate
+lf cron list
 ```
+
+A quiet Wave needs no service restart.
 
 ## Task Work stops advancing
 
@@ -32,15 +31,15 @@ lf session list
 
 `ready` means the Task is nonterminal. Status reports `execution` separately:
 starting, running, waiting for review, blocked, idle, or unknown. Read its
-reason and worker Run before recovery. Wave status and roadmap use that same
+reason and selected execution before recovery. Wave status and roadmap use that same
 execution evidence for their recommendations. Dirty files under a live worker
 are ongoing progress.
 
-Task Run history includes independent helpers, whether recorded with the public
+Task execution history includes independent helpers, whether recorded with the public
 issue identifier or internal Task ID. An idle Task Flow does not prove those
 helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
-controls; reserve bound helper Runs for distinct contributions.
+controls; reserve bound helper conversations for distinct contributions.
 
 Task status and `lf runs` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
@@ -52,13 +51,13 @@ Steer, or resume a stopped process through the same Task Work:
 ```bash
 lf session open <session-id>
 lf session complete <session-id>    # return saved review or Ask feedback
-lf task steer INF-123 "address the latest feedback"
+lf task comment INF-123 "address the latest feedback"
 lf task interrupt INF-123
-lf task resume INF-123
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-`resume` starts a fresh boundary from the Task Work, Steers, worktree, and
+`task run` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
 is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
@@ -85,11 +84,11 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task resume INF-123 --reason "provider credentials repaired"
+lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Project operations are finite Runs, so recovery is a fresh `project run`, not a
-resume of Project process state.
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+for another planning pass; it has no resident Project process to resume.
 
 Other options:
 
@@ -135,7 +134,7 @@ Inspect the focused projection instead of inferring a control state from one
 field:
 
 ```bash
-lf status <wave> --json
+lf wave status <wave> --json
 lf task status INF-123 --json
 ```
 
@@ -161,15 +160,18 @@ See [Configuration](config.md) for context options.
 
 ## Claude Code not found
 
-**Symptom:** `lf` fails with "claude not found" or similar.
+**Symptom:** `lf` fails with "'claude' is not installed" or similar.
 
-Run the setup wizard:
+Loopflow drives an AI coding tool and needs one installed. The error names
+the install command. For Claude Code:
 
 ```bash
-lf init
+npm install -g @anthropic-ai/claude-code
+lf auth connect claude
 ```
 
-If an agent CLI is missing, install that vendor's CLI and rerun `lf init`.
+With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and
+OpenCode it finds, so installing any one of them is enough.
 
 ## See Also
 

@@ -1,4 +1,0 @@
-# Produce one reviewable Task slice and publish or refresh its PR.
-- flow: code
-- review-slice
-- concept-review

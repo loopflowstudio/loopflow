@@ -44,7 +44,8 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls", "session": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
@@ -138,9 +139,9 @@ struct WorkspaceNavigationProofTests {
         snapshot["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
-            ["id": id, "run_id": id, "kind": "interactive", "work": work, "title": title, "detail": "claude",
+            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
              "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated",
+             "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated",
              "flow_membership": ["kind": "independent"], "terminal_ids": [], "open_argv": ["must-not-launch"]]
         }
         let attached = [
@@ -150,7 +151,7 @@ struct WorkspaceNavigationProofTests {
         ]
         let orphans = [
             record("demo", title: "demo", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
-            record("review-slice", title: "review-slice", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
+            record("realign", title: "realign", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
             record("luna-aria", title: "luna-aria", work: NSNull(), cwd: "/src/loopflow.release-run"),
             record("loopflow", title: "loopflow", work: NSNull(), cwd: "/src/loopflow.build-size"),
         ]
@@ -161,8 +162,8 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls": return "[]"
-            case "session": return await source.list()
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":\#(await source.list()),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
             }
@@ -268,8 +269,9 @@ struct WorkspaceNavigationProofTests {
             let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
             value["terminal_ids"] = [shells[index]]
+            value["wave_id"] = "wave-1"
             value["open_argv"] = ["must-not-launch"]
             return value
         }))
@@ -279,8 +281,8 @@ struct WorkspaceNavigationProofTests {
         let flows = try #require(JSONSerialization.jsonObject(with: flowData) as? [[String: Any]])
         let pinned = try #require(flows[1]["record"] as? [String: Any])
         let invocation = try #require(pinned["invocation_id"] as? String)
-        var plan = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))) as? [String: Any])
+        var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
+            root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])
         let waveIndex = try #require(waves.firstIndex { wave in
             let tasks = wave["tasks"] as? [String: Any]
@@ -292,13 +294,15 @@ struct WorkspaceNavigationProofTests {
         items[taskIndex]["flow"] = flows[1]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
+        let planning = SidebarSessionSource(list: roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("roadmap", _): return roadmap
-            case ("ls", _): return "[]"
+            case ("roadmap", _): return await planning.list()
+            case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return try await named.list()
+            case ("session", "list"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
+            case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
             }
         }
@@ -329,6 +333,43 @@ struct WorkspaceNavigationProofTests {
             == "Show the all-wave roadmap and launch or attach")
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").text().string() == "Independent")
 
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-second").button().tap()
+        try await settle(window)
+        // The selected second Session arrives on the second page. An
+        // incomplete or failed inventory must not detach either native pane.
+        for failing in [true, false] {
+            await named.pauseSecondPage(failing: failing)
+            let refresh = Task { await model.refreshSessions() }
+            await named.waitForPage()
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            await named.releasePage()
+            await refresh.value
+            try await settle(window)
+            #expect(model.sessions.value?.count == 2)
+            #expect(model.navigation.selectedSessionId == "second")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[1])
+            if failing {
+                guard case .unavailable(_, let reason) = model.sessions else {
+                    Issue.record("Failed page lost its unavailable state")
+                    return
+                }
+                #expect(reason == "Second page unavailable")
+            }
+        }
+
+        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try await settle(window)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
+        try await settle(window)
+
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename").button().tap()
         try await settle(window)
         #expect(model.navigation.renaming?.sessionId == "first")
@@ -340,6 +381,83 @@ struct WorkspaceNavigationProofTests {
         #expect(await named.renames == 1)
         #expect(workspace.multiplexer.layout == layout)
         #expect(terminals[0].surface == surfaces[0])
+
+        // Hidden headless Sessions stay selected, with the same native panes.
+        try await named.headlessUnbound("first")
+        await model.refreshSessions()
+        for visible in [true, false, true] {
+            model.navigation.showsHeadlessSessions = visible
+            await model.refreshSessions()
+            try await settle(window)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(terminals[0].surface == surfaces[0])
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "session-bind").button().tap()
+        model.navigation.binding?.selector = "W2-131"
+        await model.previewSessionBinding()
+        #expect(model.sessions.value?.first { $0.id == "first" }?.work == nil)
+        #expect(model.navigation.binding?.preview?.taskId == task.id)
+        var relocatedPlan = plan
+        var relocatedWaves = waves
+        var relocatedTasks = tasks
+        var relocatedItems = items
+        var reference = try #require(relocatedItems[taskIndex]["reference"] as? [String: Any])
+        var taskWorkspace = try #require(reference["workspace"] as? [String: Any])
+        taskWorkspace["worktree"] = repo + "-other-task-checkout"
+        taskWorkspace["local_exists"] = true
+        reference["workspace"] = taskWorkspace
+        relocatedItems[taskIndex]["reference"] = reference
+        relocatedTasks["items"] = relocatedItems
+        relocatedWaves[waveIndex]["tasks"] = relocatedTasks
+        relocatedPlan["waves"] = relocatedWaves
+        await planning.replace(String(decoding: try JSONSerialization.data(withJSONObject: relocatedPlan), as: UTF8.self))
+        await model.refresh()
+        await model.commitSessionBinding()
+        try await settle(window)
+        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.taskWork == task)
+        #expect(workspace.multiplexer.layout == layout)
+        for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+        #expect(window.firstResponder === terminals[0])
+        await planning.replace(roadmap)
+        await model.refresh()
+        try await settle(window)
+        // The existing final PTY assertions below read the draft typed before binding.
+
+        // Current planning can disappear while the same conversations and
+        // native surfaces remain. The draft typed above must survive this too.
+        let selection = model.selection
+        let focusedPane = workspace.multiplexer.focusedPaneId
+        var missingPlan = plan
+        var missingWaves = waves
+        missingWaves[waveIndex]["tasks"] = ["state": "unavailable", "reason": "planning offline"]
+        missingWaves[waveIndex]["unavailable_tasks"] = []
+        missingPlan["waves"] = missingWaves
+        let unavailable = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        missingPlan["waves"] = []
+        let absent = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
+        for reading in [unavailable, absent, roadmap] {
+            await planning.replace(reading)
+            await model.refresh()
+            try await settle(window)
+            let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+            #expect(crumb.taskWork == task)
+            #expect(crumb.waveWork == .wave(id: "wave-1"))
+            #expect(crumb.siblings.map(\.id) == ["first", "second"])
+            #expect(model.selection == selection)
+            #expect(model.navigation.selectedSessionId == "first")
+            #expect(workspace.multiplexer.focusedPaneId == focusedPane)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(window.firstResponder === terminals[0])
+            for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
+            if reading != roadmap {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
+                #expect(model.workspace.orphanSessions(search: "").isEmpty)
+            } else {
+                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
+                    == "Show the all-wave roadmap and launch or attach")
+            }
+        }
 
         func clickTerminal(_ index: Int) throws {
             let terminal = terminals[index]
@@ -397,7 +515,8 @@ struct WorkspaceNavigationProofTests {
 
         // A repeated skill name and a nested occurrence both locate the exact
         // captured node; navigation preserves the original unfinished draft.
-        for node in ["5", "6/fix/0"] {
+        // Captured preorder: root decision 5; XOR 6; its patch child 7.
+        for node in [UInt32(5), UInt32(7)] {
             try await named.membership(.step(flow: "feature", invocationId: invocation,
                                             step: "recorded skill", node: node,
                                             iterations: [[2, 0]], occurrence: .earlier), for: "first")
@@ -452,7 +571,7 @@ struct WorkspaceNavigationProofTests {
         // A historical invocation must not jump into an identically keyed node
         // of the current Flow. The real chip leaves this Session selected.
         try await named.membership(.step(flow: "feature", invocationId: "prior-invocation",
-                                        step: "loop-decide", node: "5", iterations: [[1, 1]],
+                                        step: "loop-decide", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()
         try await settle(window)
@@ -488,9 +607,9 @@ struct WorkspaceNavigationProofTests {
             let shell = workspace.multiplexer.layout.firstPane.id
             workspace.multiplexer.setFocusedPane(shell)
             records.append([
-                "id": "row-\(index)", "run_id": "row-\(index)", "kind": "interactive", "work": NSNull(),
+                "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "kind": "conversation", "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -501,8 +620,8 @@ struct WorkspaceNavigationProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
-            case "session" where args.dropFirst().first == "list": return sessionJSON
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
         }
@@ -578,16 +697,16 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.shell(pane)) }
         let surface = try #require(terminal.surface)
         let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
-            ["id": id, "run_id": id, "kind": "interactive", "work": NSNull(),
+            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(),
              "title": id, "detail": "Local PTY", "cwd": "/tmp",
-             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "interactive", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [pane],
+             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [pane],
              "open_argv": ["unused"]] as [String: Any]
         }), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
-            case "session" where args.dropFirst().first == "list": return records
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "session" where args.dropFirst().first == "complete":
                 if rejected { throw RegistryQueryError("Completion rejected") }
                 return "Session completed"
@@ -611,7 +730,7 @@ struct WorkspaceNavigationProofTests {
         if rejected {
             // An ordinary inventory refresh must not erase a rejected action.
             let store = workspace.sessionStore(repoPath: "/tmp", query: query)
-            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
             #expect(store.sessions.first?.state == .live)
             #expect(store.sessions.first?.resolutionError == "Completion rejected")
             try await settle(window)
@@ -656,14 +775,14 @@ struct WorkspaceNavigationProofTests {
         defer { registry.surfaces.release(.session("review-decision")) }
         let surface = try #require(terminal.surface)
         let records = """
-        [{"id":"review-decision", "run_id": "review-decision","kind":"flow","work":null,"work_path":null,
+        [{"id":"review-decision", "run_id": "review-decision", "interactive": true,"kind":"flow","work":null,"work_path":null,
           "title":"Review decision","detail":"Human review","cwd":"/tmp",
           "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],
           "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
         """
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "session": throw RegistryQueryError("Decision rejected")
             default: throw RegistryQueryError("Unexpected read in decision proof")
             }
@@ -682,7 +801,7 @@ struct WorkspaceNavigationProofTests {
             let accepted = await store.complete("review-decision")
             #expect(!accepted)
             #expect(store.sessions.first?.state == .live)
-            store.reconcile(try await query.sessions(cwd: "/tmp"))
+            store.reconcile(try await query.sessionPage(cwd: "/tmp").entries)
             try await settle(window)
             #expect(store.sessions.first?.state == .live)
             #expect(throws: Never.self) { try view.inspect().find(text: "Decision rejected") }
@@ -792,28 +911,28 @@ struct WorkspaceNavigationProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let roadmap = try String(contentsOf: root.appendingPathComponent(
+        let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent(
             "tests/fixtures/dto/roadmap_snapshot.json"
-        ), encoding: .utf8)
+        )), at: "/src/loopflow"), as: UTF8.self)
         let records = """
-        [{"id":"navigation-split", "run_id": "navigation-split","kind":"interactive",
+        [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
-        [{"id":"context-session", "run_id": "context-session","kind":"interactive","work":null,
+        [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }
         let query = RegistryQuery { args, cwd in
             switch args.first {
             case "roadmap": return roadmap
-            case "ls": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list":
-                return cwd == "/src/context" ? otherRecords : records
+                return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
             case "session" where args == ["session", "complete", "navigation-split"]:
                 for await _ in completionResponses { break }
                 return "Session completed"
@@ -1050,6 +1169,32 @@ private actor NamedSessionSource {
     private(set) var renames = 0
     private var rejectRename = false
     private var holdRename = false
+    private var paged = false
+    private var failPage = false
+    private var pendingPage: CheckedContinuation<Void, Never>?
+    private var pageWaiter: CheckedContinuation<Void, Never>?
+
+    func pauseSecondPage(failing: Bool) { paged = true; failPage = failing }
+    func waitForPage() async {
+        if pendingPage != nil { return }
+        await withCheckedContinuation { pageWaiter = $0 }
+    }
+    func releasePage() { pendingPage?.resume(); pendingPage = nil }
+    func page(_ args: [String]) async throws -> String {
+        if paged && !args.contains("--after") {
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[0]], "next": "first"]), as: UTF8.self)
+        }
+        if paged {
+            await withCheckedContinuation { pendingPage = $0; pageWaiter?.resume(); pageWaiter = nil }
+            paged = false
+            if failPage { throw RegistryQueryError("Second page unavailable") }
+            return String(decoding: try JSONSerialization.data(withJSONObject:
+                ["entries": [records[1]], "next": NSNull()]), as: UTF8.self)
+        }
+        return #"{"entries":\#(try list()),"next":null}"#
+    }
+
     private var pendingRename: CheckedContinuation<Void, Never>?
 
     func rejectNextRename() { rejectRename = true }
@@ -1066,6 +1211,26 @@ private actor NamedSessionSource {
 
     func list() throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
+    }
+
+    func headlessUnbound(_ id: String) throws {
+        let index = try #require(records.firstIndex { $0["id"] as? String == id })
+        records[index]["interactive"] = false
+        records[index]["work"] = NSNull()
+        records[index]["wave_id"] = NSNull()
+    }
+
+    func bind(_ args: [String], task: WorkReference) throws -> String {
+        if args.contains("--dry-run") {
+            return String(decoding: try JSONSerialization.data(withJSONObject: [
+                "session_id": "first", "task_id": task.id, "identifier": "W2-131", "title": "Retained Task",
+            ]), as: UTF8.self)
+        }
+        #expect(args == ["session", "bind", "--json", "--task", task.id, "--", "first"])
+        let index = try #require(records.firstIndex { $0["id"] as? String == "first" })
+        records[index]["work"] = ["kind": "task", "id": task.id]
+        records[index]["wave_id"] = "wave-1"
+        return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
     }
 
     func membership(_ value: SessionFlowMembership, for id: String) throws {

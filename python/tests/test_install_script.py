@@ -56,7 +56,6 @@ def _stage_build_artifacts(root: Path) -> None:
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
     _write_fake_macho(cargo_rel / "lf")
-    _write_fake_macho(cargo_rel / "lfd")
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
@@ -115,7 +114,7 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
 
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
-    assert (spec.macos_dir / "lfd").exists()
+    assert not (spec.macos_dir / "lfd").exists()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
@@ -137,7 +136,7 @@ def test_verify_bundle_rejects_wrong_architecture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf"))
     _patch_subprocess(monkeypatch, archs=["sparc64"])
 
     with pytest.raises(install.StageError, match="built for sparc64"):
@@ -146,7 +145,7 @@ def test_verify_bundle_rejects_wrong_architecture(
 
 def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf"))
     _patch_subprocess(monkeypatch, archs=[])  # lipo fails -> not Mach-O
 
     with pytest.raises(install.StageError, match="not a Mach-O"):
@@ -236,7 +235,7 @@ def test_local_promotion_uses_the_complete_staged_artifact_set(
         "--from-build",
         str(local_bin / "lf"),
     ]
-    assert command[command.index("--daemon-source") + 1] == str(local_bin / "lfd")
+    assert "--daemon-source" not in command
     assert command[command.index("--cli-target") + 1] == str(tmp_path / "installed/lf")
     assert "--fresh" in command
 

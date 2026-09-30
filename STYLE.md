@@ -6,9 +6,9 @@ This is the governing document of the loopflow codebase. Contributors and agents
 
 **Wave planning:**
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
-- Chapter = repository-wide planning clock; one current, advanced for all Waves together
-- Project = one unique (Wave, Chapter) plan: Tasks, KRs, metric targets, and a Flow
-- Flow invocations may be taskless; Task-owned invocations default to the Project's Flow, with explicit overrides allowed
+- Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
+- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
+- FlowSessions may be taskless; a Task selects one managed FlowSession and uses its Project's Flow by default
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -135,7 +135,7 @@ When editing `README.md` files:
 
 When editing docs in `scratch/`:
 - Focus on what's left to build, not what's done
-- `lf review` writes its assessment under `scratch/`
+- `lf realign` updates the existing plan, code, and relevant memory; keep unresolved findings with the work
 - `lf pr land` removes `scratch/*` contents automatically
 
 When editing `*.rs` files:
@@ -150,7 +150,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct RunId(String)` not `type RunId = String`
+- Newtypes for domain concepts: `struct ExecId(String)` not `type ExecId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -191,34 +191,44 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 
 ## Wave Planning
 
-A Wave's objective, memory, cadence, budget, chat, and metric instruments survive
-chapter boundaries. A Chapter is the repository's planning clock. Exactly one
-Project per (Wave, Chapter) holds Tasks, proof-shaped KRs, metric targets, and a
-Flow template; a Wave without work has an empty Project. Project has no second
-objective, memory, cadence, or operator.
+A Wave's objective, memory, cadence, budget and instruments survive planning
+boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
+Project. Linear Project status owns current/planned/completed history; there is
+no Chapter table or plan packet. Project owns Tasks, KRs, targets and its `flow:`
+default, not another objective, memory or operator.
 
-Tasks own zero or more Flow invocations, with one current root. The Project's
-Flow supplies the default; explicit `--flow` and restart overrides are allowed.
-Flows also run without a Task, using the same invocation model and persistence.
-An invocation captures its fully expanded graph, cursor, and return counts.
-Template composition does not create invocation parents; runtime loop nesting does.
+Tasks have zero or more attributed FlowSessions and select one managed FlowSession.
+The Project's Flow supplies the default; explicit Flow selection is allowed.
+Taskless execution uses the same captured graph, cursor, return counts and driver.
+Template composition expands the graph. One started Flow is one FlowSession;
+loop passes are node/iteration positions and lenses over its history, not child
+FlowSessions. Retry retains the pass; Iterate advances its return counters.
 
-Chapter rotation advances every Wave together through the deterministic operation
-documented in [Waves](docs/waves.md#the-planning-model). It owns preview,
-classification, transfer, retirement, and retry. Started unfinished Tasks retain
-identity and execution; untouched backlog is abandoned, completed Tasks remain
-historical, and missing evidence remains unresolved. Skills judge outcomes and
-author plans; they do not implement rotation. Current navigation stays Wave →
-Task; history exposes the plan for a Wave in a past Chapter.
+Repository rotation converges on an explicit target through fresh provider facts
+and stable Project identities. Partial status changes remain retryable; unrelated
+competing plans remain unresolved. Preserve active Task identity, worktree, PR
+and execution. Retire only proven untouched backlog; missing evidence is unknown.
+Current navigation stays Wave → Task and Linear retains past Projects.
 
-Main product records have SQLite owners. Session owns Runs and a current Run;
-its stable identity and name survive Run replacement. Run has a nullable Session
-FK; Session's current Run must belong to it. Session reads ancestry through its
-current Run. Invocation Task is nullable; an invocation's Runs
-share that nullable Task. A present Task implies Wave. Constructors fill omitted
-ancestors and refuse mismatches. Every denormalization
-is removed or validated on writes. The full ownership and invariant contract
-lives in [Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
+Exec is one actual lf process, including direct and agent-issued nested commands.
+AgentSession is one durable agent conversation, interactive or headless; identity,
+name, feedback and native history survive driver replacement. FlowSession owns
+captured progression and references exact successful agent completions. Agent
+outcomes and retries belong in Session history; mechanical results belong in
+Flow history. Do not replace Run with another generic attempt object.
+
+Main records have one SQLite owner. Task implies Wave; constructors fill omitted
+ancestors and reject mismatches. Bind assigns an unassigned conversation once,
+including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
+owns that single choice. Actual work
+reservation sets Started once; logging an inspection Exec does not. Every
+denormalization is removed or validated on writes. Causal ancestry grants neither
+process control nor Flow settlement. Current driver and provider generations
+are separate: an unchanged engine survives driver handoff while old clients lose
+write authority. Passive display acquires no claim.
+
+The full contract and current cutover status live in
+[Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
 
 # Development Environment
 
@@ -349,7 +359,7 @@ def open_warp(path: Path) -> None:
 
 Give each module a `README.md` for users. Use inline comments for maintainers. Don't duplicate what's in the code.
 
-Start features with a design doc under `scratch/`. After implementation, `lf review` writes its assessment under `scratch/`. `lf pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
+Start features with a design doc under `scratch/`. After implementation, `lf realign` updates the existing plan, code, and relevant memory. `lf pr land` removes `scratch/*` contents—by then, the code and its README should speak for themselves.
 
 ## User-Facing Documentation
 

@@ -55,7 +55,7 @@ targets:
             --output "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"
           if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ]; then
             signing_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
-            for helper in lf lfd; do
+            for helper in lf; do
               /usr/bin/codesign --force --sign "$signing_identity" \
                 "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$helper"
             done

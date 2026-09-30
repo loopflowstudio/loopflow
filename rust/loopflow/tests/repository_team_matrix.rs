@@ -1,8 +1,5 @@
 //! PRD-43: one repository Team, stable Project ownership, and a fail-closed migration.
 
-#[path = "support/chapter.rs"]
-mod chapter;
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -59,7 +56,7 @@ fn snapshot(
             "name": project_name,
             "summary": "Fixture project",
             "metric_targets": [],
-            "flows": { "recommended": null },
+            "flow": "feature", "status": "started",
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
@@ -86,17 +83,6 @@ fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, 
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
-    let snapshot: serde_json::Value = serde_json::from_str(&payload).unwrap();
-    if let Some(project_id) = snapshot["projects"][0]["id"].as_str() {
-        if store.chapter(registered.id(), None).unwrap().is_none() {
-            store
-                .save_chapter(
-                    &chapter::current_chapter(registered.id(), wave, project_id),
-                    true,
-                )
-                .unwrap();
-        }
-    }
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: registered.id().clone(),
@@ -309,20 +295,23 @@ fn repository_team_matrix() {
         let show = run_lf(
             &home,
             &repo,
-            &["pm", "show", "--wave", wave, "--no-sync", "--json"],
+            &["wave", "status", wave, "--no-sync", "--json"],
         );
-        let stdout = assert_success(&show, "pm show");
+        let stdout = assert_success(&show, "Wave status");
         assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
 
-        let run = run_lf(&home, &repo, &["task", "run", issue]);
-        let error = String::from_utf8_lossy(&run.stderr);
-        assert!(!run.status.success());
+        let checkout = run_lf(&home, &repo, &["task", "checkout", issue]);
+        let error = String::from_utf8_lossy(&checkout.stderr);
+        assert!(!checkout.status.success());
         assert!(
-            error.contains("already complete"),
+            error.contains("terminal and cannot start execution"),
             "unexpected task result: {error}"
         );
     }
-    let status = assert_success(&run_lf(&home, &repo, &["pm", "status"]), "pm status");
+    let status = assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
     // An unreadable snapshot remains visible as unavailable evidence for its
@@ -352,12 +341,16 @@ fn repository_team_matrix() {
         ),
     );
     drop(reopened);
-    let duplicate = run_lf(&home, &repo, &["task", "run", "LOO-1"]);
+    let duplicate = run_lf(&home, &repo, &["task", "checkout", "LOO-1"]);
     let error = String::from_utf8_lossy(&duplicate.stderr);
     assert!(error.contains("belongs to both"), "{error}");
+    // Registry discovery remains available; planning reads reject ambiguity.
+    assert_success(
+        &run_lf(&home, &repo, &["wave", "list", "--json"]),
+        "Wave list",
+    );
     for args in [
-        &["pm", "status"][..],
-        &["status", "survival", "--json"][..],
+        &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
     ] {
@@ -438,20 +431,18 @@ fn repository_team_matrix() {
         &run_lf(
             &home,
             &legacy_repo,
-            &["pm", "show", "--wave", "product", "--no-sync", "--json"],
+            &["wave", "status", "product", "--no-sync", "--json"],
         ),
         "legacy cached read",
     );
     let blocked = run_lf(
         &home,
         &legacy_repo,
-        &[
-            "pm", "task", "create", "--wave", "product", "--title", "Blocked",
-        ],
+        &["task", "create", "--wave", "product", "--title", "Blocked"],
     );
     let error = String::from_utf8_lossy(&blocked.stderr);
     assert!(!blocked.status.success());
-    assert!(error.contains("lf pm reteam --apply"), "{error}");
+    assert!(error.contains("lf repo reteam --apply"), "{error}");
     assert!(error.contains("PRD-44"), "{error}");
 
     // PRD-44 leaves the repository Team as the sole PM authority after the

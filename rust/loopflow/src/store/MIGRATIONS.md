@@ -6,7 +6,7 @@ uv run python scripts/check_migrations.py                # what CI and the relea
 ```
 
 Write the SQL below the header, and you are done — there is nothing to paste into
-`migrations.rs`. A **draft** carries a stable snake_case name, an immutable
+`migration_catalog.rs`. A **draft** carries a stable snake_case name, an immutable
 authoring id (a 128-bit token, 32 hex chars), and **no ordinal**; it lives at
 `migrations/drafts/<name>__<id>.sql`.
 The draft's file *is* its registration: canonicalization discovers it by scanning
@@ -113,7 +113,7 @@ before anything is cut. Same script, both paths.
   release-scoped ids in the same major/minor line. A binary skipped from `1.1.0`
   to `1.2.0` applies every missing patch and minor batch in that order.
 - The file stem *is* the `schema_migrations.version` string. `MigrationId` in
-  `migrations.rs` is the only thing that formats or parses it.
+  `migration_catalog.rs` is the only thing that formats or parses it.
 - The ledger records the SQL checksum, parent-history fingerprint, build
   provenance, source checkout and revision, and package version. Old canonical
   rows receive checksums when the provenance migration first runs; their writer
@@ -122,6 +122,14 @@ before anything is cut. Same script, both paths.
   authored for an earlier or later package release is an error, not a choice.
 
 ## What a database can be told
+
+The build generates the canonical schema reference from the registered SQL using
+the bundled SQLite engine, then embeds its schema values in the binary. Canonical
+and development validation share the existing per-process cache keyed by exact
+ordered migration SQL; the generated reference seeds its canonical entry. Drafts
+and historical prefixes construct their reference on first use. Each validation still reads the
+actual database schema, including constraints, indexes, triggers and foreign keys.
+The cache contains no database validity results or open SQLite connections.
 
 | State | Message |
 | --- | --- |

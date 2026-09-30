@@ -27,7 +27,7 @@ use crate::engine::worktrees::{
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{finish_arm_after_rebase, LandOptions};
-use crate::ops::pr::PrCopy;
+use crate::ops::pr::{current_pr, merge_gate_state, PrCopy};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
 
@@ -163,24 +163,11 @@ struct GhPrMergeCommit {
 }
 
 #[derive(Debug, Deserialize)]
-struct GhPrView {
-    state: String,
-    #[serde(rename = "mergeStateStatus")]
-    merge_state_status: String,
-    #[serde(default, rename = "mergeCommit")]
-    merge_commit: Option<GhPrMergeCommit>,
-    #[serde(default)]
-    url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct GhReleasePr {
     number: u64,
     state: String,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhPrMergeCommit>,
-    #[serde(default)]
-    url: Option<String>,
     #[serde(default, rename = "headRefOid")]
     head_ref_oid: Option<String>,
 }
@@ -1058,11 +1045,11 @@ fn release_single(
                     progress,
                 )?
             }
-            _ => {
-                let url = pr.url.unwrap_or_else(|| format!("PR #{}", pr.number));
+            state => {
                 return Err(OpsError::Message(format!(
-                    "{url} was closed without merging; remove or rename the release branch before retrying"
-                )));
+                    "release PR #{} has unexpected state {state}",
+                    pr.number
+                )))
             }
         }
     } else {
@@ -1627,18 +1614,7 @@ fn prepare_release_in_worktree(
 
     progress.status("Enqueuing release PR for merge...");
     let pr_copy = release_pr_copy(wt_path, target, version)?;
-    let options = LandOptions {
-        strict: true,
-        local: false,
-        create_pr: false,
-        complete: false,
-        next_slug: None,
-        worktree: None,
-        commit_message: None,
-        pr_title: Some(pr_copy.title),
-        pr_body: Some(pr_copy.body),
-        agent: None,
-    };
+    let options = release_land_options(Some(pr_copy));
     let pr = finish_arm_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
         OpsError::Message("release land completed without a pull request".to_string())
     })?;
@@ -1653,6 +1629,21 @@ fn prepare_release_in_worktree(
         pr_number: pr.number,
         head_sha,
     })
+}
+
+fn release_land_options(copy: Option<PrCopy>) -> LandOptions {
+    LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: copy.as_ref().map(|copy| copy.title.clone()),
+        pr_body: copy.map(|copy| copy.body),
+        agent: None,
+    }
 }
 
 fn finish_release_pr(
@@ -1673,7 +1664,7 @@ fn finish_release_pr(
                     prepared.pr_number
                 ));
                 fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
-                let wt = create_named_worktree(main_repo, worktree_name, None, true)?;
+                let wt = release_recovery_worktree(main_repo, worktree_name, release_branch)?;
                 let refreshed = rebuild_release_pr(
                     main_repo,
                     &wt.path,
@@ -1682,11 +1673,70 @@ fn finish_release_pr(
                     version,
                     progress,
                 );
-                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
                 prepared = refreshed?;
+                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
+            }
+            ReleasePrWait::NeedsRepair => {
+                progress.status(&format!(
+                    "Release PR #{} has failed required checks; entering watched CI repair...",
+                    prepared.pr_number
+                ));
+                fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
+                let wt = release_recovery_worktree(main_repo, worktree_name, release_branch)?;
+                let pr = current_pr(&wt.path)?.ok_or_else(|| {
+                    OpsError::Message(format!("release PR #{} is unavailable", prepared.pr_number))
+                })?;
+                let options = release_land_options(None);
+                let _context = ReleaseWorktreeContext::enter();
+                match crate::ops::pr_landing::watch_armed_pr(&wt.path, &options, pr, progress) {
+                    Ok(landing) => {
+                        let commit = landing.merge_commit.ok_or_else(|| {
+                            OpsError::Message("release landing has no merge commit".to_string())
+                        })?;
+                        cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
+                        return Ok(commit);
+                    }
+                    Err(error) => {
+                        // Main can advance during repair. Release preparation owns
+                        // rebuilding version metadata; the shared watcher owns CI.
+                        let view =
+                            crate::ops::pr::observe_pr_merge(main_repo, prepared.pr_number)?.pr;
+                        if matches!(view.merge_state.as_deref(), Some("behind" | "dirty")) {
+                            if let Some(pr) = current_pr(&wt.path)? {
+                                if let Some(head) = pr.head_sha {
+                                    prepared.head_sha = head;
+                                }
+                            }
+                            continue;
+                        }
+                        // Retain the repair checkout on a real block or provider
+                        // failure so re-entry can continue its authored work.
+                        return Err(error);
+                    }
+                }
             }
         }
     }
+}
+
+fn release_recovery_worktree(
+    repo: &Path,
+    name: &str,
+    branch: &str,
+) -> OpsResult<CreateWorktreeResult> {
+    if let Some((path, _)) = list_porcelain(repo)?
+        .into_iter()
+        .find(|(_, existing)| existing.as_deref() == Some(branch))
+    {
+        sync_main(repo, &get_default_branch(repo)?)?;
+        return Ok(CreateWorktreeResult {
+            path,
+            branch: branch.to_string(),
+            base_branch: None,
+            base_commit: None,
+        });
+    }
+    Ok(create_named_worktree(repo, name, None, true)?)
 }
 
 fn fetch_release_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsResult<()> {
@@ -1723,6 +1773,12 @@ fn rebuild_release_pr(
         }
     }
     let current_head = crate::engine::git::rev_parse(worktree, "HEAD")?;
+    if !is_clean(worktree)? {
+        return Err(OpsError::Message(format!(
+            "release repair has uncommitted work in {}; preserve and finish that repair before rebuilding",
+            worktree.display()
+        )));
+    }
     if current_head != expected_head {
         return Err(OpsError::Message(format!(
             "release PR head changed while recovery was materializing it: expected {expected_head}, found {current_head}"
@@ -2453,19 +2509,25 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
             "--state",
             "all",
             "--json",
-            "number,state,mergeCommit,url,headRefOid",
-            "--limit",
-            "1",
+            "number,state,mergeCommit,headRefOid",
         ],
     )?;
-    let mut prs: Vec<GhReleasePr> = serde_json::from_str(&output)
+    let prs: Vec<GhReleasePr> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse release PR: {err}")))?;
-    Ok(prs.pop())
+    Ok(current_release_pr(prs))
+}
+
+/// A release PR closed without merging is a withdrawn attempt. GitHub keeps it
+/// under the branch name forever, so it must not stand in for this version's
+/// release: the open or merged PR does, and with neither the release starts fresh.
+fn current_release_pr(prs: Vec<GhReleasePr>) -> Option<GhReleasePr> {
+    prs.into_iter().find(|pr| pr.state != "CLOSED")
 }
 
 enum ReleasePrWait {
     Merged(String),
     NeedsIntegration(String),
+    NeedsRepair,
 }
 
 fn wait_for_pr_merge(
@@ -2477,35 +2539,24 @@ fn wait_for_pr_merge(
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
     let poll = Duration::from_secs(10);
-    let pr_number_arg = pr_number.to_string();
     let mut attempt: u64 = 0;
 
     loop {
-        let output = run_stdout(
-            repo,
-            "gh",
-            &[
-                "pr",
-                "view",
-                &pr_number_arg,
-                "--json",
-                "state,mergeStateStatus,mergeCommit,url",
-            ],
-        )?;
-        let view: GhPrView = serde_json::from_str(&output)
-            .map_err(|err| OpsError::Parse(format!("failed to parse PR state: {err}")))?;
+        let observation = crate::ops::pr::observe_pr_merge(repo, pr_number)?;
+        let view = observation.pr;
+        let request = observation.request;
 
         match view.state.as_str() {
-            "MERGED" => {
+            "merged" => {
                 let commit = view.merge_commit.ok_or_else(|| {
                     OpsError::Message(format!(
                         "PR #{pr_number} is merged but merge commit is unavailable"
                     ))
                 })?;
-                return Ok(ReleasePrWait::Merged(commit.oid));
+                return Ok(ReleasePrWait::Merged(commit));
             }
-            "CLOSED" => {
-                let url = view.url.unwrap_or_else(|| format!("PR #{pr_number}"));
+            "closed" => {
+                let url = view.url;
                 return Err(OpsError::Message(format!(
                     "{url} was closed without merging"
                 )));
@@ -2513,9 +2564,9 @@ fn wait_for_pr_merge(
             _ => {}
         }
 
-        if matches!(view.merge_state_status.as_str(), "BEHIND" | "DIRTY") {
+        if crate::ops::pr::merge_needs_integration(view.merge_state.as_deref(), request.as_ref()) {
             return Ok(ReleasePrWait::NeedsIntegration(
-                view.merge_state_status.to_ascii_lowercase(),
+                view.merge_state.expect("integration state matched"),
             ));
         }
 
@@ -2525,17 +2576,23 @@ fn wait_for_pr_merge(
             )));
         }
 
-        if !crate::ops::pr::auto_merge_enabled(repo, pr_number)? {
+        if request.is_none() {
             progress.status(&format!(
                 "Re-arming release PR #{pr_number} for exact-head auto-merge..."
             ));
             crate::ops::pr::enable_auto_merge(repo, pr_number, None, head_sha)?;
         }
 
+        if !matches!(request, Some(crate::ops::pr::MergeRequest::Queued(_)))
+            && merge_gate_state(repo, pr_number, head_sha)?.is_some_and(|reading| reading.failing)
+        {
+            return Ok(ReleasePrWait::NeedsRepair);
+        }
+
         if attempt.is_multiple_of(6) {
             progress.status(&format!(
                 "PR #{pr_number} is open ({}) and awaiting GitHub auto-merge...",
-                view.merge_state_status.to_ascii_lowercase()
+                view.merge_state.as_deref().unwrap_or("unknown")
             ));
         }
         attempt += 1;
@@ -4032,6 +4089,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn withdrawn_release_pr_does_not_block_the_version() {
+        let pr = |number, state: &str| GhReleasePr {
+            number,
+            state: state.to_string(),
+            merge_commit: None,
+            head_ref_oid: None,
+        };
+
+        let only_withdrawn = current_release_pr(vec![pr(1303, "CLOSED")]);
+        assert!(only_withdrawn.is_none());
+
+        let retried = current_release_pr(vec![pr(1305, "OPEN"), pr(1303, "CLOSED")]);
+        assert_eq!(retried.map(|pr| pr.number), Some(1305));
+
+        let released = current_release_pr(vec![pr(1304, "CLOSED"), pr(1300, "MERGED")]);
+        assert_eq!(released.map(|pr| pr.number), Some(1300));
+    }
+
+    #[test]
     fn cycle_context_keeps_early_and_late_changes_before_detail() {
         let repo = tempfile::tempdir().unwrap();
         let target = default_release_target(repo.path());
@@ -4147,7 +4223,7 @@ mod tests {
             "CREATE TABLE waves (id TEXT);\n",
         )
         .unwrap();
-        let registry_rs = root.join("rust/loopflow/src/store/migrations.rs");
+        let registry_rs = root.join("rust/loopflow/src/store/migration_catalog.rs");
         fs::write(
             &registry_rs,
             "const MIGRATIONS: &[Migration] = &[\n    Migration {\n        \

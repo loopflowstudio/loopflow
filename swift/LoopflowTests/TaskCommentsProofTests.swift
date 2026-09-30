@@ -47,7 +47,7 @@ struct TaskCommentsProofTests {
                                 work: .task(id: "ts_review00000000000000000000000000"))
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try CommentSource(session: JSONSerialization.data(withJSONObject: [session]))
@@ -69,7 +69,10 @@ struct TaskCommentsProofTests {
         }
         func label(_ id: String) throws -> String { try find(id).accessibilityLabel().string() }
         func waitFor(_ condition: () async throws -> Bool) async throws {
-            for _ in 0..<30 where !(try await condition()) { try await settle(window) }
+            for _ in 0..<30 {
+                if try await condition() { return }
+                try await settle(window)
+            }
         }
 
         // Task A: the count is read on selection, the thread stays collapsed.
@@ -79,7 +82,7 @@ struct TaskCommentsProofTests {
         try await settle(window)
         #expect(try label("task-comments-toggle") == "Comments, 3, collapsed")
         #expect((try? find("task-comments-thread")) == nil)
-        #expect(await source.reads.first == ["pm", "task", "comments", "--id", "issue-review", "--wave", "product", "--json"])
+        #expect(await source.reads.first == ["task", "comment", "issue-review", "--wave", "product", "--json"])
 
         // Expanding rereads and shows actual authorship, dates and Markdown.
         try find("task-comments-toggle").button().tap()
@@ -207,13 +210,13 @@ private actor CommentSource {
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _): return roadmap
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
-        case ("pm", "task") where args.dropFirst(2).first == "comments":
+        case ("task", "comment"):
             reads.append(args)
-            let issue = args[args.firstIndex(of: "--id")! + 1]
+            let issue = args[2]
             let ids: [String]
             switch replies[issue] {
             case .thread(let chosen): ids = chosen

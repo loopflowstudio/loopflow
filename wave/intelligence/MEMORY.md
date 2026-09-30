@@ -61,6 +61,42 @@ acceptance. This curation does not rerun those checks or verify remote links.
   prove current delivery. Prompt boundary tests must inspect the assembled
   customer examples, not rely solely on a few forbidden vocabulary assertions.
 
+### Reconciliation and reusable skills (branch evidence, 2026-09-28)
+
+Jack requested useful standalone skills before composing process, and editing
+stale artifacts instead of accumulating review reports. The `realign` branch
+replaces review-slice with reconciliation of intent, evidence, plan, code, and
+identified Wave memory. Clear corrections can change both plan and code;
+missing behavior cannot justify weakening acceptance. Unbound work creates no
+Wave, and unavailable memory remains an explicit gap.
+
+The useful handoff is a short current account of progress, proof, lessons, and
+unresolved choices. It supplies evidence for loop-decide without selecting its
+verdict. Mandatory replacement counts and pass ledgers confused that purpose
+with ceremony; designs can still require architecture-specific replacement
+proof. Independent audits and chapter histories retain their distinct readers.
+Authoring rules live in [PROMPTS.md](../../PROMPTS.md) and builtin prompt;
+reconciliation instructions live in builtin realign.
+
+Jack Heart requested retiring `update-wave` and `record-learnings`; the
+September 28 `retire-update-wave` branch removes both. `realign` now owns
+memory curation alongside plan and code reconciliation. Keep that procedure
+in the skill, with compact ownership guidance in assembled prompts and docs.
+Existing invocations and installed exports may still carry the retired wording;
+their presence is not evidence that the source catalog still offers those skills.
+
+Commit `1a1baa883` records passing prompt goldens, formatting, and all-target
+Clippy after the guidance reduction. Those checks establish rendered guidance
+and static validity, not installed skill refresh or successful live curation.
+Current Flow composition is documented in [CLI docs](../../docs/lf.md).
+
+The [preserved design and proof limits](https://github.com/loopflowstudio/loopflow/blob/60ee8daff36b2c97ad5a6f30e1f5daa98a40bca4/scratch/realign.md)
+record passing assembled-prompt, export, catalog, and Flow checks. These prove
+instruction delivery. The stale-plan, code-defect, aligned-repeat, and missing-
+intent scenarios were walkthroughs, not independent-agent trials. QA adaptation
+was deferred; no follow-up Task was filed. This curation does not establish
+branch placement, live acceptance, or a prompting-outcome KR.
+
 ## Current evidence boundary (2026-09-23)
 
 The [accepted chapter](../../.lf/chapters/20260923T000959Z-502f011b/start.md)

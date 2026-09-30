@@ -6,10 +6,6 @@
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,
-    "live": true,
-    "paused": false,
-    "enabled": true,
-    "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,
     "retired_at": null,
@@ -22,7 +18,6 @@
       "observed_at": "1970-01-01T00:00:00Z"
     }
   },
-  "loop_state": "idle",
   "metric_portfolio": {
     "metrics": [
       {
@@ -63,24 +58,9 @@
     "truncated": false,
     "items": [
       {
-        "id": "run_00000000000000000000000000000001",
-        "parent_run_id": null,
         "repo": "/src/loopflow",
         "worktree": "/src/loopflow.task",
-        "subjects": [
-          {
-            "selector": "wave:infrastructure",
-            "source": "declared"
-          },
-          {
-            "selector": "task:INF-123",
-            "source": "declared"
-          }
-        ],
         "skill": "task/pursue",
-        "outcome": "completed",
-        "started": 1784052000,
-        "ended": 1784052600,
         "usage": {
           "streams": 1,
           "final_streams": 1,
@@ -98,48 +78,22 @@
         "evidence_gaps": 0,
         "harness": "codex",
         "model": "gpt-5",
-        "surface": "headless"
-      }
-    ]
-  },
-  "home_runtime": {
-    "home": {
-      "id": "home_00000000000000000000000000000001",
-      "route": "ssh://jack@mini-heart",
-      "created_at": "1970-01-01T00:00:00Z",
-      "observed_at": "1970-01-01T00:00:00Z"
-    },
-    "state": "running",
-    "reason": "resident is serving on the Home",
-    "endpoint": "127.0.0.1:7777",
-    "action": {
-      "kind": "attach",
-      "endpoint": "127.0.0.1:7777"
-    }
-  },
-  "chapter": {
-    "id": "current",
-    "source_project_id": "project-1",
-    "flows": {
-      "recommended": "task-design"
-    },
-    "krs": [
-      {
-        "text": "Every failed run has an owner",
-        "holds": false
-      }
-    ],
-    "phase": "complete",
-    "error": null,
-    "source_project_slug": "release-feedback",
-    "source_work_id": null,
-    "metric_targets": [
-      {
-        "metric_id": "task-loop-trust",
-        "target": {
-          "kind": "at_least",
-          "value": 1.0
-        }
+        "surface": "headless",
+        "first_provider_attempt_at": 1784052010,
+        "task_pr_id": "pr_33333333333333333333333333333333",
+        "session_id": "run_00000000000000000000000000000001",
+        "providers": [],
+        "task_id": "task_22222222222222222222222222222222",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "task_identifier": "INF-123",
+        "wave_name": "infrastructure",
+        "work_source": null,
+        "artifact_key": "run_00000000000000000000000000000001",
+        "captured": 12,
+        "caller_artifact_key": null,
+        "observed_at": 1784052000,
+        "recorded_outcome": "completed",
+        "recorded_at": 1784052600
       }
     ]
   },
@@ -231,90 +185,90 @@
               "name": "feature",
               "steps": [
                 {
-                  "key": "0",
+                  "key": 0,
                   "id": "design",
                   "label": "task-design",
                   "kind": "skill",
                   "human": false,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "1",
+                  "key": 1,
                   "id": "implement",
                   "label": "implement",
                   "kind": "skill",
                   "human": false,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature",
                     "pursue"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "2",
+                  "key": 2,
                   "id": null,
-                  "label": "review-slice",
+                  "label": "realign",
                   "kind": "skill",
                   "human": false,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature",
                     "pursue"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "3",
+                  "key": 3,
                   "id": "decide",
                   "label": "loop-decide",
                   "kind": "skill",
                   "human": false,
-                  "returns_to": "1",
-                  "parents": [
+                  "returns_to": 1,
+                  "sources": [
                     "feature",
                     "pursue"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "4",
+                  "key": 4,
                   "id": "demo",
                   "label": "demo",
                   "kind": "skill",
                   "human": true,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature",
                     "pursue"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "5",
+                  "key": 5,
                   "id": "decide_delivery",
                   "label": "loop-decide",
                   "kind": "skill",
                   "human": false,
-                  "returns_to": "1",
-                  "parents": [
+                  "returns_to": 1,
+                  "sources": [
                     "feature",
                     "pursue"
                   ],
                   "paths": []
                 },
                 {
-                  "key": "6",
+                  "key": 6,
                   "id": null,
                   "label": "xor-route",
                   "kind": "xor",
                   "human": false,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature"
                   ],
                   "paths": [
@@ -323,13 +277,13 @@
                       "description": "Repair the failing check",
                       "steps": [
                         {
-                          "key": "6/fix/0",
+                          "key": 7,
                           "id": "patch",
                           "label": "patch",
                           "kind": "skill",
                           "human": false,
                           "returns_to": null,
-                          "parents": [],
+                          "sources": [],
                           "paths": []
                         }
                       ]
@@ -342,13 +296,13 @@
                   ]
                 },
                 {
-                  "key": "7",
+                  "key": 8,
                   "id": null,
                   "label": "pr land -c",
                   "kind": "op",
                   "human": false,
                   "returns_to": null,
-                  "parents": [
+                  "sources": [
                     "feature",
                     "queue"
                   ],
@@ -356,20 +310,20 @@
                 }
               ]
             },
-            "current": "4",
+            "current": 4,
             "completed": [
-              "0",
-              "1",
-              "2",
-              "3"
+              0,
+              1,
+              2,
+              3
             ],
             "returns": [
               {
-                "decider": "3",
+                "decider": 3,
                 "traversals": 1
               },
               {
-                "decider": "5",
+                "decider": 5,
                 "traversals": 1
               }
             ],
@@ -485,7 +439,36 @@
       "status": "ready",
       "owner": "wave",
       "reason": "Task's owning Project is absent from the current PM snapshot",
-      "recovery": "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
+      "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
     }
-  ]
+  ],
+  "projects": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "project-1",
+        "work_id": null,
+        "slug": "release-feedback",
+        "name": "current",
+        "flow": "task-design",
+        "status": "started",
+        "metric_targets": [
+          {
+            "metric_id": "task-loop-trust",
+            "target": {
+              "kind": "at_least",
+              "value": 1.0
+            }
+          }
+        ],
+        "krs": [
+          {
+            "text": "Every failed run has an owner",
+            "holds": false
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  }
 }

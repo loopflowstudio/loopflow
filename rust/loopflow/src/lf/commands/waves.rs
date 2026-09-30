@@ -1,17 +1,15 @@
-//! `lf ls`, `lf status`, and `lf roadmap` — read the wave registry (`store`).
+//! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
-//! `lf ls` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf status [wave]` adds the
+//! `lf wave list` lists every durable Wave registry row and projects authored policy
+//! from `GOAL.md` plus current listener presence. `lf wave status [wave]` adds the
 //! Wave's current chapter and Tasks, the runs it has produced, what is waiting on
 //! somebody, and live loop state; with no argument it reports the Wave this
 //! process is running inside. Both are read-only; `--json` is the dashboard
-//! contract. A stopped Wave remains visible, inert, and restartable.
+//! contract. A Wave remains visible when its chat is disconnected.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
-
-use crate::pm::ChapterMetricTarget;
 
 use std::io::IsTerminal;
 use std::path::Path;
@@ -20,26 +18,24 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
-use crate::controller::wave::metrics::{
-    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
-    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
-};
-use crate::controller::wave::server::live_endpoint;
 use crate::durable::{Home, WorkRef, WorkStatus};
-use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
-use crate::lf::commands::runs::{format_tokens, RunSnapshot};
+use crate::lf::commands::runs::{format_tokens, SessionHistory};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
-use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot, ProjectFlowPlan};
+use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
     AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
+use crate::work::wave::metrics::{
+    MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
+    MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+};
 use crate::work::wave::Wave;
 
-/// One wave's registry snapshot — the `lf ls` row and the `wave` field of
-/// `lf status`. Wire type consumed by Loopflow: every field is required or
+/// One wave's registry snapshot — the `lf wave list` row and the `wave` field of
+/// `lf wave status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveSnapshot {
@@ -52,14 +48,6 @@ pub struct WaveSnapshot {
     pub repo: String,
     /// Non-terminal Tasks owned by this Wave.
     pub active_tasks: u32,
-    /// Whether a wave server answered `/health` at the discovery endpoint.
-    pub live: bool,
-    /// Whether authored policy currently refuses new turn starts.
-    pub paused: bool,
-    /// Whether this Home is allowed to keep the Wave running.
-    pub enabled: bool,
-    /// Loopback endpoint of the live server, `null` when stopped.
-    pub endpoint: Option<String>,
     /// RFC3339 creation time, `null` when the row predates the column.
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
@@ -72,16 +60,12 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
+/// `lf wave status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
 /// when a server is live — loop state. Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
-    /// Resident loop state name from the live server's `/health`
-    /// (`idle | turning | interrupting | failed`), `null` when stopped or
-    /// serving dormant.
-    pub loop_state: Option<String>,
-    pub chapter: Option<ChapterSummary>,
+    pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<TaskDetailSnapshot>,
     /// Wave-owned live evidence derived once by Rust for every consumer.
     pub metric_portfolio: MetricPortfolioDto,
@@ -89,11 +73,7 @@ pub struct WaveDetailSnapshot {
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Home-local Run records, newest first.
-    pub runs: Evidence<RunSnapshot>,
-    /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
-    /// the one contextual action a conductor surface should offer. Probed for the
-    /// focused Wave only — `lf ls` stays placement-only.
-    pub home_runtime: HomeRuntimeDto,
+    pub runs: Evidence<SessionHistory>,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -228,7 +208,7 @@ pub struct TaskConditionSnapshot {
     pub local_progress: LocalProgressEvidence,
 }
 
-/// Stable references for one Task, shared verbatim by `lf status` and
+/// Stable references for one Task, shared verbatim by `lf wave status` and
 /// `lf roadmap`. The issue URL is cached PM evidence. Workspace evidence comes
 /// from the durable Task and outlives its execution and final PR.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,100 +375,72 @@ pub struct RoadmapSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
     pub wave: WaveSnapshot,
-    pub chapter: Option<ChapterSummary>,
+    pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
     pub tasks: Evidence<RoadmapTask>,
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChapterSummary {
+pub struct ProjectSummary {
     pub id: String,
-    pub source_project_id: String,
-    pub source_project_slug: Option<String>,
-    pub source_work_id: Option<String>,
-
-    pub metric_targets: Vec<ChapterMetricTarget>,
-    pub flows: ProjectFlowPlan,
-    pub krs: Vec<PmKrSummary>,
-    pub phase: crate::work::chapter::ChapterPhase,
-    pub error: Option<String>,
+    pub work_id: Option<String>,
+    pub slug: String,
+    pub name: String,
+    pub flow: String,
+    pub status: crate::pm::ProjectStatus,
+    pub metric_targets: Vec<crate::pm::ChapterMetricTarget>,
+    pub krs: Vec<crate::pm::PmKr>,
 }
 
-async fn chapter_summary(store: &SharedStore, wave: &Wave) -> Result<Option<ChapterSummary>> {
-    let pending = store
-        .chapters(wave.id())
-        .await?
-        .into_iter()
-        .find(|chapter| chapter.phase != crate::work::chapter::ChapterPhase::Complete);
-    let Some(chapter) = store
-        .chapter(wave.id(), None)
-        .await?
-        .or_else(|| pending.clone())
-    else {
-        return Ok(None);
-    };
-    let phase = pending.as_ref().map_or(chapter.phase, |next| next.phase);
-    let error = pending
-        .as_ref()
-        .and_then(|next| {
-            next.error.as_ref().map(|error| {
-                format!(
-                    "Chapter {}: {error}. Resume with the same chapter id.",
-                    next.id.as_str()
-                )
-            })
-        })
-        .or_else(|| chapter.error.clone());
-    let source = match store.pm_snapshot(wave.id()).await? {
-        Some(row) => decode_pm_planning(wave, &row.payload)
-            .ok()
-            .and_then(|planning| {
-                planning
-                    .projects
-                    .into_iter()
-                    .find(|project| project.id == chapter.project_id)
-            }),
-        None => None,
-    };
-    let source_project_slug = source.as_ref().map(|project| project.slug.clone());
-    let source_work_id = store
-        .get_project_by_project(&chapter.project_id)
-        .await?
-        .map(|project| project.id.to_string());
-    let content = source
-        .map(|project| crate::pm::ProjectContent {
-            metric_targets: project.metric_targets.clone(),
-            flows: project.flows.unwrap_or_else(ProjectFlowPlan::empty),
-            krs: project.krs,
-        })
-        .or_else(|| chapter.activated_at.is_none().then_some(chapter.content));
-    let Some(content) = content else {
-        return Ok(None);
-    };
-    Ok(Some(ChapterSummary {
-        id: chapter.id.as_str().to_string(),
-        source_project_id: chapter.project_id,
-        source_project_slug,
-        source_work_id,
-
-        metric_targets: content.metric_targets,
-        flows: ProjectFlowPlan {
-            recommended: Some(
-                crate::ops::task::recommended_task_flow(Some(&content.flows)).to_string(),
-            ),
-        },
-        krs: content
-            .krs
+async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
+    let result = async {
+        let row = store
+            .pm_snapshot(wave.id())
+            .await?
+            .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
+        let registered = store.list_projects(Some(wave.id())).await?;
+        let projects = decode_pm_planning(wave, &row.payload)?
+            .projects
             .into_iter()
-            .map(|kr| PmKrSummary {
-                text: kr.text,
-                holds: kr.holds,
+            .map(|project| ProjectSummary {
+                work_id: registered
+                    .iter()
+                    .find(|work| work.plan.id.as_str() == project.id)
+                    .map(|work| work.id.to_string()),
+                id: project.id,
+                slug: project.slug,
+                name: project.name,
+                flow: project.flow,
+                status: project.status,
+                metric_targets: project.metric_targets,
+                krs: project.krs,
             })
-            .collect(),
-        phase,
-        error,
-    }))
+            .collect();
+        Ok((projects, false))
+    }
+    .await;
+    Evidence::from_result(result)
+}
+
+fn print_projects(projects: &Evidence<ProjectSummary>) {
+    match projects {
+        Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
+        Evidence::Ok { items, .. } => {
+            for project in items
+                .iter()
+                .filter(|project| project.status == crate::pm::ProjectStatus::Started)
+            {
+                println!(
+                    "  project   {} ({}) · flow {}",
+                    project.name, project.id, project.flow
+                );
+                for kr in &project.krs {
+                    println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
+                }
+            }
+        }
+    }
 }
 
 /// One Task in the roadmap: plan row, durable Task Work when it exists, its
@@ -506,7 +458,7 @@ pub struct RoadmapTask {
     pub section: RoadmapSection,
 }
 
-/// `lf ls` — every wave the registry knows, running and stopped alike.
+/// `lf wave list` — every wave the registry knows, running and stopped alike.
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
@@ -555,7 +507,7 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf status [wave]` — one Wave's Work hierarchy, Runs, and loop.
+/// `lf wave status [wave]` — one Wave's Work hierarchy, Runs, and loop.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -569,17 +521,9 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
         validate_pm_portfolio(&store, &repository_waves).await?;
         let snapshot = snapshot_wave(&store, &wave).await?;
-        let loop_state = match &snapshot.endpoint {
-            Some(endpoint) => loop_state(endpoint).await,
-            None => None,
-        };
         let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
-        // Probe the focused Wave's Home once so the detail carries live evidence
-        // and the single contextual action (Open/Attach, Start, or reason).
-        let home_runtime =
-            crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
                 crate::lf::commands::WorkFilter {
@@ -589,12 +533,10 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
                 },
             )),
             wave: snapshot,
-            loop_state,
-            chapter: chapter_summary(&store, &wave).await?,
+            projects: project_planning(&store, &wave).await,
             tasks: task_snapshots.tasks,
             metric_portfolio,
             unavailable_tasks: task_snapshots.unavailable_tasks,
-            home_runtime,
         };
         if json {
             println!("{}", serde_json::to_string(&status)?);
@@ -608,7 +550,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one runtime observation for the whole
-/// read, bounded Git probes for Task Work, and no network. `lf status`
+/// read, bounded Git probes for Task Work, and no network. `lf wave status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Result<()> {
@@ -701,7 +643,7 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
             }
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
-                chapter: chapter_summary(&store, wave).await?,
+                projects: project_planning(&store, wave).await,
                 tasks: match task_snapshots.tasks {
                     Evidence::Ok { items, truncated } => Evidence::Ok {
                         items: items.into_iter().map(roadmap_task).collect(),
@@ -767,7 +709,7 @@ async fn wave_tasks(
             Some(match result {
                 Err(error) => error.to_string(),
                 _ => format!(
-                    "no local chapter plan; run `lf pm sync --wave {}`",
+                    "no local chapter plan; run `lf wave sync --wave {}`",
                     wave.name()
                 ),
             }),
@@ -841,7 +783,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     }
 }
 
-/// The wave `lf status` is about: the name the caller typed, else the wave this
+/// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
@@ -874,22 +816,6 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let repo = wave.repo().to_string();
     let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
         .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
-    let paused = if wave.is_retired() {
-        false
-    } else {
-        match crate::work::wave::config::try_read_wave_config(&goal_repo, wave.name()) {
-            Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
-            Err(error) => {
-                tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
-                false
-            }
-        }
-    };
-    let endpoint = if repo.is_empty() || wave.is_retired() {
-        None
-    } else {
-        live_endpoint(Path::new(&repo), wave.name()).await
-    };
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -924,10 +850,6 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         },
         repo,
         active_tasks,
-        live: endpoint.is_some(),
-        paused,
-        enabled: placement.enabled,
-        endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
         retired_at: wave.retired_at().and_then(format_time),
@@ -961,7 +883,7 @@ fn snapshot_task_runtime(
 
 /// The wave's local PM snapshot, or `None` when none has been synced. `None` is
 /// a real, readable state ("no plan on this machine yet") — a caller that must
-/// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
+/// tell it apart from "the plan is empty" keeps the `Option`; `lf wave status`
 /// and `lf roadmap` both render it as unavailable.
 async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
     let Some(row) = store
@@ -971,25 +893,17 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     else {
         return Ok(None);
     };
-    let chapter = store.chapter(wave.id(), None).await?
-        .ok_or_else(|| anyhow!("Wave {} needs its first chapter; preview `lf wave new-chapter --wave {} --chapter <id> --dry-run`", wave.name(), wave.name()))?;
     let mut planning = decode_pm_planning(wave, &row.payload)?;
-    planning
-        .projects
-        .retain(|project| project.id == chapter.project_id);
-    planning
-        .items
-        .retain(|item| item.project_id == chapter.project_id);
-    if planning.projects.is_empty() {
-        anyhow::bail!("current chapter planning is unavailable; resume its transition or run `lf pm sync --wave {}`", wave.name());
-    }
+    let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
+    planning.projects.retain(|project| project.id == current.id);
+    planning.items.retain(|item| item.project_id == current.id);
     Ok(Some(planning))
 }
 
 fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
     serde_json::from_str(payload).map_err(|err| {
         anyhow!(
-            "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
+            "invalid PM snapshot for wave/{}; run `lf wave sync`: {err}",
             wave.name()
         )
     })
@@ -1087,10 +1001,9 @@ async fn snapshot_tasks(
             team_id: String::new(),
             assignee: None,
         };
-        let recommended = crate::ops::task::recommended_task_flow(
-            current_plan.and_then(|project| project.flows.as_ref()),
-        )
-        .to_string();
+        let recommended = current_plan
+            .map_or("feature", |plan| plan.flow.as_str())
+            .to_string();
         details.push(
             snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
         );
@@ -1119,19 +1032,16 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
         status,
         owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
-        recovery: format!(
-            "lf work abandon task {} --reason \"Project is absent from the current PM snapshot\"",
-            task.id
-        ),
+        recovery: format!("lf task status {} --json", task.id),
     }
 }
 
 fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
-    let flows = projects
+    projects
         .iter()
         .find(|project| project.id == project_id)
-        .and_then(|project| project.flows.as_ref());
-    crate::ops::task::recommended_task_flow(flows).to_string()
+        .map_or("feature", |project| project.flow.as_str())
+        .to_string()
 }
 
 async fn snapshot_task_detail(
@@ -1171,7 +1081,7 @@ async fn snapshot_task_detail(
         None => None,
     };
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_launch_refusal(store, task).await?,
+        (Some(task), None) => crate::ops::task::task_exec_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {
@@ -1281,10 +1191,8 @@ async fn snapshot_task_detail(
     let flow_controls = crate::ops::task_flow::task_flow_controls(
         &flow_record,
         &crate::ops::task_flow::TaskFlowGate {
-            identifier: &item.identifier,
             status: runtime.as_ref().map(|runtime| &runtime.status),
             plan_completed: item.completed,
-            execution: execution.as_ref(),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -1309,7 +1217,7 @@ async fn snapshot_task_detail(
         prs: prs
             .iter()
             .map(|pr| {
-                // PR emptiness is an execution-plane fact (`lf status`); it costs
+                // PR emptiness is an execution-plane fact (`lf wave status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
                 // Task condition already carries the progress evidence it needs.
                 let empty = match (task, active) {
@@ -1457,7 +1365,9 @@ fn derive_task_condition(
         let state = match execution.state {
             TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
             TaskExecutionState::Human => TaskConditionState::Waiting,
-            TaskExecutionState::Blocked => TaskConditionState::Blocked,
+            TaskExecutionState::Blocked | TaskExecutionState::Stalled => {
+                TaskConditionState::Blocked
+            }
             TaskExecutionState::Unknown => TaskConditionState::Unknown,
             TaskExecutionState::Idle => unreachable!("idle execution uses local progress"),
         };
@@ -1643,9 +1553,6 @@ fn next_move_for_task(
     }
 }
 
-/// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
-/// errors). Kept minimal — `lf status` with no arg is a convenience, not the
-/// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::work::wave::context::WAVE_ID_ENV)
         .ok()
@@ -1653,31 +1560,12 @@ fn ambient_wave() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Ask a live server for its resident loop state (`/health` `loop` field).
-async fn loop_state(endpoint: &str) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .ok()?;
-    let body: serde_json::Value = client
-        .get(format!("http://{endpoint}/health"))
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()?;
-    body.get("loop_state")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
 fn format_time(ts: time::OffsetDateTime) -> Option<String> {
     ts.format(&time::format_description::well_known::Rfc3339)
         .ok()
 }
 
-/// With no registry on this machine, `lf ls`/`status` have nothing to read —
+/// With no registry on this machine, `lf wave list`/`status` have nothing to read —
 /// emit the empty snapshot (`[]`/`null`) or a User note, and succeed.
 fn no_registry(json: bool, empty: &str) -> Result<()> {
     if json {
@@ -1695,30 +1583,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {home:<16}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
-        enabled = "ENABLED",
-        turns = "TURNS",
-        live = "LIVE",
         tasks = "TASKS",
         home = "HOME",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {home:<16}  {endpoint}",
+            "{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
-            enabled = if wave.enabled { "yes" } else { "no" },
-            turns = if wave.paused { "paused" } else { "enabled" },
-            live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             home = truncate(&wave.home.route, 16),
-            endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
     }
 }
@@ -1738,29 +1619,11 @@ async fn child_work_status(store: &SharedStore, child: &ChildRef) -> Result<Work
         .map_err(|error| anyhow!("failed to read child Work status: {error}"))
 }
 
-fn home_state_label(state: HomeState) -> &'static str {
-    match state {
-        HomeState::Unreachable => "unreachable",
-        HomeState::Stopped => "stopped",
-        HomeState::Running => "running",
-        HomeState::Unknown => "unknown",
-    }
-}
-
-/// The single contextual action a surface should offer, rendered for the CLI.
-fn home_action_label(action: &HomeActionDto) -> String {
-    match action {
-        HomeActionDto::Attach { endpoint } => format!("Attach ({endpoint})"),
-        HomeActionDto::Start { home_id } => format!("Start on {home_id}"),
-        HomeActionDto::Reason { message } => message.clone(),
-    }
-}
-
 fn print_status(status: &WaveDetailSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
     println!(
-        "{bold}{name}{reset}  {status}{loop_state}",
+        "{bold}{name}{reset}  {status}",
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
@@ -1769,11 +1632,6 @@ fn print_status(status: &WaveDetailSnapshot) {
         } else {
             wave.status.label()
         },
-        loop_state = status
-            .loop_state
-            .as_deref()
-            .map(|m| format!("  loop:{m}"))
-            .unwrap_or_default(),
     );
     if let Some(retired_at) = &wave.retired_at {
         println!(
@@ -1783,35 +1641,8 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!(
-        "  turns     {}",
-        if wave.paused { "paused" } else { "enabled" }
-    );
-    println!("  enabled   {}", wave.enabled);
-    println!(
-        "  home      {} ({})  [{}]",
-        wave.home.id,
-        wave.home.route,
-        home_state_label(status.home_runtime.state)
-    );
-    println!(
-        "  action    {}",
-        home_action_label(&status.home_runtime.action)
-    );
-    println!(
-        "  endpoint  {}",
-        wave.endpoint.as_deref().unwrap_or("(stopped)")
-    );
-    if let Some(chapter) = &status.chapter {
-        println!("  chapter   {}  {:?}", chapter.id, chapter.phase);
-
-        for kr in &chapter.krs {
-            println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
-        }
-        if let Some(error) = &chapter.error {
-            println!("  pending   {error}");
-        }
-    }
+    println!("  home      {} ({})", wave.home.id, wave.home.route);
+    print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {
         Evidence::Unavailable { reason } => println!("  tasks unavailable: {reason}"),
@@ -1885,7 +1716,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
             .then(left.name.cmp(&right.name))
     });
     for metric in official {
-        append_metric_lines(&mut lines, metric, "Wave", "    ");
+        append_metric_lines(&mut lines, metric, portfolio, "    ");
     }
 
     let mut candidates = portfolio
@@ -1897,7 +1728,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
     if !candidates.is_empty() {
         lines.push("    Instrumenting".to_string());
         for metric in candidates {
-            append_metric_lines(&mut lines, metric, "Wave", "      ");
+            append_metric_lines(&mut lines, metric, portfolio, "      ");
         }
     }
     if !portfolio.contract_issues.is_empty() {
@@ -1912,7 +1743,7 @@ pub fn metric_portfolio_text(portfolio: &MetricPortfolioDto) -> String {
 fn append_metric_lines(
     lines: &mut Vec<String>,
     metric: &MetricReadingDto,
-    owner: &str,
+    portfolio: &MetricPortfolioDto,
     indent: &str,
 ) {
     lines.push(format!(
@@ -1921,9 +1752,9 @@ fn append_metric_lines(
         metric_evidence_label(&metric.evidence),
     ));
     lines.push(format!(
-        "{indent}  Owner {owner} · Value {value} · Target {target} over {window} · {freshness}",
+        "{indent}  Owner Wave · Value {value} · Target {target} over {window} · {freshness}",
         value = metric_value(metric),
-        target = metric_target(metric),
+        target = metric_target(metric, portfolio),
         window = metric.window,
         freshness = metric_freshness(&metric.freshness),
     ));
@@ -1956,10 +1787,13 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         | MetricEvidenceDto::Met { value, .. }
         | MetricEvidenceDto::Missed { value, .. } => Some(*value),
         MetricEvidenceDto::Unknown { cause } => match cause {
-            MetricUnknownCauseDto::Incomplete { value, .. }
+            MetricUnknownCauseDto::TargetUnavailable { value, .. }
+            | MetricUnknownCauseDto::Incomplete { value, .. }
             | MetricUnknownCauseDto::WindowMismatch { value, .. }
             | MetricUnknownCauseDto::StaleObservation { value, .. } => Some(*value),
-            _ => None,
+            MetricUnknownCauseDto::Never
+            | MetricUnknownCauseDto::RevisionMismatch { .. }
+            | MetricUnknownCauseDto::StaleUnavailable { .. } => None,
         },
         MetricEvidenceDto::Unavailable { .. } => None,
     };
@@ -1968,7 +1802,15 @@ fn metric_value(metric: &MetricReadingDto) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn metric_target(metric: &MetricReadingDto) -> String {
+fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
+    if portfolio.contract_issues.iter().any(|issue| {
+        matches!(issue,
+            MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
+            if wave_id == &metric.identity.wave_id
+        )
+    }) {
+        return "unavailable for this chapter".into();
+    }
     match metric.target {
         None => "unset for this chapter".into(),
         Some(MetricTarget::AtLeast { value }) => {
@@ -2016,6 +1858,9 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
         )),
         MetricEvidenceDto::Unknown { cause } => Some(match cause {
             MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
+            MetricUnknownCauseDto::TargetUnavailable { .. } => {
+                "chapter target planning is unavailable".to_string()
+            }
             MetricUnknownCauseDto::RevisionMismatch {
                 expected_contract_revision,
                 observed_contract_revision,
@@ -2070,7 +1915,7 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     }
 }
 
-fn print_runs(runs: &Evidence<RunSnapshot>) {
+fn print_runs(runs: &Evidence<SessionHistory>) {
     match runs {
         Evidence::Unavailable { reason } => println!("  runs unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
@@ -2087,7 +1932,7 @@ fn print_runs(runs: &Evidence<RunSnapshot>) {
                         .total_tokens()
                         .map(format_tokens)
                         .unwrap_or_else(|| "-".to_string()),
-                    age = format_age(now().unix_timestamp() - run.started),
+                    age = format_age(now().unix_timestamp() - run.observed_at),
                 );
             }
             if *truncated {
@@ -2201,9 +2046,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             name = wave.wave.name,
             status = wave.wave.status.label(),
         );
-        if let Some(chapter) = &wave.chapter {
-            println!("  chapter {}", chapter.id);
-        }
+        print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
         let tasks = match &wave.tasks {
@@ -2318,18 +2161,107 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::controller::wave::metrics::{
-        MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
-        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
-    };
     use crate::durable::WorkStatus;
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+    use crate::work::wave::metrics::{
+        MetricEvidenceDto, MetricFreshnessDto, MetricIdentity, MetricPortfolioDto,
+        MetricReadingDto, MetricStage, MetricTarget, MetricUnknownCauseDto,
+    };
     use crate::work::wave::Wave;
 
     #[tokio::test]
-    async fn wave_keeps_current_plan_visible_with_a_failed_preparing_chapter() {
+    async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                database.clone(),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "product".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let mut item = crate::pm::PmItem {
+            id: "removed".into(),
+            identifier: "FIX-1".into(),
+            url: None,
+            name: "Untouched backlog".into(),
+            description: String::new(),
+            rank: 1,
+            completed: false,
+            state: Some("unstarted".into()),
+            project_id: "current".into(),
+            project: "current".into(),
+            team_id: "team".into(),
+            assignee: None,
+        };
+        let mut items = vec![item.clone()];
+        item.id = "completed".into();
+        item.identifier = "FIX-2".into();
+        item.completed = true;
+        item.state = Some("completed".into());
+        items.push(item);
+        let snapshot = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 1,
+            payload: serde_json::json!({"projects":[{
+                "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
+                "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
+                "initiative_ids":["initiative"], "team_ids":["team"]
+            }], "items":items})
+            .to_string(),
+        };
+        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        // Old applied abandonment receipts do not imply native deletion.
+        let before = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+        assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
+        store
+            .confirm_task_deletion(wave.id(), "removed", "FIX-1")
+            .await
+            .unwrap();
+        for project_id in ["current", "next"] {
+            let mut stale = snapshot.clone();
+            let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
+            payload["projects"][0]["id"] = serde_json::json!(project_id);
+            for item in payload["items"].as_array_mut().unwrap() {
+                item["project_id"] = serde_json::json!(project_id);
+            }
+            stale.payload = payload.to_string();
+            store.put_pm_snapshot(stale).await.unwrap();
+            let reopened = Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    database.clone(),
+                ))
+                .await
+                .unwrap(),
+            );
+            let detail = super::wave_tasks(&reopened, &wave, false, None)
+                .await
+                .unwrap();
+            let super::Evidence::Ok { items, .. } = detail.tasks else {
+                panic!("planning unavailable");
+            };
+            assert_eq!(items.len(), 1);
+            assert!(detail.unavailable_tasks.is_empty());
+            let roadmap = items
+                .into_iter()
+                .map(super::roadmap_task)
+                .collect::<Vec<_>>();
+            assert_eq!(roadmap[0].task.id, "completed");
+        }
+    }
+
+    #[tokio::test]
+    async fn wave_reads_project_plan_and_preserves_unavailable_evidence() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2344,30 +2276,10 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut chapter = crate::work::chapter::Chapter {
-            predecessor_metrics: Vec::new(),
-            id: crate::work::chapter::ChapterId::parse("one").unwrap(),
-            wave_id: wave.id().clone(),
-            wave: wave.name().into(),
-            project_id: "first".into(),
-            content: crate::ops::chapter::empty_plan(),
-            predecessors: vec![],
-            tasks: vec![],
-            phase: crate::work::chapter::ChapterPhase::Complete,
-            created_at: 1,
-            activated_at: Some(1),
-            completed_at: Some(1),
-            error: None,
-        };
-        chapter.content.krs = vec![crate::pm::PmKr {
-            text: "Current proof".into(),
-            holds: false,
-        }];
-        store.save_chapter(&chapter, true).await.unwrap();
-        assert!(super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Unavailable { .. }
+        ));
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await
@@ -2375,50 +2287,36 @@ mod tests {
         assert!(missing.metrics.is_empty());
         assert!(matches!(
             &missing.contract_issues[..],
-            [crate::controller::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             payload: serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
-                "metric_targets":[], "flows":{"recommended":null}, "krs":[{"text":"Edited proof", "holds":false}],
+                "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]}).to_string(),
         }).await.unwrap();
-        chapter.id = crate::work::chapter::ChapterId::parse("two").unwrap();
-        chapter.project_id = "second".into();
-        chapter.content = crate::ops::chapter::empty_plan();
-        chapter.phase = crate::work::chapter::ChapterPhase::Preparing;
-        chapter.activated_at = None;
-        chapter.completed_at = None;
-        chapter.error = Some("Task state is unresolved".into());
-        store.save_chapter(&chapter, false).await.unwrap();
-
-        let summary = super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(summary.id, "one");
-        assert_eq!(summary.krs[0].text, "Edited proof");
-        assert_eq!(summary.phase, crate::work::chapter::ChapterPhase::Preparing);
-        assert!(summary
-            .error
-            .unwrap()
-            .contains("Chapter two: Task state is unresolved"));
+        let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
+            panic!("Project plan unavailable");
+        };
+        assert_eq!(items[0].id, "first");
+        assert_eq!(items[0].krs[0].text, "Edited proof");
+        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         unreadable.payload = "{}".into();
         store.put_pm_snapshot(unreadable).await.unwrap();
-        assert!(super::chapter_summary(&store, &wave)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Unavailable { .. }
+        ));
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await
                 .unwrap();
         assert!(matches!(
             &missing.contract_issues[..],
-            [crate::controller::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
     }
 
@@ -2429,6 +2327,73 @@ mod tests {
             "\u{2026}fix/alpha"
         );
         assert_eq!(truncate_start("beta", 10), "beta");
+    }
+
+    #[test]
+    fn text_metrics_preserve_values_when_chapter_targets_are_unavailable() {
+        let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/metric_portfolio.json"
+        ))
+        .unwrap();
+        let observed = fixture
+            .metrics
+            .iter()
+            .find(|metric| {
+                matches!(
+                    metric.evidence,
+                    MetricEvidenceDto::Unknown {
+                        cause: MetricUnknownCauseDto::TargetUnavailable { .. }
+                    }
+                )
+            })
+            .unwrap();
+        for cause in [
+            MetricUnknownCauseDto::TargetUnavailable {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::StaleObservation {
+                value: 1.0,
+                source_window_start: OffsetDateTime::UNIX_EPOCH,
+                source_window_end: OffsetDateTime::UNIX_EPOCH,
+            },
+            MetricUnknownCauseDto::Never,
+        ] {
+            let never = matches!(cause, MetricUnknownCauseDto::Never);
+            let mut metric = observed.clone();
+            metric.evidence = MetricEvidenceDto::Unknown { cause };
+            let portfolio = MetricPortfolioDto {
+                contract_issues: vec![
+                    crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                        wave_id: metric.identity.wave_id.clone(),
+                        reason: "current Project is ambiguous".into(),
+                    },
+                ],
+                metrics: vec![metric],
+            };
+            let text = metric_portfolio_text(&portfolio);
+            assert!(text.contains("Target unavailable for this chapter"));
+            assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
+            assert!(!text.contains("unset for this chapter"));
+        }
+        let mut known_empty = observed.clone();
+        known_empty.evidence = MetricEvidenceDto::Untargeted {
+            value: 1.0,
+            source_window_start: OffsetDateTime::UNIX_EPOCH,
+            source_window_end: OffsetDateTime::UNIX_EPOCH,
+        };
+        let text = metric_portfolio_text(&MetricPortfolioDto {
+            metrics: vec![known_empty],
+            contract_issues: vec![
+                crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                    wave_id: "another-wave".into(),
+                    reason: "no saved plan".into(),
+                },
+            ],
+        });
+        assert!(text.contains("[no target]"));
+        assert!(text.contains("Target unset for this chapter"));
     }
 
     #[test]
@@ -2580,7 +2545,7 @@ mod tests {
                 state,
                 reason: "worker evidence".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,

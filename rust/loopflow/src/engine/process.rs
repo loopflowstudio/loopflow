@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 /// The SSH destination by which the current foreground `lf` was reached.
@@ -103,78 +103,29 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
-pub(crate) fn resolve_lfd_binary() -> PathBuf {
-    let cargo_override = std::env::var("CARGO_BIN_EXE_lfd")
-        .ok()
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from);
-    let lf = resolve_lf_binary();
-    let lf_sibling = lf
-        .parent()
-        .map(|parent| parent.join("lfd"))
-        .filter(|path| path.is_file());
-    let invoked_sibling = std::env::args_os()
-        .next()
-        .map(PathBuf::from)
-        .and_then(|invoked| invoked.parent().map(|parent| parent.join("lfd")))
-        .filter(|path| path.is_file());
-    let path_binary = which_on_path(Path::new("lfd"));
-    let current = std::env::current_exe().ok().filter(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lfd")
-    });
-
-    select_lfd_binary(
-        crate::build_info::provenance(),
-        cargo_override,
-        lf_sibling,
-        invoked_sibling,
-        path_binary,
-        current,
-    )
-}
-
-pub(crate) fn resolve_lfd_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_lfd_binary();
-    if candidate.is_absolute() {
-        return if candidate.is_file() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lfd binary {} does not exist; install the current Home control pair",
-                candidate.display()
-            ))
-        };
+/// A recursive executable lock puts its `lf` first on PATH. Ordinary step
+/// discovery uses that same shell order, then the selected installation, then
+/// this driver. Historical control pins never override a newly selected lf.
+pub(crate) fn resolve_step_lf_binary(cwd: &Path) -> Result<PathBuf> {
+    let search_path = std::env::var_os("PATH").unwrap_or_default();
+    if let Some(path) = std::env::split_paths(&search_path)
+        .map(|directory| cwd.join(directory).join("lf"))
+        .find(|candidate| candidate.is_file())
+    {
+        return Ok(path);
     }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; install lfd beside the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-fn select_lfd_binary(
-    provenance: crate::build_info::BuildProvenance,
-    cargo_override: Option<PathBuf>,
-    lf_sibling: Option<PathBuf>,
-    invoked_sibling: Option<PathBuf>,
-    path_binary: Option<PathBuf>,
-    current_lfd: Option<PathBuf>,
-) -> PathBuf {
-    if let Some(path) = cargo_override {
-        return path;
-    }
-    if provenance == crate::build_info::BuildProvenance::Development {
-        if let Some(path) = lf_sibling {
-            return path;
+    if let Some(selection) =
+        crate::machine_install::current_selection(&crate::machine_install::root()?)?
+    {
+        if let Some(cli) = selection
+            .artifact_set
+            .artifact(&crate::machine_install::ArtifactRole::Cli)
+            .filter(|cli| cli.path.is_file())
+        {
+            return Ok(cli.path.clone());
         }
     }
-    invoked_sibling
-        .or(path_binary)
-        .or(current_lfd)
-        .unwrap_or_else(|| PathBuf::from("lfd"))
+    std::env::current_exe().context("resolve Flow driver executable as final fallback")
 }
 
 fn select_binary_override(
@@ -258,16 +209,17 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
     })
 }
 
-/// Resolve the current Home `lf` binary, never the historical `LF_CONTROL_BIN`.
-///
-/// `resolve_lf_binary` prefers `LF_CONTROL_BIN` in a release build — the pin a
-/// legacy body carries from whichever binary created it. Relaunching through
-/// that is exactly the stranding this resolver exists to prevent, so the
-/// control override is deliberately skipped: `LF_BIN` (the current Home), then
-/// the installed `lf` on `PATH`, then this executable, then the bare name.
-/// An uninstalled development process continues through its own executable:
-/// PATH's installed artifact owns a different Home and cannot read its IDs.
+/// Resolve the current Home's CLI. Installation owns both its executable and
+/// store; ordinary overrides apply only to uninstalled source execution.
 pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Some(cli) = selection
+            .artifact_set
+            .artifact(&crate::machine_install::ArtifactRole::Cli)
+        {
+            return cli.path.clone();
+        }
+    }
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
     }
@@ -358,55 +310,6 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-/// Start a machine-Home process through the current installed/dev control pair,
-/// ignoring a historical body's `LF_CONTROL_*` pins.
-pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_home_session_with_env(session, cwd, argv, &[]).await
-}
-
-pub(crate) async fn start_home_session_with_env(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    let context = current_home_execution_context()?;
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    environment.extend_from_slice(env);
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
-
-pub(crate) async fn start_home_session_for_install_selection(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    selection: &crate::machine_install::InstallSelection,
-    switch_id: Option<&str>,
-) -> Result<()> {
-    let cli = selection
-        .artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::Cli)
-        .ok_or_else(|| anyhow!("install switch target has no CLI"))?;
-    cli.verify()?;
-    let lf_home = selection
-        .store
-        .parent()
-        .ok_or_else(|| anyhow!("install switch target store has no Home directory"))?
-        .to_path_buf();
-    let context = crate::child::ChildExecutionContext {
-        lf_bin: cli.path.clone(),
-        db_path: selection.store.clone(),
-        lf_home,
-    };
-    let lf_bin = context.lf_bin.to_string_lossy().to_string();
-    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
-    if let Some(switch_id) = switch_id {
-        environment.push((crate::machine_install::INSTALL_SWITCH_ENV, switch_id));
-    }
-    start_session_with_context(session, cwd, argv, &environment, context).await
-}
-
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
     cwd: &Path,
@@ -424,11 +327,15 @@ async fn start_session_with_context(
     env: &[(&str, &str)],
     context: crate::child::ChildExecutionContext,
 ) -> Result<()> {
-    let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
-        .into_iter()
-        .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
-        .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-        .collect::<Vec<_>>();
+    let inherited_context = [
+        "LF_TRACE_ID",
+        "LF_PROCESS_ID",
+        crate::lf::WORK_DECLARATION_ENV,
+    ]
+    .into_iter()
+    .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
+    .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
+    .collect::<Vec<_>>();
     let mut child_env = env
         .iter()
         .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
@@ -501,7 +408,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_FLOW_STEP LF_HUMAN_SESSION LF_HUMAN_SESSION_RUN_BIND LF_RUN_DIR LF_RUN_CONTEXT LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_AS LF_FLOW_STEP LF_HUMAN_SESSION LF_HUMAN_SESSION_RUN_BIND LF_RUN_DIR LF_RUN_CONTEXT LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_ID LF_INSTALL_SWITCH LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK LF_TASK_ORIGIN LF_DISCORD_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY; export LF_USER_NAME=\"\"";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -589,8 +496,7 @@ mod tests {
 
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
-        DISCORD_TOKEN_ENV,
+        pin_control_binary, select_binary_override, select_current_home_binary, DISCORD_TOKEN_ENV,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -634,32 +540,6 @@ mod tests {
                 Some("/ambient/lf".into()),
             ),
             Some(PathBuf::from("/production/lf"))
-        );
-    }
-
-    #[test]
-    fn release_daemon_resolution_prefers_the_promoted_target_over_a_stale_store_sibling() {
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Release,
-                None,
-                Some(PathBuf::from("/home/op/.lf/bin/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/home/op/.local/bin/lfd")
-        );
-        assert_eq!(
-            select_lfd_binary(
-                BuildProvenance::Development,
-                None,
-                Some(PathBuf::from("/repo/target/debug/lfd")),
-                None,
-                Some(PathBuf::from("/home/op/.local/bin/lfd")),
-                None,
-            ),
-            PathBuf::from("/repo/target/debug/lfd")
         );
     }
 
@@ -828,4 +708,23 @@ mod tests {
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
     }
+}
+
+#[cfg(not(test))]
+pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    start_home_session_with_env(session, cwd, argv, &[]).await
+}
+
+#[cfg(not(test))]
+pub(crate) async fn start_home_session_with_env(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let context = current_home_execution_context()?;
+    let lf_bin = context.lf_bin.to_string_lossy().to_string();
+    let mut environment = vec![("LF_BIN", lf_bin.as_str())];
+    environment.extend_from_slice(env);
+    start_session_with_context(session, cwd, argv, &environment, context).await
 }

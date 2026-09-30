@@ -28,11 +28,12 @@ lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -77,7 +78,7 @@ A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
 
-When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
+When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
 `loopflow` and `wave/operate` skills.
@@ -99,9 +100,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
+skills.
 
 </lf:loopflow>
 
@@ -120,6 +121,10 @@ If no user authorization is required, record a material assumption in
 
 No rendering environment. Output is logged, not displayed.
 
+
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
 
 The skill.
 
@@ -145,17 +150,17 @@ re-derive what these already record.
 
 Working code with rough edges beats perfect code that took too long.
 
-Produce a first draft quickly. Polish cleans it up. You can be re-invoked if needed. Don't block on ambiguity—make the simplest choice and keep moving.
+Produce a working change, resolve reversible ambiguity, and verify it. Preserve the intended outcome across internal slices; a first draft does not satisfy unfinished acceptance.
 
 ## Workflow
 
-The design doc and style guides are in your context.
+Use the supplied design and repository conventions. A small change may have its
+plan in the conversation; do not require a document template or a prior skill.
 
 1. **Understand the design**
-   The design doc has data structures, function signatures, constraints, a
-   "done when" check, the complete target architecture, and one marked current
-   slice. Reconstruct the current concepts, authorities, writers, persistence,
-   and call paths before choosing where the behavior belongs.
+   Recover the intended outcome, accepted constraints, approach, and proof.
+   Read the current plan wherever it lives. Reconstruct the affected concepts,
+   owners, persistence, and call paths before choosing where behavior belongs.
 
 2. **Implement**
    - Data structures first—get the core types right
@@ -163,15 +168,24 @@ The design doc and style guides are in your context.
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation
    - Delete the authority or path the design makes obsolete
-   - A large design proceeds in slices—one coherent piece at a time, each
-     checked against both its focused proof and the full-design trajectory—but
-     the branch ships as one PR. Update only `This slice` and the slice ledger;
-     never replace the complete design with a local implementation plan. Don't
-     stage the landing with flags, v2s, or setups nothing uses yet.
+   - When replacing an existing path, move a real consumer end to end and
+     delete the predecessor in the same cut. New capabilities need no invented
+     predecessor or deletion quota.
+   - Follow the design's delivery boundary. An indivisible architectural change
+     proceeds in coherent internal slices but ships as one PR. Keep the complete
+     target and update the remaining work as implementation teaches us more.
+     Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Verify**
    - Run the smallest behavioral test that proves the behavior you changed
    - Run the "done when" check from the design doc
+   - If a required proof cannot run, stop dependent work and record the exact
+     command and blocker. "Authored, not executed" is not a completed pass.
+   - Update the working plan in place with remaining work, consequential
+     discoveries, and proof results or links. Delete stale instructions; retain
+     accepted requirements and unresolved counterexamples. Leave a brief summary
+     of progress, learning, and proof when useful for the handoff; avoid
+     duplicating the plan in a report for each pass.
    - Do not run an affected-suite or full-repository gate here; gate and CI own
      those broader proofs
 
@@ -187,6 +201,21 @@ compatibility shims, and parallel stores are blocking by default. Use one only
 when the reviewed design explicitly authorizes it and names its deletion point.
 
 **Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
+
+## Task context
+
+When a Task is supplied, use its directive, accepted design and included Steers.
+Stay in its supplied worktree and preserve the active writer, selected Flow,
+and review boundaries. Do not select backlog work, create a second Task or
+launch a competing implementation. A failed planning read is a named gap;
+continue independent work from the supplied evidence without repairing auth.
+Publication, landing and navigation belong to the caller's explicit steps.
+
+While building feature work, notice signals that could help the Wave steer.
+Name the outcome, candidate measure, decision value and cheapest credible
+producer. Add a useful instrument when it fits the coherent change;
+otherwise leave the proposal for Wave sponsorship.
+Metric proposals are discoveries, not a completion quota.
 
 ## Wave context
 

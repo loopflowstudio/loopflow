@@ -7,7 +7,7 @@ Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to resume the workflow safely.
 
 ```bash
-lf task prepare INF-123
+lf task checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
@@ -45,7 +45,7 @@ The exact landing fence is modeled in
 
 ## Create or reuse the worktree
 
-`lf task prepare` resolves one existing Linear Issue inside one Project and
+`lf task checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
 execution. `lf task run` uses the same substrate and additionally advances the
 declared Task flow. The repository identity—not the caller's
@@ -78,10 +78,24 @@ lf pr land                                     # prepared and auto-merged
 `publish` creates or refreshes the current PR without rebasing. `arm` and
 `land` integrate current main, clear merge-time scratch state, collapse
 checkpoint history into one authored commit, verify once, and push the exact
-head. `arm` requests GitHub auto-merge and returns. `land` watches through
-merge. `submit` performs the same preparation but leaves the exact-head merge
+head. A range with one linear commit keeps that commit; integrating a changed
+target can still replace it. `arm` requests GitHub auto-merge and returns. `land`
+watches through merge. `submit` performs the same preparation but leaves the exact-head merge
 to a person. These delivery commands inspect Task delivery state when present;
 they do not require a live Task worker or certify that a particular Flow ran.
+
+Final preparation keeps the existing PR title and body when its published head
+matches the local head. Explicit copy and valid gate output take precedence;
+unpublished changes still generate fresh copy. Task merge-disposition text is
+updated after that selection. Preparing an unchanged published PR needs no agent
+just to rewrite its description.
+
+Repeating `arm` or `land` on a clean, already armed exact head resumes the
+existing request, including standalone PRs. It preserves the commit, merge
+queue position, and CI. Explicit standalone title/body edits update only those
+fields; omitted copy is preserved. Dirty source or a new local commit still
+prepares and publishes a replacement head. Task requests must also match the
+requested completion/continuation disposition.
 
 `lf pr open` is the presenting verb; it opens the review surface after
 publishing. Headless Task flows use publish, arm, or land.
@@ -115,7 +129,7 @@ sequencer lifetime; new agent launches refuse while that operation is live.
 | stale rebase record without a kernel lock | adopted or removed through the rebase path |
 
 The rebase owner authorizes only its exact sequencer and recovery child. It does
-not make a provider the worktree owner or serialize ordinary edits, Run
+not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
 
 ### PR mutation
@@ -164,19 +178,41 @@ A failure may need several repairs, including on the same head. Incidents
 record responses; the supervisor owns execution. A moved head requires a new
 observation and check set. GitHub remains the final merge authority.
 
+An auto-merge request targeting a merge queue keeps waiting when its base
+advances, including before queue entry. Its original-head CI still receives
+repair, and a real conflict still requires integration. Once GitHub queues the
+PR, landing and release wait for the queue's integrated-commit proof instead
+of interpreting the original head's mergeability or checks. Removing the
+request restores ordinary handling; only an authoritative GitHub merge
+finishes the landing.
+
+Landing and release read PR state, head, merge commit, auto-merge request, and
+queue membership in one GitHub response. A merge therefore takes precedence
+over its removed request without combining an earlier open state with a later
+request read. Missing or partial responses cannot settle a landing.
+
 `PrLanding` owns the supervisor generation. `LandingSupervisor` names the
 process, placement, and heartbeat used both to claim and to retain that
 ownership. Incidents retain response provenance and timing across generations.
 
+Required gates and repair details come from one paginated GitHub check set for
+the observed PR head. Every page must still name that head. A moved head leaves
+checks unknown until the caller reobserves; an unreadable page cannot supply a
+partial success. Repeated jobs retain their newest result within each workflow
+and event, while legacy status contexts keep their own identities.
+
 Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
 under a fresh supervisor generation, including when the SHA has not changed.
-The waiting CLI displays completed `ci-fix` conclusions from existing Run
-records for this worktree, including when lfd supervises the landing. Use
+The waiting CLI displays completed `ci-fix` conclusions from recorded conversation
+records for this worktree, while the local process supervises the landing. Use
 `lf runs <run> --final` to inspect a conclusion separately.
 
 Watched repairs return `published` or `blocked` with a summary in their existing
 final answer. A blocked result names the required action. The watcher observes
 GitHub before returning it, so an already-merged PR still finishes successfully.
+That reconciliation happens immediately after the repair returns. Pending CI
+keeps its normal polling interval, and a repeated repair waits for that interval
+and a fresh observation before starting.
 Provider exit code zero alone does not mean the repair succeeded.
 
 After merge, bare `lf pr land` settles that PR and leaves the Task open.
@@ -185,7 +221,7 @@ serial chain to a new branch from fetched main.
 
 ## Failure and recovery
 
-- An interrupted provider Run does not discard the worktree or PR chain.
+- An interrupted provider turn does not discard the worktree or PR chain.
 - A failed check is GitHub evidence, not a completed local transition.
 - A crashed rebase keeps Git's sequencer state; explicit recovery adopts it
   with fresh operation identity.
@@ -203,7 +239,7 @@ serial chain to a new branch from fetched main.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.
-- Run identity does not grant Git or PR mutation authority.
+- Conversation identity does not grant Git or PR mutation authority.
 - Repair and merge decisions are fenced by exact PR head evidence.
 
 ## Next

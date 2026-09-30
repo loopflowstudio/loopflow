@@ -1,6 +1,8 @@
 import Foundation
 
 public enum SessionState: String, Codable, Sendable, Hashable {
+    /// Metadata has no trustworthy live/closed observation.
+    case unknown
     case waiting
     case active
     case ready
@@ -10,7 +12,7 @@ public enum SessionState: String, Codable, Sendable, Hashable {
 public enum SessionKind: String, Codable, Sendable, Hashable {
     case ask
     case flow
-    case interactive
+    case conversation
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
@@ -32,7 +34,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 /// this from the Flow position or the Run's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, invocationId: String, step: String, node: String?, iterations: [[UInt32]]?,
+    case step(flow: String, invocationId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
               occurrence: SessionFlowOccurrence)
     case independent
     case unknown(reason: String)
@@ -53,7 +55,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
                 flow: try container.decode(String.self, forKey: .flow),
                 invocationId: try container.decode(String.self, forKey: .invocationId),
                 step: try container.decode(String.self, forKey: .step),
-                node: try container.decodeIfPresent(String.self, forKey: .node),
+                node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
                 occurrence: try container.decode(SessionFlowOccurrence.self, forKey: .occurrence)
             )
@@ -95,6 +97,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
                 label = "\(base) · iteration unavailable"
             }
             switch occurrence {
+            case .unknown: return "\(label) · position unavailable"
             case .current: return label
             case .earlier: return "\(label) · earlier"
             case .past: return "\(label) · past run"
@@ -109,6 +112,8 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
 
 /// Where a Flow occurrence sits relative to its Flow's current position.
 public enum SessionFlowOccurrence: String, Codable, Sendable, Hashable {
+    /// Known membership without a recorded selected occurrence.
+    case unknown
     /// The invocation's current position.
     case current
     /// An earlier position of the invocation that is still active.
@@ -133,8 +138,8 @@ public struct SessionAction: Codable, Sendable, Hashable {
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
-    public let runId: String
     public let kind: SessionKind
+    public let interactive: Bool
     public let work: WorkReference?
     public let waveId: String?
     public let workPath: String?
@@ -157,10 +162,9 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, work, title, detail, provider, cwd, state
+        case id, kind, interactive, work, title, detail, provider, cwd, state
         case waveId = "wave_id"
         case actions
-        case runId = "run_id"
         case titleSource = "title_source"
         case flowMembership = "flow_membership"
         case workPath = "work_path"
@@ -168,4 +172,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
     }
+}
+
+/// A bounded inventory page; nil next marks a complete enumeration.
+public struct SessionPage: Codable, Sendable, Hashable {
+    public let entries: [SessionRecord]
+    public let next: String?
 }

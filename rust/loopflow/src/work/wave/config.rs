@@ -19,8 +19,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// The wave's resident loop reads these and opens a system pass when a
-/// schedule comes due (`crate::controller::wave::runner`) — no daemon poller, no table.
+/// `lf cron sync` installs these schedules on the placed Home.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -57,11 +56,6 @@ pub enum WaveChatConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
-    /// OS user allowed to start this Wave automatically. Absent means any user.
-    pub owner: Option<String>,
-    /// Machine allowed to start this Wave automatically. Accepts a HomeId,
-    /// hostname, or IP address. Absent means any Home.
-    pub home: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
@@ -69,11 +63,6 @@ pub struct WaveConfig {
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
-    /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
-    /// listener to refuse to START turns (message→turn, heartbeat, cron)
-    /// while keeping the listener serving and queueing. Controllers re-read
-    /// the file live; the registry row does not mirror this value.
-    pub paused: Option<bool>,
 }
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
@@ -107,7 +96,7 @@ pub(crate) fn try_read_wave_config(
 }
 
 /// Read only the external chat binding, so malformed unrelated Wave policy
-/// cannot turn listener startup into a new validation boundary.
+/// cannot prevent an independent bridge from reading its binding.
 pub(crate) fn try_read_wave_chat_config(
     repo: &Path,
     name: &str,
@@ -315,22 +304,6 @@ pub fn update_wave_agent_config(
     })
 }
 
-/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
-///
-/// Enabled turns are the default, so resuming removes `paused` rather than
-/// persisting a redundant `paused: false` field.
-pub fn update_wave_paused(repo: &Path, name: &str, paused: bool) -> Result<(), String> {
-    update_wave_goal_config(repo, name, |map| {
-        let key = Value::String("paused".to_string());
-        if paused {
-            map.insert(key, Value::Bool(true));
-        } else {
-            map.remove(&key);
-        }
-        Ok(())
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,8 +322,6 @@ mod tests {
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.owner.as_deref(), Some("jack"));
-        assert_eq!(config.home.as_deref(), Some("build.example.com"));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 
@@ -448,7 +419,7 @@ mod tests {
 
         fs::write(
             dir.join("GOAL.md"),
-            "---\npaused: not-a-boolean\n---\nDrive the work.\n",
+            "---\nowner: [not-a-string]\n---\nDrive the work.\n",
         )
         .expect("write unrelated invalid policy");
         assert!(matches!(
@@ -538,33 +509,5 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
-    }
-
-    #[test]
-    fn update_wave_paused_preserves_goal_and_removes_default() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("product");
-        fs::create_dir_all(&dir).expect("create dir");
-        let goal = dir.join("GOAL.md");
-        let body = "\n## Objective\n\nShip the control room.\n";
-        fs::write(
-            &goal,
-            format!("---\nowner: jack\nagent: codex\n---\n{body}"),
-        )
-        .expect("write");
-
-        update_wave_paused(temp.path(), "product", true).expect("pause");
-        let paused = fs::read_to_string(&goal).expect("read paused goal");
-        assert!(paused.contains("owner: jack"));
-        assert!(paused.contains("agent: codex"));
-        assert!(paused.contains("paused: true"));
-        assert!(paused.ends_with(body));
-
-        update_wave_paused(temp.path(), "product", false).expect("resume");
-        let resumed = fs::read_to_string(&goal).expect("read resumed goal");
-        assert!(resumed.contains("owner: jack"));
-        assert!(resumed.contains("agent: codex"));
-        assert!(!resumed.contains("paused:"));
-        assert!(resumed.ends_with(body));
     }
 }

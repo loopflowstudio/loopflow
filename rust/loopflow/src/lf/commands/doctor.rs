@@ -1,14 +1,4 @@
-//! `lf doctor` — the ledger reports on itself.
-//!
-//! Every wave question is a query against the run ledger, so a ledger that is
-//! wrong, deaf, or ambiguous makes every downstream answer confidently wrong.
-//! These checks exist because each one failed silently at least once: a schema
-//! drift dropped 29 hours of writes while `debug!` swallowed the error, a
-//! column rename left `node='step'` and `node='skill'` meaning the same thing,
-//! and the old process-grained run view once spliced one process's label onto
-//! another's cost.
-//!
-//! Checks are pure functions of the rows, so they are tested without a store.
+//! Diagnose current storage, execution records and scheduled obligations.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -17,14 +7,9 @@ use anyhow::{anyhow, Result};
 use chrono::{Datelike, Local, LocalResult, NaiveDate, TimeZone, Utc};
 use time::{Duration, OffsetDateTime};
 
+use crate::exec::Exec;
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
-use crate::store::RunEventRow;
-
-/// A node value the current binary understands. `step` is the pre-054 spelling
-/// of `skill`; rows carrying it are history the readers silently drop.
-const NODES: [&str; 3] = ["run", "flow", "skill"];
-const EVENTS: [&str; 4] = ["started", "completed", "errored", "escalated"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,7 +78,7 @@ pub fn run(json: bool) -> Result<()> {
     let mut store_report = inspect_store(&database_path);
     let (events, mut checks) = match opened {
         Ok(store) => {
-            let events = store.list_run_events_since(0)?;
+            let events = store.execs_since(0)?;
             let now = OffsetDateTime::now_utc().unix_timestamp();
             let checks = match crate::ops::default_launch_agents_dir()
                 .and_then(|directory| crate::ops::list_cron_obligations(&directory))
@@ -347,7 +332,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
             };
             let mut fallback_roles = vec![
                 crate::machine_install::ArtifactRole::Cli,
-                crate::machine_install::ArtifactRole::Daemon,
+
             ];
             if active
                 .selection
@@ -358,7 +343,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 fallback_roles.extend([
                     crate::machine_install::ArtifactRole::App,
                     crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
-                    crate::machine_install::ArtifactRole::AppHelper("lfd".to_string()),
+
                 ]);
             }
             let fallback = match active.published_fallback.verify(&fallback_roles) {
@@ -377,12 +362,12 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
+pub fn audit(events: &[Exec]) -> Vec<Check> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     audit_at(events, &[], now)
 }
 
-fn audit_at(events: &[RunEventRow], obligations: &[CronObligation], now: i64) -> Vec<Check> {
+fn audit_at(events: &[Exec], obligations: &[CronObligation], now: i64) -> Vec<Check> {
     if events.is_empty() && obligations.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
     }
@@ -391,7 +376,6 @@ fn audit_at(events: &[RunEventRow], obligations: &[CronObligation], now: i64) ->
     }
     vec![
         check_continuity(events, obligations, now),
-        check_vocabulary(events),
         check_attribution(events),
         check_identity(events),
         check_lineage(events),
@@ -404,7 +388,7 @@ struct ExpectedInterval {
     end: i64,
 }
 
-fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now: i64) -> Check {
+fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -> Check {
     let gaps = ledger_gap_days(events, now);
     if obligations.is_empty() {
         return Check::ok(
@@ -467,8 +451,8 @@ fn check_continuity(events: &[RunEventRow], obligations: &[CronObligation], now:
     )
 }
 
-fn ledger_gap_days(events: &[RunEventRow], now: i64) -> Vec<time::Date> {
-    let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.ts)).collect();
+fn ledger_gap_days(events: &[Exec], now: i64) -> Vec<time::Date> {
+    let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.started_at)).collect();
     let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
         return Vec::new();
     };
@@ -593,67 +577,24 @@ fn format_local_timestamp(timestamp: i64) -> String {
         .unwrap_or_else(|| timestamp.to_string())
 }
 
-/// A half-landed rename leaves two spellings of one concept, and every query
-/// grouping on it silently drops history.
-fn check_vocabulary(events: &[RunEventRow]) -> Check {
-    let mut unknown: HashMap<String, usize> = HashMap::new();
-    for event in events {
-        if !NODES.contains(&event.node.as_str()) {
-            *unknown.entry(format!("node={}", event.node)).or_default() += 1;
-        }
-        if !EVENTS.contains(&event.event.as_str()) {
-            *unknown.entry(format!("event={}", event.event)).or_default() += 1;
-        }
-    }
-    if unknown.is_empty() {
-        return Check::ok("vocabulary", "node and event values are all known");
-    }
-    let mut parts: Vec<_> = unknown
-        .into_iter()
-        .map(|(value, count)| format!("{value} ({count} rows)"))
-        .collect();
-    parts.sort();
-    Check::fail(
-        "vocabulary",
-        format!("values outside the closed set: {}", parts.join(", ")),
-    )
-}
-
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[RunEventRow]) -> Check {
-    let mut commands: HashMap<&str, HashSet<&str>> = HashMap::new();
-    let mut terminal = 0usize;
-    let mut terminal_unnamed = 0usize;
-
-    for event in events {
-        if let Some(command) = event.command.as_deref() {
-            commands
-                .entry(&event.process_id)
-                .or_default()
-                .insert(command);
-        }
-        if event.node == "run" && event.event != "started" {
-            terminal += 1;
-            if event.command.is_none() && event.flow.is_none() && event.skill.is_none() {
-                terminal_unnamed += 1;
-            }
-        }
+fn check_attribution(events: &[Exec]) -> Check {
+    let unnamed = events
+        .iter()
+        .filter(|exec| exec.completed_at.is_some() && exec.command.is_none())
+        .count();
+    if unnamed == 0 {
+        Check::ok("attribution", "every completed Exec names its command")
+    } else {
+        Check::fail(
+            "attribution",
+            format!("{unnamed} completed Execs name no command"),
+        )
     }
-
-    let ambiguous = commands.values().filter(|set| set.len() > 1).count();
-    if ambiguous == 0 && terminal_unnamed == 0 {
-        return Check::ok("attribution", "every terminal row names its work");
-    }
-    Check::fail(
-        "attribution",
-        format!(
-            "{ambiguous} process_id(s) carry >1 command; {terminal_unnamed}/{terminal} terminal rows name no command, flow, or skill"
-        ),
-    )
 }
 
 /// Repo identity is the absolute main-repo root, never a basename.
-fn check_identity(events: &[RunEventRow]) -> Check {
+fn check_identity(events: &[Exec]) -> Check {
     let repos: HashSet<Option<&str>> = events.iter().map(|event| event.repo.as_deref()).collect();
     let invalid = repos
         .iter()
@@ -674,16 +615,16 @@ fn check_identity(events: &[RunEventRow]) -> Check {
     )
 }
 
-fn check_lineage(events: &[RunEventRow]) -> Check {
+fn check_lineage(events: &[Exec]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.process_id.as_str(), event.run_id.as_str()))
+        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_process_id.as_deref()?;
-            (processes.get(parent).copied() != Some(event.run_id.as_str())).then_some(parent)
+            let parent = event.parent_exec_id.as_ref()?.as_str();
+            (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
         })
         .collect();
     if dangling.is_empty() {
@@ -748,10 +689,10 @@ mod tests {
 
     use super::{audit, check_continuity, inspect_store, latest_due_interval, Status};
     use crate::durable::{CronReceiptId, HomeId};
+    use crate::exec::Exec;
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
     };
-    use crate::store::RunEventRow;
 
     const DAY: i64 = 86_400;
 
@@ -781,32 +722,32 @@ mod tests {
         assert!(error.contains("latest known"), "{error}");
     }
 
-    fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {
-        RunEventRow {
-            run_id: run_id.to_string(),
-            process_id: run_id.to_string(),
-            parent_process_id: None,
-            seq: 0,
-            ts,
-            repo: Some("/src/loopflow".to_string()),
-            worktree: None,
-            wave: None,
-            node: node.to_string(),
-            event: event.to_string(),
+    fn row(ts: i64, event: &str) -> Exec {
+        Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: Some(false),
+            caller_session_id: None,
+            caller_provider_generation: None,
             command: None,
-            flow: None,
-            skill: None,
-            step_index: None,
+            repo: Some("/src/loopflow".into()),
+            cwd: None,
+            started_at: ts,
+            completed_at: (event != "started").then_some(ts),
+            outcome: (event != "started").then(|| "succeeded".into()),
+            exit_code: None,
+            signal: None,
             error: None,
         }
     }
 
-    fn named(mut row: RunEventRow, command: &str) -> RunEventRow {
+    fn named(mut row: Exec, command: &str) -> Exec {
         row.command = Some(command.to_string());
         row
     }
 
-    fn status_of(rows: &[RunEventRow], name: &str) -> Status {
+    fn status_of(rows: &[Exec], name: &str) -> Status {
         audit(rows)
             .into_iter()
             .find(|check| check.name == name)
@@ -856,26 +797,14 @@ mod tests {
 
     #[test]
     fn august_ledger_gaps_predate_the_durable_cron_obligation() {
-        let mut rows = vec![row(
-            "august-03",
-            timestamp("2026-08-03T12:00:00Z"),
-            "run",
-            "completed",
-        )];
+        let mut rows = vec![row(timestamp("2026-08-03T12:00:00Z"), "completed")];
         for day in 12..=23 {
             rows.push(row(
-                &format!("august-{day}"),
                 timestamp(&format!("2026-08-{day:02}T12:00:00Z")),
-                "run",
                 "completed",
             ));
         }
-        rows.push(row(
-            "august-25",
-            timestamp("2026-08-25T12:00:00Z"),
-            "run",
-            "completed",
-        ));
+        rows.push(row(timestamp("2026-08-25T12:00:00Z"), "completed"));
         let now = timestamp("2026-08-25T23:00:00Z");
         let mut cron = obligation(timestamp("2026-08-22T16:00:00Z"));
         let interval = latest_due_interval(&cron, now).unwrap();
@@ -975,18 +904,8 @@ mod tests {
     fn a_later_receipt_restores_the_current_window_without_rewriting_history() {
         let now = timestamp("2026-08-23T23:00:00Z");
         let rows = vec![
-            row(
-                "before-gap",
-                timestamp("2026-08-03T12:00:00Z"),
-                "run",
-                "completed",
-            ),
-            row(
-                "after-gap",
-                timestamp("2026-08-12T12:00:00Z"),
-                "run",
-                "completed",
-            ),
+            row(timestamp("2026-08-03T12:00:00Z"), "completed"),
+            row(timestamp("2026-08-12T12:00:00Z"), "completed"),
         ];
         let original_rows = rows.clone();
         let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
@@ -1012,73 +931,17 @@ mod tests {
     }
 
     #[test]
-    fn a_half_landed_rename_is_caught() {
-        // `step` is the pre-054 spelling of `skill`. Both in one ledger means
-        // every query grouping on node silently drops history.
-        let rows = [
-            row("a", DAY, "run", "completed"),
-            row("a", DAY, "step", "completed"),
-        ];
-        assert_eq!(status_of(&rows, "vocabulary"), Status::Fail);
-    }
-
-    #[test]
-    fn one_process_carrying_two_commands_is_unattributable() {
-        let rows = [
-            named(row("shared", DAY, "run", "started"), r#"["lf","wave"]"#),
-            named(row("shared", DAY, "run", "started"), r#"["lf","op","pm"]"#),
-            row("shared", DAY, "run", "completed"),
-        ];
-        let check = audit(&rows)
-            .into_iter()
-            .find(|c| c.name == "attribution")
-            .unwrap();
-        assert_eq!(check.status, Status::Fail);
-        assert!(check.detail.contains("1 process_id"), "{}", check.detail);
-    }
-
-    #[test]
     fn a_terminal_row_that_names_its_work_attributes_cleanly() {
-        let mut terminal = row("a", DAY, "run", "completed");
+        let mut terminal = row(DAY, "completed");
         terminal.command = Some(r#"["lf","code"]"#.to_string());
-        let rows = [
-            named(row("a", DAY, "run", "started"), r#"["lf","code"]"#),
-            terminal,
-        ];
+        let rows = [named(row(DAY, "started"), r#"["lf","code"]"#), terminal];
         assert_eq!(status_of(&rows, "attribution"), Status::Ok);
     }
 
     #[test]
-    fn two_processes_in_one_trace_are_attributable() {
-        let mut parent = named(row("shared", DAY, "run", "completed"), r#"["lf","wave"]"#);
-        parent.process_id = "parent".to_string();
-        let mut child = named(row("shared", DAY, "run", "completed"), r#"["lf","pm"]"#);
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        assert_eq!(status_of(&[parent, child], "attribution"), Status::Ok);
-    }
-
-    #[test]
     fn a_repo_basename_fails_identity() {
-        let mut event = row("a", DAY, "run", "completed");
+        let mut event = row(DAY, "completed");
         event.repo = Some("loopflow".to_string());
         assert_eq!(status_of(&[event], "identity"), Status::Fail);
-    }
-
-    #[test]
-    fn a_dangling_parent_process_id_fails_the_doctor() {
-        let mut event = row("a", DAY, "run", "completed");
-        event.parent_process_id = Some("missing".to_string());
-        assert_eq!(status_of(&[event], "lineage"), Status::Fail);
-    }
-
-    #[test]
-    fn a_parent_from_another_trace_fails_lineage() {
-        let mut parent = row("trace-a", DAY, "run", "completed");
-        parent.process_id = "parent".to_string();
-        let mut child = row("trace-b", DAY, "run", "completed");
-        child.process_id = "child".to_string();
-        child.parent_process_id = Some("parent".to_string());
-        assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
     }
 }

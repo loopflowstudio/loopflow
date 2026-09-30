@@ -100,7 +100,10 @@ class LinearHandler(BaseHTTPRequestHandler):
                                             "id": "project-1",
                                             "name": "Product — Reliability",
                                             "description": "",
-                                            "content": "## KRs\n\n- [ ] Fresh proof",
+                                            "content": (
+                                                "flow: feature\n\n## KRs\n\n- [ ] Fresh proof"
+                                            ),
+                                            "status": {"type": "started"},
                                             "initiatives": {"nodes": [{"id": "initiative-1"}]},
                                             "teams": {"nodes": [{"id": "team-1"}]},
                                         }
@@ -285,7 +288,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             ).fetchall()
             started = time.monotonic()
             result = _run(
-                [str(lf), "pm", "show", "--wave", "product", "--sync", "--json"], cwd=repo, env=env
+                [str(lf), "status", "product", "--sync", "--json"], cwd=repo, env=env
             )
             elapsed = time.monotonic() - started
             assert elapsed < 8, "planning read exceeded its bounded failure allowance"
@@ -324,7 +327,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
                 assert result.returncode != 0
                 assert not result.stdout.strip(), "failed fresh read returned planning output"
                 assert "invalid_grant" in result.stderr
-                assert "doppler run -- lf auth linear" in result.stderr
+                assert "doppler run -- lf auth connect linear" in result.stderr
                 assert current == token_before
                 assert (
                     db.execute("SELECT * FROM pm_snapshots WHERE wave_id=?", (wave_id,)).fetchall()

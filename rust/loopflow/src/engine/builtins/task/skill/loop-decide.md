@@ -1,50 +1,35 @@
 ---
-requires: accepted objective, iteration evidence, review findings, and the current Flow decision protocol
+requires: objective, current evidence and feedback, and the caller's decision protocol
 produces: Advance or Iterate with evidence, or a Blocked outcome for human resolution
 action_style: procedural
 ---
 Decide whether the Flow should advance, iterate, or ask a human to resolve stalled progress.
 
-Read the accepted objective, the previous iteration's direction, what this pass
-changed or learned, and the current review findings. Reuse recorded proof when
-it still applies. Work and review steps supply evidence; this decision step owns
-the navigation choice. Do not require the preceding agent to write a decision
-file or infer its decision from a successful process exit.
+Use the objective, success conditions, and constraints supplied by the caller.
+Do not impose a particular workflow, producer skill, artifact format, or
+progress metric. Work and review steps supply domain-specific criteria and
+evidence; this step owns the navigation judgment.
 
-Use `scratch/` as the shared working record. Start with the exact note paths
-named in the incoming feedback or direction, then read the current design and
-relevant review/proof notes. Inspect the rest of scratch for unresolved findings
-or accepted changes that the handoff omitted. If no paths were supplied, locate
-those notes by their topic and contents. No special filename, latest-file rule,
-or producer skill determines which evidence is authoritative. Reconcile dated
-observations, explicit human decisions, and superseded conclusions; a newer
-proposal does not replace an accepted requirement by itself. Read the current
-files when they may have changed since this Run's context was assembled.
-
-After an interactive demo, distinguish observed behavior, accepted design
-changes, remaining implementation, and unresolved questions in those notes.
-Completing the demo means the conversation ended; it is not a verdict that the
-work is finished. Iterate to the authored target when the revised design needs
-implementation. Cite the relevant note paths and the concrete next action/proof
-in your decision summary so the next work step can use the same evidence.
-Advance only when the current design and feedback are satisfied. Missing or
-contradictory evidence is a reason to clarify through the blocked protocol,
-not to infer acceptance. Scratch recommendations inform your decision; they
-are not executable verdicts.
+Read the previous direction, what changed or was learned, current feedback,
+and unresolved findings. Follow supplied artifact paths and inspect their
+current contents when they may have changed. Reconcile earlier evidence and
+accepted changes; a newer proposal does not override an accepted requirement.
+Reuse applicable proof. An unexecuted check or successful process exit alone
+does not establish that the objective was met.
 
 - **Advance** when the work required at this boundary is satisfied, including
-  applicable whole-design claims and unresolved findings from earlier passes.
-  A passing latest slice is insufficient. Leave later reviews and delivery
-  to their declared steps.
+  applicable acceptance conditions and findings from earlier attempts. Leave
+  later obligations to their declared steps.
 - **Iterate** when meaningful progress was made and specific remaining work can
-  use the declared backward edge. Supply the next action and proof, within the
-  accepted scope. Learning that rules out a hypothesis or narrows the problem
-  counts as progress; changed files and activity alone do not.
+  use the declared backward edge. Supply the next action and observable result,
+  within the accepted scope. Learning that rules out a hypothesis or narrows
+  the problem counts as progress; activity alone does not.
 - **Blocked** when the previous iteration made no meaningful progress, repeated
   the same failure without new evidence, or exposed an input or judgment the
-  agent cannot supply. Explain the comparison and what needs resolving. Do not
-  spend another iteration repeating unchanged direction. If evidence is missing,
-  name that gap rather than pretending it proves no progress.
+  agent cannot supply. Honor unresolved blockers in the supplied criteria and
+  evidence, including required checks that cannot run. Explain what needs
+  resolving. Do not spend another iteration repeating unchanged direction.
+  If evidence is missing, name that gap rather than pretending it proves no progress.
 
 Separate the questions before deciding: which obligations are satisfied, what
 changed or was learned, and what useful action or missing human input remains.
@@ -55,9 +40,8 @@ judge whether to continue from the work and evidence, not the iteration count.
 Use the supplied decision protocol for this exact occurrence. Advance and
 Iterate navigate; Blocked reports a stopped execution requiring an Ask. Include
 the attempted direction, before/after evidence, and the question in that outcome.
-The Ask runs the unblock skill with the human; unblock uses concept-review by
-default and narrows to a specific question when possible. Let the runtime open
-that Ask once rather than also opening a second Session yourself.
+Let the supplied protocol own how help is requested; do not open a second
+Session alongside its request.
 
 After the human completes the Ask, read its summary and the changed artifacts.
 Reassess using the new evidence or direction. Completion of an Ask is not proof
@@ -65,8 +49,12 @@ that the work is done and does not choose a navigation decision. If the
 same blocker remains unresolved, report that fact instead of cycling through
 identical Asks automatically.
 
-A rejected decision command is correction feedback, not a failed work pass.
-Correct its reported shape or authority error within this Run when possible;
+The same applies to other reviews: completion returns feedback, not a verdict.
+Carry accepted changes, unresolved questions, and the concrete next action into
+the decision summary, with references the next step can follow.
+
+Output validation feedback requests a corrected value in this same conversation.
+Return the declared verdict and evidence summary;
 do not rerun implementation to repair output. Missing or malformed output does
 not establish that the work made no progress. If the protocol still cannot be
 satisfied, leave the specific failure visible rather than inventing success.

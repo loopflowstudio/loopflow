@@ -37,7 +37,9 @@ static AUTHORIZED_CURRENT: OnceLock<Option<InstallSelection>> = OnceLock::new();
 #[non_exhaustive]
 pub enum ArtifactRole {
     Cli,
-    Daemon,
+    /// Decoding and digest verification of retained pre-cutover artifact sets only.
+    #[serde(rename = "daemon")]
+    RetiredDaemon,
     App,
     AppHelper(String),
 }
@@ -125,13 +127,13 @@ impl ArtifactSet {
             .artifact(&ArtifactRole::Cli)
             .expect("validated artifact set has a CLI");
         let daemon = self
-            .artifact(&ArtifactRole::Daemon)
-            .expect("validated artifact set has a daemon");
+            .artifact(&ArtifactRole::RetiredDaemon)
+            .map(|artifact| artifact.path.as_path());
         let app = self
             .artifact(&ArtifactRole::App)
             .map(|artifact| app_bundle_for_executable(&artifact.path))
             .transpose()?;
-        let actual = artifact_set_sha256(&cli.path, &daemon.path, app)?;
+        let actual = artifact_set_sha256(&cli.path, daemon, app)?;
         if actual != self.content_sha256 {
             return Err(anyhow!(
                 "install artifact set {} content digest mismatch: expected {}, got {}",
@@ -183,7 +185,7 @@ impl ArtifactSet {
                 ));
             }
         }
-        for role in [ArtifactRole::Cli, ArtifactRole::Daemon] {
+        for role in [ArtifactRole::Cli] {
             if !roles.contains(&role) {
                 return Err(anyhow!(
                     "install artifact set {} is missing role {:?}",
@@ -334,14 +336,16 @@ pub enum RecoveryOwner {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ActivationTargets {
     pub cli: PathBuf,
-    pub daemon: PathBuf,
+    /// Retained receipt input; never activated by this executable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon: Option<PathBuf>,
     pub app: Option<PathBuf>,
     pub legacy_app: Option<PathBuf>,
 }
 
 impl ActivationTargets {
     fn validate(&self) -> Result<()> {
-        for path in [&self.cli, &self.daemon] {
+        for path in [&self.cli] {
             if !path.is_absolute() {
                 return Err(anyhow!(
                     "install activation target {} is not absolute",
@@ -551,8 +555,14 @@ impl SwitchReceipt {
             || self.target.artifact_set.content_sha256 != prior.target.artifact_set.content_sha256
             || self.target.artifact_set.artifact(&ArtifactRole::Cli)
                 != prior.target.artifact_set.artifact(&ArtifactRole::Cli)
-            || self.target.artifact_set.artifact(&ArtifactRole::Daemon)
-                != prior.target.artifact_set.artifact(&ArtifactRole::Daemon)
+            || self
+                .target
+                .artifact_set
+                .artifact(&ArtifactRole::RetiredDaemon)
+                != prior
+                    .target
+                    .artifact_set
+                    .artifact(&ArtifactRole::RetiredDaemon)
             || self.target_published_fallback != prior.target_published_fallback;
         if identity_changed {
             return Err(anyhow!(
@@ -694,7 +704,6 @@ pub fn root() -> Result<PathBuf> {
 pub fn entry_gate_path(root: &Path, role: &ArtifactRole) -> Result<PathBuf> {
     let name = match role {
         ArtifactRole::Cli => "lf",
-        ArtifactRole::Daemon => "lfd",
         other => return Err(anyhow!("artifact role {other:?} has no machine entry gate")),
     };
     Ok(root.join(GATE_DIRECTORY).join(name))
@@ -740,23 +749,10 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
     Ok(target)
 }
 
-fn _switch_capability(role: &ArtifactRole) -> Option<String> {
-    if let Some(capability) = std::env::var(INSTALL_SWITCH_ENV)
+fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
+    std::env::var(INSTALL_SWITCH_ENV)
         .ok()
         .filter(|value| !value.is_empty())
-    {
-        return Some(capability);
-    }
-    if role != &ArtifactRole::Daemon {
-        return None;
-    }
-    let mut arguments = std::env::args_os();
-    while let Some(argument) = arguments.next() {
-        if argument == "--install-switch" {
-            return arguments.next().and_then(|value| value.into_string().ok());
-        }
-    }
-    None
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -844,6 +840,10 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
 
 /// Find a retained development Home without changing its data or machine selection.
 pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelection> {
+    Ok(retained_development_receipt(root, id)?.target)
+}
+
+pub(crate) fn retained_development_receipt(root: &Path, id: &str) -> Result<SwitchReceipt> {
     for entry in fs::read_dir(root.join("receipts"))? {
         let path = entry?.path();
         if path.extension().is_none_or(|extension| extension != "json") {
@@ -858,7 +858,7 @@ pub fn retained_development_home(root: &Path, id: &str) -> Result<InstallSelecti
             if !receipt.target.store.is_file() {
                 return Err(anyhow!("retained Home {} is missing its store", id));
             }
-            return Ok(receipt.target);
+            return Ok(receipt);
         }
     }
     Err(anyhow!("no retained development installation named {id}"))
@@ -878,6 +878,59 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
         return Ok(MachineInstallState::Settled(Box::new(active)));
     }
     Ok(MachineInstallState::Legacy)
+}
+
+/// The executable/store pair selected for ordinary machine operations.
+pub(crate) fn current_selection(root: &Path) -> Result<Option<InstallSelection>> {
+    match read_state(root)? {
+        MachineInstallState::Legacy => Ok(None),
+        MachineInstallState::Settled(active) => Ok(Some(active.selection)),
+        MachineInstallState::Switching(receipt) => {
+            startup_selection_during_switch(&receipt).map(Some)
+        }
+    }
+}
+
+/// Stores remain installation-owned after another Home becomes current.
+pub(crate) fn owned_stores(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut stores = known_installations(root)?
+        .into_iter()
+        .map(|selection| selection.store)
+        .collect::<Vec<_>>();
+    stores.sort();
+    stores.dedup();
+    Ok(stores)
+}
+
+pub(crate) fn known_installations(root: &Path) -> Result<Vec<InstallSelection>> {
+    let mut selections = Vec::new();
+    match read_state(root)? {
+        MachineInstallState::Legacy => {}
+        MachineInstallState::Settled(active) => selections.push(active.selection),
+        MachineInstallState::Switching(receipt) => {
+            selections.push(receipt.target);
+            selections.extend(receipt.prior);
+        }
+    }
+    let receipts = match fs::read_dir(root.join("receipts")) {
+        Ok(receipts) => receipts,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(selections),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in receipts {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let receipt: SwitchReceipt = read_json(&path)?;
+        receipt.validate()?;
+        for selection in std::iter::once(receipt.target).chain(receipt.prior) {
+            if !selections.contains(&selection) {
+                selections.push(selection);
+            }
+        }
+    }
+    Ok(selections)
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1076,7 +1129,19 @@ fn authorize_for_switch(
             // install so a failed or in-flight switch cannot brick ordinary startup.
             startup_active_during_switch(&receipt)?
         }
-        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Settled(active) => {
+            if switch_id.is_none() {
+                if let Some(selection) = requested_retained_selection(
+                    root,
+                    &active.selection.store,
+                    executable,
+                    Some(role),
+                )? {
+                    return Ok(Some(selection));
+                }
+            }
+            *active
+        }
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1118,10 +1183,6 @@ fn artifact_matches_runtime_role(artifact: &ArtifactRole, runtime: &ArtifactRole
             (artifact, runtime),
             (ArtifactRole::AppHelper(name), ArtifactRole::Cli) if name == "lf"
         )
-        || matches!(
-            (artifact, runtime),
-            (ArtifactRole::AppHelper(name), ArtifactRole::Daemon) if name == "lfd"
-        )
 }
 
 pub fn authorize_current(role: &ArtifactRole) -> Result<Option<InstallSelection>> {
@@ -1159,7 +1220,14 @@ pub fn selection_for_executable(
         // A failed or in-flight switch resolves through the last good install so
         // ordinary startup keeps working instead of refusing every command.
         MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Settled(active) => {
+            if let Some(selection) =
+                requested_retained_selection(root, &active.selection.store, executable, None)?
+            {
+                return Ok(Some(selection));
+            }
+            *active
+        }
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1189,6 +1257,67 @@ pub fn selection_for_executable(
     Ok(Some(active.selection))
 }
 
+/// A saved terminal handoff carries its existing executable/store pair. It may
+/// continue after another installation becomes current without switching the
+/// machine or treating the retained executable as a new source build.
+fn requested_retained_selection(
+    root: &Path,
+    active_store: &Path,
+    executable: &Path,
+    role: Option<&ArtifactRole>,
+) -> Result<Option<InstallSelection>> {
+    let Some(requested) = std::env::var_os("LF_DB_PATH")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("LF_HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join("loopflow.db"))
+        })
+    else {
+        return Ok(None);
+    };
+    let requested = crate::store::canonicalize_with_missing_tail(&requested)?;
+    if active_store == requested {
+        return Ok(None);
+    }
+    let receipts = match fs::read_dir(root.join("receipts")) {
+        Ok(receipts) => receipts,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut candidates = Vec::new();
+    for entry in receipts {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let receipt: SwitchReceipt = read_json(&path)?;
+        receipt.validate()?;
+        if receipt.phase == SwitchPhase::Settled {
+            candidates.extend(
+                std::iter::once(receipt.target)
+                    .chain(receipt.prior)
+                    .filter(|selection| selection.store == requested),
+            );
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let digest = file_sha256(executable)?;
+    for selection in candidates {
+        if let Some(artifact) = selection.artifact_set.artifacts.iter().find(|artifact| {
+            artifact.sha256 == digest
+                && role.is_none_or(|role| artifact_matches_runtime_role(&artifact.role, role))
+        }) {
+            artifact.verify()?;
+            return Ok(Some(selection));
+        }
+    }
+    Ok(None)
+}
+
 pub fn selection_for_current_executable() -> Result<Option<InstallSelection>> {
     if let Some(selection) = AUTHORIZED_CURRENT.get() {
         return Ok(selection.clone());
@@ -1213,7 +1342,7 @@ fn file_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
-fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
+pub(crate) fn app_bundle_for_executable(path: &Path) -> Result<&Path> {
     path.parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
@@ -1273,10 +1402,16 @@ pub(crate) fn tree_sha256(path: &Path) -> Result<String> {
     Ok(hex::encode(digest.finalize()))
 }
 
-pub(crate) fn artifact_set_sha256(cli: &Path, daemon: &Path, app: Option<&Path>) -> Result<String> {
+pub(crate) fn artifact_set_sha256(
+    cli: &Path,
+    daemon: Option<&Path>,
+    app: Option<&Path>,
+) -> Result<String> {
     let mut digest = Sha256::new();
     digest.update(file_sha256(cli)?.as_bytes());
-    digest.update(file_sha256(daemon)?.as_bytes());
+    if let Some(daemon) = daemon {
+        digest.update(file_sha256(daemon)?.as_bytes());
+    }
     if let Some(app) = app {
         digest.update(tree_sha256(app)?.as_bytes());
     }
@@ -1408,10 +1543,10 @@ mod tests {
             source,
             source_revision: format!("revision-{id}"),
             source_identity: format!("identity-{id}"),
-            content_sha256: artifact_set_sha256(&cli, &daemon, None).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), None).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
             ],
         }
     }
@@ -1470,7 +1605,7 @@ mod tests {
                 .clone(),
             activation: ActivationTargets {
                 cli: directory.join("active-lf"),
-                daemon: directory.join("active-lfd"),
+                daemon: Some(directory.join("active-lfd")),
                 app: None,
                 legacy_app: None,
             },
@@ -1637,10 +1772,10 @@ mod tests {
             source: InstallSource::Published,
             source_revision: "revision".to_string(),
             source_identity: "release".to_string(),
-            content_sha256: artifact_set_sha256(&cli, &daemon, Some(&app)).unwrap(),
+            content_sha256: artifact_set_sha256(&cli, Some(&daemon), Some(&app)).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
-                ArtifactIdentity::capture(ArtifactRole::Daemon, &daemon).unwrap(),
+                ArtifactIdentity::capture(ArtifactRole::RetiredDaemon, &daemon).unwrap(),
                 ArtifactIdentity::capture(ArtifactRole::App, &app_executable).unwrap(),
             ],
         };
@@ -1856,6 +1991,7 @@ mod tests {
 
     #[test]
     fn settlement_commits_target_then_archives_immutable_receipt() {
+        let _lock = crate::journal::test_env_lock();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
@@ -1904,6 +2040,25 @@ mod tests {
         settle_switch(&root, &next, &later_active).unwrap();
         let restored = retained_development_home(&root, &development.installation_id).unwrap();
         assert_eq!(restored, development);
+        let previous_db = std::env::var_os("LF_DB_PATH");
+        std::env::set_var("LF_DB_PATH", &development.store);
+        let cli = &development
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .path;
+        let authorized = authorize(&root, cli, &ArtifactRole::Cli);
+        let resolved = selection_for_executable(&root, cli);
+        match previous_db {
+            Some(value) => std::env::set_var("LF_DB_PATH", value),
+            None => std::env::remove_var("LF_DB_PATH"),
+        }
+        assert_eq!(authorized.unwrap(), Some(development.clone()));
+        assert_eq!(resolved.unwrap(), Some(development.clone()));
+        let stores = owned_stores(&root).unwrap();
+        assert!(stores.contains(&published.store));
+        assert!(stores.contains(&development.store));
+        assert!(stores.contains(&later.store));
         assert_eq!(
             fs::read(&restored.store).unwrap(),
             b"retained chapter and Task history"

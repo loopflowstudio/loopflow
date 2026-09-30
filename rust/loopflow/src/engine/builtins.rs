@@ -4,7 +4,7 @@
 //! subdirectory and build.rs generates the HashMap entries.
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the speech vocabulary (`lf chat`).
+/// agent receives, including the Work and Session vocabulary.
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -191,18 +191,14 @@ mod tests {
 
     #[test]
     fn wave_model_is_embedded_in_prompts_and_docs() {
-        let update_wave = get_builtin_skill("update-wave").expect("update-wave prompt");
         let design = get_builtin_skill("design").expect("design prompt");
-        let scan_waves = get_builtin_skill("scan").expect("scan prompt");
+        let wave = get_builtin_skill("wave/operate").expect("Wave operation");
 
-        // The roadmap lives in Linear, reached via `lf pm` — no local N-*.md files.
-        assert!(update_wave.contains("lf pm"));
-        assert!(update_wave.contains("MEMORY.md"));
-        assert!(!update_wave.contains("1-fix-broken-build.md"));
-        assert!(design.contains("lf pm"));
+        // The roadmap lives in Linear, reached via `lf wave sync` — no local N-*.md files.
+        assert!(design.contains("lf wave status"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
-        assert!(scan_waves.contains("lf pm show"));
+        assert!(wave.contains("lf wave status"));
         assert!(WAVES_DOC.contains("GOAL.md"));
         assert!(WAVES_DOC.contains("Linear"));
         assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
@@ -231,7 +227,7 @@ mod tests {
         assert!(project.contains("a Met guardrail stays quiet until its alarm"));
         assert!(project.contains("intent graph, not a control plane"));
 
-        let task = normalize(get_builtin_skill("task/pursue").expect("task pursue"));
+        let task = normalize(get_builtin_skill("implement").expect("implementation"));
         assert!(task.contains("While building feature work, notice signals"));
         assert!(task.contains("otherwise leave the proposal for Wave sponsorship"));
         assert!(task.contains("Metric proposals are discoveries, not a completion quota"));
@@ -253,9 +249,9 @@ mod tests {
         for contract in [
             "Do not create a manifest, receipt, marker, or new planning state",
             "Keep that core in this Task",
-            "lf task start",
+            "lf task create --run",
             "--flow <chosen-flow>",
-            "lf task prepare <issue> --json",
+            "lf task checkout <issue> --json",
             "lf task run <issue> --flow <chosen-flow>",
             "Use the Flow the user selected",
         ] {
@@ -265,15 +261,7 @@ mod tests {
             );
         }
 
-        for name in [
-            "explore",
-            "refine",
-            "review-design",
-            "prompt",
-            "review-open-work",
-            "review",
-            "init",
-        ] {
+        for name in ["refine", "review-open-work", "init"] {
             let skill = get_builtin_skill(name).expect("builtin skill");
             assert!(
                 skill.contains("## Reviewer mode"),
@@ -293,19 +281,6 @@ mod tests {
             );
         }
 
-        let review_slice = get_builtin_skill("review-slice").expect("review-slice skill");
-        for evidence in [
-            "production-like path",
-            "Done when",
-            "Implemented behavior",
-            "complete diff",
-            "lf pr publish",
-        ] {
-            assert!(
-                review_slice.contains(evidence),
-                "review-slice omits {evidence:?} evidence"
-            );
-        }
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
             "human feedback, revised artifact references, and remaining",
@@ -330,14 +305,14 @@ mod tests {
 
         for command in [
             "lf auth status",
-            "lf route show",
+            "lf auth route show",
             "lf home id --json",
-            "lf ls --json",
-            "lf status <wave> --json",
+            "lf wave list --json",
+            "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
             "lf home observe <home-id>",
-            "lf home probe <wave> --json",
+            "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }
@@ -362,59 +337,33 @@ mod tests {
         let wave = get_builtin_skill("wave/operate").expect("wave operate");
         assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
-        assert!(wave.contains("Always launch work"));
+        assert!(wave.contains("Tasks progress independently"));
+        assert!(wave.contains("S5 · Identity"));
+        assert!(!wave.contains("lf loop"));
 
-        let project = get_builtin_skill("wave/operate").expect("project operate");
-        assert!(project.contains("lf task run <issue-id>"));
-        assert!(!project.contains("lf loop"));
-
-        let task = get_builtin_skill("task/pursue").expect("task pursue");
+        let task = get_builtin_skill("implement").expect("implementation");
         assert!(task.contains("second Task"));
-        assert!(task.contains("lf pr land"));
-        assert!(task.contains("pinned final flow"));
+        assert!(task.contains("Publication, landing and navigation belong to the caller"));
         assert!(!task.contains("lf pm task done"));
-        assert!(task.contains("lf pm task create"));
 
         assert!(get_builtin_flow("task").is_none());
-        assert!(get_builtin_flow("task-design")
-            .expect("Task first flow")
-            .contains("name: kickoff"));
         let first = get_builtin_flow("task-design").expect("Task first flow");
+        assert!(first.contains("name: kickoff"));
         assert_eq!(first.matches("human: true").count(), 1);
         assert!(first.contains("id: review_kickoff"));
         assert!(!get_builtin_flow("incident")
             .expect("incident first flow")
             .contains("human:"));
-        assert!(get_builtin_flow("slice")
+        assert!(get_builtin_flow("pursue")
             .expect("Task loop flow")
-            .contains("- review-slice"));
+            .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- op: pr land -c"));
+            .contains("- cmd: pr land -c"));
 
-        for wrapper in ["design", "ship-5whys", "wave"] {
+        for wrapper in ["design", "launch-plan", "ship-5whys", "wave"] {
             assert!(get_builtin_flow(wrapper).is_none());
         }
-
-        let launch = get_builtin_flow("launch-plan").expect("launch flow");
-        for step in [
-            "name: launch-plan",
-            "- implement",
-            "- compress",
-            "- gate",
-            "id: review_keystone_demo",
-            "- op: pr land -c",
-        ] {
-            assert!(launch.contains(step), "missing {step}");
-        }
-        assert!(
-            launch.find("- implement").unwrap() < launch.find("- gate").unwrap(),
-            "implementation and compression precede gate"
-        );
-        assert!(
-            launch.find("review_keystone_demo").unwrap() < launch.find("- op: pr land -c").unwrap(),
-            "no keystone can ship before demo acceptance"
-        );
     }
 
     #[test]
@@ -447,7 +396,7 @@ mod tests {
 
     #[test]
     fn task_design_and_multi_task_outputs_share_the_machine_contract() {
-        let clarify = get_builtin_skill("task/clarify").expect("task clarify");
+        let kickoff = get_builtin_skill("kickoff").expect("implementation plan");
         for requirement in [
             "User-visible outcome",
             "End-to-end proof",
@@ -458,13 +407,13 @@ mod tests {
             "Exclusions",
             "implementation receipts",
         ] {
-            assert!(clarify.contains(requirement));
+            assert!(kickoff.contains(requirement));
         }
 
-        for name in ["wave/operate", "scan", "assess", "wave-report"] {
+        for name in ["wave/operate", "wave-report"] {
             let skill = get_builtin_skill(name).expect("multi-Task output skill");
             assert!(skill.contains("lf roadmap"));
-            assert!(skill.contains("lf status"));
+            assert!(skill.contains("lf wave status"));
             assert!(skill.contains("task.identifier"));
             assert!(skill.contains("reference.issue_url"));
             assert!(skill.contains("active_pr.slug"));
@@ -475,17 +424,73 @@ mod tests {
     }
 
     #[test]
-    fn build_is_one_bounded_pass_without_delivery() {
-        let flow = get_builtin_flow("build").expect("build flow");
-        assert!(flow.contains("- kickoff"));
-        assert!(flow.contains("flow: code"));
-        assert!(flow.contains("- demo"));
-        assert!(!flow.contains("name: review-design"));
-        assert!(!flow.contains("feedback:"));
-        assert!(!flow.contains("loop:"));
-        assert!(!flow.contains("- gate"));
-        assert!(!flow.contains("deploy"));
-        assert!(!flow.contains("pr land"));
+    fn consolidated_catalog_removes_variants_without_aliases() {
+        for name in [
+            "restore",
+            "expand",
+            "integrate-upstream",
+            "ship-5whys",
+            "task/clarify",
+            "task/pursue",
+            "task/mutate",
+            "iterate",
+            "explore",
+            "scan",
+            "assess",
+            "mutate",
+            "review",
+            "vsm/operate",
+            "s2-scan",
+            "s2-assess",
+            "s3-scan",
+            "s3-assess",
+            "s4-scan",
+            "s4-assess",
+            "s5-scan",
+            "s5-assess",
+        ] {
+            assert!(get_builtin_skill(name).is_none(), "{name}");
+        }
+        for name in [
+            "build",
+            "slice",
+            "pair",
+            "design-and-ship",
+            "sync",
+            "launch-plan",
+            "garden",
+            "garden-act",
+            "build-or-silent",
+            "s1-build",
+            "govern-operations",
+            "govern-control",
+            "govern-coordination",
+            "govern-intelligence",
+            "govern-identity",
+        ] {
+            assert!(get_builtin_flow(name).is_none(), "{name}");
+        }
+        for name in [
+            "design",
+            "kickoff",
+            "debug",
+            "s1",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "reduce",
+            "polish",
+            "concept-review",
+            "review-design",
+            "research",
+            "qa",
+            "triage",
+            "gate",
+            "demo",
+        ] {
+            assert!(get_builtin_skill(name).is_some(), "{name}");
+        }
     }
 
     #[test]
@@ -551,7 +556,9 @@ mod tests {
     }
 
     #[test]
-    fn retired_export_memory_skill_is_not_registered() {
-        assert!(get_builtin_skill("export-memory").is_none());
+    fn retired_memory_skills_are_not_registered() {
+        for name in ["export-memory", "update-wave", "record-learnings"] {
+            assert!(get_builtin_skill(name).is_none(), "{name}");
+        }
     }
 }

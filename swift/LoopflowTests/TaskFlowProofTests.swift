@@ -28,14 +28,20 @@ struct TaskFlowTests {
             Issue.record("second snapshot is pinned"); return
         }
         #expect(running.returns.map(\.traversals) == [2, 0])
-        #expect(running.returns.map(\.decider) == ["3", "5"])
-        #expect(running.graph.steps.filter { $0.returnsTo == "1" }.map(\.key) == ["3", "5"])
+        #expect(running.returns.map(\.decider) == [3, 5])
+        #expect(running.graph.steps.filter { $0.returnsTo == 1 }.map(\.key) == [3, 5])
         #expect(snapshots[1].control(.start)?.unavailable != nil)
         #expect(snapshots[1].controls.map(\.kind) == [.start, .resume, .restart])
         #expect(snapshots[4].record == .finished(flow: "build"))
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("task_flow.json")) as? [[String: Any]])
         let record = try #require(missing[1]["record"] as? [String: Any])
+        var stringNode = record
+        stringNode["current"] = "2"
+        missing[1]["record"] = stringNode
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskFlowSnapshot].self, from: JSONSerialization.data(withJSONObject: missing))
+        }
         for field in ["returns", "iterations"] {
             var incomplete = record
             incomplete.removeValue(forKey: field)
@@ -48,6 +54,11 @@ struct TaskFlowTests {
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
         #expect(catalog.map(\.name) == ["feature", "broken"])
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
+        #expect(catalog[0].graph?.steps[0].sources == ["feature"])
+        let graph = try #require(catalog[0].graph)
+        let template = try #require(catalog[0].template)
+        #expect(FlowTemplateProjection(graph: graph, items: template.items,
+                                       expanded: ["group-0"]).graph == graph)
     }
 
     @Test("Template disclosure keeps repeated and empty groups, XOR paths and both returns")
@@ -57,17 +68,17 @@ struct TaskFlowTests {
         let template = try #require(entry.template)
         let graph = try #require(entry.graph)
         let folded = FlowTemplateProjection(graph: graph, items: template.items, expanded: [])
-        #expect(folded.graph.steps.map(\.key) == ["group-0", "group-1", "group-2", "2", "group-4"])
+        #expect(folded.graph.steps.map(\.key) == [8, 9, 10, 2, 12])
         #expect(folded.graph.steps[0].label == folded.graph.steps[1].label)
         #expect(folded.graph.steps[2].label.contains("0"))
         let returns = FlowTemplateView.spans(graph, projection: folded)
-        #expect(returns.map(\.decider) == ["4", "6"])
+        #expect(returns.map(\.decider) == [5, 7])
         #expect(returns.allSatisfy { $0.from == 4 && $0.to == 4 })
         let partial = FlowTemplateProjection(graph: graph, items: template.items, expanded: ["group-0", "group-4"])
-        #expect(partial.graph.steps.map(\.key) == ["0", "group-1", "group-2", "2", "3", "4", "5", "6"])
+        #expect(partial.graph.steps.map(\.key) == [0, 8, 9, 2, 4, 5, 6, 7])
         let all = FlowTemplateProjection(graph: graph, items: template.items, expanded: Set((0...4).map { "group-\($0)" }))
         #expect(all.graph == graph)
-        #expect(all.graph.node("2/fix/0")?.label == "implement")
+        #expect(all.graph.node(3)?.label == "implement")
 
         var missing = try #require(JSONSerialization.jsonObject(with: fixture("flow_template.json")) as? [String: Any])
         var body = try #require(missing["template"] as? [String: Any])
@@ -83,11 +94,11 @@ struct TaskFlowTests {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
         guard case .pinned(let human) = snapshots[2].record else { Issue.record("pinned"); return }
         let states = flowNodeStates(human.graph, pinned: human)
-        #expect(states["1"] == .completed && states["3"] == .completed)
-        #expect(states["4"] == .waitingForHuman)
+        #expect(states[1] == .completed && states[3] == .completed)
+        #expect(states[4] == .waitingForHuman)
         // The second decision is pending again in this pass; the router pends too.
-        #expect(states["5"] == .pending && states["6"] == .pending)
-        #expect(states["6/fix/0"] == .pending)
+        #expect(states[5] == .pending && states[6] == .pending)
+        #expect(states[7] == .pending)
         #expect(human.iterations == [[1, 1]])
         #expect(human.returns[1].traversals == 1)
         guard case .pinned(let running) = snapshots[1].record else { Issue.record("pinned"); return }
@@ -97,10 +108,40 @@ struct TaskFlowTests {
         #expect(running.returns.map(\.traversals) == [2, 0])
 
         guard case .pinned(let blocked) = snapshots[3].record else { Issue.record("pinned"); return }
-        #expect(flowNodeStates(blocked.graph, pinned: blocked)["3"] == .blocked)
+        #expect(flowNodeStates(blocked.graph, pinned: blocked)[3] == .blocked)
+        let stalledSnapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("task_flow_stalled.json"))
+        guard case .pinned(let stalled) = stalledSnapshot.record else { Issue.record("pinned"); return }
+        #expect(stalled.execution == .stalled)
+        #expect(flowNodeStates(stalled.graph, pinned: stalled)[0] == .stalled)
+        #expect(FlowPalette.describe(.stalled).contains("interrupt then resume"))
+        #expect(stalled.reason.contains("Session event 12"))
         // A preview only marks human boundaries.
         let preview = flowNodeStates(human.graph, pinned: nil)
-        #expect(preview["4"] == .pendingHuman && preview["1"] == .pending)
+        #expect(preview[4] == .pendingHuman && preview[1] == .pending)
+    }
+
+    @Test("Captured numeric IDs preserve nested containment and independent return counts")
+    func nestedNumericIdentity() throws {
+        let snapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("flow_numeric_nested.json"))
+        guard case .pinned(let pinned) = snapshot.record else { Issue.record("pinned"); return }
+        let graph = pinned.graph
+        #expect(graph.steps.map(\.key) == [0, 1, 9])
+        #expect(graph.node(5)?.label == "check")
+        #expect(graph.node(5)?.returnsTo == 4)
+        #expect(graph.node(6)?.returnsTo == 2)
+        #expect(graph.node(8)?.returnsTo == 7)
+        #expect(graph.node(9)?.returnsTo == 0)
+        #expect(graph.node(10) == nil)
+        let outer = try #require(graph.node(1))
+        #expect(outer.contains(5) && outer.contains(8) && !outer.contains(9))
+        #expect(outer.paths[0].steps.contains { $0.contains(5) })
+        #expect(!outer.paths[1].steps.contains { $0.contains(5) })
+        let states = flowNodeStates(graph, pinned: pinned)
+        #expect(states[1] == .running && states[3] == .running && states[5] == .running)
+        #expect(states[4] == .completed && states[7] == .pending && states[9] == .pending)
+        #expect(pinned.returns.map(\.decider) == [5, 6, 8, 9])
+        #expect(pinned.returns.map(\.traversals) == [2, 0, 0, 3])
+        #expect(pinned.iterations == [[3], [0], [2]])
     }
 
     @Test("Running status elapsed time and the two return ports")
@@ -154,7 +195,7 @@ struct TaskFlowProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))
@@ -173,7 +214,11 @@ struct TaskFlowProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         func find(_ id: String) throws -> InspectableView<ViewType.ClassifiedView> {
-            try view.inspect().find(viewWithAccessibilityIdentifier: id)
+            do {
+                return try view.inspect().find(viewWithAccessibilityIdentifier: id)
+            } catch {
+                throw RegistryQueryError("Missing \(id): \(error)")
+            }
         }
         func text(_ id: String) throws -> String { try find(id).text().string() }
 
@@ -187,7 +232,7 @@ struct TaskFlowProofTests {
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2")
         #expect((try? find("task-flow-iteration")) == nil, "a preview has no iteration")
         #expect((try? find("flow-node-4")) == nil, "composition starts folded")
-        try find("flow-node-group-0").button().tap()
+        try find("flow-node-9").button().tap()
         try await settle(window)
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
         try find("template-group-group-0").disclosureGroup().collapse()
@@ -284,9 +329,10 @@ struct TaskFlowProofTests {
                     try find("template-group-\(prefix)inner").disclosureGroup().expand()
                 } else { try group.collapse() }
                 try await settle(window)
-                for (number, key) in ["1", "2"].enumerated() {
-                    #expect(try text("task-flow-loop-\(prefix)\(key)") == "Loop \(number + 1)")
-                    try pressElement("flow-node-\(prefix)\(key)", in: window)
+                for (number, offset) in [1, 2].enumerated() {
+                    let key = (prefix.isEmpty ? 0 : 4) + offset
+                    #expect(try text("task-flow-loop-\(key)") == "Loop \(number + 1)")
+                    try pressElement("flow-node-\(key)", in: window)
                     try await settle(window)
                     let expected = prefix.isEmpty ? "implement" : "fix-implement"
                     let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
@@ -377,8 +423,8 @@ struct TaskFlowProofTests {
         // Running reads `● step · elapsed · provider`; the fixture's runtime record
         // dates from July, so only the fixed parts are pinned here.
         let running = try text("task-flow-status")
-        #expect(running.hasPrefix("review-slice · ") && running.hasSuffix(" · claude"), "was \(running)")
-        #expect(try find("flow-node-2").accessibilityLabel().string() == "review-slice, running")
+        #expect(running.hasPrefix("realign · ") && running.hasSuffix(" · claude"), "was \(running)")
+        #expect(try find("flow-node-2").accessibilityLabel().string() == "realign, running")
         #expect((try? find("task-flow-pause")) == nil)
         try captureIfRequested(window, name: "task-flow-running")
 
@@ -497,28 +543,28 @@ private actor FlowSource {
         func steps(_ prefix: String) -> [[String: Any]] {
             (0...2).map { index -> [String: Any] in
                 let target = prefix.isEmpty ? "implement" : "fix-implement"
-                return ["key": "\(prefix)\(index)", "id": NSNull(),
+                return ["key": (prefix.isEmpty ? 0 : 4) + index, "id": NSNull(),
                  "label": index == 0 ? target : "loop-decide", "kind": "skill",
-                 "human": false, "returns_to": index == 0 ? NSNull() : "\(prefix)0",
-                 "parents": ["feature"], "paths": []]
+                 "human": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
+                 "sources": ["feature"], "paths": []]
             }
         }
         func items(_ prefix: String) -> [[String: Any]] {
             [["kind": "group", "id": "\(prefix)outer", "name": "build", "items": [
                 ["kind": "group", "id": "\(prefix)inner", "name": "edit", "items": [
-                    ["kind": "node", "key": "\(prefix)0", "paths": [:]]
+                    ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 0, "paths": [:]]
                 ]],
                 ["kind": "group", "id": "\(prefix)empty", "name": "empty", "items": []]
             ]],
-             ["kind": "node", "key": "\(prefix)1", "paths": [:]],
-             ["kind": "node", "key": "\(prefix)2", "paths": [:]]]
+             ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 1, "paths": [:]],
+             ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 2, "paths": [:]]]
         }
         var nodes = steps("")
-        nodes.append(["key": "3", "id": NSNull(), "label": "xor-route", "kind": "xor",
-                      "human": false, "returns_to": NSNull(), "parents": ["feature"],
+        nodes.append(["key": 3, "id": NSNull(), "label": "xor-route", "kind": "xor",
+                      "human": false, "returns_to": NSNull(), "sources": ["feature"],
                       "paths": [["name": "fix", "description": "Repair", "steps": steps("3/fix/")]]])
         var tree = items("")
-        tree.append(["kind": "node", "key": "3", "paths": ["fix": items("3/fix/")]])
+        tree.append(["kind": "node", "key": 3, "paths": ["fix": items("3/fix/")]])
         entries[0]["graph"] = ["name": "feature", "steps": nodes]
         entries[0]["template"] = ["revision": "crossing-returns", "items": tree]
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
@@ -536,11 +582,11 @@ private actor FlowSource {
         switch (args.first, args.dropFirst().first) {
         case ("roadmap", _):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        case ("ls", _): return "[]"
+        case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return catalog
-        case ("task", "run"), ("task", "resume"):
+        case ("task", "run"):
             controls.append(args)
             return ""
         case ("task", "restart"):

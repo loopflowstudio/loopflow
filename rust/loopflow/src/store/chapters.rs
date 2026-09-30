@@ -1,30 +1,27 @@
 use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::work::chapter::{Chapter, ChapterId, TaskStartEvidence};
+use crate::ops::chapter::TaskStartEvidence;
 use crate::work::project::ProjectId;
 
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn chapter(
+    pub async fn projects_pending_adoption(
         &self,
         wave: &WaveId,
-        id: Option<&ChapterId>,
-    ) -> StoreResult<Option<Chapter>> {
+    ) -> StoreResult<Vec<(String, i64)>> {
         let wave = wave.clone();
-        let id = id.cloned();
-        run_sqlite(&self.sqlite, move |store| store.chapter(&wave, id.as_ref())).await
-    }
-
-    pub async fn chapters(&self, wave: &WaveId) -> StoreResult<Vec<Chapter>> {
-        let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.chapters(&wave)).await
-    }
-
-    pub async fn save_chapter(&self, chapter: &Chapter, activate: bool) -> StoreResult<()> {
-        let chapter = chapter.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.save_chapter(&chapter, activate)
+            store.projects_pending_adoption(&wave)
+        })
+        .await
+    }
+
+    pub async fn finish_project_adoption(&self, wave: &WaveId, project: &str) -> StoreResult<()> {
+        let wave = wave.clone();
+        let project = project.to_owned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.finish_project_adoption(&wave, &project)
         })
         .await
     }

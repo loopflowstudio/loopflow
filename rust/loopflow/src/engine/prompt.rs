@@ -392,7 +392,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
     Ok(PromptComponents {
         surface: opts.surface,
-        user_name: None,
+        user_name: crate::engine::config::participant_name()?,
         docs,
         diff,
         diff_files,
@@ -1483,22 +1483,16 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              ## Wave memory\n\n\
              Persistent memory at {}. Read it before every iteration; its current\n\
              contents, when any, ride this prompt's wave-memory section.\n\
-             Keep it compact enough to include every iteration: correct stale entries,\n\
-             add durable observations, and delete session-specific notes.\n\n\
-             Suggested sections — Patterns, Preferences, Learnings — but add your own as needed.\n\
+             Edit it through the ordinary repository workflow; no live Wave is required.\n\
+             `realign` reconciles memory with the plan and code. Keep durable observations,\n\
+             correct or remove stale entries, and drop session-specific notes. Use absolute dates.\n\n\
+             Organize as useful, for example:\n\
              - Patterns: codebase conventions, architecture, how things connect\n\
              - Preferences: user workflow, tool choices, communication norms\n\
              - Learnings: what worked, what failed, surprises\n\n\
-             What belongs elsewhere:\n\
-             - architectural decisions → wave docs or explicit docs\n\
-             - design rationale → scratch/ or wave plan\n\
-             - session-specific notes → nowhere (let them die)\n\n\
-             How to update:\n\
-             - Edit the file through the ordinary repository workflow; no live Wave is required.\n\
-             - `update-wave` owns deliberate end-of-work curation.\n\
-             - Correct or remove entries that are wrong or stale.\n\
-             - Use absolute dates, not \"today\" or \"recently\".\n\
-             - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
+             Keep memory compact enough for every iteration. Put architectural decisions\n\
+             in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.\n\
+             As sections grow, promote stable entries to wave docs or explicit docs and trim.\n\
              </lf:wave>",
             wave, wave, memory_path
         ));
@@ -1719,7 +1713,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
+/// File format: `{timestamp}-{run_id}-{sources}.{skill}.md`, with the
 /// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
@@ -1728,7 +1722,7 @@ pub fn write_prompt_log(
     repo_root: &Path,
     prompt: &str,
     skill_name: &str,
-    flow_parents: Option<&[String]>,
+    sources: Option<&[String]>,
 ) -> Result<PathBuf, CoreError> {
     let prompts_dir = repo_root.join(".lf/prompts");
     fs::create_dir_all(&prompts_dir)?;
@@ -1737,9 +1731,9 @@ pub fn write_prompt_log(
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
     // Replace / with . so namespaced skills (e.g., garden/scan) don't create subdirectories.
     let safe_skill = skill_name.replace('/', ".");
-    let name_part = match flow_parents {
-        Some(parents) if !parents.is_empty() => {
-            format!("{}.{}", parents.join("."), safe_skill)
+    let name_part = match sources {
+        Some(sources) if !sources.is_empty() => {
+            format!("{}.{}", sources.join("."), safe_skill)
         }
         _ => safe_skill,
     };
@@ -1946,7 +1940,7 @@ mod tests {
     #[test]
     fn assembled_prompts_deliver_procedures_to_the_owning_skill() {
         let repo = init_repo();
-        for name in ["implement", "debug", "loopflow", "wave/operate"] {
+        for name in ["implement", "debug", "unbreak", "loopflow", "wave/operate"] {
             let components = gather_context(&GatherContextOpts {
                 repo_root: repo.path().to_path_buf(),
                 skill: Some(name.to_string()),
@@ -1964,10 +1958,11 @@ mod tests {
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
-            for procedure in ["lf task restart", "lf work place", "lf ps --json"] {
+            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
+            for procedure in ["lf task restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
-                    orchestrates,
+                    name == "loopflow",
                     "{name}: {procedure}"
                 );
             }
@@ -2838,7 +2833,7 @@ mod tests {
     }
 
     #[test]
-    fn write_prompt_log_with_flow_parents() {
+    fn write_prompt_log_with_sources() {
         let repo = init_repo();
         let path = write_prompt_log(
             repo.path(),

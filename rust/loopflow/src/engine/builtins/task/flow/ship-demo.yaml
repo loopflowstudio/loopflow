@@ -1,8 +1,7 @@
 # Prove the result, review the demo together, then settle the Task.
-- task-gate
+- gate
 - step:
     id: review_demo
     name: demo
     human: true
-- record-learnings
-- op: pr land -c
+- cmd: pr land -c

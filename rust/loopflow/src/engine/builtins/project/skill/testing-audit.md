@@ -11,7 +11,7 @@ where agents or developers repeatedly pay for the same proof.
 ## Orientation
 
 Read the repository guidance, test entrypoints, CI workflows, release gates,
-review-slice/production checks, and any local run or trace ledger. Keep raw prompts,
+realign/production checks, and any local run or trace ledger. Keep raw prompts,
 commands, output, credentials, and customer data private; reports contain only
 aggregates and named repository artifacts.
 
@@ -48,7 +48,7 @@ Write findings and the change design to `scratch/testing-audit.md`.
      or implementation structure unless they protect a concrete safety rule.
    - Replace broad inner-loop runs with focused behavior, affected-suite gates,
      and exact-tree evidence reuse.
-   - Give implement, compress, rebase, gate, CI/release, and review-slice distinct
+   - Give implement, compress, rebase, gate, CI/release, and realign distinct
      proof ownership so a phase transition does not trigger a redundant run.
    - Prefer real configured/deployed product proof when it is safe and
      observable. Never mutate production solely for an audit or review.

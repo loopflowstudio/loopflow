@@ -50,18 +50,18 @@ struct SessionChromeProofTests {
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
-                                    "step": "review-slice", "occurrence": "current", "node": "5", "iterations": [[2, 1]]]
+                                    "step": "realign", "occurrence": "current", "node": 5, "iterations": [[2, 1]]]
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
             case ("roadmap", _): return roadmap
-            case ("ls", _): return "[]"
+            case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return sessions
+            case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
         }
@@ -90,14 +90,32 @@ struct SessionChromeProofTests {
         #expect(throws: Never.self, "membership text") {
             let label = try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button()
                 .labelView().text().string()
-            #expect(label.contains("feature / review-slice"))
+            #expect(label.contains("feature / realign"))
         }
-        #expect(throws: Never.self, "worktree chip") {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+        #expect(throws: Never.self, "Session worktree location") {
+            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+                .menu().labelView().find(text: "loopflow")
+            #expect(try location.string() == "loopflow")
+        }
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
         }
         #expect(throws: Never.self, "complete") {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
         }
+
+        model.navigation.selectedSessionId = nil
+        try await settle(window)
+        #expect(throws: Never.self, "Task-only worktree location") {
+            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+                .text().string()
+            #expect(location == "loopflow")
+        }
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+        }
+        model.navigation.selectedSessionId = "release"
+        try await settle(window)
 
         // Two panes: a strip each, no trio at rest, none on the unfocused pane's hover.
         for pane in panes {
@@ -157,8 +175,8 @@ struct SessionChromeProofTests {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
-            case "ls": return "[]"
-            case "session": return "[]"
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
@@ -241,7 +259,7 @@ struct SessionChromeProofTests {
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
             if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }
@@ -252,7 +270,7 @@ struct SessionChromeProofTests {
             if args.first == "roadmap" { return roadmap }
             if args.first == "session" { return try await inventory.read() }
             if args.first == "flow" { return flows }
-            if args.first == "ls" { return "[]" }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
         }
         let model = PodiumModel(query: query, repoPath: repo)
@@ -455,8 +473,8 @@ struct SessionChromeProofTests {
             fixtures.appendingPathComponent("task_flow.json"))) as? [[String: Any]])
         let pinned = try #require(flows[1]["record"] as? [String: Any])
         let invocation = try #require(pinned["invocation_id"] as? String)
-        var plan = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
+        var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
+            fixtures.appendingPathComponent("roadmap_snapshot.json")), at: "/src/loopflow")) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])
         let waveIndex = try #require(waves.firstIndex { wave in
             let tasks = wave["tasks"] as? [String: Any]
@@ -512,7 +530,7 @@ private actor PaletteSessionInventory {
     func fail() { failed = true }
     func read() throws -> String {
         if failed { throw RegistryQueryError("Session read unavailable") }
-        return value
+        return #"{"entries":\#(value),"next":null}"#
     }
 }
 

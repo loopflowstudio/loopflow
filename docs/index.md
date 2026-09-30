@@ -1,63 +1,53 @@
 # Loopflow
 
-Run one useful prompt first:
-
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
-lf debug -c        # copy an error to the clipboard, watch it fix
+lf debug -c
 ```
 
-That command assembles the skill, repository guidance, scratch notes, and
-clipboard into one prompt. It launches the configured provider and writes one
-Home-local Run record. The Run records what happened; it does not reserve the
-repository, control a Wave, or become planning state.
+A software instrument. Give an agent a task, keep its conversation, and resume
+captured work when a command stops. Loopflow keeps the command's result, the
+agent's history and the Flow's progress separate, so each answers one question.
 
-The same building block runs **Waves**: persistent agents that coordinate
-chapter plans and Tasks, remember what they learn, and stay steerable.
-There is no Loopflow server at the center. Repo files hold authored behavior;
-Linear and GitHub hold shared coordination and delivery facts; each Home keeps
-its local execution records. `lf ssh` runs the same local commands on another
-Home.
+Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+or [Codex](https://github.com/openai/codex), which have their own cost.
 
-## Build outward
-
-| Add this | When you need it | Truth lives in |
-|---|---|---|
-| **Skill** | One repeatable agent action | `.lf/skills/*.md` |
-| **Flow** | Several bounded actions in order | `.lf/flows/*.yaml` |
-| **Wave** | A durable goal, memory, cadence, and project selection | `wave/<name>/` plus local placement |
-| **Project** | A measured bet with KRs | Linear |
-| **Task** | One concrete change in its own worktree | Linear, Git, and GitHub |
-| **Run** | Evidence from one harness launch | `$LF_HOME/runs/` on the executing Home |
-
-Each layer owns one kind of fact. None needs a universal current execution
-record to coordinate the others.
-
-Start a Wave after authoring `wave/engbot/GOAL.md`:
+## The pieces
 
 ```bash
-lf start engbot
-lf --wave <wave> wave/operate "ship the parser fix first"
-lf status engbot
-lf stop engbot
+lf -b implement
+lf session list --interactive false --json
+lf session connect SESSION
+lf task run INF-123
 ```
 
-**Loopflow** (macOS) presents the same conversation and work map. It is a
-client of the same local `lf --json` reads, not another source of truth.
+A Skill supplies instructions; a Flow composes skills, mechanical operations and
+reviews. A Task owns one change, its checkout and PRs. A Wave keeps the objective
+and memory; its current Linear Project holds the plan and default Flow.
+
+Exec records an actual lf command process. AgentSession keeps the conversation,
+including headless work. FlowSession preserves a captured Flow and consumes its
+exact boundary results. A conversation can outlive its command, and a completed
+command can leave a Flow waiting for review.
+
+Read the [contract and cutover status](architecture-reference.md#cutover-status)
+for the accepted model and remaining implementation, or the [Glossary](glossary.md)
+for a term. The Mac app and CLI read the same owners.
 
 ## Read by area
 
-| Where you are | What to read |
+| You want to | Read |
 |---|---|
-| Just installed, want to try it | [Get Started](getting-started.md) |
-| Automating with a persistent agent | [Waves](waves.md) |
-| Writing skills, flows, and goals | [Authoring](authoring.md) |
-| Writing an agent that drives other agents | [The Agent API](agent-api.md) |
-| Watching and steering many agents | [Conducting](conducting.md) |
-| Looking up a command | [`lf` reference](lf.md) |
+| Install it and try one piece of work | [Get Started](getting-started.md) |
+| See what got done and what needs you | [Conducting](conducting.md) |
+| Give it a goal to keep working on | [Waves](waves.md) |
+| Change how it works | [Authoring](authoring.md) |
+| Drive it from another AI agent | [The Agent API](agent-api.md) |
+| Look up a word | [Glossary](glossary.md) |
+| Look up a command | [`lf` reference](lf.md) |
 
-## Shape one run
+## Shape one conversation
 
 A skill is a markdown file that tells the coding agent what to do:
 
@@ -89,7 +79,7 @@ lf ship-api
 ```
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
-`gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/` override
+`gate`, `qa`, the `code` flow, and more. Repo skills in `.lf/skills/` override
 and extend them. [Authoring](authoring.md) starts with a working skill and then
 adds flow and goal structure only where it earns its place.
 
@@ -120,7 +110,7 @@ Do not take the first N commits and call that the history.
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)
 ~/.lf/                    # Global config, skills, and the local store
-  runs/                   # Home-local append-only launch evidence
+  loopflow.db             # Local identity and execution history
 ```
 
 `scratch/` dies with the PR; `wave/` lives forever. Design docs go in
@@ -132,7 +122,7 @@ Every documentation URL serves HTML. The reviewed Markdown source remains
 available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is
-[/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched Run you already
+[/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched conversation you already
 carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Next
@@ -141,4 +131,4 @@ carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Reference
 
-[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)
+[Glossary](glossary.md) · [`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)

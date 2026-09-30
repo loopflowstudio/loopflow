@@ -46,6 +46,8 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
 /// reports an already-open PR, so `land` finds a PR to finalize without
 /// creating one.
 fn gh_open_pr_script(log_path: &str) -> String {
+    let unarmed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(925, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 auto_state="{log_path}.auto"
@@ -59,7 +61,7 @@ if [ "$1 $2" = "pr list" ]; then
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
-  if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+  if [ -f "$auto_state" ]; then echo '{armed}'; else echo '{unarmed}'; fi
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
@@ -76,6 +78,7 @@ exit 0
 }
 
 fn gh_auto_enabled_script(log_path: &str) -> String {
+    let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
         r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -83,7 +86,7 @@ if [ "$1" = "--version" ]; then
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "api graphql" ]; then
-  echo 'true'
+  echo '{armed}'
   exit 0
 fi
 if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
@@ -470,6 +473,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     create_or_update_pr(
         repo.path(),
         &PrOptions {
+            draft: false,
             title: Some("publish heal".to_string()),
             body: Some("proof body".to_string()),
             agent: None,
@@ -492,6 +496,13 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
         pr.base_commit, stale_base,
         "publication must not advance the recorded integration base"
     );
+    let publication = pr.publication.as_ref().expect("adopted publication");
+    assert_eq!(publication.github.as_ref().unwrap().number, 925);
+    assert_eq!(
+        publication.presentation.as_ref().unwrap().head_sha,
+        before_publish
+    );
+    assert!(publication.merge.is_none());
     let files = git_out(
         &repo,
         &["diff", "--name-only", &format!("{}..HEAD", pr.base_commit)],

@@ -155,10 +155,8 @@ main() {
   tar -xzf "$tarball" -C "$tmpdir"
 
   src="$tmpdir/lf"
-  daemon_src="$tmpdir/lfd"
   dst="$install_dir/lf"
-  daemon_dst="$install_dir/lfd"
-  chmod +x "$src" "$daemon_src"
+  chmod +x "$src"
   app_source=""
   if [ "$(uname -s)" = "Darwin" ] && [ "$cli_only" != "1" ]; then
     applications_dir="${LF_APPLICATIONS_DIR:-/Applications}"
@@ -186,8 +184,6 @@ main() {
     spctl --assess --type execute "$app_source"
     "$src" install promote \
       --cli-target "$dst" \
-      --daemon-source "$daemon_src" \
-      --daemon-target "$daemon_dst" \
       --app-source "$app_source" \
       --app-target "$applications_dir/Loopflow.app" \
       --legacy-app-target "$applications_dir/Concerto.app" \
@@ -195,12 +191,10 @@ main() {
   else
     "$src" install promote \
       --cli-target "$dst" \
-      --daemon-source "$daemon_src" \
-      --daemon-target "$daemon_dst" \
       --sync-skills
   fi
 
-  echo "Installed to $install_dir/lf and $install_dir/lfd"
+  echo "Installed to $install_dir/lf"
 
   case ":$PATH:" in
     *":$install_dir:"*) ;;

@@ -101,6 +101,19 @@ enum WorkspaceTone {
     }
 }
 
+extension TaskFlowExecution {
+    /// Shared by Flow status, plan chips and navigation dots. Quiet states have no chip.
+    var presentation: (label: String?, tone: WorkspaceTone) {
+        switch self {
+        case .running, .starting: ("Running", .running)
+        case .human: ("Your review", .human)
+        case .blocked: ("Blocked", .blocked)
+        case .stalled: ("Stalled", .blocked)
+        case .idle, .unknown: (nil, .stopped)
+        }
+    }
+}
+
 extension Color {
     /// Resolves against the view's effective appearance, so one workspace
     /// color serves the light and dark palettes.

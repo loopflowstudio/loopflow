@@ -95,7 +95,7 @@ can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker
 inline.
 
-`lf task`, `lf wave`, and `lf pm` are orchestration tools. Use
+`lf task`, `lf wave`, and `lf repo` are orchestration tools. Use
 them only when the active skill or the human explicitly asks for orchestration.
 Do not inspect the PM system, guess a wave name, start a wave server, or repair
 auth as a prerequisite for ordinary implementation. If explicitly requested
@@ -103,7 +103,7 @@ orchestration is unavailable, report the exact blocker once and continue inline
 whenever the seed remains computable.
 
 A one-shot operation is a direct skill or flow run. Durable delegated work
-starts from an existing Linear task with `lf task prepare <issue-id>`; use
+starts from an existing Linear task with `lf task checkout <issue-id>`; use
 `lf task run <issue-id>` when Loopflow should pursue its declared Flow end to
 end.
 When dependent work must begin before another Task PR merges, start a separate
@@ -131,12 +131,12 @@ When the human asks about Loopflow state, use the shared read surfaces instead
 of reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf ls --json              # every durable Wave and its Home/runtime evidence
-lf status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
+lf wave list --json              # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
-`lf status` is the focused operational view. `lf roadmap` is the planning
+`lf wave status` is the focused operational view. `lf roadmap` is the planning
 overlay, not a second runtime model.
 
 ## Place And Run
@@ -148,11 +148,10 @@ moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf work place wave <wave-id> <home-id>          # change durable placement
-lf start <wave>                                 # start it on this machine
-lf stop <wave>                                  # stop it on this machine
-lf ssh <home-id> status <wave> --json           # inspect it on that Home
-lf ssh <home-id> start <wave>                   # start it on that Home
+lf wave place <wave-id> <home-id>          # change durable placement
+lf chat --follow -w <wave>                       # connect to chat
+lf ssh <home-id> wave status <wave> --json           # inspect it on that Home
+lf ssh <home-id> chat --follow -w <wave>         # connect on that Home
 ```
 
 Use `--as task:...` or `--as wave:...` with a named
@@ -172,7 +171,7 @@ on their machine.
 Run a bounded skill or flow with an existing Task or Wave as its subject:
 
 ```bash
-lf task prepare LOO-267
+lf task checkout LOO-267
 lf --task LOO-267 design "Revise the discovery design"
 lf --task LOO-267 code "Implement the accepted slice"
 lf --task LOO-267 research \
@@ -183,7 +182,7 @@ lf --wave context wave/operate \
   "Reconcile the KRs with the current evidence"
 ```
 
-`lf task prepare` ensures tracked Task Work, its one worktree, and serial PR
+`lf task checkout` ensures tracked Task Work, its one worktree, and serial PR
 identity without starting Task execution. `--task`
 and `--wave` run the requested skill or flow about the most specific
 selected Work. A Task implies its Wave and resolves the current chapter internally.
@@ -250,8 +249,8 @@ releases the caller with that summary. Declared Task FlowSteps use the same
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
-curated rather than appending a transcript. `update-wave` owns deliberate
-end-of-work memory curation; no live Wave is required.
+curated rather than appending a transcript. `realign` reconciles memory with
+the plan and code; no live Wave is required.
 
 `lf chat` is the User conversation surface. `lf task steer` posts a Linear Task
 comment; direct Linear comments also reach the advancing worker. Steering does
@@ -316,7 +315,6 @@ If no human authority is required, record a material assumption in
 `scratch/questions.md` and proceed with the simpler safe choice. Do not stop.
 
 No rendering environment. Output is logged, not displayed.
-
 
 Direction for this work.
 

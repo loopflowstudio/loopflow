@@ -2,58 +2,29 @@
 
 use std::time::Duration;
 
-use crate::child::ChildRef;
-use crate::durable::{AbandonReceipt, WorkRef};
+use crate::durable::WorkRef;
 use crate::store::SharedStore;
-use crate::work::task::Task;
-
-use super::{OpsError, OpsResult};
 
 pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkControlReceipt {
-    Steer { comment_id: String },
     Interrupt { work: WorkRef },
-    Resume { work: WorkRef },
-    Abandon { receipt: AbandonReceipt },
 }
 
 impl WorkControlReceipt {
     pub fn label(&self) -> String {
         match self {
-            Self::Steer { comment_id } => comment_id.clone(),
             Self::Interrupt { work } => work.id().to_string(),
-            Self::Resume { work } => work.id().to_string(),
-            Self::Abandon { receipt } => receipt.work.id().to_string(),
         }
     }
 
     pub fn action(&self) -> &'static str {
         match self {
-            Self::Steer { .. } => "posted to Linear",
             Self::Interrupt { .. } => "interrupted",
-            Self::Resume { .. } => "resumed",
-            Self::Abandon { .. } => "abandoned",
         }
     }
-}
-
-pub(crate) async fn resume_task(store: &SharedStore, mut task: Task) -> OpsResult<WorkRef> {
-    let label = format!("Task {}", task.plan.identifier);
-    if let Some(intent) = &task.abandon_intent {
-        return Err(child_error(format!(
-            "{label} is being abandoned: {}",
-            intent.reason
-        )));
-    }
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(child_error)?;
-    super::task::resume_inactive_process(store, &mut task).await?;
-    Ok(work)
 }
 
 /// Inject steer comments newer than `*cursor` into the live provider turn. A
@@ -118,8 +89,4 @@ pub(crate) async fn observe_interrupt(
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "failed to read interrupt requests"),
     }
-}
-
-fn child_error(error: impl std::fmt::Display) -> OpsError {
-    OpsError::Message(error.to_string())
 }

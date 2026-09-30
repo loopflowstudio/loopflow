@@ -2,13 +2,8 @@
 import SwiftUI
 import Loopflow
 
-struct WaveComposerPrefill: Equatable {
-    let id: UUID
-    let text: String
-}
 
 struct WaveWorkSelection: Equatable {
-    let kind: ChildActivitySubject
     let id: String
 }
 
@@ -18,7 +13,7 @@ struct WaveDetailReading {
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
-        return WavePlan(objective: snapshot.workMap.objective, chapter: snapshot.workMap.chapter)
+        return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
     }
 
     mutating func update(_ snapshot: WaveDetailSnapshot) {
@@ -37,9 +32,7 @@ struct WaveDetailReading {
     }
 }
 
-/// One Wave surface: chapter plan and Tasks beside the durable conversation.
-/// `lf status` supplies the work map; the Wave listener streams ordered chat and
-/// child activity from its journal.
+/// The Wave's chapter plan, Tasks and metrics, supplied by `lf wave status`.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
@@ -49,14 +42,13 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var showHistory = false
     @State private var historyReference: String?
-    @State private var prefill: WaveComposerPrefill?
     @State private var workRefresh: UInt64 = 0
     @StateObject private var terminalStore = TaskTerminalStore()
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            Button("Chapter history") { showHistory = true }.padding(.bottom, 8)
+            Button("Project history") { showHistory = true }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -65,40 +57,19 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     selection: $selection,
                     refreshSignal: workRefresh,
-                    onTellWave: tellWave,
+
                     terminalStore: terminalStore
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
 
-                WaveChatView(
-                    repoPath: repoPath,
-                    waveName: wave.name,
-                    prefill: prefill,
-                    onSelectChild: { reference in
-                        if reference.kind == .project {
-                            historyReference = reference.id
-                            if wave.plan?.chapter?.sourceProjectId != reference.id && wave.plan?.chapter?.sourceProjectSlug != reference.id && wave.plan?.chapter?.sourceWorkId != reference.id { showHistory = true }
-                            selection = nil
-                        } else { selection = reference }
-                    },
-                    onChildActivity: { workRefresh &+= 1 }
-                )
-                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+
             }
         }
         .sheet(isPresented: $showHistory) {
-            ChapterHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
+            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
         }
     }
 
-    private func tellWave(_ selection: WaveWorkSelection) {
-        self.selection = selection
-        let noun = "Task"
-        prefill = WaveComposerPrefill(
-            id: UUID(),
-            text: "Regarding \(noun) \(selection.id): "
-        )
-    }
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
@@ -131,7 +102,6 @@ private struct WavePlanView: View {
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let refreshSignal: UInt64
-    let onTellWave: (WaveWorkSelection) -> Void
     @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
@@ -158,8 +128,6 @@ private struct WavePlanView: View {
                     WaveWorkInspector(
                         selection: selection,
                         workMap: workMap,
-                        repoPath: repoPath,
-                        onTellWave: onTellWave,
                         terminalStore: terminalStore
                     )
                 }
@@ -234,7 +202,7 @@ private struct WavePlanView: View {
 
     private var chapterAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let chapter = displayedPlan.chapter { WaveChapterView(chapter: chapter) }
+            if let chapter = displayedPlan.currentProject { WaveChapterView(chapter: chapter) }
             Text("Tasks").font(Typography.sectionTitle(17))
             if isAwaitingDetail {
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -366,10 +334,10 @@ struct WaveMetricPortfolioView: View {
                     VStack(spacing: 0) {
                         WaveMetricTableHeader()
                         ForEach(official) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: false)
+                            WaveMetricTableRow(metric: metric, candidate: false, targetUnavailable: presentation.targetUnavailable(for: metric))
                         }
                         ForEach(candidates) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: true)
+                            WaveMetricTableRow(metric: metric, candidate: true, targetUnavailable: presentation.targetUnavailable(for: metric))
                         }
                     }
                     .workspacePanel()
@@ -448,11 +416,12 @@ private struct WaveMetricTableHeader: View {
 private struct WaveMetricTableRow: View {
     let metric: MetricReading
     let candidate: Bool
+    let targetUnavailable: Bool
 
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave")
+        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: targetUnavailable)
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -516,7 +485,13 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let targetedCount: Int
     let requiresWorkCount: Int
     let contractIssueCount: Int
-    let chapterUnavailable: Bool
+    private let unavailableWaves: Set<String>
+
+    var chapterUnavailable: Bool { !unavailableWaves.isEmpty }
+
+    func targetUnavailable(for metric: MetricReading) -> Bool {
+        unavailableWaves.contains(metric.identity.waveId)
+    }
 
     init(portfolio: MetricPortfolio) {
         let official = portfolio.metrics.filter { $0.stage == .graduated }
@@ -526,10 +501,10 @@ struct WaveMetricPortfolioPresentation: Equatable {
         holdingCount = official.count { $0.target != nil && $0.evidence.isHealthy }
         requiresWorkCount = targetedCount - holdingCount
         contractIssueCount = portfolio.contractIssues.count
-        chapterUnavailable = portfolio.metrics.isEmpty && portfolio.contractIssues.contains {
-            if case .chapterUnavailable = $0 { return true }
-            return false
-        }
+        unavailableWaves = Set(portfolio.contractIssues.compactMap {
+            if case let .chapterUnavailable(waveId, _) = $0 { return waveId }
+            return nil
+        })
     }
 
     var headline: String {
@@ -560,14 +535,15 @@ struct WaveMetricRowPresentation: Equatable {
     let freshness: String
     let reason: String?
 
-    init(metric: MetricReading, owner: String) {
+    init(metric: MetricReading, owner: String, targetUnavailable: Bool) {
         name = metric.name
         description = metric.description
         state = metric.evidence.label
         self.owner = owner
         instrumentState = metric.instrumented ? "Instrumented" : "Awaiting instrument"
         value = metric.evidence.value.map { metric.format($0) } ?? "—"
-        target = metric.target?.display(unit: metric.unit) ?? "unset for this chapter"
+        target = targetUnavailable ? "unavailable for this chapter"
+            : metric.target?.display(unit: metric.unit) ?? "unset for this chapter"
         window = metric.window
         freshness = metric.freshness.summary
         reason = metric.evidence.reason
@@ -671,7 +647,8 @@ private extension MetricEvidence {
 private extension MetricUnknownCause {
     var value: Double? {
         switch self {
-        case let .incomplete(value, _, _),
+        case let .targetUnavailable(value, _, _),
+             let .incomplete(value, _, _),
              let .windowMismatch(value, _, _),
              let .staleObservation(value, _, _): return value
         case .never, .revisionMismatch, .staleUnavailable: return nil
@@ -681,6 +658,7 @@ private extension MetricUnknownCause {
     var summary: String {
         switch self {
         case .never: return "No observation has arrived."
+        case .targetUnavailable: return "Chapter target planning is unavailable."
         case let .revisionMismatch(expected, observed, sourceTime):
             return "Evidence at \(sourceTime) measured revision \(observed), not \(expected)."
         case .incomplete: return "The latest source window is incomplete."
@@ -751,20 +729,18 @@ private struct WaveTaskWorkView: View {
         .contentShape(Rectangle())
         .accessibilityIdentifier("wave-task")
         .onTapGesture {
-            selection = WaveWorkSelection(kind: .task, id: task.task.identifier)
+            selection = WaveWorkSelection(id: task.task.identifier)
         }
     }
 
     private var isSelected: Bool {
-        selection == WaveWorkSelection(kind: .task, id: task.task.identifier)
+        selection == WaveWorkSelection(id: task.task.identifier)
     }
 }
 
 private struct WaveWorkInspector: View {
     let selection: WaveWorkSelection
     let workMap: WaveWorkMap
-    let repoPath: String
-    let onTellWave: (WaveWorkSelection) -> Void
     @ObservedObject var terminalStore: TaskTerminalStore
 
     @Environment(\.palette) private var palette
@@ -777,9 +753,6 @@ private struct WaveWorkInspector: View {
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 Spacer()
-                Button("Tell Wave about this") { onTellWave(selection) }
-                    .buttonStyle(.borderless)
-                    .font(Typography.caption(10))
             }
             if let task {
                 Text("\(task.task.identifier) · \(task.task.name)")
@@ -809,7 +782,7 @@ private struct WaveWorkInspector: View {
                     task: task.task,
                     reference: task.reference,
                     runtime: task.runtime,
-                    repoPath: repoPath,
+                    prURL: task.prs.first { $0.id == task.activePr }?.publication?.github?.url,
                     terminalStore: terminalStore,
                     initialSection: .changes
                 )
@@ -818,7 +791,6 @@ private struct WaveWorkInspector: View {
     }
 
     private var task: WaveTaskWork? {
-        guard selection.kind == .task else { return nil }
         return workMap.tasks.items
             .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
     }
@@ -891,7 +863,7 @@ private struct PrLink: View {
 }
 
 struct WaveChapterView: View {
-    let chapter: ChapterSummary
+    let chapter: ProjectPlanningSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -912,10 +884,7 @@ struct WaveChapterView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-            if chapter.phase != "complete" {
-                Text("Chapter transition in progress").foregroundStyle(Color.statusWarning)
-            }
-            if let error = chapter.error { Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled) }
+
         }.accessibilityIdentifier("wave-chapter")
     }
 }

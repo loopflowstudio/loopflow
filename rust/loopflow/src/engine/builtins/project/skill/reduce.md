@@ -56,7 +56,7 @@ The question isn't "what's messy?" but "what would change if we rebuilt around w
 ## What to skip
 
 - Performance issues (different concern)
-- Missing features (that's expand, not reduce)
+- Missing features unrelated to simplifying the existing system
 - Style inconsistencies (that's polish)
 - Complexity that matches actual product complexity
 

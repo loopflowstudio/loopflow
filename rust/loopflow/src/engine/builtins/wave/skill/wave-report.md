@@ -73,7 +73,7 @@ between items.
 Three sources write `needs:`:
 - Users, when they know the dependency up front
 - Build agents, when they hit a wall during implementation
-- The garden, when it keeps rediscovering the same blocking pattern
+- Wave or repository operation, when it keeps rediscovering the same blocking pattern
 
 Gather:
 - `**Needs:**` declarations on wave items — the primary signal
@@ -91,7 +91,7 @@ Interpret:
   under more pressure than one with zero downstream blockers.
 - Area overlap without explicit triggers or `needs:` means
   uncoordinated coupling — potential merge conflict territory.
-- When the garden discovers a dependency that isn't declared, propose
+- When Wave or repository operation discovers a dependency that isn't declared, propose
   adding `needs:` to the item. Sensed first, declared when confirmed.
 
 ### 3. Design debt
@@ -186,7 +186,7 @@ Interpret:
 ## Task references
 
 When the report names more than one Task, read `lf roadmap --wave <wave>
---json` for plan-wide rows and `lf status <wave> --json` for live execution.
+--json` for plan-wide rows and `lf wave status <wave> --json` for live execution.
 Render operational Task lists with the shared reference:
 
 ```markdown

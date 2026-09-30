@@ -1,5 +1,7 @@
 //! Public commands must acquire only the repository context they actually use.
 
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -33,6 +35,103 @@ fn success(output: Output) -> String {
 }
 
 #[test]
+fn explicit_branch_data_overrides_inherited_observation_and_run_context() {
+    let home = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let store_path = home.path().join(".lf/loopflow.db");
+    SqliteStore::new(&store_path).unwrap();
+    let source_db = source.path().join("loopflow.db");
+    fs::write(&source_db, b"source must not be opened").unwrap();
+    let marker = loopflow::durable::HomeId::new();
+    for args in [
+        vec![
+            "home",
+            "observe",
+            marker.as_str(),
+            "ssh://proof@example.invalid",
+            "--json",
+        ],
+        vec!["ps", "--json"],
+    ] {
+        let output = command(home.path(), home.path(), &args)
+            .env_remove("LF_DB_PATH")
+            .env("LF_CONTROL_HOME", source.path())
+            .env("LF_CONTROL_DB_PATH", &source_db)
+            .env("LF_RUN_DIR", source.path().join("runs/parent"))
+            .env("LF_RUN_ID", "run_parent")
+            .output()
+            .unwrap();
+        success(output);
+    }
+    let connection = rusqlite::Connection::open(&store_path).unwrap();
+    let route: String = connection
+        .query_row(
+            "SELECT route FROM homes WHERE id=?1",
+            [marker.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(route, "ssh://proof@example.invalid");
+    assert_eq!(fs::read(source_db).unwrap(), b"source must not be opened");
+    assert_eq!(fs::read_dir(source.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn installation_restriction_uses_checkout_or_explicit_declaration() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    repo.create_branch("install-task");
+    let task = support::register_unrun_task(
+        &home.path().join(".lf"),
+        repo.path(),
+        "install-task",
+        &repo.head_sha(),
+    );
+    let store_path = home.path().join(".lf/loopflow.db");
+    for (cwd, declaration, restricted) in [
+        (repo.path(), None, true),
+        (home.path(), Some(format!("task:{}", task.task.id)), true),
+        (home.path(), None, false),
+    ] {
+        let mut cmd = command(
+            home.path(),
+            cwd,
+            &["install", "promote", "--cli-target", "/unused/lf"],
+        );
+        cmd.env("LF_TASK_ORIGIN", "1")
+            .env("LF_WORK_ADVANCE_CLAIM", "obsolete")
+            .env("LF_INSTALL_PROMOTE_HOP", "6");
+        if let Some(value) = declaration {
+            cmd.env("LF_AS", value);
+        }
+        let output = cmd.output().unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        let expected = if restricted {
+            "Task Work cannot change"
+        } else {
+            "did not converge"
+        };
+        assert!(error.contains(expected), "{error}");
+    }
+    let output = command(
+        home.path(),
+        repo.path(),
+        &[
+            "install",
+            "local-preflight",
+            "--store",
+            store_path.to_str().unwrap(),
+            "--json",
+        ],
+    )
+    .output()
+    .unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&success(output)).unwrap();
+    assert!(preview.get("compatibility").is_some());
+}
+
+#[test]
 fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
@@ -40,14 +139,13 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
     for args in [
         vec!["list"],
-        vec!["--list"],
         vec!["flow", "show", "code"],
         vec!["flow", "validate", "code"],
         vec!["auth", "status"],
-        vec!["profile", "list"],
-        vec!["route", "show"],
-        vec!["route", "show", "--repo", "example/project"],
-        vec!["ls", "--json"],
+        vec!["auth", "status", "--details"],
+        vec!["auth", "route", "show"],
+        vec!["auth", "route", "show", "--repo", "example/project"],
+        vec!["wave", "list", "--json"],
         vec!["ps", "--json"],
     ] {
         let output = command(home.path(), cwd.path(), &args)
@@ -55,10 +153,11 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
             .output()
             .unwrap();
         let stdout = success(output);
-        if args == ["list"] || args == ["--list"] {
+        if args == ["list"] {
             assert!(stdout.contains("debug"));
+            assert!(stdout.contains("unbreak"));
         }
-        if args[0] == "route" {
+        if args.get(1) == Some(&"route") {
             assert!(stdout.contains("claude"));
         }
         assert!(
@@ -69,7 +168,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 }
 
 #[test]
-fn missing_repository_and_missing_home_are_distinct() {
+fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     let output = command(home.path(), cwd.path(), &["rebase", "--plan"])
@@ -80,12 +179,20 @@ fn missing_repository_and_missing_home_are_distinct() {
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("initialized local store"));
+    let identity = success(output);
+    assert!(!identity.trim().is_empty());
+    let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+    let commands: i64 = database
+        .query_row("SELECT count(*) FROM execs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        commands, 2,
+        "the failed rebase and Home read each own an Exec"
+    );
     let output = command(
         home.path(),
         cwd.path(),
-        &["route", "set", "claude", "person@example.com"],
+        &["auth", "route", "set", "claude", "person@example.com"],
     )
     .output()
     .unwrap();
@@ -100,7 +207,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
     let outside = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let other = TestRepo::new();
-    let linked = repo.create_named_worktree("catalog");
+    let linked = repo.create_named_worktree("list");
     let nested = repo.path().join("nested");
     fs::create_dir_all(&nested).unwrap();
     for root in [repo.path(), linked.as_path()] {
@@ -129,7 +236,7 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
         (linked.as_path(), 1, true),
     ] {
         let output = success(
-            command(home.path(), cwd, &["ls", "--json"])
+            command(home.path(), cwd, &["wave", "list", "--json"])
                 .output()
                 .unwrap(),
         );

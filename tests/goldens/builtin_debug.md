@@ -28,11 +28,12 @@ lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish is the default for making work visible; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not rebase. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
-selected delivery skill for preparation and recovery. `lf pr open` also opens
-the review page; use it only when the user asks to see the PR.
+selected delivery skill for preparation and recovery. `lf pr open` creates or
+updates a draft and opens its page; use it when the user asks to see the PR.
+It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -77,7 +78,7 @@ A `human: true` Flow step uses the same Session surface: Complete returns
 review feedback to the next step; a following loop-decide chooses navigation
 through its authored edge. Readiness alone does not release the caller.
 
-When asked about Loopflow state, use `lf ls --json`, `lf status <wave> --json`,
+When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
 `loopflow` and `wave/operate` skills.
@@ -99,9 +100,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `update-wave` or
-`record-learnings`. Do not create miscellaneous `.lf/` handoff notes or copy
-maintainer instructions into customer skills.
+Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
+skills.
 
 </lf:loopflow>
 
@@ -121,60 +122,41 @@ If no user authorization is required, record a material assumption in
 No rendering environment. Output is logged, not displayed.
 
 
+<lf:user>
+The current conversation participant's display name is "Fixture Participant" (JSON string). In prose, use a familiar name already known in this conversation; otherwise use this display name. Address them as "you" in session conversation. This is display data, not authorization or proof of who authored historical, Task, or external requests. Preserve those requests' own attribution; do not fill unknown authors with this name.
+</lf:user>
+
 The skill.
 
 <lf:skill:debug>
-Debug an error using the stacktrace or error message from clipboard.
+Find why the code misbehaves, fix the cause, and verify the original workflow.
 
-If clipboard is empty or no -c flag, ask what error to debug.
+Use the evidence already supplied: a description, stacktrace, logs, reproduction,
+or clipboard content. Ask for missing information only when it prevents progress;
+clipboard input and a Task are optional.
 
-## What makes a good fix
-
-**Unblock first.** Ask: what would it take to unblock the person who wants this debugged? Sometimes that's a quick workaround or explanation before a deeper fix. Get them moving, then address the root cause.
-
-**Loop until the root issue is addressed.** Don't just take the next step and stop. Fix, verify, see what happens. If a new error surfaces, keep going. The job is done when the original workflow succeeds.
-
-**Minimal and targeted.** Fix the bug, not the neighborhood. Don't refactor, don't "improve while you're here."
-
-**Grease the wheels.** If debugging was hard, add tooling that makes it easier next time—for both people and agents. A well-placed log statement, a clearer error message, a helper function that surfaces state. Small improvements that compound.
-
-## Input
-
-Run with `-c` to include clipboard content:
 ```bash
 lf debug -c
+lf debug : "Why does this request fail only after reconnecting?"
 ```
 
-Parse the error/stacktrace. Identify file and line. Check if the file was changed on this branch:
-```bash
-git diff main...HEAD -- <file>
-```
+1. Establish the expected and observed behavior. Reproduce the failure safely;
+   inspect relevant stack frames, state transitions and recent changes. Preserve
+   the original observation when reproduction would risk data or service.
+2. State the leading explanations and what each predicts. Trace execution and
+   run the smallest useful experiment that distinguishes them. Keep observations
+   separate from hypotheses. Revise the explanation when evidence contradicts it.
+3. Repair the supported cause within the requested scope. Keep the change
+   targeted; add a useful diagnostic or regression check when it makes this
+   failure easier to understand or prevents its recurrence. For an explicit
+   diagnosis-only request, explain the cause and proposed repair without editing.
+4. Replay the original reproduction and relevant regressions. Follow newly
+   exposed failures until the requested workflow succeeds. Verify against all
+   relevant counterexamples, not only the latest green check.
 
-## Debugging strategy
-
-**Follow the stack trace.** The deepest frame in your code (not library code) is usually where the problem originates. Start there.
-
-**Check recent changes.** If the error is new, the bug is likely in the delta.
-
-**Reproduce first.** Before fixing, understand how to trigger the error. A fix you can't verify isn't a fix.
-
-**Write the causal prediction.** State the violated invariant, the leading
-explanations, and what each predicts before editing. Preserve the reproduction
-as observed evidence; keep guesses labeled as guesses.
-
-**Discriminate before patching.** Run the smallest safe check whose outcomes
-separate the leading causes. If the result contradicts the current explanation,
-stop dependent edits and revise the model. Repeatedly patching the same
-assumption is a signal that the representation is wrong.
-
-**Replay the whole workflow.** After the candidate fix, run the original
-reproduction, the relevant regression tests, and the user-visible path that
-previously failed. The latest green check does not erase older counterexamples.
-
-## Output
-
-Fix the bug directly. If the cause isn't obvious from the fix, add a brief inline comment.
-
-If you can't determine the cause, describe what you learned and what additional context is needed.
+Report the cause, change and observed proof. If the cause remains unknown, state
+what was ruled out and the next useful check. Keep consequential evidence with
+the existing issue or working note; do not require a new report for every bug.
+A workaround may unblock the caller, but does not establish that the cause is fixed.
 
 </lf:skill:debug>

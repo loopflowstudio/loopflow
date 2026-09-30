@@ -125,15 +125,15 @@ private actor DirectiveSource {
 
     func read(_ args: [String], cwd: String?) async throws -> String {
         switch args.first {
-        case "pm":
-            guard Array(args.prefix(7)) == ["pm", "task", "update", "--id", "issue-review", "--wave", "product"],
-                  args.count == 8, args[7].hasPrefix("--notes="), cwd == "/src/loopflow" else {
+        case "task":
+            guard Array(args.prefix(5)) == ["task", "edit", "issue-review", "--wave", "product"],
+                  args.count == 6, args[5].hasPrefix("--notes="), cwd == "/src/loopflow" else {
                 throw RegistryQueryError("Wrong Task update target")
             }
             if outcome == .rejected { throw RegistryQueryError("Write rejected") }
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(original.utf8))
             let old = snapshot.waves[0].tasks.items.first { $0.id == "issue-review" }!.task.description
-            let text = String(args[7].dropFirst("--notes=".count)) + "\nProvider-normalized."
+            let text = String(args[5].dropFirst("--notes=".count)) + "\nProvider-normalized."
             let oldJSON = String(decoding: try JSONEncoder().encode(old), as: UTF8.self)
             let newJSON = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
             roadmap = original.replacingOccurrences(of: oldJSON, with: newJSON)
@@ -147,7 +147,8 @@ private actor DirectiveSource {
                 await gate.wait()
             }
             return result
-        case "ls", "session": return "[]"
+        case "wave" where args.dropFirst().first == "list": return "[]"
+        case "session": return #"{"entries":[],"next":null}"#
         case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("Unexpected directive proof operation")
         }

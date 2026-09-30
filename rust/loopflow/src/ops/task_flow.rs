@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowPosition, WorkStatus};
+use crate::durable::{FlowSession, WorkStatus};
 use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowReturn};
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 
@@ -35,8 +35,8 @@ pub enum TaskFlowRecord {
 pub struct PinnedTaskFlow {
     pub invocation_id: String,
     pub graph: FlowGraph,
-    pub current: Option<String>,
-    pub completed: Vec<String>,
+    pub current: Option<u32>,
+    pub completed: Vec<u32>,
     pub returns: Vec<FlowReturn>,
     /// Per-edge counts at each active nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
@@ -47,11 +47,12 @@ pub struct PinnedTaskFlow {
 }
 
 impl PinnedTaskFlow {
-    pub(crate) fn new(position: &FlowPosition, execution: &TaskExecutionSnapshot) -> Self {
-        let projection = project_cursor(&position.invocation.steps, &position.cursor);
+    pub(crate) fn new(position: &FlowSession, execution: &TaskExecutionSnapshot) -> Self {
+        let graph = FlowGraph::new(&position.invocation.flow, &position.invocation.steps);
+        let projection = project_cursor(&graph, &position.cursor);
         Self {
             invocation_id: position.invocation.id.clone(),
-            graph: FlowGraph::new(&position.invocation.flow, &position.invocation.steps),
+            graph,
             current: projection.current,
             completed: projection.completed,
             returns: projection.returns,
@@ -71,7 +72,7 @@ impl PinnedTaskFlow {
 pub enum TaskFlowControlKind {
     /// `lf task run ISSUE --flow FLOW`
     Start,
-    /// `lf task resume ISSUE`
+    /// `lf task run ISSUE`
     Resume,
     /// `lf task restart ISSUE --flow FLOW`
     Restart,
@@ -87,11 +88,9 @@ pub struct TaskFlowControl {
 /// Facts beyond the Flow record that decide control legality.
 #[derive(Debug)]
 pub(crate) struct TaskFlowGate<'a> {
-    pub identifier: &'a str,
     /// `None` when no durable Task Work exists yet.
     pub status: Option<&'a WorkStatus>,
     pub plan_completed: bool,
-    pub execution: Option<&'a TaskExecutionSnapshot>,
     pub worktree_blocker: Option<&'a str>,
     pub launch_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
@@ -125,19 +124,12 @@ pub(crate) fn task_flow_controls(
             TaskExecutionState::Running | TaskExecutionState::Starting => {
                 Some("The Task worker is already advancing this Flow".to_string())
             }
-            TaskExecutionState::Human => Some(format!(
-                "{}; continue it through its Session",
-                flow.reason
-            )),
-            TaskExecutionState::Unknown => Some(flow.reason.clone()),
-            TaskExecutionState::Blocked if flow.restart_required => Some(format!(
-                "{}. Only Stop & restart can clear this blocker",
-                flow.reason
-            )),
-            TaskExecutionState::Blocked => Some(format!(
-                "{}. After correcting it, resume with a stated reason: `lf task resume {} --reason \"<what changed>\"`",
-                flow.reason, gate.identifier
-            )),
+            TaskExecutionState::Human => {
+                Some(format!("{}; continue it through its Session", flow.reason))
+            }
+            TaskExecutionState::Unknown
+            | TaskExecutionState::Blocked
+            | TaskExecutionState::Stalled => Some(flow.reason.clone()),
             TaskExecutionState::Idle => gate.resume_refusal.map(str::to_string),
         },
         TaskFlowRecord::None | TaskFlowRecord::Finished { .. } => {
@@ -147,13 +139,13 @@ pub(crate) fn task_flow_controls(
 
     let restart = if gate.status.is_none() {
         Some("Task has no Work yet; start a Flow instead".to_string())
-    } else if gate
-        .execution
-        .is_some_and(|execution| execution.state == TaskExecutionState::Unknown)
-    {
-        gate.execution.map(|execution| execution.reason.clone())
     } else {
-        gate.worktree_blocker.map(str::to_string)
+        match record {
+            TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Unknown => {
+                Some(flow.reason.clone())
+            }
+            _ => gate.worktree_blocker.map(str::to_string),
+        }
     };
 
     vec![
@@ -177,8 +169,8 @@ mod tests {
         TaskFlowRecord::Pinned(PinnedTaskFlow {
             invocation_id: "inv".into(),
             graph: FlowGraph::new("feature", &[]),
-            current: Some("2".into()),
-            completed: vec!["0".into(), "1".into()],
+            current: Some(2),
+            completed: vec![0, 1],
             returns: Vec::new(),
             iterations: vec![vec![]],
             execution,
@@ -191,10 +183,8 @@ mod tests {
         task_flow_controls(
             record,
             &TaskFlowGate {
-                identifier: "LOO-1",
                 status,
                 plan_completed: false,
-                execution: None,
                 worktree_blocker: None,
                 launch_refusal: None,
                 resume_refusal: None,
@@ -230,6 +220,7 @@ mod tests {
         }
         let done = WorkStatus::Done;
         assert!(available(&pinned(TaskExecutionState::Idle, false), Some(&done)).is_empty());
+        assert!(available(&pinned(TaskExecutionState::Unknown, false), Some(&ready)).is_empty());
     }
 
     #[test]
@@ -247,17 +238,30 @@ mod tests {
         let edges: Vec<_> = running
             .returns
             .iter()
-            .map(|edge| (edge.decider.as_str(), edge.traversals))
+            .map(|edge| (edge.decider, edge.traversals))
             .collect();
-        assert_eq!(edges, [("3", 2), ("5", 0)]);
+        assert_eq!(edges, [(3, 2), (5, 0)]);
         assert!(matches!(
             snapshots[4].record,
             TaskFlowRecord::Finished { .. }
         ));
         assert_eq!(serde_json::to_value(&snapshots).unwrap(), value);
+        let mut string_node = value[1].clone();
+        string_node["record"]["current"] = serde_json::json!("2");
+        assert!(serde_json::from_value::<TaskFlowSnapshot>(string_node).is_err());
         let mut missing = value[1].clone();
         missing["record"].as_object_mut().unwrap().remove("returns");
         assert!(serde_json::from_value::<TaskFlowSnapshot>(missing).is_err());
+
+        let stalled: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_flow_stalled.json"
+        ))
+        .unwrap();
+        let snapshot: TaskFlowSnapshot = serde_json::from_value(stalled.clone()).unwrap();
+        assert!(
+            matches!(&snapshot.record, TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Stalled)
+        );
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), stalled);
 
         let catalog: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_catalog.json"

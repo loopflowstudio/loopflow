@@ -133,6 +133,7 @@ public enum MetricEvidence: Decodable, Sendable, Hashable {
 
 public enum MetricUnknownCause: Decodable, Sendable, Hashable {
     case never
+    case targetUnavailable(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case revisionMismatch(expected: String, observed: String, sourceTime: String)
     case incomplete(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
     case windowMismatch(value: Double, sourceWindowStart: String, sourceWindowEnd: String)
@@ -153,6 +154,12 @@ public enum MetricUnknownCause: Decodable, Sendable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "never": self = .never
+        case "target_unavailable":
+            self = .targetUnavailable(
+                value: try container.decode(Double.self, forKey: .value),
+                sourceWindowStart: try container.decode(String.self, forKey: .sourceWindowStart),
+                sourceWindowEnd: try container.decode(String.self, forKey: .sourceWindowEnd)
+            )
         case "revision_mismatch":
             self = .revisionMismatch(
                 expected: try container.decode(String.self, forKey: .expectedContractRevision),

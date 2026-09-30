@@ -1,6 +1,6 @@
 ---
 requires: code on branch
-produces: polished code, scratch/<branch>-review.md
+produces: corrected code and docs, verification evidence, and delivery context
 action_style: procedural
 ---
 Make the branch as ready to ship as possible, and as easy for reviewers to evaluate as possible.
@@ -20,20 +20,12 @@ Before starting, orient yourself in this branch:
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
 
-## Goal
-
-Polish isn't "tests pass." Tests passing is table stakes.
-
-Polish means: the code is as good as it can be given the design intent, and a reviewer can understand the change in one read.
-
-Ship-ready code. Reviewer-friendly docs. No excuses left.
-
 ## Phase 1: Polish Code
 
-Make the implementation as clean as possible.
-
 1. **Review the diff**
-   The diff against main is in your context. Check it against the repo's style guides.
+   Inspect the supplied change, including uncommitted work, against its intended
+   outcome and the repo's style guides. Resolve the relevant comparison from the
+   working context; do not assume a particular base branch or prior skill.
 
 2. **Fix developer experience**
    - Intuitive APIs: sensible defaults, obvious signatures, no surprises
@@ -74,22 +66,9 @@ Make the implementation as clean as possible.
 
 Make the change easy to review.
 
-1. **Write the design review doc** → `scratch/<branch>-review.md`
-
-   This document helps reviewers quickly grasp the diff:
-
-   | Section | Content |
-   |---------|---------|
-   | **What was implemented** | Concrete description. "Added X that does Y." |
-   | **Key choices** | Decisions made, why, alternatives rejected |
-   | **How it fits together** | Architecture in 2-3 sentences or a diagram |
-   | **Risks and bottlenecks** | What could break. What's slow. What's fragile. |
-   | **What's not included** | Intentional omissions. Scope boundaries. |
-
-   This isn't a changelog. It's a guide for someone reading the PR cold.
-
-2. **Run validation and capture results**
-   - Run the "done when" check from the design doc (`scratch/<branch>.md`)
+1. **Verify the intended outcome**
+   - Check the accepted success conditions. Reuse applicable passing evidence;
+     run missing proof and record its limits in the PR copy or existing plan.
    - If the work has measurable outcomes (performance, accuracy, latency, size, counts), run before/after comparisons and record the numbers
    - If the work is a UI or UX change, capture the key states and interactions
    - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
@@ -97,93 +76,31 @@ Make the change easy to review.
      the new path. If none does, capture a concrete metric proposal for the
      Wave. A local benchmark supports it but is not live coverage by itself.
 
-3. **Write PR copy for ops handoff**
+2. **Prepare delivery context**
 
-   Write for someone returning after time away. Name the concrete improvement in the
-   title. Open the body with one short paragraph of one or two sentences explaining
-   what was difficult before
-   and what this PR makes easier or newly possible for users, operators, or maintainers.
-   They should understand the benefit without running a command or opening another document.
+   Keep the experienced improvement, actual checks and material limits in the
+   existing plan or durable docs. Delivery commands generate PR copy through
+   their pr-message template; gate need not duplicate that writing pass.
+   If copy was explicitly requested or already prepared, reconcile it with the
+   current change. Optional cached copy lives in `scratch/pr-title.txt`,
+   `scratch/pr-body.md` and `scratch/.pr-copy-ref` (current HEAD SHA).
+   Publication consumes these files before its first commit or push. Preserve
+   consequential evidence at its lasting owner before delivery clears scratch.
 
-   Keep the promise within what this PR delivers, even when the Task has a larger ambition.
-   Use familiar product language and concrete verbs. An area prefix is useful only when
-   it helps recognition. Preserve proper names and command spelling.
-
-   Follow with **What changes**: a short paragraph or a few bullets describing the
-   meaningful change. Include implementation detail only when it helps review. Put **Why
-   it matters** after that, and omit it if the summary already explains the consequence.
-   Include material risks or limitations when needed. Keep automated test and lint
-   results in **Checks** when useful, or link to CI. Finish with **Try it** when there
-   is a useful walkthrough: describe a concrete user action and the visible result
-   that demonstrates the benefit. Tests, test commands, and test results never belong
-   in this section. Distinguish suggested steps from behavior actually observed;
-   label simulations and remaining limits. Omit the walkthrough when it adds nothing.
-
-   Use only the sections the change needs. A small change may need only a short summary
-   and a useful walkthrough. Rewrite around the current diff when scope changes; remove
-   superseded explanation instead of appending a diary. Loopflow supplies Task identity
-   and merge consequences from durable state; do not invent or repeat those facts.
-
-   Link related work where you explain its relevance. In prose and PR bodies, use
-   `[Title · Task ID or PR number](known URL)` on first mention; shorten later references
-   when unambiguous. State the relationship, such as builds on, supersedes, or verified by.
-   Use known URLs and preserve cited decisions and evidence somewhere that survives shipping.
-   In operational lists, put the ID first: `[Task ID or PR number · Title](known URL)`.
-
-   Write to:
-   - `scratch/pr-title.txt` — one-line PR title
-   - `scratch/pr-body.md` — markdown PR body
-   - `scratch/.pr-copy-ref` — current `HEAD` SHA (`git rev-parse HEAD`)
-
-   `lf pr publish`, `lf pr submit`, and `lf pr land` consume these files.
-   Publication removes these files and `scratch/<branch>-review.md` before its
-   first commit or push, so gate handoff state never becomes a PR head.
-
-4. **Update README and docs**
+3. **Update README and docs**
    - If user-facing behavior changed, docs must reflect it
    - Examples must work. Commands must be current.
    - Check: `README.md`, module READMEs, docstrings on public APIs
 
-5. **Inline documentation**
+4. **Inline documentation**
    - Add comments where the "why" isn't obvious
    - Don't document the obvious. `# increment counter` above `counter += 1` is noise.
 
-6. **Wave alignment** (if running in a wave context)
-   - Does the shipped code advance the wave's Goals?
-   - Were any known risks from `GOAL.md`, `MEMORY.md`, or the current chapter KRs/metric targets introduced or ignored?
-   - Are there observable project KRs or measures to note in the review doc?
-
 ## Scope
 
-**Polish this branch.** Only code changed by this branch.
-
-**Skip unrelated improvements.** "While I'm here" fixes belong in a separate branch.
-
-**Skip style preferences.** Working code you'd write differently isn't broken.
-
-**Don't gold-plate beyond design intent.** Polish to the design, not past it.
-
-## Output
-
-Phase 1 produces clean, tested code. Phase 2 produces:
-
-- `scratch/<branch>-review.md`
-- `scratch/pr-title.txt`
-- `scratch/pr-body.md`
-- `scratch/.pr-copy-ref`
-- updated docs
-
-If nothing needs fixing and tests pass, say so—but still write the design review doc.
-
-## Reference
-
-```bash
-git diff main...HEAD     # see what changed
-```
-
-Find test, formatting, and static-analysis commands from repo guidance
-(`TESTING.md`, `README.md`, docs) and map the touched files to the checks that
-can fail because of them. CI owns the full parallel matrix.
+Polish only code changed by this branch, within the design intent. Skip unrelated
+improvements and style preferences. If code and docs already meet the contract,
+leave them alone. Report applicable proof and unresolved blockers briefly.
 
 ## Adaptation
 

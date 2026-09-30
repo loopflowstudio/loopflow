@@ -352,9 +352,10 @@ pub struct TaskPr {
     pub slug: String,
     pub branch: String,
     pub base_commit: String,
-    /// Another Task's PR this worktree was placed on, or `None` when rooted on
-    /// the default branch. `base_commit` is that parent's exact fork commit; the
-    /// link clears after the parent merges and this PR collapses onto main.
+    /// Selected parent PR, or `None` when rooted on the default branch.
+    /// Selection does not move Git: `base_commit` remains the child's last
+    /// recorded fork until rebase succeeds. The link clears after the parent
+    /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,
     pub merge_commit: Option<String>,
@@ -589,7 +590,7 @@ pub enum PmWritebackState {
 /// The durable attempt metadata lives on `TaskPr`; this derived view tells one
 /// caller whether it read GitHub, reused a recent reading, or opened a degraded
 /// circuit while preserving the cached PR fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "freshness", rename_all = "snake_case")]
 pub enum Observation {
     /// No remote read applies, as for an unpublished working PR.
@@ -621,6 +622,8 @@ pub struct Task {
     pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
+    /// Explicit choice for every Flow step; None uses the step/config defaults.
+    pub agent: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -727,29 +730,6 @@ pub struct TaskEvent {
     pub created_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskObservation {
-    pub task_id: TaskId,
-    pub issue_identifier: String,
-    pub event_id: i64,
-    pub event: TaskEventKind,
-}
-
-impl TaskObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("task-{}-{}", self.task_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Task observation always serializes to structured JSON");
-        format!(
-            "<task_observation task_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.task_id, self.issue_identifier, self.event_id, payload
-        )
-    }
-}
-
 /// The durable cursor for streaming Linear edits by participants into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
@@ -809,7 +789,7 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskId, TaskObservation, TaskPr, TaskPrId,
+        TaskId, TaskPr, TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -829,6 +809,7 @@ mod tests {
             project_id: crate::work::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
+            agent: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -842,23 +823,6 @@ mod tests {
         assert_eq!(TaskId::parse(task.as_str()).unwrap(), task);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
-    }
-
-    #[test]
-    fn task_observation_has_a_stable_structured_inbox_identity() {
-        let observation = TaskObservation {
-            task_id: TaskId::from_raw("ts_example"),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 42,
-            event: super::TaskEventKind::Failed {
-                error: "provider stopped".to_string(),
-                resumable: true,
-            },
-        };
-
-        assert_eq!(observation.inbox_id(), "task-ts_example-42");
-        assert!(observation.prompt().contains("<task_observation"));
-        assert!(observation.prompt().contains("\"kind\":\"failed\""));
     }
 
     #[test]

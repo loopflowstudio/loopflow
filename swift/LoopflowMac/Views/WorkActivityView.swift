@@ -5,7 +5,6 @@ struct WorkActivityView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
-    @State private var isSettingTurnIntent = false
     @State private var turnIntentError: String?
 
     var body: some View {
@@ -14,9 +13,6 @@ struct WorkActivityView: View {
             Divider()
             if let reason = model.workActivity.errorMessage {
                 evidenceBanner(reason)
-            }
-            if let turnIntentError {
-                evidenceBanner(turnIntentError)
             }
             content
         }
@@ -43,15 +39,6 @@ struct WorkActivityView: View {
                         .accessibilityIdentifier("podium-activity-scope")
                 }
                 Spacer(minLength: Spacing.sm)
-                if let wave = selectedWave, model.selection?.kind == .wave {
-                    Button(wave.paused ? "Resume" : "Pause") {
-                        Task { await setPaused(!wave.paused, waveId: wave.id) }
-                    }
-                    .buttonStyle(.borderless)
-                    .font(Typography.caption(9).weight(.semibold))
-                    .disabled(isSettingTurnIntent)
-                    .accessibilityIdentifier("podium-wave-turn-control")
-                }
                 if model.selection != nil {
                     Button {
                         model.select(nil)
@@ -156,12 +143,6 @@ struct WorkActivityView: View {
         .accessibilityIdentifier("podium-activity-\(entry.id)")
     }
 
-    private var selectedWave: WaveSnapshot? {
-        guard let selection = model.selection else { return nil }
-        guard let waveId = model.waveId(for: selection) else { return nil }
-        return model.wave(id: waveId)?.wave
-    }
-
     private var scopeTitle: String {
         switch model.selection {
         case nil:
@@ -203,8 +184,8 @@ struct WorkActivityView: View {
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
         case .workCreated: ("plus", .statusNeutral)
-        case .runStarted: ("play.fill", .statusInfo)
-        case .runFinished(_, let status):
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", .statusInfo)
+        case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
@@ -242,15 +223,4 @@ struct WorkActivityView: View {
             .background(Color.statusWarning.opacity(0.10))
     }
 
-    @MainActor
-    private func setPaused(_ paused: Bool, waveId: String) async {
-        isSettingTurnIntent = true
-        turnIntentError = nil
-        defer { isSettingTurnIntent = false }
-        do {
-            try await model.setWavePaused(waveId: waveId, paused: paused)
-        } catch {
-            turnIntentError = error.localizedDescription
-        }
-    }
 }

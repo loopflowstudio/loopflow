@@ -21,7 +21,7 @@ Flow. Launching a draft does not approve it.
 ## Orientation
 
 - Read `scratch/` and the repo agent guide. Continue an existing design instead of re-deriving it.
-- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf pm show --wave <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
+- Read the active Wave's `GOAL.md` and `MEMORY.md` only when placement is part of the design and the seed names that exact Wave. Use `lf wave status <wave>` only when its chapter state is material; never infer a Wave or repair PM access as a prerequisite.
 - Write the design to `scratch/<workspace-slug>.md`. Put unresolved assumptions in `scratch/questions.md`.
 
 ## Surface
@@ -69,8 +69,9 @@ Tighten the artifact to:
   reshapes or deletes.
 - **Forbidden outcomes** — duplicate representations, compatibility layers, or
   locally passing states that still violate the intended architecture.
-- **Internal slices** — ordered coherent cuts, one marked `This slice`, plus a
-  durable evidence ledger that never replaces the full design.
+- **Internal slices** — ordered coherent cuts, one marked `This slice`. Keep
+  consequential evidence and unresolved gaps in the working design while
+  preserving the full target; no separate pass ledger is required.
 - **Measure** — only when a meaningful before/after quantity exists.
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.
@@ -81,40 +82,9 @@ and execution updates in authorized Task comments, with links to detailed eviden
 Comments may be collapsed: keep current blockers, dependencies, and accepted scope
 visible in the description. Reconcile changed scope instead of appending amendments.
 
-## Existing-design handoff
+## Handoff
 
-When the user asks to file a Task and run a Flow from an existing design,
-keep the design separate. Reuse the Task if it is the same work; otherwise file
-a short user-problem brief under the selected Wave, with a design reference,
-its maturity, and open questions. Do not invent ownership.
-
-```bash
-lf pm task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task prepare <issue> --json
-# Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> --flow <chosen-flow>
-```
-
-Inspect the current context first: a design already in the Task worktree needs
-no transfer. For a separate source, copy the actual documents and supporting
-files before launch, preserve relative references, and check their contents in
-the destination. A path alone does not supply context. Preparation launches no
-worker; put any initial directive on preparation, since an already prepared
-Task rejects a new `run --directive`. Do not overwrite newer destination work.
-
-The destination becomes the working design; retain source provenance without
-maintaining competing active copies. Markdown under its recursive `scratch/`
-tree enters worker context; other assets remain on disk. Preserve material
-needed after scratch cleanup in durable documentation or existing records.
-Do not pipe the design into Task creation: stdin becomes the Task description.
-
-Use the Flow the user selected and inspect its contents when explaining where it
-begins; otherwise use the Wave chapter recommendation. Continue the design already
-present without treating its draft choices as approved. Report the Task link,
-destination design path, selected Flow, and observed launch result. Verify
-supplied context separately from worker startup.
-
-If implementation already exists in the source checkout, preserve it and its
-writer. Document transfer does not adopt a checkout; current preparation does
-not adopt an unbound existing branch/worktree. Report that gap before launching
-a competing implementation. No automatic scratch-transfer flag is available.
+Leave the current design and its evidence ready for kickoff to shape into an
+implementation plan. Task allocation and launch belong to launch-plan when
+execution is requested. Preserve accepted intent and unresolved choices in the
+artifact; finishing design does not itself authorize launching work.

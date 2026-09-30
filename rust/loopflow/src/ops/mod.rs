@@ -9,7 +9,6 @@ mod flow;
 pub(crate) mod flow_run;
 pub(crate) mod flow_session;
 pub(crate) mod git_operation;
-pub mod home;
 pub(crate) mod human_session;
 mod land;
 pub mod linear_observe;
@@ -25,8 +24,11 @@ mod release;
 mod run;
 pub mod task;
 pub mod task_actions;
+pub(crate) mod task_destination;
 pub mod task_execution;
 pub mod task_flow;
+#[doc(hidden)]
+pub mod task_input;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -45,11 +47,10 @@ pub use cron::{
 };
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
-pub use flow::execute_flow_ops;
+pub use flow::execute_flow_command;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_rebase, finish_submit_after_rebase};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
-pub(crate) use pr_landing::supervise_pr_landing;
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
 pub(crate) use rebase::{abort_rebase_after_authorization, continue_rebase_after_authorization};
@@ -64,12 +65,12 @@ pub use release::{
     ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome,
     ReleaseStatusResult,
 };
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
-pub(crate) use run::{render_task_context, render_wave_context};
+pub(crate) use run::render_task_context;
+pub(crate) use run::{exec_task_worker, TaskWorkerExec};
 #[doc(hidden)]
 pub use run::{
-    resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
-    WorkSelection,
+    resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,
+    resolve_work_selection, WorkBinding, WorkSelection,
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

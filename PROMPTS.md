@@ -99,13 +99,21 @@ path is not passing its contents. State how separate inputs reach the consumer
 before launch and which copy remains current. Name a missing transport mechanism
 instead of expanding the Task description into a document store.
 
-For working notes, prefer topic-named Markdown under `scratch/` that makes sense
-without the producing conversation or knowledge of the next skill. Preserve
-context, observations, accepted decisions, open questions, and the next useful
-action/proof. Link related artifacts and mark superseded conclusions. Handoff
-summaries name exact relevant paths and a short takeaway; consumers reconcile
-those notes with current requirements rather than treating filenames or prose
-recommendations as execution authority.
+Prefer editing the artifact that owns the current truth: code, tests, a plan,
+usage docs, or existing findings. Delete obsolete instructions and reconcile
+changed assumptions there. Leave a minimal review when it helps the next reader:
+where the work stands against the plan, what worked, what implementation taught
+us, and what remains unresolved. A step such as `loop-decide` needs these facts
+to judge well; the review should supply them without choosing the navigation
+outcome. Avoid duplicating the plan or accumulating reports by default.
+
+Keep evidence that changes a decision, unresolved counterexamples, accepted
+constraints, and consequential rationale. Link durable proof instead of copying
+it. When working notes are needed, use topic-named Markdown under `scratch/`
+that makes sense without the producing conversation. Handoffs link the current
+artifacts and summarize enough evidence for the next decision, including proof
+limits. They do not grant execution authority. Update an existing summary when
+it serves the handoff; a no-op needs no new artifact.
 
 Define the finish line before the procedure. A strong prompt makes five things
 computable:
@@ -141,8 +149,10 @@ expensive actions:
    only the latest or friendliest case.
 5. **Act** — cross the real side-effect boundary only after the candidate
    survives the available checks.
-6. **Record** — keep the evidence and durable conclusion outside the provider
-   transcript; prune stale hypotheses, never observations.
+6. **Update** — put the conclusion into its existing owner. Replace stale
+   instructions and hypotheses while preserving relevant observations and
+   unresolved counterexamples. Save evidence needed for the next decision;
+   do not require a new report or a transcript of every probe.
 
 Schema Harness makes this literal: an append-only transition timeline is the
 ground truth, an editable program carries the current world representation and
@@ -398,21 +408,40 @@ Goals should feel opinionated. "Slow is fake." "Errors of omission kill." "Sunk 
 
 Use direct statements and sharp questions. Avoid hedging ("consider whether...", "you might want to...").
 
-## Gate vs Big prompts
+## Build atoms before processes
 
-Two modes for the same concern:
+Define a useful operation first, then compose operations into a Flow. A skill
+should name the information it needs and the change it leaves behind. Do not
+derive its contract from one place in a process: a previous skill, named Flow,
+branch convention, Task binding, or report filename is usually incidental.
 
-**Gate prompts (`-gate`)**: Fast quality checks for inner loops.
-- Decisive: produce a clear verdict (SHIP/ITERATE, DONE/MORE, etc.)
-- Scoped: only look at what this branch changed
-- Minimal output: verdict + issues if any
-- "Can we ship this?"
+For example, realign needs intent and work to reconcile. It edits the plan,
+code, and identified Wave's memory after implementation, upstream integration,
+or during a conversation. Work without a Wave still has useful inputs. A caller
+can compose rebase → realign or implement → compress → realign → loop-decide.
+Rebasing, publication, and navigation stay explicit in that composition.
 
-**Big prompts (`-big`)**: Strategic assessment for steering.
-- Broad: look at the whole codebase or system
-- Produce documentation for review
-- Identify highest-leverage changes
-- "What should we focus on?"
+Keep real domain constraints and authority boundaries. A release skill still
+needs a release target; an interactive product decision still needs the person
+who can make it. Generality means adapting to available context, not guessing
+missing intent or granting more authority.
+
+Test the atom standalone, midstream with partial evidence, and on a repeated
+invocation. It should do useful work in each applicable context, identify exact
+missing inputs when necessary, and stop without manufacturing changes when done.
+
+## Match output to the work
+
+For an inner loop, use the investigation to repair code, rewrite the plan, or
+prune findings while the context is available. Leave unresolved choices where
+the next action is defined. A review summary is insufficient when the skill is
+authorized to make the clear correction itself.
+
+Independent audits and strategic retrospectives can warrant reports: their
+reader needs evidence or judgment separated from execution. Name that reader
+and decision. Scope alone does not require a document, and a broader assessment
+can still improve an existing plan directly. Navigation decisions use the
+caller's protocol; ordinary editing skills need no invented verdict vocabulary.
 
 ## Outputs for readers
 
@@ -541,8 +570,11 @@ Before committing a prompt:
 - [ ] Referenced inputs are available in the consumer’s execution context
 - [ ] Rendered output, including tool-added text, preserves the reading order
 - [ ] Output format is specified if the prompt produces artifacts
-- [ ] Gate prompts have clear verdicts
-- [ ] Big prompts produce documentation, not just observations
+- [ ] The skill works standalone, midstream, and on a repeated invocation
+- [ ] Required inputs describe real needs, not an assumed producer or Flow
+- [ ] Clear corrections update their owner; separate reports have a distinct use
+- [ ] Pruning stale prose preserves unresolved evidence and accepted constraints
+- [ ] Publication and navigation remain explicit responsibilities of their callers
 
 ## Sources
 

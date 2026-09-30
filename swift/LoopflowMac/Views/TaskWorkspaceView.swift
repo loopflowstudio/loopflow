@@ -11,7 +11,6 @@ struct TaskTerminal: Identifiable, Hashable {
 @MainActor
 final class TaskTerminalStore: ObservableObject {
     let surfaces = GhosttySurfacePool()
-
     @Published private var tabsByTask: [String: [TaskTerminal]] = [:]
     @Published private var selectedTabByTask: [String: String] = [:]
 
@@ -58,51 +57,34 @@ enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
-private enum TaskPreviewMode: String, CaseIterable, Identifiable {
-    case diff = "Diff"
-    case file = "File"
-
-    var id: String { rawValue }
-}
-
 struct TaskWorkspaceView: View {
     let task: TaskPlanningSnapshot
     let reference: TaskReferenceSnapshot
     let runtime: TaskRuntimeSnapshot?
-    let repoPath: String
+    let prURL: URL?
     @ObservedObject var terminalStore: TaskTerminalStore
+    @Environment(SessionsWorkspaceRegistry.self) private var workspaces
 
     @Environment(\.palette) private var palette
     @State private var section = TaskWorkspaceSection.changes
-    @State private var changes: TaskChangesSnapshot?
-    @State private var selectedPath: String?
-    @State private var previewMode = TaskPreviewMode.diff
-    @State private var diff: TaskDiffSnapshot?
-    @State private var file: TaskFileSnapshot?
-    @State private var error: String?
-    @State private var loading = false
 
     init(
         task: TaskPlanningSnapshot,
         reference: TaskReferenceSnapshot,
         runtime: TaskRuntimeSnapshot?,
-        repoPath: String,
+        prURL: URL?,
         terminalStore: TaskTerminalStore,
         initialSection: TaskWorkspaceSection = .changes
     ) {
         self.task = task
         self.reference = reference
         self.runtime = runtime
-        self.repoPath = repoPath
+        self.prURL = prURL
         self.terminalStore = terminalStore
         _section = State(initialValue: initialSection)
     }
 
     private var workspace: TaskWorkspaceSnapshot? { reference.workspace }
-    private var previewIdentity: String {
-        "\(task.identifier)|\(selectedPath ?? "")|\(previewMode.rawValue)"
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -110,7 +92,8 @@ struct TaskWorkspaceView: View {
             if let runtime, let workspace {
                 switch section {
                 case .changes:
-                    changesView
+                    TaskFilesView(store: workspaces.workspace(for: workspace.worktree).files(taskId: task.id,
+                                                             issue: task.identifier, cwd: workspace.worktree), prURL: prURL)
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskId: runtime.workId,
@@ -128,8 +111,6 @@ struct TaskWorkspaceView: View {
         }
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
-        .task(id: runtime?.workId) { await loadChanges() }
-        .task(id: previewIdentity) { await loadPreview() }
     }
 
     private var header: some View {
@@ -155,167 +136,8 @@ struct TaskWorkspaceView: View {
             .frame(width: 210)
             Button("Warp") { openWarp() }
                 .disabled(workspace == nil)
-            Button {
-                Task { await loadChanges() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh Task changes")
-            .disabled(runtime == nil || workspace == nil || loading)
         }
         .padding(Spacing.md)
-    }
-
-    private var changesView: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                if let changes, changes.files.isEmpty {
-                    ContentUnavailableView(
-                        "No changes",
-                        systemImage: "checkmark.circle",
-                        description: Text("This Task matches its recorded base commit.")
-                    )
-                } else {
-                    List(selection: $selectedPath) {
-                        ForEach(changes?.files ?? []) { changedFile in
-                            changedFileRow(changedFile)
-                                .tag(changedFile.path)
-                        }
-                    }
-                    .listStyle(.sidebar)
-                }
-            }
-            .frame(minWidth: 220, idealWidth: 280, maxWidth: 340)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Picker("Preview", selection: $previewMode) {
-                        ForEach(TaskPreviewMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
-                    Spacer()
-                    if loading { ProgressView().controlSize(.small) }
-                }
-                .padding(Spacing.sm)
-                Divider()
-                preview
-            }
-            .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            Text(changedFile.path)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(2)
-            Text(changeLabels(changedFile).joined(separator: " · "))
-                .font(Typography.caption(9))
-                .foregroundStyle(palette.textSecondary)
-        }
-        .padding(.vertical, Spacing.xxs)
-    }
-
-    @ViewBuilder
-    private var preview: some View {
-        if let error {
-            ContentUnavailableView(
-                "Workspace unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text(error)
-            )
-        } else if selectedPath == nil {
-            ContentUnavailableView(
-                "Select a changed file",
-                systemImage: "doc.text.magnifyingglass"
-            )
-        } else {
-            let text = previewMode == .diff ? diff?.patch : file?.content
-            let isBinary = previewMode == .diff ? (diff?.binary ?? false) : (file?.binary ?? false)
-            if isBinary {
-                ContentUnavailableView("Binary file", systemImage: "doc.badge.ellipsis")
-            } else if let text {
-                ScrollView([.horizontal, .vertical]) {
-                    Text(text.isEmpty ? "No textual changes." : text)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(palette.text)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(Spacing.md)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if (previewMode == .diff ? diff?.truncated : file?.truncated) == true {
-                        Text("Truncated at 1 MB")
-                            .font(Typography.caption(9))
-                            .padding(Spacing.xs)
-                            .background(.regularMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-                            .padding(Spacing.sm)
-                    }
-                }
-            } else if loading {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-
-    private func changeLabels(_ file: TaskChangedFile) -> [String] {
-        var labels: [String] = []
-        if file.committed { labels.append("committed") }
-        if file.staged { labels.append("staged") }
-        if file.unstaged { labels.append("unstaged") }
-        if file.untracked { labels.append("untracked") }
-        return labels
-    }
-
-    @MainActor
-    private func loadChanges() async {
-        guard runtime != nil else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            let next = try await RegistryQueryLocal.shared.taskChanges(
-                issue: task.identifier,
-                cwd: repoPath
-            )
-            changes = next
-            if !next.files.contains(where: { $0.path == selectedPath }) {
-                selectedPath = next.files.first?.path
-            }
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func loadPreview() async {
-        guard runtime != nil, let selectedPath else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            switch previewMode {
-            case .diff:
-                diff = try await RegistryQueryLocal.shared.taskDiff(
-                    issue: task.identifier,
-                    path: selectedPath,
-                    cwd: repoPath
-                )
-            case .file:
-                file = try await RegistryQueryLocal.shared.taskFile(
-                    issue: task.identifier,
-                    path: selectedPath,
-                    cwd: repoPath
-                )
-            }
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
     }
 
     private func openWarp() {
@@ -326,7 +148,7 @@ struct TaskWorkspaceView: View {
         components.path = "/new_window"
         components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
         guard let url = components.url, NSWorkspace.shared.open(url) else {
-            error = "Warp could not open the Task worktree."
+            NSSound.beep()
             return
         }
     }

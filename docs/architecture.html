@@ -403,35 +403,43 @@ a:focus-visible,
 }
 
 /* Capabilities */
-.capabilities-section {
+.capabilities-section,
+.problems-section,
+.definition-section {
     max-width: 980px;
     margin: 0 auto;
     padding: 60px 24px;
 }
-.capabilities-section h2 {
+.capabilities-section h2,
+.problems-section h2,
+.definition-section h2 {
     font-family: var(--font-serif);
     font-size: 28px;
     font-weight: 400;
     margin-bottom: 28px;
     color: var(--burgundy);
 }
-.capabilities-grid {
+.capabilities-grid,
+.problems-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px 48px;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px 40px;
 }
 @media (max-width: 768px) {
-    .capabilities-grid {
+    .capabilities-grid,
+    .problems-grid {
         grid-template-columns: 1fr;
     }
 }
-.capability-item h3 {
+.capability-item h3,
+.problem-item h3 {
     font-family: var(--font-serif);
     font-size: 20px;
     color: var(--burgundy);
     margin-bottom: 4px;
 }
-.capability-item p {
+.capability-item p,
+.problem-item p {
     font-size: 15px;
     color: var(--text-secondary);
     line-height: 1.6;
@@ -1808,7 +1816,9 @@ h3:hover .anchor-link,
 
 /* Mac app option (download page) */
 .mac-app-option {
-    margin-top: 2.5rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 2.5rem;
+    border-bottom: 1px solid var(--border);
 }
 
 .mac-app-option .btn {
@@ -1841,6 +1851,86 @@ h3:hover .anchor-link,
     font-family: var(--font-mono);
     font-size: 0.9em;
     color: var(--text);
+}
+
+/* Flow diagrams (homepage) */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+.flow-figure {
+    margin: 0 0 32px;
+    overflow-x: auto;
+}
+.flow-diagram {
+    display: block;
+    width: 100%;
+    min-width: 640px;
+    height: auto;
+    font-family: var(--font-sans);
+}
+.flow-person {
+    fill: var(--bg);
+    stroke: var(--burgundy);
+    stroke-width: 2;
+}
+.flow-auto {
+    fill: var(--bg-subtle);
+    stroke: var(--border);
+    stroke-width: 1.5;
+}
+.flow-edge {
+    fill: none;
+    stroke: var(--text-secondary);
+    stroke-width: 1.5;
+}
+.flow-back {
+    stroke-dasharray: 5 4;
+}
+.flow-arrowhead {
+    fill: var(--text-secondary);
+}
+.flow-node-label {
+    font-size: 16px;
+    fill: var(--burgundy);
+}
+.flow-node-small {
+    font-size: 12.5px;
+    fill: var(--text);
+}
+.flow-plain {
+    font-size: 16px;
+    fill: var(--text);
+}
+.flow-edge-label {
+    font-size: 12.5px;
+    fill: var(--text-secondary);
+}
+.problems-section {
+    padding-top: 20px;
+}
+.problem-item .problem {
+    margin-bottom: 6px;
+}
+.problem-item .solve {
+    color: var(--text);
+}
+.definition-section p {
+    max-width: 720px;
+    margin-bottom: 14px;
+    color: var(--text-secondary);
+}
+.definition-section .scale-heading {
+    margin-top: 48px;
+}
+.install-facts {
+    margin-top: 18px;
+    font-size: 14px;
+    color: var(--text-secondary);
 }
 
 /* Portable-only additions. The shared docs system lives in website/static/style.css. */
@@ -1936,9 +2026,11 @@ h3:hover .anchor-link,
           <h1>Architecture</h1>
           <p class="docs-deck">A developer's path through the whole system</p>
         </header>
-<p>Loopflow turns one reusable instruction into one observed model-provider run.
-Everything else composes that path, gives it durable purpose, delivers its
-changes, places it on a machine, or projects what happened.</p>
+<p>Loopflow records commands, preserves agent conversations, and advances captured
+Flows. Exec, AgentSession and FlowSession own those three lifetimes.</p>
+<p>This guide specifies the accepted model. The reference owns
+<a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
+map and the checked current-source inventory.</p>
 <p>This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
 syntax lives in the <a href="https://loopflow.studio/docs/lf"><code>lf</code> reference</a>; the exhaustive checked inventory
@@ -1947,29 +2039,29 @@ lives in <a href="https://loopflow.studio/architecture/reference">Architecture R
 <pre tabindex="0"><code class="language-bash">lf implement
 </code></pre>
 <p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
-publishes a Run manifest, launches the provider, records direct evidence, and
-settles once. It needs no Wave, Project, Task, or daemon. The local SQLite
-store records the Run even when all its planning parents are null.</p>
+records its Exec, reserves an AgentSession, captures the input, then launches the
+provider. It needs no Wave, Project, Task, or daemon. The conversation persists
+after that command exits; a later command can connect to the same AgentSession.</p>
 <pre tabindex="0"><code class="language-text">request
   |
   v
 lf CLI --&gt; Skill discovery --&gt; prompt --&gt; provider route --&gt; harness
                                                           |
                                                           v
-                                               SQLite Run row
-                                               + launch/evidence artifacts
+                                               AgentSession history
+                                               + immutable input/output artifacts
 </code></pre>
-<p>Before the provider starts, the current Home has a <code>runs</code> row and launch evidence:</p>
-<pre tabindex="0"><code class="language-text">$LF_HOME/runs/&lt;prefix&gt;/&lt;run-id&gt;/
-  manifest.json
-</code></pre>
-<p>While it runs, Loopflow may append lifecycle, conversation, tool, raw provider,
-and usage evidence to <code>events.jsonl</code>. When the harness returns, it creates
-<code>terminal.json</code> once. The row owns Run identity, current ancestry, and lifecycle;
-files retain immutable launch inputs and append-only evidence. A failed Run-row
-write stops before provider launch. Missing telemetry cannot change the provider
-result. <a href="https://loopflow.studio/architecture/reference#harness-launch-and-run-records">Run publication and recovery</a>
-define the database/filesystem boundary.</p>
+<p>Before the provider starts, the current Home has the conversation reservation
+and its immutable input. SQLite owns identity, attribution, driver authority and
+history references; payload files retain large captured inputs and output.
+Admission failure stops before provider launch. General command logging has a
+different boundary: unavailable/bootstrap stores leave explicitly unrecorded
+Execs rather than bypassing installation authority to create a receipt.</p>
+<p>AgentSession history records provider outcomes, retries and usage. Exec records
+the command's outcome. A provider can finish successfully before a later command
+operation fails; neither result overwrites the other. Missing telemetry stays
+missing. The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">execution contract</a>
+defines these ownership boundaries.</p>
 <p>The implementation follows the same order as the diagram:</p>
 <table tabindex="0">
 <thead>
@@ -2006,9 +2098,9 @@ define the database/filesystem boundary.</p>
 <td>Provider output and usage events</td>
 </tr>
 <tr>
-<td>Record the Run and evidence</td>
-<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/run_record.rs"><code>run_record.rs</code></a> and the store</td>
-<td>Run row, immutable launch inputs, and terminal evidence</td>
+<td>Record command and conversation evidence</td>
+<td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/journal"><code>journal/</code></a> and the store</td>
+<td>Exec completion, AgentSession history and immutable payloads</td>
 </tr>
 </tbody>
 </table>
@@ -2016,7 +2108,7 @@ define the database/filesystem boundary.</p>
 <h2 id="add-one-capability-at-a-time">Add one capability at a time<a class="anchor-link" href="#add-one-capability-at-a-time" title="Link to this section">#</a></h2>
 <p>The Skill runner is useful by itself. The rest of Loopflow grows outward by
 adding one kind of capability at each layer. Tracked Work owns autonomous
-progression; transient boundary Runs consume the same execution and delivery
+progression; attributed conversations consume the same execution and delivery
 operations available to helpers without becoming resident Work identities.</p>
 <pre tabindex="0"><code class="language-text">one Skill run
     |
@@ -2030,7 +2122,7 @@ operations available to helpers without becoming resident Work identities.</p>
     |
     +-- Home: place execution, credentials, services, files, and locks
     |
-    `-- Views: project planning, Run, provider, Git, and OS evidence
+    `-- Views: project planning, command, conversation, provider, Git, and OS evidence
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -2043,12 +2135,12 @@ operations available to helpers without becoming resident Work identities.</p>
 <tbody>
 <tr>
 <td>Execution</td>
-<td>Skill discovery, prompt assembly, provider routing, harnesses, Run records</td>
+<td>Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history</td>
 <td><a href="https://loopflow.studio/architecture/execution">Execution</a></td>
 </tr>
 <tr>
 <td>Planning</td>
-<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps, resident loops</td>
+<td>Flow composition, Wave/Task Work, Steer, questions, review FlowSteps</td>
 <td><a href="https://loopflow.studio/architecture/planning">Planning</a></td>
 </tr>
 <tr>
@@ -2058,7 +2150,7 @@ operations available to helpers without becoming resident Work identities.</p>
 </tr>
 <tr>
 <td>Homes</td>
-<td>Placement, <code>lfd</code>, Wave listeners, SSH routing, machine install</td>
+<td>Placement, SSH routing, machine install</td>
 <td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
 </tr>
 <tr>
@@ -2075,19 +2167,19 @@ operations available to helpers without becoming resident Work identities.</p>
 </table>
 <p>The source tree makes the planning boundary literal:</p>
 <pre tabindex="0"><code class="language-text">work/                          controller/
-wave/{mod,config,context,      wave/{runner,resident,server,
-      memory}                       placement,...}
+wave/{mod,config,context,
+      memory,metrics,relocate}
 project                       task/mod
 task                          Task worker
 
 ops/chapter.rs                deterministic chapter rotation
 
-execution kernel: engine/ + harness/ + Run records
+execution kernel: engine/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 </code></pre>
 <p><code>work</code> never imports <code>controller</code>. The execution kernel works without either
 layer and never loads Work. CLI and boundary callers resolve Work identity,
-Wave memory, and the Task's current Flow invocation, then pass ordinary launch
+Wave memory, and the Task's managed FlowSession, then pass ordinary launch
 inputs into the kernel.</p>
 <p>Release delivery also separates proof from authority:</p>
 <pre tabindex="0"><code class="language-text">merged release commit
@@ -2117,7 +2209,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
           |                    |
           v                    v
   authored definitions    tracked Work
-  Skills / Flows /       Chapter x Wave = Project -&gt; Task
+  Skills / Flows /       Wave -&gt; Linear Project -&gt; Task
   goals / memory                  |
           |                       +---------&gt; Task delivery
           |                       |                ^
@@ -2130,7 +2222,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                    Home-local Run record
+                    Exec / AgentSession / FlowSession
                               |
                               v
                   status / roadmap / usage / app
@@ -2138,25 +2230,21 @@ user / agent --&gt; lf CLI --------+----------+-----------+
 another machine is another Home; cross it explicitly with `lf ssh`
 </code></pre>
 <p>There is no central Loopflow server. A Home owns its processes, credentials,
-planning store, Run records, and OS locks. Repository files carry authored
+planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. Linear and GitHub keep shared planning and delivery
 truth. Readers join those sources; they do not replace them with a universal
 ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
 <pre tabindex="0"><code class="language-text">Repository
-  |-- Chapter                 one current; a repository-wide clock
-  `-- Wave                    durable objective, memory, cadence, budget, chat, metrics
-        `-- Project           = (Wave, Chapter); Tasks, KRs, metric targets, Flow
-              `-- Task        one active remote branch, worktree, and PR
-                    `-- Flow invocation   0..n, one current: unrolled graph + cursor + returns
-                          `-- Run         optional invocation; task =&gt; wave, each nullable
+  `-- Wave                    enduring objective, memory and cadence
+        `-- Linear Project    status + shared chapter name + Flow + KRs
+              `-- Task        identity, worktree, PR and managed FlowSession
 
-Session --&lt; Run               one conversation with a Run history
-Session.current_run -&gt; Run    one of that Session's Runs
-
-Flow = ordered Skill | Op | Xor | human boundaries, with optional backward edges
-WorkRef = Wave | Project | Task
-WorkStatus = Ready | Done | Abandoned
+Exec                          one actual lf process; immutable causal parent
+AgentSession                  one conversation; nullable current driver Exec
+  `-- history                 provider starts, outcomes, retries and usage
+FlowSession                   captured graph, cursor, return counts and claim
+  `-- history                 mechanical results or exact agent completion refs
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -2169,91 +2257,106 @@ WorkStatus = Ready | Done | Abandoned
 <tbody>
 <tr>
 <td>Skill</td>
-<td>Reusable instructions plus declared context needs</td>
-<td>Repository override, builtin, or installed Markdown</td>
+<td>Reusable instructions and declared context</td>
+<td>Repository, builtin or installed Markdown</td>
 </tr>
 <tr>
 <td>Flow</td>
-<td>The template: ordered Skill and mechanical nodes, Xor routing, human boundaries, backward edges</td>
+<td>Reusable graph of agent, mechanical, routing and review steps</td>
 <td>Repository or builtin YAML</td>
 </tr>
 <tr>
-<td>Flow invocation</td>
-<td>One running Flow: the fully unrolled graph, its cursor, and each loop's return count</td>
-<td><code>flow_invocations</code> row</td>
+<td>Exec</td>
+<td>One actual lf process, its caller and command completion</td>
+<td><code>execs</code></td>
 </tr>
 <tr>
-<td>Run</td>
-<td>Evidence from one mediated provider launch, with its nullable invocation, Task, and Wave</td>
-<td><code>runs</code> row plus one immutable Home-local record</td>
+<td>AgentSession</td>
+<td>An interactive or headless conversation across drivers and native reconnection</td>
+<td><code>agent_sessions</code>, subordinate history and provider-native conversation</td>
 </tr>
 <tr>
-<td>Session</td>
-<td>One conversation across Runs, with a current Run: interactive, Flow review, or Ask</td>
-<td><code>sessions</code> row plus provider-native history</td>
-</tr>
-<tr>
-<td>Chapter</td>
-<td>The repository's planning clock; one current, advanced for every Wave at once</td>
-<td><code>chapters</code> row</td>
+<td>FlowSession</td>
+<td>One captured Flow's progress, including taskless execution</td>
+<td><code>flow_sessions</code> and its subordinate history</td>
 </tr>
 <tr>
 <td>Wave</td>
-<td>Durable operating context with goal, memory, cadence, budget, chat, and metric instruments</td>
-<td>Repository Wave files, <code>waves</code> row, Linear Initiative membership</td>
+<td>Enduring objective, memory, cadence, budget and metric instruments</td>
+<td>Wave files, local Wave identity and Linear Initiative membership</td>
+</tr>
+<tr>
+<td>Chapter</td>
+<td>Shared name of each Wave's In Progress Project</td>
+<td>Linear Project statuses; no Chapter row or packet</td>
 </tr>
 <tr>
 <td>Project</td>
-<td>One Wave's plan for one Chapter: Tasks, KRs, metric targets, and the Flow its Tasks invoke</td>
-<td><code>projects</code> row plus its Linear Project</td>
+<td>A Wave's plan, KRs, targets and default Flow</td>
+<td>Linear Project and its synchronized <code>projects</code> row</td>
 </tr>
 <tr>
 <td>Task</td>
-<td>One concrete change, investigation, or document</td>
-<td><code>tasks</code> row, Linear Issue, Git, GitHub</td>
-</tr>
-<tr>
-<td>Work</td>
-<td>Shared durable planning state for one Wave, Project, or Task</td>
-<td>Rows keyed directly by stable Work identity</td>
+<td>A concrete change, investigation or document</td>
+<td><code>tasks</code>, Linear Issue, Git and GitHub</td>
 </tr>
 <tr>
 <td>Steer</td>
-<td>Ordered authored correction to Work</td>
-<td>Append-only Work input</td>
+<td>An authored correction to Work</td>
+<td>Ordered Work input</td>
 </tr>
 <tr>
 <td>Home</td>
-<td>Stable machine authority whose route may change</td>
-<td>Home identity and observed SSH route</td>
+<td>A machine's store, credentials and exact process authority</td>
+<td>Home identity and observed route</td>
 </tr>
 <tr>
 <td>Placement</td>
-<td>Assignment of one Work to one Home</td>
+<td>Where a Work executes</td>
 <td><code>(WorkRef, HomeId)</code></td>
 </tr>
 </tbody>
 </table>
-<p>SQLite owns each product record; files carry authored definitions and large
-evidence artifacts. Sessions, Runs, and Flow invocations each have one reader.
-A Session has a stable ID, owns its Runs, and points to its current Run.
-Its Task, Wave, provider, and execution membership come from the current Run.
-Renaming updates the Session; binding updates its current Run's nullable Task and Wave.
-Replacing a Run retains the Session and its name, and preserves every prior Run.
-Landing a PR never erases those links.</p>
-<p>An invocation's Task is optional: Flows also run without planning records.
-A Run in an invocation shares its nullable Task; a present Task implies Wave.
-Construction fills omitted ancestors and refuses mismatches; binding preserves
-execution membership. Runs without a Task may name only a Wave or no planning
-parent, whether or not they belong to an invocation. A Task selects its Project's Flow by
-default and accepts an explicit override. Completed invocations remain readable.</p>
-<p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns fields,
-validators, and write contracts. The <a href="https://loopflow.studio/architecture/reference#flow-execution">Flow execution contract</a>
-distinguishes template expansion from runtime nesting.</p>
-<p>Run identity records causality and provenance. It never grants Work mutation,
-credential, Git, or process-signal authority.</p>
-<p>Provider-backed steps, including review conversations and routing Skills, have
-Runs. A mechanical operation or a cursor transition need not launch a provider.</p>
+<p>An AgentSession keeps its ID, name, feedback and native conversation when its
+command process changes. Its <code>interactive</code> field is independent of purpose,
+Flow membership and completion. Default conversation views show interactive
+Sessions; explicit filters expose headless and completed history. Large captured
+payloads remain files, but readers select and page rows before opening them.</p>
+<p>Connect uses the live engine when possible. Passive display acquires no claim.
+Transferring the conversation driver revokes the old client's ability to start
+or steer turns and mutate Session state, including queued writes. It does not
+replace the provider generation or interrupt an existing turn. Explicit restart
+replaces only the exact conversation owner; it never kills a shared engine to
+restart one thread. Engine PID, client PID and conversation driver are distinct.</p>
+<p>Exec ancestry records the actual lf caller. A direct child names its parent's
+Exec; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
+The provider's generation resolves to the current driver at child admission.
+A delayed command from a replaced provider retains historical provenance; old
+Exec parents are never rewritten. Causal ancestry grants no control authority.</p>
+<p>A Task selects one managed FlowSession and permits other attributed Flows.
+Taskless and Task-owned Flows use the same captured graph and driver. Loop
+passes are positions in that one FlowSession; template composition compiles into
+the graph. Each agent-backed step references the exact successful AgentSession
+history entry that fulfilled it. Mechanical results stay in FlowSession history;
+each step uses a real child Exec, and mechanical work creates no agent conversation.
+Failed or interrupted work remains visible, and stale results cannot advance
+the current boundary. Conversation continuation is separate from Flow retry.</p>
+<p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
+Bind fills an unassigned conversation's Task once. CLI states the permanent
+target and writes; Desktop confirms it. Bind cannot clear or move an assignment
+or change Flow membership. Done
+and landed Tasks remain valid targets. Under the current conservative attribution
+assumption, earlier usage retains its recorded owner; binding affects subsequent
+work, and uncertain mid-turn allocation remains unknown.</p>
+<p><code>tasks.started_at</code> is set once when actual Task work is reserved or first bound.
+Recording an inspection command's Exec does not start a Task. Chapter retirement
+also checks authored work, PRs and active claims; missing history alone cannot
+prove untouched backlog. Rotation converges from fresh Linear facts using the
+explicit target name and stable Project identities. A partially rotated repository
+must be retryable; unrelated competing plans remain unresolved.</p>
+<p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
+write contracts. Run is a historical representation to import and remove, not a
+fourth execution object or a generic attempt type under another name.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf debug -c
@@ -2262,7 +2365,7 @@ lf gate --diff-files
 <p>These commands need the execution area only: discover, prompt, route, launch,
 record, return.</p>
 <h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf task prepare INF-123
+<pre tabindex="0"><code class="language-bash">lf task checkout INF-123
 lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
 lf commit -m &quot;Reconcile Task research&quot;
@@ -2272,28 +2375,25 @@ lf task status INF-123 --json
 </code></pre>
 <p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active
 serial PR identity. It starts no Task execution. Each <code>--task</code> command
-is an independent Run in that worktree; several may overlap and write distinct
+starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
 Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code>,
 <code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
-Task worker, piecemeal helper Runs, or another system.</p>
+Task worker, piecemeal helper AgentSessions, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf start product
+<pre tabindex="0"><code class="language-bash">lf --wave product wave/operate        # one finite planning pass
 lf task run INF-123
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
-lf status product
+lf wave status product
 </code></pre>
-<p>The Home keeper may start the placed Wave listener and resident. Task motion
-does not depend on either: Task commands claim the Task's current Flow
-invocation for one worker. Chapter rotation is a deterministic
-repository-wide operation that gives every Wave a new Project at once.
-Direct questions and helper work use ordinary fresh attributed Runs without
-gaining Task Flow authority.
-A Task review FlowStep starts the persisted Skill as a provider Run and remains
-parked until its exact decision arrives. Daemon and app triggers are later work.</p>
+<p>Task commands claim the Task's managed FlowSession. Repository rotation converges
+every Wave on the requested Project name, preserving active Task identity and
+execution. Direct questions and helpers use attributed AgentSessions without
+gaining Flow authority. A review starts its captured Skill in an AgentSession
+and parks until the exact saved feedback is completed and consumed.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf ssh build-home runs --json
-lf ssh build-home start product
+<pre tabindex="0"><code class="language-bash">lf ssh build-home session list --json
+lf ssh build-home --wave product wave/operate
 </code></pre>
 <p>The origin transports one command. The target resolves its own Home state and
 runs the same <code>lf</code>. Reads are local unless this hop is explicit.</p>
@@ -2322,7 +2422,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
 </tr>
 <tr>
-<td>daemons, remote execution, placement, process control, promotion</td>
+<td>remote execution, placement, process control, promotion</td>
 <td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
 </tr>
 <tr>
@@ -2364,7 +2464,7 @@ A successful check covers that inventory, not configured runtime behavior.</p>  
 <footer>
   <div class="container">
     <div class="footer-text">
-      <p>Loopflow — Living software. Conducted by you.</p>
+      <p>Loopflow, a software instrument.</p>
       <p class="built-by">
 Built by <a href="https://github.com/loopflowstudio" target="_blank" rel="noopener noreferrer" aria-label="Loopflow Studio (opens in new tab)" class="external-link">Loopflow Studio</a>      </p>
     </div>

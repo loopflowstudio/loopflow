@@ -26,7 +26,8 @@ struct WorkspaceDestinationTests {
             if args.first == "roadmap" {
                 return args.contains("--task") ? data : #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#
             }
-            if args.first == "session" || args.first == "ls" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted in navigation proof")
         }
         let model = PodiumModel(query: query)
@@ -38,7 +39,8 @@ struct WorkspaceDestinationTests {
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
             if args.first == "roadmap" { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
-            if args.first == "session" || args.first == "ls" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
         let destination = PodiumModel(query: exactQuery)
@@ -69,7 +71,8 @@ struct WorkspaceDestinationTests {
         let model = PodiumModel(query: RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
             if args.first == "roadmap" { return current }
-            if args.first == "ls" || args.first == "session" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }, repoPath: wave.wave.repo)
         await model.openTaskLink(try #require(URL(string: "loopflow://task/\(task.task.identifier)")))
@@ -102,7 +105,8 @@ struct WorkspaceDestinationTests {
                     return response
                 }
                 if args.first == "roadmap" { return current }
-                if args.first == "ls" || args.first == "session" { return "[]" }
+                if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: wave.wave.repo)
             await model.refresh()
@@ -131,8 +135,8 @@ struct WorkspaceDestinationTests {
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
         let model = PodiumModel(query: RegistryQuery { args, _ in
             if args.first == "roadmap" { return data }
-            if args.first == "session" { return sessions }
-            if args.first == "ls" { return "[]" }
+            if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
         }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -156,7 +160,8 @@ struct WorkspaceDestinationTests {
         let model = PodiumModel(query: RegistryQuery { args, _ in
             if args.contains("--task") { await barrier.wait(); return exact }
             if args.first == "roadmap" { return data }
-            if args.first == "ls" || args.first == "session" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("Unavailable")
         }, repoPath: wave.wave.repo)
         await model.refresh()
@@ -194,7 +199,8 @@ struct WorkspaceDestinationTests {
                     return response
                 }
                 if args.first == "roadmap" { return data }
-                if args.first == "ls" || args.first == "session" { return "[]" }
+                if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: "/src/loopflow")
             await model.refresh()
@@ -249,7 +255,8 @@ struct WorkspaceDestinationTests {
                 return responses[issue]!
             }
             if args.first == "roadmap" { return data }
-            if args.first == "ls" || args.first == "session" { return "[]" }
+            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
         let router = WorkspaceLinkRouter()

@@ -1,12 +1,12 @@
 //! Durable tracking for one Linear Project's KRs.
 //!
-//! A Project coordinates Tasks from the owning Wave's clean
-//! control checkout. It owns no worktree, shipping branch, PR, permanent
+//! Linear status selects the current plan; Project planning facts include its
+//! default Flow. A Project owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
+use crate::child::AbandonIntent;
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
@@ -102,44 +102,4 @@ impl HistoricalFailure {
             occurred_at: event.created_at,
         })
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectObservation {
-    pub project_id: ProjectId,
-    pub project: String,
-    pub event_id: i64,
-    pub event: ProjectEventKind,
-}
-
-impl ProjectObservation {
-    pub fn inbox_id(&self) -> String {
-        format!("project-{}-{}", self.project_id, self.event_id)
-    }
-
-    pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&self.event)
-            .expect("Project observation always serializes to structured JSON");
-        format!(
-            "<project_observation project_id=\"{}\" project=\"{}\" event_id=\"{}\">\n{}\n</project_observation>",
-            self.project_id, self.project, self.event_id, payload
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ChildEventPayload {
-    Project { event: ProjectEventKind },
-    Task { event: TaskEventKind },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObservationOutboxRow {
-    pub id: i64,
-    pub recipient: ObservationRecipient,
-    pub source: ChildRef,
-    pub event_id: i64,
-    pub payload: ChildEventPayload,
-    pub delivered_at: Option<OffsetDateTime>,
 }

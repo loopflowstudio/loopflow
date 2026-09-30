@@ -406,14 +406,25 @@ mod tests {
         // Standalone vendor skills receive their procedures without an ambient prompt.
         for vendor in [".agents", ".claude"] {
             let root = home.path().join(vendor).join("skills");
+            for name in builtins::builtin_skill_names() {
+                let exported = fs::read_to_string(root.join(name).join("SKILL.md")).unwrap();
+                let source = builtins::get_builtin_skill(name).unwrap();
+                let body =
+                    split_frontmatter(source).map_or_else(|| source.to_string(), |(_, body)| body);
+                assert!(
+                    exported.contains(body.trim()),
+                    "{vendor} omitted {name}'s method"
+                );
+            }
+            assert!(!root.join("review-slice/SKILL.md").exists());
+            assert!(!root.join("refresh-plan/SKILL.md").exists());
+            assert!(!root.join("update-wave/SKILL.md").exists());
+            assert!(!root.join("record-learnings/SKILL.md").exists());
             let control = fs::read_to_string(root.join("loopflow/SKILL.md")).unwrap();
             assert!(control.contains("lf task restart"));
-            assert!(control.contains("lf work place"));
+            assert!(control.contains("lf wave place"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
             assert!(!implement.contains("lf task restart"));
-            let learn = fs::read_to_string(root.join("record-learnings/SKILL.md")).unwrap();
-            assert!(learn.contains("wave/<name>/MEMORY.md"));
-            assert!(!learn.contains("lf memory add"));
         }
     }
 
@@ -440,13 +451,6 @@ mod tests {
     #[test]
     fn sync_skills_prunes_only_generated_skills() {
         let home = TempDir::new().unwrap();
-        let stale_dir = home.path().join(".agents/skills/stale");
-        fs::create_dir_all(&stale_dir).unwrap();
-        fs::write(
-            stale_dir.join(SKILL_FILE_NAME),
-            "---\nname: stale\nloopflow: true\n---\nold\n",
-        )
-        .unwrap();
         let user_dir = home.path().join(".agents/skills/user");
         fs::create_dir_all(&user_dir).unwrap();
         fs::write(
@@ -455,12 +459,26 @@ mod tests {
         )
         .unwrap();
 
+        // Catalog tests own which names retire; pruning handles flat and nested paths.
+        let retired = ["restore", "task/clarify", "vsm/operate"];
+        for name in retired {
+            let dir = home.path().join(".agents/skills").join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join(SKILL_FILE_NAME),
+                format!("---\nname: {name}\nloopflow: true\n---\nold\n"),
+            )
+            .unwrap();
+        }
         let report = sync_skills(&options_for(&home)).unwrap();
-        assert!(report
-            .pruned
-            .iter()
-            .any(|path| path.ends_with(".agents/skills/stale/SKILL.md")));
-        assert!(!stale_dir.join(SKILL_FILE_NAME).exists());
-        assert!(user_dir.join(SKILL_FILE_NAME).exists());
+        for name in retired {
+            let dir = home.path().join(".agents/skills").join(name);
+            assert!(!dir.exists(), "{name}");
+            assert!(report.pruned.contains(&dir.join(SKILL_FILE_NAME)), "{name}");
+        }
+        assert_eq!(
+            fs::read_to_string(user_dir.join(SKILL_FILE_NAME)).unwrap(),
+            "---\nname: user\n---\nkeep\n"
+        );
     }
 }

@@ -1,9 +1,12 @@
+mod support;
+
 use loopflow::ops::{
     continue_rebase_for_resolution, plan_rebase, rebase_with_recovery, recover_rebase,
     NullProgress, OpsError, RebaseClass, RebaseOptions, RebaseRecovery, RebaseStrategy,
 };
 use loopflow_test_support::TestRepo;
 use std::process::Command;
+use support::EnvGuard;
 
 fn git(repo: &std::path::Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -57,6 +60,7 @@ fn start_conflicting_recovery(repo: &TestRepo) -> RebaseRecovery {
 
 #[test]
 fn rebase_onto_main_succeeds() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -84,6 +88,7 @@ fn rebase_onto_main_succeeds() {
 
 #[test]
 fn rebase_publishes_new_existing_and_deleted_remote_branches() {
+    let _env = EnvGuard::new(&[]);
     for remote_state in ["new", "existing", "deleted"] {
         let repo = TestRepo::new();
         repo.create_branch("feature");
@@ -138,6 +143,7 @@ fn rebase_publishes_new_existing_and_deleted_remote_branches() {
 
 #[test]
 fn rebase_preserves_unseen_remote_work() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature\n");
@@ -186,6 +192,7 @@ fn rebase_preserves_unseen_remote_work() {
 #[cfg(unix)]
 #[test]
 fn rebase_preserves_branch_recreated_during_push() {
+    let _env = EnvGuard::new(&[]);
     use std::os::unix::fs::PermissionsExt;
 
     let repo = TestRepo::new();
@@ -236,6 +243,7 @@ fn rebase_preserves_branch_recreated_during_push() {
 
 #[test]
 fn rebase_conflict_returns_error() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let result = rebase_with_recovery(
         repo.path(),
@@ -260,6 +268,7 @@ fn rebase_conflict_returns_error() {
 
 #[test]
 fn second_identical_conflict_reuses_resolution_without_recovery() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let original_head = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
@@ -295,6 +304,7 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
 
 #[test]
 fn preexisting_rebase_is_refused_without_abort_or_head_movement() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let output = Command::new("git")
         .args(["rebase", "origin/main"])
@@ -327,6 +337,7 @@ fn preexisting_rebase_is_refused_without_abort_or_head_movement() {
 
 #[test]
 fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
@@ -344,6 +355,7 @@ fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
 
 #[test]
 fn recovery_abort_cannot_masquerade_as_success() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
@@ -360,6 +372,7 @@ fn recovery_abort_cannot_masquerade_as_success() {
 
 #[test]
 fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
@@ -377,6 +390,7 @@ fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
 
 #[test]
 fn recovery_with_detached_head_cannot_masquerade_as_success() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
@@ -394,6 +408,7 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
 
 #[test]
 fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
@@ -416,6 +431,7 @@ fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
 
 #[test]
 fn stale_owned_rebase_can_be_explicitly_continued() {
+    let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let result = rebase_with_recovery(
         repo.path(),
@@ -444,6 +460,7 @@ fn stale_owned_rebase_can_be_explicitly_continued() {
 
 #[test]
 fn linked_worktrees_own_rebases_independently() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("conflict.txt", "base\n");
     repo.stage_all();
@@ -492,6 +509,7 @@ fn linked_worktrees_own_rebases_independently() {
 
 #[test]
 fn rebase_after_squash_merge_replays_only_unique_work() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("parent");
     repo.create_file("a1.txt", "a1");
@@ -531,7 +549,54 @@ fn rebase_after_squash_merge_replays_only_unique_work() {
 }
 
 #[test]
+fn existing_root_child_rebases_onto_parent_from_its_original_fork() {
+    let repo = TestRepo::new();
+    let original_fork = repo.head_sha();
+    repo.create_branch("child");
+    repo.create_file("child.txt", "authored before stacking");
+    repo.stage_all();
+    repo.commit("Child work before selecting a parent");
+    repo.checkout("main");
+    repo.create_branch("parent");
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    repo.push_new_branch("parent");
+    let parent_head = repo.head_sha();
+    repo.checkout("child");
+
+    let verification = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/parent".into(),
+            push: false,
+            fork_base: Some(original_fork),
+        },
+        &NullProgress,
+    )
+    .expect("adopt the selected parent without losing child work");
+    assert_eq!(verification.target_sha, parent_head);
+    assert_eq!(
+        git(
+            repo.path(),
+            &["diff", "--name-only", "origin/parent...HEAD"]
+        ),
+        "child.txt"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("child.txt")).unwrap(),
+        "authored before stacking"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
+        "parent work"
+    );
+    assert_eq!(git(repo.path(), &["rev-parse", "parent"]), parent_head);
+}
+
+#[test]
 fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
+    let _env = EnvGuard::new(&[]);
     // A child stacked on a parent whose two commits both edit the same file:
     // once squash-merged, `git cherry` cannot match the combined patch, so the
     // durable fork base is the only signal that drops the parent's work cleanly.
@@ -582,6 +647,7 @@ fn stacked_child_collapses_onto_main_dropping_squashed_parent() {
 
 #[test]
 fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
+    let _env = EnvGuard::new(&[]);
     // A fork base that is not an ancestor of HEAD means the child's own history
     // was rewritten; replaying would rewrite history blindly, so refuse.
     let repo = TestRepo::new();
@@ -615,6 +681,7 @@ fn stacked_rebase_refuses_when_base_is_not_an_ancestor() {
 
 #[test]
 fn dotted_branch_names_do_not_imply_a_parent() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("jack/a.b");
     repo.create_file("feature.txt", "feature");
@@ -629,6 +696,7 @@ fn dotted_branch_names_do_not_imply_a_parent() {
 
 #[test]
 fn explicit_onto_is_the_only_alternate_base() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("alternate");
     repo.create_file("alternate.txt", "alternate");
@@ -642,6 +710,7 @@ fn explicit_onto_is_the_only_alternate_base() {
 
 #[test]
 fn dirty_scratch_only_branch_resets_to_base() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("scratch/design.md", "notes");
@@ -654,6 +723,7 @@ fn dirty_scratch_only_branch_resets_to_base() {
 
 #[test]
 fn modified_scratch_file_keeps_its_leading_path_character() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_file("scratch/notes.md", "original\n");
     repo.stage_all();
@@ -672,6 +742,7 @@ fn modified_scratch_file_keeps_its_leading_path_character() {
 
 #[test]
 fn wave_changes_are_protected() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("wave/goals/MEMORY.md", "state");

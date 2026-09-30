@@ -1,7 +1,44 @@
 # Testing
 
-CI runs the full proof matrix in parallel. Local work should run the smallest
-proof that can change the next decision.
+PR and merge-group CI run the full proof matrix in parallel. Local work should
+run the smallest proof that can change the next decision.
+
+A new PR update cancels the previous CI run for that PR. Main and merge-group
+runs remain independent.
+
+CI Rust cache keys include the root workspace's build profiles, which the cache
+action's member-manifest discovery omits. Profile changes get fresh dependency
+caches; version-only releases retain them. Main publishes the shared caches;
+PRs and merge groups restore them without accumulating private copies. Cache
+restoration alone never skips proof. After a merge, main can reuse a
+successful merge-group CI run for the identical SHA and workflow, linking that
+run in its summary. Missing or unreadable proof runs the full matrix. Main still
+restores the shared caches and runs each job whose cache misses; those jobs
+refresh their caches and must pass. PRs and merge groups always execute every check.
+
+Swift cache keys include the tracked Swift tree, compiler, and SDK. Successful
+main jobs save the build and source hashes/timestamps. After checkout, CI restores
+an input's cached timestamp only when its contents still match; changed inputs
+keep their new timestamps and rebuild. Missing timestamp metadata leaves normal
+Swift build detection in control. Source or toolchain changes may require a new
+main cache fill; PRs and merge groups only restore shared caches.
+
+CI wraps the expensive Rust, Swift, and Xcode commands with native
+`/usr/bin/time`: `-v` on Linux and `-l` on macOS. Their existing job logs retain
+elapsed time, user/system CPU seconds, maximum RSS, faults, and context switches
+on success or command failure. Swift's failure artifact retains the same output.
+Runner cancellation may prevent a final report. Skipped checks have no new measurement.
+Compare the same command, source,
+runner/toolchain, and cache state; sum user/system time to compare CPU work with
+elapsed time. A timing difference alone does not establish contention.
+
+[GNU time](https://www.gnu.org/software/time/manual/html_node/Memory-Resources.html)
+reports maximum RSS in KiB; macOS reports bytes. These are the native command
+accounting peaks, not simultaneous aggregate process-tree or host physical memory.
+Work performed by external services may be excluded, so this does not measure
+Docker daemon memory or establish a safe parallel-worker count. Local gate CPU
+receipts remain under `.lf/tmp/gate`; use the same native timing command for a
+focused local comparison.
 
 The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
@@ -60,13 +97,46 @@ uv run python scripts/resource_envelope.py --recover
 
 The resource preflight names the owner and budget for every worktree build,
 gate-artifact root, the Home-local Run record store, uv cache, Cargo cache, and
-free disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
-worktree build, 128 GiB across builds, 16 GiB each for Run records and uv, and
-four low-priority verification workers. Recovery removes only allowlisted build
-roots from inactive worktrees, old disposable gate output, and entries accepted
-by `uv cache prune`. It never removes source, a worktree, gate receipts, Run
-bundles, or SQLite state. Unresolved pressure stops before product tests run and
-prints the local path that needs an explicit retention decision.
+free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
+emergency disk reserve, and four
+low-priority verification workers. Total build size is measured, not capped.
+Individual root thresholds are cleanup signals, not gates: an oversized sibling names its
+worktree in a warning and does not block a healthy checkout. The 24 GiB build threshold
+identifies cleanup candidates, not a limit on what a worktree may build.
+
+Verification preflight and explicit `--recover` reclaim inactive worktrees'
+allowlisted build roots only when unchanged for at least 24 hours and either
+oversized or needed to restore the cleanup target. They also prune old disposable
+gate output and entries accepted by `uv cache prune`. Cleanup runs before
+verification, not on an independent timer. A busy uv cache is reported immediately
+without waiting for its reader locks, including the parent `uv run`. Other cleanup
+and above-reserve verification continue. To reclaim uv entries, run
+`UV_LOCK_TIMEOUT=0 uv cache prune` directly when other uv commands are idle.
+A nonblocking host lock permits only
+one cleaner at a time across parallel workers. Verification prints each cleanup
+result and reclaimed size, including failed pruning attempts, and saves them in
+its resource receipt. All active
+worktrees, source, worktree metadata, gate receipts, Run bundles, and SQLite
+state are retained, including the current checkout's active builds. Only disk
+below the emergency reserve stops product tests;
+low-disk output names the largest inactive build roots. Measurement failures
+remain explicit because unmeasured capacity cannot establish a safe build.
+If eligible caches cannot restore 64 GiB free, verification warns and continues
+above 32 GiB. The reserve is a last-resort stop, not a forecast of a build's disk
+requirements or a host-wide reservation for concurrent builds.
+
+Gate roots with only recent output consume no recovery slots, leaving capacity
+for stale build cleanup. Removing even an empty old directory counts toward the
+same per-pass root limit.
+
+An empty plan or an identical passing result reused with `--reuse-passing`
+returns before resource scans and cleanup. Neither executes a build nor writes
+a new proof receipt. Changed content or commands require fresh verification and
+the normal resource checks.
+
+Busy uv cache pruning times out after 15 seconds while other eligible recovery
+continues. Retry `uv cache prune` after other uv processes exit, or run recovery
+from an activated `.venv`; an enclosing `uv run` can hold the cache lock.
 
 Every phase runs under a printed wall-clock limit. A phase that overruns is
 killed—process group and all—and reported as `VERIFICATION BUDGET`, so
@@ -98,10 +168,13 @@ Read the same gate evidence through the daily operator flow:
 lf telemetry-daily
 ```
 
-The scorecard joins accepted provider Turn usage with pre-land phase records. It
+The scorecard joins current Run usage and duration with Task PR landing and pre-land phase records. It
 prints aggregate values and coverage only—never commands, prompts, output, or
 task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.
+
+“Recorded agent attempt → merge” includes earlier and unfinished Runs attributed
+to the exact PR. See [metric definitions and coverage limits](performance/README.md).
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real
@@ -134,6 +207,14 @@ Tests for release automation, installers, and repository scripts.
 ```bash
 uv run pytest python/tests/                          # All Python tests
 uv run pytest python/tests/test_install_script.py -v # One file
+```
+
+After changing the CLI guide, agent API docs, published Loopflow skill, or
+builtin `LOOPFLOW.md`, run the shared inspection-command check even when no
+Python files changed:
+
+```bash
+uv run pytest python/tests/test_loopflow_skill_alignment.py
 ```
 
 ## Website Tests
@@ -176,10 +257,27 @@ Pass `--no-parallel` explicitly for the full suite. Native proofs share AppKit's
 main actor; concurrent suites can starve async observations and distort timing
 budgets. Swift Testing otherwise runs suites concurrently.
 
+`scripts/prove_wave_surface_states.sh` separately renders four fixture states at
+two widths using the built app. It runs the two widths in separate processes,
+waits for both, then advances to the next state. All eight images must be nonempty
+and pairwise distinct. Interrupting the script stops and reaps its capture children.
+
+Failed Swift CI runs retain a `swift-tests-<run>-<attempt>` artifact for seven
+days with the toolchain, output log, and Swift Testing event stream. When console
+output stops after compilation, inspect `events.jsonl` for the last started test
+without a matching end event. SwiftPM buffers console output, so silence alone
+does not establish that test execution never began.
+
 The Swift transport suite launches `target/debug/lf` against a temporary Home.
 Build the current CLI before running it; an existing developer build can hide
 a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
 include this build.
+
+Transport tests register `Process.terminationHandler` before launch and await
+its notification. Do not use `waitUntilExit()` after an async suspension: the
+test can resume on a different thread and hang in Foundation's run-loop wait
+even after the child exits. When a Swift run stops reporting progress, sample
+the test helper process before changing timeouts; cleanup can be the blocker.
 
 In asynchronous terminal proofs, observe the surface after each wake-up before
 checking the deadline. A busy main actor can resume after the deadline even
@@ -189,6 +287,12 @@ For async model readers, keep generic values crossing actor boundaries
 `Sendable`. A newer local Swift compiler can accept code rejected by CI's
 toolchain; record `swift --version` with compile evidence when investigating
 concurrency diagnostics.
+
+Keep native code compatible with CI's Xcode toolchain in both SwiftPM and Xcode
+builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4
+cannot enable it even with an experimental feature flag. Put teardown that can
+run off-actor in a resource owner and exercise release from outside the main
+actor. A newer local compiler's pass does not establish older-toolchain support.
 
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
@@ -203,14 +307,20 @@ the Xcode test target compiles.
 Two levels, split on purpose:
 
 **Compile check** (`loopflow` suite, in `--all` and CI). Compiles the macOS app
-and its signed test runners. Swift package tests already exercise the shared
-suites un-hosted, so the only unique signal here is that the app target builds:
+and its signed test runners with the terminal fallback. Swift package tests
+exercise the shared suites with GhosttyKit:
 
 ```bash
 cd swift
 xcodegen generate
 xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 ```
+
+CI caches this build only for identical tracked Swift inputs, Xcode, SDK and
+XcodeGen versions. Matching source timestamps preserve compilation across
+checkouts; changed inputs start fresh, including signed entitlement state.
+Only main saves caches. PRs and merge groups still run the compile command and
+build the current Rust control tools.
 
 **Hosted run** (`ui-host` required gate, permissioned host only). Actually runs
 `LoopflowUITests`; needs macOS UI-automation permission. Never runs under
@@ -224,7 +334,7 @@ See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Ten proof jobs run in parallel and feed the
+See `.github/workflows/ci.yml`. These proof jobs run in parallel and feed the
 aggregate `tests-result` check:
 
 | Job | Runner | Command |
@@ -237,10 +347,11 @@ aggregate `tests-result` check:
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
+| `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All ten must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
+All must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
 runs the same architecture command every Monday and retains its JSON report for
 90 days; four consecutive runs are the time-based architecture KR evidence.
 
@@ -280,15 +391,41 @@ directory without Git metadata; Work operations still enforce repository ownersh
 cargo nextest run -p loopflow --test status_tests --test wave_repository_ownership --no-fail-fast
 ```
 
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
+Task decision recovery has a focused public-operation proof:
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
+cargo test -p loopflow --lib task_decision_public_resume -- --test-threads=1
 ```
 
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
+It runs the driver-created Ask through resume, including a later branch-adoption
+refusal, retained feedback and direction, and a fresh Run with the saved agent.
+PM, provider and process-launch effects are simulated; the public resume core,
+account selection, store, prompt and driver execute.
+
+The opt-in `task_decision_live_policy_blocks_two_empty_replacement_passes` test
+uses actual Codex judgment and simulated PM. Run it with `--ignored --nocapture`
+and explicitly set `LOOPFLOW_LIVE_TASK_LF` to the source `lf` built in this checkout,
+`LOOPFLOW_LIVE_CODEX_HOME` to an existing configured account Home, and
+`LOOPFLOW_LIVE_TASK_OUTPUT` to a fresh evidence directory. It retains its isolated
+Home and Run records on failure. This also tests the provider tool shell's
+executable/Home propagation: manually supplying a verdict or rewriting the
+prompt's commands does not satisfy the proof. The test first runs a separate provider tool-shell probe:
+`command -v lf`, `lf task status TEST-1 --json`, and an allowlisted Home/database
+capture must identify the source fixture despite an installed `lf` on PATH.
+It then judges the recorded passes, completes the resulting policy Ask with
+explicitly synthetic feedback, and checks that the same decision Run finishes.
+Keep earlier failed receipts; an automatic failure Ask is not policy acceptance.
+
+Task stall proof uses `session_record::activity::tests`, `task_live_unblock`, and
+Swift `TaskFlowProofTests`. The sampler retains PID/start identity and cumulative
+CPU for the body and descendants in existing Run events. Five quiet minutes
+requires samples no more than 45 seconds apart; the worker samples every 15
+seconds. Unit proofs advance a simulated clock; the CLI/desktop proof samples a
+real sleeping process with a seeded five-minute history. Neither establishes a
+five-minute configured provider stall. Preserve CPU-active silence, fresh-event,
+missing-sample and PID-reuse counterexamples when changing the projection.
+Repeated samples of a reused body PID must remain Unknown; they cannot replace
+the observer's original body identity and later establish a stall for that Run.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
@@ -311,9 +448,50 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `AskHome`
 in Ask-session tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
+the Session driver references share the same database. Simulated finite-provider
+harnesses must record their owned child exit; an absent endpoint is not exit
+evidence.
+
+`exec_ownership_tests::interruption_records_the_exec_without_a_fabricated_signal_name`
+checks the OS exit, durable Exec outcome and absence of its owned scorecard child.
+It retains child output for failures. On Linux, `cc` builds the test-only
+`support/hold_group_kill.c` interposer: after delivering the real group kill it
+holds the signal hook for 200 ms, exposing normal command return racing cleanup.
+The fixture asserts that this scheduling point was reached. This is controlled
+ordering evidence, not a claim about how long a hosted signal handler paused.
+Other Unix platforms exercise the ordinary interruption path.
+
+Exercise native Flow recovery with real Codex and a local Responses fixture:
+
+```bash
+uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
+  --lf target/debug/lf --launch --flow-driver-loss completed \
+  --output .lf/tmp/native-flow-completed
+```
+
+Use `--flow-driver-loss running` for a surviving turn during public resume,
+`--flow-driver-loss both` for explicit retry after both driver and engine die,
+`--flow-decision-retry missing|replace` for native structured-output exhaustion
+or successful retry, `--flow-blocked` for keyed feedback continuation, and
+`--public-connect` for a live headless-to-terminal handoff.
+The fixture copies the candidate, uses private Homes and stops only its identified
+engine children. Native execution uses synthetic Responses, not configured
+accounts or installed data. Ordinary retry, usage, binding and review behavior
+belong in `session_lifecycle_tests`; Chapter convergence belongs in
+`ops::chapter::tests`, including interrupted rotation and second-Home sync.
+
+Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
+launch authority before reconciling a user merge. Pin the test executable when
+no child is launched; an installed `lf` on PATH can hide this missing fixture.
 Fixtures selecting a private `LF_HOME` must also clear and restore
 `LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
 control authority, and Run lookup otherwise reads outside the fixture's Home.
+Clearing inherited authority alone does not isolate a process that falls back
+to its development Home. Give each proof phase a disposable default `LF_HOME`
+and `LF_DB_PATH`; individual fixtures must clear or override both when selecting
+their own stores. Flow fixtures put the candidate `lf` on PATH, since child steps
+use ordinary executable discovery. `LF_BIN` alone does not select a Flow child.
 Reproduce executable-resolution failures with the compiled test
 binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
 containing Git but no `lf`.
@@ -321,6 +499,16 @@ containing Git but no `lf`.
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-decide after work and review so navigation
 cannot skip a later review.
+
+Include the CLI/desktop unblock projection when changing builtin Flow composition:
+
+```bash
+cargo test -p loopflow --test task_initialization_tests task_live_unblock
+```
+
+Fixtures targeting a named boundary should resolve its node ID in the expanded
+invocation. A hard-coded step index can silently select a different skill when
+a nested Flow gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
 running its Python behavior tests:
@@ -342,6 +530,22 @@ match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
 cargo test -p loopflow --lib engine::builtins::tests
+```
+
+When changing the builtin catalog or Flow composition, also exercise discovery.
+Listings keep effective skills and authored flows separate and show their sources
+and invocations; `lf flow show` expands a flow's steps.
+
+```bash
+cargo test -p loopflow --test cli_discovery list_preserves_kinds_overrides_sources_and_reserved_invocations
+```
+
+Catalog retirement also affects historical migration tests. Keep their persisted
+names and data-preservation assertions at the migration boundary; current catalog
+resolution belongs in engine tests. Include the legacy Flow repair proof:
+
+```bash
+cargo test -p loopflow --lib legacy_task_flow_repair
 ```
 
 Skill export tests use isolated homes and cover builtin/global definitions,
@@ -366,8 +570,8 @@ launch tests should prove that the canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task controller consumers: worker claims now leave Started history even
-after a provider failure. Use CI's materialized migration graph for trigger
+include Task controller consumers: durable work reservation retains Started
+after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Installed development
 builds record draft checksums too: add a forward draft after the owning migration
 instead of rewriting an applied draft. Preserve populated historical fixtures.
@@ -377,7 +581,9 @@ source copy that includes the current tracked and untracked inputs. Materializat
 can change package versions, the lockfile, registry and migration files; another
 Run can commit those temporary changes before cleanup. Keep the assigned checkout
 on its authoring schema and leave the live Home untouched. A copy without Git
-metadata cannot prove fixtures that require `git rev-parse HEAD`: run those in
+metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
+source behavior; otherwise the build defaults to release provenance. It also
+cannot prove fixtures that require `git rev-parse HEAD`: run those in
 the assigned checkout when its schema suffices, and report that separate proof.
 Do not count a fixture setup failure as a passing materialized test.
 
@@ -401,6 +607,86 @@ Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
 pass alone does not prove that an existing Home can upgrade without losing work.
 
+Prove branch data isolation against the real installed CLI after building `lf`:
+
+```bash
+uv run python scripts/verify_branch_data.py --output scratch/branch-data-proof.json
+```
+
+This opts into seeding the source-specific data directory from the current
+installation.
+It writes a synthetic remote Home observation only in that copy, proves that a
+repeat invocation retains it, and checks that the installed CLI still opens its
+store with identical schema and migration receipts. It performs no SSH calls,
+Task launch or promotion. The observation remains in the branch database. This is
+database-isolation evidence, not the complete Task-worker demo for LOO-321.
+
+`ops::task_destination::tests::managed_operations_move_before_branch_effects`
+uses paired disposable stores and a simulated installed subprocess. It proves
+operation routing before branch effects, returned installed snapshots, rejection
+of branch-only Task identities, and preservation of private writes after installed
+failure. Its test-only installation root cannot redirect production installation
+authority. It does not launch an actual Task worker or
+prove installed Session readiness, tmux, or daemon execution.
+
+Run the real CLI resume regressions with isolated installation authority:
+
+```bash
+uv run python scripts/test_task_installation.py
+# One changed managed operation proof:
+uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
+```
+
+This copies source into a disposable Linux container and creates an OS account
+whose installation records select the compiled CLI. An ELF trailer gives
+the installed CLI a distinct identity: byte-identical copies are installed too,
+regardless of path. No host Home, credentials or installation is mounted.
+These installation tests run only through
+this harness (`task-installation` in CI); ordinary Rust runs mark them ignored.
+They prove Task continuation’s auto-merge revocation and review continuity, agent
+selection read from the installed database while branch reads remain private, and direct-open
+refusal without changing the owned development database/WAL bytes. Review
+completion rejects branch-only feedback and a stale readiness token, resolves
+both boundary and Run selectors, records the exact installed feedback once,
+and preserves the branch Flow and events. The same review scenario proves agent
+persistence and repeated `task run` retaining its invocation, cursor and prepared
+review Run. It also rejects a missing replacement Flow before changing the installed
+review or committing a restart checkpoint. Managed-operation CLI assertions belong
+in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
+host account's installation authority. Read-only Flow projections stay in the
+ordinary suite.
+
+The mechanical Flow proof uses that disposable account without an installation
+selection. A claim followed by admission failure/release leaves Started absent;
+the real worker records operation history and Started together. It retains the
+captured Flow after the template disappears and creates no operation Run.
+The executable-discovery proof removes `lf` from PATH, exercises driver and
+selected-installation fallback, then puts another `lf` first on PATH. It checks
+the child Exec executable and its Flow store. The declaration proof starts Task Y
+from Task X's agent and checks Y attribution while retaining X as the causal parent.
+
+The recovery proof adds a draft unknown to the branch, preserves both
+databases and independent private writes, recommends the
+installed executable/database pair only after its real exact-store preflight,
+and refuses
+that recommendation after the installed schema changes or executable disappears.
+The focused `incompatible_seed_preserves_source_receipts_and_private_writes`
+unit proof covers a newer source snapshot, its WAL, and reseeding without replacing
+private work. GitHub is
+simulated and review Runs are prepared without launching a provider. These are
+real current-CLI operation proofs, not older-version compatibility, promotion
+or configured worker acceptance.
+The harness keeps Docker build/registry caches, serializes use of its build
+cache, and destroys the account and installation after each attempt.
+
+The `store::branch_data::tests` private-data subprocess fixture checks ordinary
+storage, observation, Run artifacts, and child context with stale control pins,
+including a relative custom database and malformed inherited control path.
+`global_commands` has focused real-CLI proofs for explicit data-directory
+reads/writes and
+Task-bound promotion refusal with read-only candidate preflight. These use
+disposable stores; they do not prove installed worker routing or a live demo.
+
 After rebasing across a release cut, run the installed-development migration
 tests as well as the new migration's tests. Adoption fixtures must include the
 draft receipts for every pending release; a fixture pinned to one released
@@ -413,7 +699,7 @@ cargo test -p loopflow --lib installed_development_
 Run records have focused storage, harness, reducer, and reader checks:
 
 ```bash
-cargo test -p loopflow run_record
+cargo test -p loopflow session_record
 cargo test -p loopflow journal
 cargo test -p loopflow store
 cargo test -p loopflow harness::conformance_tests
@@ -441,6 +727,20 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_rebase_conflict.sh
 ```
 
+Exercise Task deletion through the real CLI on Linux:
+
+```bash
+cargo test -p loopflow --test task_deletion_tests
+```
+
+Requires `uv`, Python and OpenSSL. The test creates an isolated Home/store and a
+local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
+only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
+setting, so this test is Linux-only. It verifies native removal, local retirement,
+completed history, retained PRs/files, retries, planning sync, diagnostics and
+rejection of the removed `pm`/`work` groups. No installation or live provider is
+used.
+
 Exercise Linear expiry and rejection through an installed development CLI:
 
 ```bash
@@ -449,9 +749,9 @@ uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
 ```
 
 Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
-`uv`. Install the published CLI/daemon fallback and promote the candidate with
+`uv`. Install the published CLI fallback and promote the candidate with
 `lf install promote --from-build ...` first. That Home needs a registered
-repository and `tmux` so promotion can verify its daemon. Never mount a real
+repository. Never mount a real
 Home or credentials into this container: the fixture replaces its Linear row
 and seeds planning data in the selected development store.
 
@@ -470,8 +770,8 @@ uv run --no-project --python 3.14 /fixture/install_bootstrap.py
 ```
 
 Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
-pair to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
-`/fixture/bin/{lf,lfd}`. Build the pair in a separate disposable source snapshot
+CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
+`/fixture/bin/lf`. Build the CLI in a separate disposable source snapshot
 after `canonicalize_migrations.py --materialize-for-tests`, using release
 provenance and published migration authority only in that isolated build.
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
@@ -481,7 +781,7 @@ external-installer transition.
 
 The script creates separate OS accounts and a local HTTPS release endpoint.
 It exercises the real CLI, verified shell installer, store creation, repeat
-installation, missing-daemon repair, checkout preservation, and recovery after
+installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
@@ -492,7 +792,7 @@ public release-channel demo. Discard the container afterward.
 ```bash
 package-smoke/lf --version
 package-smoke/lf --help
-package-smoke/lf --list
+package-smoke/lf list
 ```
 
 Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.
@@ -510,27 +810,19 @@ When adding features that need manual verification, write or extend a script in 
 
 ## Boundary-specific checks
 
-When changing Flow boundary or prepared Run ownership, include the Flow Run
-recovery tests. Human boundaries prepare their Run before provider launch;
-fixtures must start that Run instead of binding a fresh capture.
+When changing Flow step or prepared Run ownership, include the invocation
+store tests and the public Session lifecycle proofs. Human boundaries prepare their
+Run before provider launch; fixtures must start that Run instead of binding a
+fresh capture.
 
 ```bash
-cargo test -p loopflow --lib ops::flow_run::tests
+cargo test -p loopflow --lib store::sqlite::flows
+cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
 
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
 a human review preserves its invocation and cursor while preparing its Run;
 assert those facts instead of equality of the entire versioned Flow record.
-
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
-```
-
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
@@ -554,6 +846,15 @@ Tests that construct session commands must supply their own `LF_BIN` fixture,
 restore it afterward, and serialize environment changes with `test_env_lock`.
 Reuse `TestLfBinGuard` in Task controller tests. Session spawning remains mocked.
 
+For gate runs launched inside a managed Run, clear inherited `LF_*` authority and
+pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
+runner. The materialization wrapper clears only its listed variables; it does not
+clear every inherited pin. The provider harness prepends the selected CLI's parent
+to PATH, so an inherited CLI directory containing `claude` can outrank a fixture's
+fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
+this. Keep the failed evidence if this occurs, stop the test group, and verify the
+fixture under the corrected executable context before completing the suite.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
@@ -565,3 +866,13 @@ Exercise Session fixtures through Rust as well as Swift after ancestry changes.
 `wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different
 types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
+
+Session fixtures share `AMBIENT_TASK_ENV` in
+`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Home,
+Run identity/directory, Task authority, and review Session identity under the
+suite's environment lock and restores them afterward. Prove isolation from a
+live Session without shell-level scrubbing:
+
+```bash
+cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1
+```

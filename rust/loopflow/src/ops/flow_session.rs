@@ -324,6 +324,7 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
         return Ok(surface);
     }
     let run = flow_run::read(&token.invocation)?;
+    let _accounts = run.accounts.clone().unwrap_or_default().activate()?;
     let boundary = validate(&run, token)?;
     let human_token = HumanSessionToken::StandaloneFlow {
         token: token.clone(),
@@ -352,7 +353,11 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
             human_session::HUMAN_SESSION_ENV,
             serde_json::to_string(&human_token)?,
         )
-        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(token)?);
+        .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(token)?)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            run.accounts.clone().unwrap_or_default().env_value()?,
+        );
     for (flag, value) in [
         ("--model", &run.model),
         ("--wave", &run.wave),

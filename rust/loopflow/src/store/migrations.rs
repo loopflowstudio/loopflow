@@ -3256,6 +3256,31 @@ mod tests {
     }
 
     #[test]
+    fn provider_account_credential_identity_retains_unbound_historical_observations() {
+        let conn = open();
+        apply_before_current_draft(&conn, "provider_account_credential_identity");
+        if !_draft_is_canonical("provider_account_identity") {
+            conn.execute_batch(&current_draft_sql("provider_account_identity"))
+                .unwrap();
+        }
+        conn.execute_batch("INSERT INTO provider_accounts (provider, account_id, home, login_email, credential_state, routing_state, observed_email, observed_subject, cooldown_until, created_at, updated_at)
+            VALUES ('claude', 'engineering', '/fixture/account', 'eng@example.com', 'connected', 'explicit_only', 'eng@example.com', 'user-one', 123, 1, 2);").unwrap();
+        conn.execute_batch(&current_draft_sql("provider_account_credential_identity"))
+            .unwrap();
+        let row = conn.query_row("SELECT observed_email, observed_subject, observed_credential_digest, cooldown_until, routing_state FROM provider_accounts WHERE account_id = 'engineering'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, i64>(3)?, row.get::<_, String>(4)?))).unwrap();
+        assert_eq!(
+            row,
+            (
+                "eng@example.com".into(),
+                "user-one".into(),
+                None,
+                123,
+                "explicit_only".into()
+            )
+        );
+    }
+
+    #[test]
     fn auth_browser_bindings_preserve_populated_profiles_accounts_and_routes() {
         let conn = open();
         apply_before_current_draft(&conn, "auth_browser_bindings");

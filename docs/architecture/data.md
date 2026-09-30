@@ -39,7 +39,7 @@ kernel locks                  live local exclusion authority
 | What did one provider launch emit? | the Run record on the Home that launched it |
 | Is a local process moving now? | the OS process table joined to local command receipts |
 | Did a PR merge? | GitHub |
-| May this rebase begin? | live kernel-held Git locks |
+| May this sync begin? | live kernel-held Git locks |
 | Which binary will a new process start? | machine-install selection receipt |
 
 An identifier can join evidence across these sources. It does not transfer
@@ -104,7 +104,7 @@ selects new artifacts; see [Homes and processes](homes.md#promote-a-new-artifact
 | current Home `flows/<invocation-id>/position.json` | ordinary Flow's captured definition, cursor, active boundary, failure and completion | position lock plus atomic replacement; driver lock serializes continuation |
 | current Home `human-sessions/<ask-id>.json` | Ask question, selected skill, caller/Session Run, readiness and completion summary | Session launch lock serializes startup and human updates; atomic replacement |
 | provider account homes | provider-native login and resume state | provider adapter owns format |
-| absolute Git directory `loopflow/` | writer and rebase receipts | kernel-held lock plus readable JSON |
+| absolute Git directory `loopflow/` | writer and sync receipts | kernel-held lock plus readable JSON |
 | machine-install root | versioned artifacts and switch receipts | stage immutably, select atomically |
 
 Run records are deliberately decentralized. A scan can rebuild the complete

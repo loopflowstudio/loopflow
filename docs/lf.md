@@ -85,7 +85,7 @@ lf repo release run patch           # verify, prepare notes, tag, and publish a 
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
-own preparation and integration; publish does not rebase. PR operations work
+own preparation and integration; publish does not sync. PR operations work
 on ordinary branches without creating a Task. Bare `land` keeps a Task open.
 
 ## Accounts and access
@@ -125,7 +125,7 @@ explicitly. See [Authoring](authoring.md) to define either.
 lf task checkout EXP-12              # prepare a Task's worktree without starting it
 lf task worktree create csv-export   # create a worktree without a tracked Task
 lf task commit -m "Add CSV export"  # save local changes
-lf task rebase --plan                # inspect the integration strategy
+lf sync --plan                       # inspect the integration strategy
 lf task pr checks --watch            # follow the PR's checks
 ```
 

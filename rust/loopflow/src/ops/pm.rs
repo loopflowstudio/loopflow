@@ -1127,6 +1127,7 @@ pub(crate) async fn task_comment_async(
     wave: Option<&str>,
     issue: &str,
     message: Option<&str>,
+    steer: bool,
 ) -> OpsResult<TaskComments> {
     if message.is_some_and(|text| text.trim().is_empty()) {
         return Err(OpsError::Message("Task comment cannot be empty".into()));
@@ -1142,8 +1143,13 @@ pub(crate) async fn task_comment_async(
     }
     let posted = match message {
         Some(message) => Some(
-            super::linear_observe::publish_issue_comment(&repository.client, &item.id, message)
-                .await?,
+            super::linear_observe::publish_issue_comment(
+                &repository.client,
+                &item.id,
+                message,
+                steer,
+            )
+            .await?,
         ),
         None => None,
     };

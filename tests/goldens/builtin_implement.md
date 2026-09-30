@@ -20,15 +20,15 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                     # inspect integration strategy
-lf rebase                            # apply it
+lf sync --plan                       # inspect integration strategy
+lf sync                              # apply it
 lf pr publish --title "..."          # push and create/update PR
 lf pr submit                         # prepare for the user's merge click
 lf pr arm                            # prepare and request auto-merge; return
 lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish makes a PR ready for review; it does not rebase. Submit is
+Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
@@ -88,6 +88,16 @@ never launch a GUI browser executable for capture. Keep credentials out of
 terminal output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge
+
+Keep agent progress in local working notes and the final Run response. Do not
+post routine progress to Linear: Task comments are for new direction from people.
+Agent comments published through `lf task comment` carry a progress marker and
+are excluded from steers. Use `--steer` only for deliberate new direction.
+Preserve `<!-- loopflow-progress:... -->` provenance
+when writing progress through another integration.
+
+Launch context has explicit budgets. An excerpt names its complete local source;
+read relevant omitted sections before acting, rather than rereading whole archives.
 
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
@@ -157,16 +167,23 @@ plan in the conversation; do not require a document template or a prior skill.
    Recover the intended outcome, accepted constraints, approach, and proof.
    Read the current plan wherever it lives. Reconstruct the affected concepts,
    owners, persistence, and call paths before choosing where behavior belongs.
+   Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
+   and their exclusive tests/fixtures slated for removal, with required behavior,
+   data, and proof to preserve. Keep it current across passes.
 
 2. **Implement**
-   - Data structures first—get the core types right
+   - Make the deepest planned deletions first: remove obsolete concepts,
+     authorities, and paths, then build data structures on what remains.
+   - Never repair, refactor, or extend a deletion target or its exclusive
+     tests/fixtures. When one fails, carry out the planned removal instead.
+     Preserve coverage of required behavior on the surviving path.
+   - Move real consumers end to end and include any required data migration in
+     the deletion cut. Temporary compile/test breakage within the cut is no
+     reason to repair the predecessor; finish the cut before claiming proof.
+     New capabilities need no invented predecessor or deletion quota.
    - Functions one at a time, following the signatures
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation
-   - Delete the authority or path the design makes obsolete
-   - When replacing an existing path, move a real consumer end to end and
-     delete the predecessor in the same cut. New capabilities need no invented
-     predecessor or deletion quota.
    - Follow the design's delivery boundary. An indivisible architectural change
      proceeds in coherent internal slices but ships as one PR. Keep the complete
      target and update the remaining work as implementation teaches us more.
@@ -222,6 +239,12 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
 
 If the design doc is unclear, make the simplest reversible choice and record it
 in `scratch/questions.md`.

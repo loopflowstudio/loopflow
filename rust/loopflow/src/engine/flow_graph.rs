@@ -621,8 +621,8 @@ mod tests {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
             ("code", &["implement", "compress"], &[], 0),
-            ("queue", &["compress", "rebase", "realign", "gate"], &[], 0),
-            ("refresh", &["rebase", "realign"], &[], 0),
+            ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
+            ("refresh", &["sync", "realign"], &[], 0),
             ("task-design", &["kickoff", "review-design"], &[1], 0),
             ("incident", &["unbreak", "5whys", "launch-plan"], &[], 0),
             (
@@ -630,7 +630,7 @@ mod tests {
                 &[
                     "implement",
                     "compress",
-                    "rebase",
+                    "sync",
                     "realign",
                     "loop-decide",
                     "pr-publish",
@@ -685,7 +685,7 @@ mod tests {
         let flow = load_flow("refresh", repo.path()).unwrap();
         let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
-        assert_eq!(labels, ["rebase", "realign"]);
+        assert_eq!(labels, ["sync", "realign"]);
         assert_eq!(graph.steps[0].kind, FlowNodeKind::Op);
         assert_eq!(graph.steps[1].kind, FlowNodeKind::Skill);
     }
@@ -703,14 +703,14 @@ mod tests {
                 "review-design",
                 "implement",
                 "compress",
-                "rebase",
+                "sync",
                 "realign",
                 "loop-decide",
                 "pr-publish",
                 "demo",
                 "loop-decide",
                 "compress",
-                "rebase",
+                "sync",
                 "realign",
                 "gate",
                 "pr land -c"

@@ -1,8 +1,10 @@
 use std::io::BufRead;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use regex::Regex;
 use tokio::sync::mpsc;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
@@ -89,6 +91,12 @@ async fn drive_task(
         if before.claim.as_ref() != Some(&launch_claim) {
             anyhow::bail!("Task driver launch claim is stale");
         }
+        let _accounts = before
+            .invocation
+            .accounts
+            .clone()
+            .unwrap_or_default()
+            .activate()?;
         // A Flow may start with an operation or a recovered verdict, so the
         // launch can legitimately have no provider route yet.
         if before.current().kind != StepKind::Op && !before.has_pending_decision() {
@@ -479,7 +487,7 @@ async fn run_task_with(
                         let latest = load_task(&store, &task.id).await?;
                         task.pm_writeback = latest.pm_writeback;
                         let _ = harness.stop().await;
-                        finish_capture(capture.as_ref(), "completed");
+                        finish_capture(capture.as_ref(), if status == Lifecycle::Interrupted { "interrupted" } else { "completed" });
                         return finish_claimed_task_boundary(
                             &store,
                             &mut task,
@@ -710,8 +718,17 @@ async fn prepare_task_flow_step(
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await?;
-    let steers = store.task_steers(&task.id).await?;
-    let seeded_steer_id = steers.last().map_or(0, |steer| steer.id);
+    let consumed = crate::run_record::completed_step_steer_id(
+        &crate::store::observability_home_dir(),
+        &crate::run_record::RunFlowStep::of(flow, None),
+    )?;
+    let steers: Vec<_> = store
+        .task_steers(&task.id)
+        .await?
+        .into_iter()
+        .filter(|steer| steer.id > consumed)
+        .collect();
+    let seeded_steer_id = steers.last().map_or(consumed, |steer| steer.id);
     let interrupt_id = store.latest_interrupt_id(&work).await?;
     let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
         .ok_or_else(|| anyhow!("Task Flow step is not a skill"))?;
@@ -1065,30 +1082,26 @@ fn completed_boundary_failure(
     output: Option<&str>,
     exit_code: Option<i32>,
 ) -> Option<String> {
-    if status != Lifecycle::Failed && exit_code.is_none_or(|code| code == 0) {
+    if status != Lifecycle::Failed {
         return None;
     }
-    let output = output?;
-    let lower = output.to_ascii_lowercase();
-    if ![
-        "operation not permitted",
-        "permission denied",
-        "read-only file system",
-        "network access is disabled",
-        "network is unreachable",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-    {
-        return None;
-    }
-    let command = command.join(" ");
-    let detail = output
+    // Aggregated output includes file contents. A quoted denial string in a
+    // failed search is not a diagnostic from the command that failed.
+    static DENIAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+            r"(?i)(?:^|: )(?:operation not permitted|permission denied|",
+            r"read-only file system|network access is disabled(?: by policy)?|",
+            r"network is unreachable|connection refused|",
+            r"command not found(?:: [\w./+-]+)?|executable file not found in \$PATH)",
+            r"(?: \(os error \d+\))?$",
+        ))
+        .expect("execution denial diagnostic regex is valid")
+    });
+    let detail = output?
         .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
         .map(str::trim)
-        .unwrap_or("no command error output");
+        .find(|line| DENIAL.is_match(line))?;
+    let command = command.join(" ");
     let detail = detail.chars().take(1_000).collect::<String>();
     let exit = exit_code
         .map(|code| format!(" (exit {code})"))
@@ -1170,7 +1183,7 @@ mod planning_tests {
         completed_boundary_failure, execution_blocker_at_handoff, task_seed,
         unhandled_failure_receipt,
     };
-    use crate::chat::types::Lifecycle;
+    use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::durable::{
         Author, FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
@@ -1208,7 +1221,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "rebase", "realign"] {
+            for expected in ["implement", "compress", "sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(
                     !super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap()
@@ -1282,7 +1295,7 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
-        for expected in ["compress", "rebase", "realign", "gate", "pr land -c"] {
+        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
             assert_eq!(position.current().step, expected);
             let finished =
                 super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
@@ -2111,12 +2124,11 @@ mod planning_tests {
                 // Only provider/PM/session effects are simulated. Public resume owns
                 // adoption, reconciliation, account selection and the worker claim.
                 let account_home = guard.ledger.home().join("accounts/claude/fixture-account");
-                std::fs::create_dir_all(&account_home).unwrap();
-                std::fs::write(account_home.join(".credentials.json"),
-                    r#"{"claudeAiOauth":{"accessToken":"fixture-token","expiresAt":4102444800000}}"#).unwrap();
-                let account = crate::provider_account::new_account(
+                let mut account = crate::provider_account::new_account(
                     crate::provider_auth::Provider::Claude,
-                    crate::store::ProviderAccountId::parse("fixture-account").unwrap(), account_home, None);
+                    crate::store::ProviderAccountId::parse("fixture-account").unwrap(), account_home,
+                    Some(crate::profile::EmailAddress::parse("fixture@example.com").unwrap()));
+                crate::provider_account::identity::tests::write_claude_identity(&mut account);
                 store.upsert_provider_account(&account).await.unwrap();
                 store.set_provider_route(&crate::profile::ProviderRoute {
                     scope: crate::profile::RouteScope::Default, provider: crate::provider_auth::Provider::Claude,
@@ -2635,13 +2647,91 @@ mod planning_tests {
 
     #[test]
     fn ordinary_failed_probe_is_not_an_execution_boundary_blocker() {
-        assert!(completed_boundary_failure(
-            &["rg".into(), "missing-pattern".into()],
+        // LOO-346 printed these source literals before its final rg exited 1.
+        // LOO-340 matched archived JSON containing a denial; a missing search
+        // path made that batch exit 2.
+        let source = "        \"operation not permitted\",\n        \"permission denied\",\n        \"read-only file system\",\n        \"network access is disabled\",\n        \"network is unreachable\",\n";
+        for (output, code) in [
+            (String::new(), 1),
+            (source.to_string(), 1),
+            (
+                format!("{source}rg: missing.rs: No such file or directory (os error 2)\n"),
+                2,
+            ),
+            (
+                "archive.json:1:{\"description\":\"commit: Operation not permitted\\nretry\"}\nrg: engine: No such file or directory (os error 2)\n".into(),
+                2,
+            ),
+            ("test result: FAILED. 1 failed\n".into(), 101),
+            ("usage: command [OPTIONS]\n".into(), 2),
+        ] {
+            let failure = completed_boundary_failure(
+                &["sed -n '1020,1160p' task.rs; rg missing-pattern missing.rs".into()],
+                Lifecycle::Failed,
+                Some(&output),
+                Some(code),
+            );
+            assert!(
+                failure.is_none(),
+                "ordinary output became a blocker: {failure:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn execution_boundary_blocker_requires_a_failed_command_and_names_its_denial() {
+        for diagnostic in [
+            "fatal: Unable to create '/repo/index.lock': Operation not permitted",
+            "rg: private: Permission denied (os error 13)",
+            "mkdir: /readonly: Read-only file system",
+            "network access is disabled by policy",
+            "connect: Network is unreachable",
+            "connect: Connection refused (os error 61)",
+            "zsh:1: command not found: missing-tool",
+        ] {
+            let output = format!("{diagnostic}\nunrelated trailing output\n");
+            let command = ["some-command".into()];
+            let failure =
+                completed_boundary_failure(&command, Lifecycle::Failed, Some(&output), Some(1))
+                    .expect("a failed command with a denial diagnostic blocks");
+            assert!(failure.ends_with(diagnostic));
+            assert!(!failure.contains("unrelated trailing output"));
+            assert!(completed_boundary_failure(
+                &command,
+                Lifecycle::Completed,
+                Some(&output),
+                Some(1),
+            )
+            .is_none());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn execution_boundary_blocker_preserves_real_sandbox_denial() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("denied");
+        let output = std::process::Command::new("/usr/bin/sandbox-exec")
+            .args([
+                "-p",
+                "(version 1)(allow default)(deny file-write*)",
+                "/usr/bin/touch",
+            ])
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!target.exists());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains(target.to_str().unwrap()), "{stderr}");
+        let failure = completed_boundary_failure(
+            &["touch".into(), target.display().to_string()],
             Lifecycle::Failed,
-            Some(""),
-            Some(1),
+            Some(&stderr),
+            output.status.code(),
         )
-        .is_none());
+        .expect("the OS sandbox denial must still block");
+        assert!(failure.contains("Operation not permitted"), "{failure}");
     }
 
     #[test]
@@ -2883,6 +2973,8 @@ mod planning_tests {
     #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn control_events_after_seed_preparation_remain_live() {
         let _lf_bin = super::TestLfBinGuard::pin();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
         let (store, task, flow) = human_task_fixture().await;
         let work = WorkRef::Task(task.id.clone());
         let seeded = store
@@ -2913,6 +3005,65 @@ mod planning_tests {
         assert_eq!(steer_cursor, late.id);
         assert_eq!(harness.interrupts, 1);
         assert_eq!(interrupt_cursor, late_interrupt);
+
+        let capture = crate::run_record::CaptureHandle::begin_at(
+            home.path(),
+            super::task_run_spec(
+                &task,
+                &super::owning_wave(&store, &task).await.unwrap(),
+                &super::owning_project(&store, &task).await.unwrap(),
+                "fixture".into(),
+                None,
+                "headless",
+                crate::run_record::RunFlowStep::of(&flow, None),
+            ),
+        )
+        .unwrap();
+        capture.record_input("steer_seed_through", &seeded.id.to_string());
+        capture.record_input(
+            &format!("steer_transport_accepted:{}", late.id),
+            "late direction",
+        );
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: "fixture".into(),
+            status: Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+        let unread = store
+            .append_steer(&work, Author::User, "unread direction")
+            .await
+            .unwrap();
+        let repeated = super::prepare_task_flow_step(&store, &task, "human-task-proof", &flow)
+            .await
+            .unwrap();
+        assert!(!repeated.turn.input.contains("seeded direction"));
+        assert!(!repeated.turn.input.contains("late direction"));
+        assert!(repeated.turn.input.contains("unread direction"));
+        assert_eq!(repeated.seeded_steer_id, unread.id);
+
+        let oversized = "Keep café and λ stable.\n".repeat(80_000);
+        let large = store
+            .append_steer(&work, Author::User, &oversized)
+            .await
+            .unwrap();
+        let delivered = crate::ops::child::inject_live_steers(
+            &store,
+            &task.id,
+            &mut harness,
+            &mut steer_cursor,
+        )
+        .await;
+        let input = &delivered.last().unwrap().text;
+        assert_eq!(steer_cursor, large.id);
+        assert!(input.len() <= 128 * 1024);
+        assert!(
+            crate::engine::prompt::count_tokens(input)
+                <= crate::engine::context_budget::GOAL_TOKENS
+        );
+        assert!(input.contains("Full text:"));
+        assert!(std::fs::read_dir(task.worktree.join(".lf/tmp/context"))
+            .unwrap()
+            .any(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap() == large.text));
     }
 
     #[tokio::test]
@@ -3088,7 +3239,7 @@ mod planning_tests {
         std::fs::create_dir_all(&flow_dir).unwrap();
         std::fs::write(
             flow_dir.join("two-ops.yaml"),
-            "- cmd: rebase --plan\n- cmd: rebase --plan\n",
+            "- cmd: sync --plan HEAD\n- cmd: sync --plan HEAD\n",
         )
         .unwrap();
         let mut flow = super::start_task_flow(&task, "two-ops").unwrap();
@@ -3102,7 +3253,15 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Account launch intent is process-scoped.
     async fn active_task_invocation_ignores_later_flow_and_skill_edits() {
+        let _lock = crate::journal::test_env_lock();
+        let accounts = crate::provider_account::lease::AccountSelection::from_flags(
+            &["claude=first@".into(), "codex=second@".into()],
+            &[],
+        )
+        .unwrap();
+        let selected = accounts.activate().unwrap();
         let (store, task, _) = human_task_fixture().await;
         let flow_dir = task.worktree.join(".lf/flows");
         let skill_dir = task.worktree.join(".lf/skills");
@@ -3110,7 +3269,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: rebase --plan\n",
+            "- original-proof\n- cmd: sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -3119,6 +3278,7 @@ mod planning_tests {
         )
         .unwrap();
         let flow = super::start_task_flow(&task, "persisted-proof").unwrap();
+        drop(selected);
         store
             .set_flow_position(&task.id, flow.clone())
             .await
@@ -3141,6 +3301,7 @@ mod planning_tests {
         .unwrap();
 
         let persisted = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let crate::engine::ConcreteStep::Skill(active_skill) = persisted.current_plan() else {
             panic!("active first step is a skill")
         };
@@ -3154,7 +3315,7 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "rebase");
+        assert_eq!(active_op.item.command, "sync");
         assert_eq!(active_op.item.args, ["--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();

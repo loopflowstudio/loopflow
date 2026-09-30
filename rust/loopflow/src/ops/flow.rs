@@ -5,14 +5,13 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::engine::flow::Command as FlowCommand;
-use crate::engine::git::get_default_branch;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
-    abandon_branch, arm, commit_workflow, create_or_update_pr, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_publish, release_run, release_status, release_tag,
-    submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    abandon_branch, arm, commit_workflow, create_or_update_pr, release_bump, release_check,
+    release_notes, release_publish, release_run, release_status, release_tag, submit,
+    AbandonOptions, CommitOptions, LandOptions, PrOptions,
 };
 
 pub fn execute_flow_command(
@@ -27,35 +26,31 @@ pub fn execute_flow_command(
 
     match cli.command {
         Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
-        Some(Commands::Rebase {
+        Some(Commands::Sync {
             plan,
             manual,
-            continue_rebase,
+            continue_sync,
             abort,
             adopt,
             onto,
         }) => {
-            if manual || continue_rebase || abort || adopt {
+            if manual || continue_sync || abort || adopt {
                 return Err(OpsError::Message(
-                    "manual rebase recovery is only available from the CLI".to_string(),
+                    "manual sync recovery is only available from the CLI".to_string(),
                 ));
             }
-            if plan {
-                return Ok(());
-            }
-            let base = get_default_branch(repo)?;
-            let onto_ref = onto.unwrap_or_else(|| format!("origin/{base}"));
-            rebase_with_recovery(
+            crate::lf::commands::ops::run_sync_in(
                 repo,
-                &RebaseOptions {
-                    onto: onto_ref,
-                    push: true,
-                    fork_base: None,
-                },
-                progress,
-            )?;
-            Ok(())
+                onto.as_deref(),
+                plan,
+                false,
+                false,
+                false,
+                false,
+            )
+            .map_err(|error| OpsError::Message(error.to_string()))
         }
+
         Some(Commands::Commit {
             message,
             push,
@@ -369,7 +364,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
+        "cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, sync, commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }

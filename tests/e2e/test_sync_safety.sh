@@ -6,6 +6,9 @@ unset LOOPFLOW_DIRECTIVE_FILE LF_WORKTREE_WRITER_ID LF_GIT_OPERATION_ID
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LF_BIN="$ROOT_DIR/target/debug/lf"
 TMP_ROOT=$(mktemp -d)
+export LF_HOME="$TMP_ROOT/lf-home"
+export LF_DB_PATH="$LF_HOME/loopflow.db"
+unset LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_RUN_CONTEXT LF_TASK_ORIGIN LF_RUN_ID LF_RUN_DIR LF_WORK_ADVANCE_CLAIM LF_ACCOUNT_LEASE LF_HUMAN_SESSION
 
 cleanup() {
   find "$TMP_ROOT" -name sentinel.pid -type f -print0 2>/dev/null |
@@ -27,9 +30,11 @@ if [ "${1:-}" = "--version" ]; then
 fi
 printf '%s %s %s\n' "${SENTINEL_MODE:-unknown}" "${LF_WORKTREE_WRITER_ID:-missing}" "${LF_GIT_OPERATION_ID:-missing}" >>"$SENTINEL_LOG"
 case "${SENTINEL_MODE:-noop}" in
-  resolve)
+  resolve|adopt)
     printf 'resolved by owned recovery\n' >conflict.txt
-    "$LF_TEST_BIN" rebase --continue
+    args=(sync --continue)
+    if [ "$SENTINEL_MODE" = adopt ]; then args+=(--adopt); fi
+    "$LF_TEST_BIN" "${args[@]}"
     ;;
   hold)
     echo $$ >"$SENTINEL_PID_FILE"
@@ -41,8 +46,8 @@ case "${SENTINEL_MODE:-noop}" in
   noop)
     exit 0
     ;;
-  nested_rebase)
-    "$LF_TEST_BIN" rebase
+  nested_sync)
+    "$LF_TEST_BIN" sync
     ;;
 esac
 SENTINEL
@@ -114,32 +119,62 @@ create_clean_repo() {
   git -C "$OTHER" push origin main >/dev/null
 }
 
-# Clean mechanical rebase: an unavailable sentinel would fail the scenario if
+# Clean mechanical sync: an unavailable sentinel would fail the scenario if
 # the provider launch seam were touched.
 create_clean_repo clean
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/clean.log"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test ! -s "$SENTINEL_LOG"
-echo "PASS clean rebase used no provider"
+echo "PASS clean sync used no provider"
+
+# A supervisor can hand off a raw merge, and a stopped Loopflow sync keeps its
+# pinned target for the next agent. Launch itself neither claims nor publishes.
+for merge_owner in raw stopped; do
+  create_conflict_repo "handoff-$merge_owner"
+  git -C "$REPO" fetch origin main >/dev/null
+  handoff_head=$(git -C "$REPO" rev-parse HEAD)
+  handoff_target=$(git -C "$REPO" rev-parse origin/main)
+  export SENTINEL_LOG="$TMP_ROOT/handoff-$merge_owner.log"
+  : >"$SENTINEL_LOG"
+  set +e
+  if [ "$merge_owner" = raw ]; then
+    git -C "$REPO" merge origin/main >"$TMP_ROOT/handoff-$merge_owner.out" 2>&1
+  else
+    (cd "$REPO" && "$LF_BIN" sync --manual >"$TMP_ROOT/handoff-$merge_owner.out" 2>&1)
+  fi
+  handoff_status=$?
+  set -e
+  test "$handoff_status" -ne 0
+  export SENTINEL_MODE=resolve
+  if [ "$merge_owner" = raw ]; then export SENTINEL_MODE=adopt; fi
+  (cd "$REPO" && "$LF_BIN" : finish-existing-merge >/dev/null)
+  test "$(git -C "$REPO" show -s --format=%P HEAD)" = "$handoff_head $handoff_target"
+  test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$handoff_head"
+  test "$(cat "$REPO/conflict.txt")" = "resolved by owned recovery"
+  test ! -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
+  test ! -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
+  test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
+  echo "PASS agent completed $merge_owner merge handoff locally"
+done
 
 # A deleted remote branch leaves tracking behind; the CLI must recreate it
-# after replaying main and leave its upstream usable on the next invocation.
+# after merging main and leave its upstream usable on the next invocation.
 create_clean_repo deleted
 published_head=$(git -C "$REPO" rev-parse origin/feature)
 git --git-dir="$REMOTE" update-ref -d refs/heads/feature
 test "$(git -C "$REPO" rev-parse origin/feature)" = "$published_head"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 git -C "$REPO" merge-base --is-ancestor origin/main HEAD
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test "$(git --git-dir="$REMOTE" show feature:feature.txt)" = feature
 test "$(git --git-dir="$REMOTE" show feature:main.txt)" = main
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test "$(git -C "$REPO" rev-parse '@{upstream}')" = "$(git -C "$REPO" rev-parse HEAD)"
 echo "PASS deleted remote branch recreated with usable tracking"
 
 # Publishing a deliberately behind branch pushes and updates the review surface
-# without entering the integration path. A later explicit rebase owns that work.
+# without entering the integration path. A later explicit sync owns that work.
 create_clean_repo publication
 pre_publish_head=$(git -C "$REPO" rev-parse HEAD)
 cat >"$BIN_DIR/gh" <<'GH_SENTINEL'
@@ -159,7 +194,14 @@ case "${1:-} ${2:-}" in
     : >"$GH_STATE"
     printf 'https://example.com/pr/7\n'
     ;;
-  "api graphql") printf 'false\n' ;;
+  "api graphql")
+    request=null
+    if [ -e "$GH_STATE.auto" ]; then request='{"enabledAt":"2026-09-30T00:00:00Z"}'; fi
+    printf '{"data":{"repository":{"pullRequest":{"id":"PR_fixture","number":7,"url":"https://example.com/pr/7","state":"OPEN","isDraft":false,"headRefName":"feature","headRefOid":"%s","mergedAt":null,"mergeCommit":null,"mergeStateStatus":"CLEAN","isMergeQueueEnabled":false,"autoMergeRequest":%s,"mergeQueueEntry":null}}}}\n' "$(git rev-parse HEAD)" "$request"
+    ;;
+  "pr merge")
+    if [[ "$*" == *--disable-auto* ]]; then rm -f "$GH_STATE.auto"; else : >"$GH_STATE.auto"; fi
+    ;;
   "pr edit"|"pr ready") ;;
 esac
 GH_SENTINEL
@@ -183,22 +225,22 @@ test ! -s "$SENTINEL_LOG"
 test "$(git -C "$REPO" rev-parse HEAD)" = "$published_head"
 test "$(wc -l <"$OPEN_LOG" | tr -d ' ')" = 1
 test ! -s "$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 git -C "$REPO" merge-base --is-ancestor origin/main HEAD
 test "$(git -C "$REPO" rev-parse HEAD)" != "$published_head"
-echo "PASS publication stayed integration-free until explicit rebase"
+echo "PASS publication stayed integration-free until explicit sync"
 
 # A provider receives no worktree authority; nested integration takes its own
 # short mutation lock.
 create_clean_repo nested
-export SENTINEL_MODE=nested_rebase SENTINEL_LOG="$TMP_ROOT/nested.log"
+export SENTINEL_MODE=nested_sync SENTINEL_LOG="$TMP_ROOT/nested.log"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" : run-nested-rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" : run-nested-sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^nested_rebase missing missing$' "$SENTINEL_LOG"
+grep -Eq '^nested_sync missing missing$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 
-# A live provider does not reserve the worktree. A separate rebase can take the
+# A live provider does not reserve the worktree. A separate sync can take the
 # short mutation lock and complete while the provider remains alive.
 create_clean_repo writer
 export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/writer.log"
@@ -210,9 +252,9 @@ writer_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
 writer_head=$(git -C "$REPO" rev-parse HEAD)
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/writer.rebase.out" 2>&1)
-writer_rebase_status=$?
-test "$writer_rebase_status" -eq 0
+(cd "$REPO" && "$LF_BIN" sync >"$TMP_ROOT/writer.sync.out" 2>&1)
+writer_sync_status=$?
+test "$writer_sync_status" -eq 0
 test "$(git -C "$REPO" rev-parse HEAD)" != "$writer_head"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test ! -e "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
@@ -222,41 +264,40 @@ wait "$writer_owner"
 set -e
 echo "PASS live provider held no worktree authority"
 
-# Hold the first recovery provider open. Foreign rebase and skill invocations
+# Hold the first recovery provider open. Foreign sync and skill invocations
 # must refuse while preserving the exact conflict and launching no second agent.
 create_conflict_repo foreign
 export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/foreign.log"
 export SENTINEL_READY="$TMP_ROOT/foreign.ready" SENTINEL_RELEASE="$TMP_ROOT/foreign.release"
 export SENTINEL_PID_FILE="$TMP_ROOT/sentinel.pid"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && exec "$LF_BIN" rebase >"$TMP_ROOT/foreign.owner.out" 2>&1) &
+(cd "$REPO" && exec "$LF_BIN" sync >"$TMP_ROOT/foreign.owner.out" 2>&1) &
 foreign_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
 owned_head=$(git -C "$REPO" rev-parse HEAD)
 set +e
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/foreign.rebase.out" 2>&1)
-foreign_rebase_status=$?
+(cd "$REPO" && "$LF_BIN" sync >"$TMP_ROOT/foreign.sync.out" 2>&1)
+foreign_sync_status=$?
 (cd "$REPO" && "$LF_BIN" implement >"$TMP_ROOT/foreign.agent.out" 2>&1)
 foreign_agent_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" rebase --continue >"$TMP_ROOT/foreign.continue.out" 2>&1)
+(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" sync --continue >"$TMP_ROOT/foreign.continue.out" 2>&1)
 foreign_continue_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" rebase --abort >"$TMP_ROOT/foreign.abort.out" 2>&1)
+(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" sync --abort >"$TMP_ROOT/foreign.abort.out" 2>&1)
 foreign_abort_status=$?
 set -e
-test "$foreign_rebase_status" -ne 0
+test "$foreign_sync_status" -ne 0
 test "$foreign_agent_status" -ne 0
 test "$foreign_continue_status" -ne 0
 test "$foreign_abort_status" -ne 0
 test "$(git -C "$REPO" rev-parse HEAD)" = "$owned_head"
-test -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-merge" -o \
-  -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-apply"
+test -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 : >"$SENTINEL_RELEASE"
 set +e
 wait "$foreign_owner"
 set -e
-echo "PASS foreign rebase and agent launch changed no owned state"
+echo "PASS foreign sync and agent launch changed no owned state"
 
 # A matching recovery child continues the sequencer it inherited. The parent
 # verifies and pushes once after the sentinel exits.
@@ -264,12 +305,12 @@ create_conflict_repo authorized
 authorized_original=$(git -C "$REPO" rev-parse HEAD)
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/authorized.log"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 grep -Eq '^resolve missing gitop_[^ ]+$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
-test ! -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-merge"
-test ! -d "$(git -C "$REPO" rev-parse --absolute-git-dir)/rebase-apply"
+test ! -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
+
 echo "PASS authorized recovery continued the original sequencer"
 
 # Replaying the exact conflict reuses the reviewed resolution mechanically.
@@ -277,7 +318,7 @@ echo "PASS authorized recovery continued the original sequencer"
 git -C "$REPO" reset --hard "$authorized_original" >/dev/null
 : >"$SENTINEL_LOG"
 printf 'unrelated\n' >"$REPO/unrelated.tmp"
-(cd "$REPO" && "$LF_BIN" rebase >/dev/null)
+(cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test ! -s "$SENTINEL_LOG"
 test "$(cat "$REPO/conflict.txt")" = "resolved by owned recovery"
 test -f "$REPO/unrelated.tmp"
@@ -285,7 +326,7 @@ test -z "$(git -C "$REPO" diff --cached --name-only)"
 echo "PASS repeated conflict reused resolution without a provider"
 
 # The shared arm/land preparation resumes after the verified integration instead
-# of replaying collapse/rebase and pushing twice. Watcher proof is in land_tests.
+# of starting another merge and pushing twice. Watcher proof is in land_tests.
 create_conflict_repo land-recovery
 printf 'checkpoint one\n' >"$REPO/first.txt"
 git -C "$REPO" add first.txt
@@ -303,10 +344,10 @@ PUSH_HOOK
 chmod +x "$REMOTE/hooks/update"
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/land-recovery.provider.log"
 : >"$SENTINEL_LOG"; : >"$land_push_log"; rm -f "$GH_STATE"
-(cd "$REPO" && "$LF_BIN" pr arm --title "one replay" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" pr arm --title "one merge" --body "proof" >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 test "$(grep -c '^refs/heads/feature$' "$land_push_log")" = 1
-test "$(git -C "$REPO" rev-list --count origin/main..HEAD)" = 1
+git -C "$REPO" log --format=%s origin/main..HEAD | grep -q "checkpoint: first slice"
 test -f "$REPO/first.txt"
 test ! -e "$REPO/scratch/working.md"
 test -z "$(git -C "$REPO" diff --name-only origin/main...HEAD -- scratch)"
@@ -318,11 +359,11 @@ create_conflict_repo incomplete
 export SENTINEL_MODE=noop SENTINEL_LOG="$TMP_ROOT/incomplete.log"
 : >"$SENTINEL_LOG"
 set +e
-(cd "$REPO" && "$LF_BIN" rebase >"$TMP_ROOT/incomplete.out" 2>&1)
+(cd "$REPO" && "$LF_BIN" sync >"$TMP_ROOT/incomplete.out" 2>&1)
 incomplete_status=$?
 set -e
 test "$incomplete_status" -ne 0
-grep -q 'still reports an active rebase operation' "$TMP_ROOT/incomplete.out"
+grep -q 'still reports an active merge operation' "$TMP_ROOT/incomplete.out"
 test -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/loopflow/rebase-owner.json"
 echo "PASS zero-exit incomplete recovery failed and remained recoverable"
 
@@ -333,7 +374,7 @@ export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/stale.log"
 export SENTINEL_READY="$TMP_ROOT/stale.ready" SENTINEL_RELEASE="$TMP_ROOT/stale.release"
 export SENTINEL_PID_FILE="$TMP_ROOT/sentinel.pid"
 : >"$SENTINEL_LOG"
-(cd "$REPO" && exec "$LF_BIN" rebase >"$TMP_ROOT/stale.owner.out" 2>&1) &
+(cd "$REPO" && exec "$LF_BIN" sync >"$TMP_ROOT/stale.owner.out" 2>&1) &
 stale_owner=$!
 for _ in $(seq 1 200); do [ -e "$SENTINEL_READY" ] && break; sleep 0.05; done
 test -e "$SENTINEL_READY"
@@ -346,9 +387,9 @@ if [ -f "$SENTINEL_PID_FILE" ]; then
 fi
 printf 'resolved after owner death\n' >"$REPO/conflict.txt"
 set +e
-(cd "$REPO" && "$LF_BIN" rebase --continue >"$TMP_ROOT/adopt.one" 2>&1) &
+(cd "$REPO" && "$LF_BIN" sync --continue >"$TMP_ROOT/adopt.one" 2>&1) &
 adopt_one=$!
-(cd "$REPO" && "$LF_BIN" rebase --continue >"$TMP_ROOT/adopt.two" 2>&1) &
+(cd "$REPO" && "$LF_BIN" sync --continue >"$TMP_ROOT/adopt.two" 2>&1) &
 adopt_two=$!
 wait "$adopt_one"; adopt_one_status=$?
 wait "$adopt_two"; adopt_two_status=$?
@@ -357,7 +398,7 @@ test $(( (adopt_one_status == 0) + (adopt_two_status == 0) )) -eq 1
 echo "PASS stale ownership was adopted exactly once"
 
 # Private Git dirs permit two linked worktrees to own and resolve independent
-# rebases concurrently.
+# syncs concurrently.
 REMOTE="$TMP_ROOT/linked.git"
 REPO="$TMP_ROOT/linked"
 git init --bare -b main "$REMOTE" >/dev/null
@@ -385,11 +426,11 @@ git -C "$REPO" commit -m main >/dev/null
 git -C "$REPO" push origin main >/dev/null
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/linked.log"
 : >"$SENTINEL_LOG"
-(cd "$TMP_ROOT/linked.one" && "$LF_BIN" rebase >"$TMP_ROOT/linked.one.out" 2>&1) &
+(cd "$TMP_ROOT/linked.one" && "$LF_BIN" sync >"$TMP_ROOT/linked.one.out" 2>&1) &
 linked_one=$!
-(cd "$TMP_ROOT/linked.two" && "$LF_BIN" rebase >"$TMP_ROOT/linked.two.out" 2>&1) &
+(cd "$TMP_ROOT/linked.two" && "$LF_BIN" sync >"$TMP_ROOT/linked.two.out" 2>&1) &
 linked_two=$!
 wait "$linked_one"
 wait "$linked_two"
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 2
-echo "PASS linked worktrees rebased independently"
+echo "PASS linked worktrees synced independently"

@@ -38,6 +38,7 @@ use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
     RoutingState, SharedStore, StoreError,
 };
+use crate::subscription::SubscriptionUsage;
 
 const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on the browser login to finish; give
@@ -68,10 +69,10 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
     match cmd {
         AuthCommand::Status {
             provider,
-            verify,
+            cached,
             details,
             json,
-        } => auth_status::run(provider.as_deref(), *verify, *details, *json).await,
+        } => auth_status::run(provider.as_deref(), !*cached, *details, *json).await,
         AuthCommand::Disconnect { provider, email } => match email {
             Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,
@@ -94,6 +95,22 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
                 Some(email) => connect_account(provider, email, chrome_profile.as_deref()).await,
                 None => connect(provider, chrome_profile.as_deref()).await,
             }
+        }
+        AuthCommand::RedeemReset {
+            provider,
+            email,
+            idempotency_key,
+            credit_id,
+            json,
+        } => {
+            redeem_reset(
+                provider,
+                email,
+                idempotency_key.as_deref(),
+                credit_id.as_deref(),
+                *json,
+            )
+            .await
         }
         AuthCommand::Route { cmd } => super::profile::run_route_async(cmd).await,
         AuthCommand::Set {
@@ -274,6 +291,113 @@ async fn remember_browser_profile(
         .set_auth_browser_profiles(provider, account_id, std::slice::from_ref(&profile.id))
         .await?;
     Ok(())
+}
+
+async fn redeem_reset(
+    provider: &str,
+    email: &str,
+    key: Option<&str>,
+    credit_id: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        parse_managed_provider(provider)? == Provider::Codex,
+        "banked resets are available only for Codex"
+    );
+    anyhow::ensure!(
+        key.is_none_or(|value| !value.trim().is_empty()),
+        "idempotency key must not be empty"
+    );
+    anyhow::ensure!(
+        credit_id.is_none_or(|value| !value.trim().is_empty()),
+        "credit ID must not be empty"
+    );
+    let store = open_account_store().await?;
+    let accounts = store.list_provider_accounts(Some("codex")).await?;
+    let account = match match_account(&accounts.iter().collect::<Vec<_>>(), email) {
+        AccountMatch::One(account) => account,
+        AccountMatch::Ambiguous(_) => anyhow::bail!("ambiguous login prefix; use a full email"),
+        AccountMatch::None => anyhow::bail!("no managed Codex login matches {email}"),
+    };
+    let home = account
+        .home
+        .as_deref()
+        .context("account has no managed credential home")?;
+    let _lock = acquire_managed_login_lock(home, Provider::Codex, &account.account_id)?;
+    let key = key
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // Print before the request so a lost reply can be retried without another spend.
+    eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
+        .await
+        .with_context(|| {
+            format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
+        })?;
+    if json {
+        let snapshot = |usage: &SubscriptionUsage| {
+            serde_json::json!({
+                "windows": usage.windows, "reset_credits": usage.reset_credits,
+            })
+        };
+        let report = serde_json::json!({
+            "provider": "codex", "account_id": account.account_id, "login": account_login(account),
+            "idempotency_key": key, "outcome": redemption.outcome,
+            "before": snapshot(&redemption.before),
+            "after": redemption.after.as_ref().ok().map(snapshot),
+            "refresh_error": redemption.after.as_ref().err().map(ToString::to_string),
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "{}: {} (attempt {key})",
+            account_login(account),
+            redemption.outcome
+        );
+        println!("Before:");
+        print_reset_usage(&redemption.before);
+        println!("After:");
+        match &redemption.after {
+            Ok(usage) => print_reset_usage(usage),
+            Err(error) => println!("  unknown; {error}"),
+        }
+    }
+    for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
+        store
+            .upsert_provider_account_limits("codex", &account.account_id, &usage.windows, "poll")
+            .await
+            .with_context(|| {
+                format!(
+                    "reset outcome {}; failed to save usage; attempt {key}",
+                    redemption.outcome
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn print_reset_usage(usage: &SubscriptionUsage) {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    for window in &usage.windows {
+        if window.resets_at.is_some_and(|reset| reset <= now) {
+            println!("  {}: usage unknown; reset passed", window.window);
+        } else {
+            println!(
+                "  {}: {}% used, {}% left",
+                window.window,
+                window.used_percent,
+                100u8.saturating_sub(window.used_percent)
+            );
+        }
+    }
+    println!(
+        "  banked resets: {}",
+        usage
+            .reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count.to_string())
+            .unwrap_or_else(|| "unknown".into())
+    );
 }
 
 async fn connect_account(
@@ -648,6 +772,7 @@ async fn register_managed_account(
         });
     account.observed_email = Some(identity.email);
     account.observed_subject = Some(identity.subject);
+    account.observed_credential_digest = identity.credential_digest;
     account.observed_plan = plan;
     account.home = Some(account_home);
     account.login_email = Some(login_email);
@@ -1213,6 +1338,7 @@ mod tests {
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
@@ -1252,6 +1378,7 @@ mod tests {
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
@@ -1443,13 +1570,19 @@ mod account_first_tests {
             &codex,
             r#"#!/bin/sh
 case "$*" in
-  *app-server*)
-    read -r initialize
-    echo '{"id":1,"result":{}}'
-    read -r initialized
-    read -r account
+  *app-server*) ;;
+  *) exit 90;; # Native login would open a second browser.
+esac
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r request
+case "$request" in
+  *account/read*)
     printf '{"id":2,"result":{"account":{"email":"%s"}}}\n' "$LF_TEST_CODEX_EMAIL"
     exit 0;;
+  *account/login/start*) ;;
+  *) exit 91;;
 esac
 count=0
 if [ -f "$LF_TEST_CODEX_COUNT" ]; then count=$(cat "$LF_TEST_CODEX_COUNT"); fi
@@ -1457,12 +1590,13 @@ count=$((count + 1))
 printf '%s' "$count" > "$LF_TEST_CODEX_COUNT"
 printf '%s\n' "$CODEX_HOME" >> "$LF_TEST_CODEX_HOMES"
 if [ "$LF_TEST_CODEX_FAIL_FIRST" = "1" ] && [ "$count" = "1" ]; then exit 1; fi
-printf '%s\n' 'https://auth.openai.com/oauth/authorize?client_id=test'
+echo '{"id":2,"result":{"type":"chatgpt","loginId":"fixture-login","authUrl":"https://auth.openai.com/oauth/authorize?client_id=test"}}'
 if [ -n "$LF_TEST_CODEX_RELEASE" ]; then
   while [ ! -f "$LF_TEST_CODEX_RELEASE" ]; do sleep 0.05; done
 fi
 mkdir -p "$CODEX_HOME"
 cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
+echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","success":true}}'
 "#,
         )
         .unwrap();
@@ -1658,6 +1792,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             login_email: Some(EmailAddress::parse(login).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: if account_home.is_some() {
                 CredentialState::Connected
@@ -1941,7 +2076,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
         let error = connect_account("codex", "operator@", None)
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("URL"));
+        assert!(error.to_string().contains("disconnected"));
         assert!(TEST_OPENED_CHROME_PROFILES.lock().unwrap().is_empty());
         assert_eq!(
             fs::read_to_string(temp.path().join("codex-count")).unwrap(),
@@ -2121,6 +2256,27 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             Some("user-operator@example.com")
         );
         assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+
+        // Even staged credential bytes cannot substitute for this attempt's success.
+        let provider = temp.path().join("bin/codex");
+        let script = fs::read_to_string(&provider).unwrap();
+        fs::write(
+            &provider,
+            script.replace("\"success\":true", "\"success\":false"),
+        )
+        .unwrap();
+        let error = connect_account("codex", "operator@", Some("Primary"))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Codex login failed"));
+        assert_eq!(fs::read(home.join("auth.json")).unwrap(), original);
+        assert_eq!(
+            store
+                .get_provider_account("codex", &account.account_id)
+                .await
+                .unwrap(),
+            Some(installed)
+        );
     }
 
     #[test]
@@ -2132,6 +2288,7 @@ cp "$LF_TEST_CODEX_AUTH_JSON" "$CODEX_HOME/auth.json"
             login_email: Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Missing,
             routing_state: RoutingState::Automatic,

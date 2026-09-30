@@ -627,7 +627,7 @@ impl SqliteStore {
     /// Move a stacked Task PR to its parent's current tip, or clear the parent
     /// after that work reaches the default branch. This deliberately moves the
     /// otherwise-immutable `base_commit` through a dedicated transition.
-    pub fn rebase_task_pr(
+    pub fn sync_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,

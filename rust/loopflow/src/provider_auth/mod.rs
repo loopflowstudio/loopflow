@@ -8,6 +8,7 @@
 
 #[cfg(unix)]
 mod browser_handoff;
+pub(crate) mod codex;
 pub mod credential_socket;
 
 use std::collections::{HashMap, HashSet};
@@ -34,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -1492,26 +1493,21 @@ impl CodexAuthBroker {
         }
     }
 
-    fn command(&self) -> Command {
+    fn command(&self, subcommand: &str) -> Command {
         let mut command = Command::new("codex");
         command.env("CODEX_HOME", &self.codex_home);
         command
             .env_remove("CODEX_ACCESS_TOKEN")
             .env_remove("OPENAI_API_KEY");
-        command
-    }
-
-    fn add_file_store_override(&self, command: &mut Command) {
         if self.force_file_store {
             command.args(["-c", "cli_auth_credentials_store=\"file\""]);
         }
+        command.arg(subcommand);
+        command
     }
 
     async fn refresh_access_token(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("app-server");
-        refresh_codex_access_token_with_command(&mut command)
+        codex::refresh(&mut self.command("app-server"))
             .await
             .map(|_| ())
     }
@@ -1524,19 +1520,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("login");
-        command.env("BROWSER", "echo");
-
-        start_auth_command(
-            Provider::Codex,
-            "codex",
-            command,
-            AuthCommandInput::None,
-            parse_generic_auth_line,
-        )
-        .await
+        codex::start_login(&mut self.command("app-server")).await
     }
 
     async fn check_status(&self) -> Result<AuthStatus, AuthError> {
@@ -1559,11 +1543,7 @@ impl AuthBroker for CodexAuthBroker {
     }
 
     async fn disconnect(&self) -> Result<(), AuthError> {
-        let mut command = self.command();
-        self.add_file_store_override(&mut command);
-        command.arg("logout");
-
-        match command.output().await {
+        match self.command("logout").output().await {
             Ok(output) if output.status.success() => Ok(()),
             Ok(_) | Err(_) => {
                 let auth_path = self.codex_home.join("auth.json");
@@ -2708,6 +2688,7 @@ pub(crate) fn codex_identity_from_home(
     Some(crate::provider_account::identity::AccountIdentity {
         email: email.into(),
         subject: subject.into(),
+        credential_digest: None,
     })
 }
 
@@ -2721,10 +2702,7 @@ pub(crate) async fn verify_codex_identity(
     AuthError,
 > {
     let broker = CodexAuthBroker::for_profile(home.to_path_buf());
-    let mut command = broker.command();
-    broker.add_file_store_override(&mut command);
-    command.arg("app-server");
-    let response = refresh_codex_access_token_with_command(&mut command).await?;
+    let response = codex::refresh(&mut broker.command("app-server")).await?;
     let identity = codex_identity_from_account(home, &response).map_err(|message| {
         AuthError::CommandFailed {
             provider: Provider::Codex,
@@ -2783,145 +2761,6 @@ fn jwt_claims(token: &str) -> Option<serde_json::Value> {
 async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
     let broker = CodexAuthBroker::for_profile(codex_home.to_path_buf());
     broker.refresh_access_token().await
-}
-
-async fn refresh_codex_access_token_with_command(
-    command: &mut Command,
-) -> Result<serde_json::Value, AuthError> {
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(unix)]
-    command.process_group(0);
-
-    let mut child = command.spawn().map_err(|source| {
-        if source.kind() == std::io::ErrorKind::NotFound {
-            AuthError::CommandUnavailable {
-                provider: Provider::Codex,
-                command: "codex".to_string(),
-            }
-        } else {
-            AuthError::CommandSpawn {
-                provider: Provider::Codex,
-                source,
-            }
-        }
-    })?;
-    let _process_group = crate::engine::process::ProcessGroupGuard::new(
-        child
-            .id()
-            .expect("newly spawned Codex command should have a process id"),
-    );
-    let mut stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: "app-server did not expose stdin".to_string(),
-    })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AuthError::CommandFailed {
-            provider: Provider::Codex,
-            message: "app-server did not expose stdout".to_string(),
-        })?;
-    let mut stdout = BufReader::new(stdout);
-
-    write_codex_auth_request(
-        &mut stdin,
-        &serde_json::json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "loopflow",
-                    "title": "loopflow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }
-        }),
-    )
-    .await?;
-    read_codex_auth_response(&mut stdout, 1).await?;
-    write_codex_auth_request(&mut stdin, &serde_json::json!({"method": "initialized"})).await?;
-    write_codex_auth_request(
-        &mut stdin,
-        &serde_json::json!({
-            "id": 2,
-            "method": "account/read",
-            "params": {"refreshToken": true},
-        }),
-    )
-    .await?;
-    read_codex_auth_response(&mut stdout, 2).await
-}
-
-async fn write_codex_auth_request(
-    stdin: &mut tokio::process::ChildStdin,
-    request: &serde_json::Value,
-) -> Result<(), AuthError> {
-    let mut line = serde_json::to_vec(request).map_err(|error| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: format!("failed to encode app-server request: {error}"),
-    })?;
-    line.push(b'\n');
-    stdin
-        .write_all(&line)
-        .await
-        .map_err(|source| AuthError::CommandIo {
-            provider: Provider::Codex,
-            source,
-        })?;
-    stdin.flush().await.map_err(|source| AuthError::CommandIo {
-        provider: Provider::Codex,
-        source,
-    })
-}
-
-async fn read_codex_auth_response(
-    stdout: &mut BufReader<tokio::process::ChildStdout>,
-    request_id: i64,
-) -> Result<serde_json::Value, AuthError> {
-    tokio::time::timeout(Duration::from_secs(15), async {
-        loop {
-            let mut line = String::new();
-            let bytes =
-                stdout
-                    .read_line(&mut line)
-                    .await
-                    .map_err(|source| AuthError::CommandIo {
-                        provider: Provider::Codex,
-                        source,
-                    })?;
-            if bytes == 0 {
-                return Err(AuthError::CommandFailed {
-                    provider: Provider::Codex,
-                    message: "app-server disconnected before refreshing auth".to_string(),
-                });
-            }
-            let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            if message.get("id").and_then(serde_json::Value::as_i64) != Some(request_id) {
-                continue;
-            }
-            if message.get("error").is_some() {
-                return Err(AuthError::CommandFailed {
-                    provider: Provider::Codex,
-                    message: "app-server rejected the proactive token refresh".to_string(),
-                });
-            }
-            return Ok(message
-                .get("result")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null));
-        }
-    })
-    .await
-    .map_err(|_| AuthError::CommandFailed {
-        provider: Provider::Codex,
-        message: "timed out waiting for app-server auth refresh".to_string(),
-    })?
 }
 
 pub(crate) fn extract_codex_access_token(home_dir: &Path) -> Option<String> {
@@ -5281,50 +5120,32 @@ attributes:
     async fn codex_refresh_uses_app_server_managed_auth_flow() {
         let tmp = tempdir().expect("tempdir");
         let script = tmp.path().join("codex-app-server");
-        let trace = tmp.path().join("requests.jsonl");
         fs::write(
             &script,
             r#"#!/bin/sh
-trace="$1"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
+IFS= read -r initialize
 printf '{"id":1,"result":{}}\n'
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-IFS= read -r line
-printf '%s\n' "$line" >> "$trace"
-printf '{"id":2,"result":{"account":null}}\n'
+IFS= read -r initialized
+IFS= read -r request
+case "$request" in
+  *'"method":"account/read"'*'"refreshToken":true'*)
+    echo '{"id":2,"result":{"account":{"email":"operator@example.com"}}}';;
+  *) exit 90;;
+esac
 "#,
         )
         .expect("write fake app-server");
-        let mut permissions = fs::metadata(&script)
-            .expect("script metadata")
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&script, permissions).expect("make script executable");
-
-        let mut command = Command::new(&script);
-        command.arg(&trace);
-        refresh_codex_access_token_with_command(&mut command)
+        let response = codex::refresh(Command::new("/bin/sh").arg(script))
             .await
             .expect("refresh through fake app-server");
-
-        let requests = fs::read_to_string(trace).expect("read request trace");
-        let requests = requests
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request json"))
-            .collect::<Vec<_>>();
-        assert_eq!(requests[0]["method"], "initialize");
-        assert_eq!(requests[1]["method"], "initialized");
-        assert_eq!(requests[2]["method"], "account/read");
-        assert_eq!(requests[2]["params"]["refreshToken"], true);
+        assert_eq!(response["account"]["email"], "operator@example.com");
     }
 
     #[tokio::test]
     async fn codex_refresh_reports_missing_cli() {
         let tmp = tempdir().expect("tempdir");
         let mut command = Command::new(tmp.path().join("missing-codex"));
-        let error = refresh_codex_access_token_with_command(&mut command)
+        let error = codex::refresh(&mut command)
             .await
             .expect_err("missing app-server should fail");
         assert!(matches!(error, AuthError::CommandUnavailable { .. }));

@@ -229,7 +229,7 @@ Auth connects your providers locally:
 lf auth connect github    # connect GitHub
 lf auth connect claude    # connect Claude
 lf auth connect linear    # connect Linear with OAuth
-lf auth status    # inspect cached credentials
+lf auth status    # refresh managed identity and usage
 ```
 
 ---

@@ -233,6 +233,7 @@ fn drive_saved(id: &str, cli: &Cli) -> Result<FlowOutcome> {
         anyhow::bail!("Flow {} is blocked: {reason}", record.id);
     }
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &record.flow);
+    let _accounts = record.accounts.clone().unwrap_or_default().activate()?;
     let mut launch = cli.launch_options();
     launch.wave = record.wave.clone();
     launch.task = record.task.clone();

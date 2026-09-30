@@ -124,6 +124,14 @@ pub(super) fn execute(
             command.env_remove(name);
         }
     }
+    // Login selectors are launch intent, resolved again by the destination's catalog.
+    if let Some(selection) = std::env::var_os(crate::provider_account::lease::ACCOUNT_SELECTION_ENV)
+    {
+        command.env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            selection,
+        );
+    }
     if crate::run_record::task_origin() {
         command.env("LF_TASK_ORIGIN", "1");
     }

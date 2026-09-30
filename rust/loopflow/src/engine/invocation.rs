@@ -24,6 +24,7 @@ pub enum StepKind {
 pub struct QueuedInvocation {
     pub id: String,
     pub flow: String,
+    pub accounts: Option<Box<crate::provider_account::lease::AccountSelection>>,
     #[serde(deserialize_with = "deserialize_steps")]
     pub steps: Vec<ConcreteStep>,
 }
@@ -37,6 +38,9 @@ impl QueuedInvocation {
         Ok(Self {
             id: Uuid::new_v4().to_string(),
             flow,
+            accounts: Some(Box::new(
+                crate::provider_account::lease::AccountSelection::from_env()?,
+            )),
             steps,
         })
     }

@@ -76,14 +76,18 @@ hand off the whole seed, and never delegate the one blocker between you and
 completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
-`--stack-on` forks the child's worktree from the parent Task's active PR and
-records the fork commit; the child's PR targets the parent's branch until
-merge, then replays only child-authored commits onto `main`.
+`--stack-on` forks the child's worktree from the parent Task's active PR, records
+the fork commit, and adds a `Clear inherited scratch` commit before execution.
+Parent syncs keep the child's scratch, including its deletions. The parent retains
+its own notes. The child's PR targets the parent's branch until
+merge, then `lf sync` merges main using the recorded fork as the comparison base.
+Child edits survive the parent's squash landing without replay.
 
 ## Steer
 
 ```bash
 lf task comment INF-123 "keep the public API"          # post a Linear Task comment
+lf task comment INF-123 --steer "keep the public API"  # explicit direction from an agent
 lf --wave <wave> wave/operate "prioritize the parser"
 lf --wave <wave> wave/operate "reassess Project priorities"
 ```
@@ -99,6 +103,20 @@ receipt confirms publication to Linear. Run traces distinguish input included
 in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
+
+On a repeated captured Flow step, workers seed only steer IDs newer than that
+step's last successful Run inputs. Failed or interrupted attempts acknowledge
+nothing. Each structural step and each new invocation has its own history;
+unreceived late comments remain eligible. This records delivery, not proof that
+the model followed the instruction.
+
+Keep routine agent progress in working notes and the Run response. `task comment`
+inside a Run marks its publication as progress, excluded from steers. Use
+`--steer` only to deliver deliberate new direction. Direct
+participant comments and explicit worker steering remain direction, even through
+the same account. Other integrations should mark progress with
+`<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
+eligible because their authorship cannot be inferred safely.
 
 `lf task interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the

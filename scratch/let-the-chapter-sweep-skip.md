@@ -22,11 +22,9 @@ no remaining deletion targets.
 
 ## Remaining acceptance
 
-- Gate owns the affected Task-planning suite against the materialized migration
-  graph. The focused fixture uses the normal hermetic store with embedded drafts.
 - Configured acceptance still needs a live preview naming Technical Architecture
   once and cancellation of eligible LOO-309/LOO-329 issues if still open. No live
-  issue was canceled during implementation.
+  issue was canceled during implementation or gate; demo owns this acceptance.
 
 ## Review — 2026-09-30
 
@@ -43,4 +41,21 @@ The stateful GraphQL fixture now locks once per request, removing repeated locks
 and reading Project identity and title from the same state. No asynchronous work
 runs while the request holds that lock.
 
-Check after compression: `cargo test -p loopflow --lib foreign_projects_do_not_block_sweep_refresh_or_sync -- --nocapture` passed (1); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; materialized affected suite and configured acceptance belong to gate/demo.
+## Gate — 2026-09-30
+
+Review found no further code changes needed. The skip predicate runs before
+Project validation and title normalization in the changed readers; sync repeats
+the ownership decision before renaming. Explicit issue mutation still resolves
+fresh ownership through the strict validator. Snapshot omission does not delete
+retained Project/Task records. The documented optional issue matches both JSON
+serialization and text rendering; there is no Swift mirror of SweepEntry.
+
+Materialized checks used a disposable source copy, leaving the assigned checkout
+and installed Home untouched. Inherited `LF_*`/`LOOPFLOW_*` authority was cleared,
+development provenance was explicit, and `LF_BIN` pointed at the compiled source
+CLI. The initial copy setup encountered the Ghostty submodule directory before
+any test ran; the corrected Rust-only copy omitted that unrelated submodule.
+The disposable copy was removed after the suite. Fixture results do not establish
+configured Linear acceptance or shipment. Hosted CI owns the full matrix.
+
+Gate check: `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py`, `uv run pytest python/tests/test_loopflow_skill_alignment.py -q` (4), `uv run python dev.py test` from website (78 passed, 3 skipped), and `git diff --check d296b480` passed; in a disposable source copy after `scripts/canonicalize_migrations.py 0.12.28 --materialize-for-tests`, `cargo build -p loopflow --bin lf --jobs 4` and `cargo nextest run -p loopflow --lib --build-jobs 4 --test-threads 4 -E 'test(ops::pm::) | test(pm::linear::) | test(ops::linear_observe::)' --no-fail-fast` passed (91); configured preview/apply remains with demo and full matrix with CI.

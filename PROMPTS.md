@@ -418,8 +418,8 @@ branch convention, Task binding, or report filename is usually incidental.
 For example, realign needs intent and work to reconcile. It edits the plan,
 code, and identified Wave's memory after implementation, upstream integration,
 or during a conversation. Work without a Wave still has useful inputs. A caller
-can compose rebase → realign or implement → compress → realign → loop-decide.
-Rebasing, publication, and navigation stay explicit in that composition.
+can compose sync → realign or implement → compress → realign → loop-decide.
+Synchronization, publication, and navigation stay explicit in that composition.
 
 Keep real domain constraints and authority boundaries. A release skill still
 needs a release target; an interactive product decision still needs the person

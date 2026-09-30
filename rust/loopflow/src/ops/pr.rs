@@ -113,9 +113,9 @@ pub fn create_or_update_pr(
     };
     let (stacked, base_branch) = publication_base()?;
 
-    // Prove the Task PR range without healing integration metadata before the
-    // first remote side effect. No-op for non-Task worktrees.
-    crate::ops::task::verify_task_pr_range_without_healing(repo)?;
+    // Record the ancestry already present in Git before the first remote effect.
+    // This recognizes completed merges without integrating or rewriting history.
+    crate::ops::task::verify_task_pr_range(repo)?;
 
     // Gate output is an in-worktree handoff, never published content. Consume
     // valid cached copy before deleting the gate-owned files so the commit and
@@ -133,7 +133,7 @@ pub fn create_or_update_pr(
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
-    crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
+    crate::ops::task::require_task_pr_range_nonempty(repo)?;
     require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;

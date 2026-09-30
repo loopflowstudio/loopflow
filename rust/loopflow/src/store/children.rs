@@ -339,7 +339,7 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.active_task_pr(&task_id)).await
     }
 
-    pub async fn rebase_task_pr(
+    pub async fn sync_task_pr(
         &self,
         pr_id: &TaskPrId,
         new_base: &str,
@@ -349,7 +349,7 @@ impl Store {
         let pr_id = pr_id.clone();
         let new_base = new_base.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rebase_task_pr(&pr_id, &new_base, clear_parent, updated_at)
+            store.sync_task_pr(&pr_id, &new_base, clear_parent, updated_at)
         })
         .await
     }

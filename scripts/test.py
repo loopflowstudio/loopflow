@@ -2,7 +2,7 @@
 """Changed-aware test runner.
 
 Runs only the CI suites the branch actually touches, so the iterative
-`lf gate` loop (rebase -> gate -> bugfix -> gate) doesn't pay for the whole
+`lf gate` loop (sync -> gate -> bugfix -> gate) doesn't pay for the whole
 matrix every pass. Stdlib only.
 
     uv run python scripts/test.py            # run suites the branch touched

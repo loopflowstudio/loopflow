@@ -76,9 +76,12 @@ hand off the whole seed, and never delegate the one blocker between you and
 completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
-`--stack-on` forks the child's worktree from the parent Task's active PR and
-records the fork commit; the child's PR targets the parent's branch until
-merge, then replays only child-authored commits onto `main`.
+`--stack-on` forks the child's worktree from the parent Task's active PR, records
+the fork commit, and adds a `Clear inherited scratch` commit before execution.
+Parent syncs keep the child's scratch, including its deletions. The parent retains
+its own notes. The child's PR targets the parent's branch until
+merge, then `lf sync` merges main using the recorded fork as the comparison base.
+Child edits survive the parent's squash landing without replay.
 
 ## Steer
 

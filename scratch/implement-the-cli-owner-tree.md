@@ -1072,3 +1072,33 @@ C096/C098/C111 deletion; complete remaining Wave/planning and finite-delivery
 cuts against their owners; prove destination readiness and first local result.
 Current source and compiled inventory agree on the implemented surface, but the
 full verdict target does not. Do not infer Task completion or shipment.
+
+### Compression · 2026-09-30
+
+Monitor now dispatches through one exhaustive match instead of two matches and
+a separate Show branch. Review exposed reversed `json`/`dry_run` arguments:
+the new public-CLI regression failed before the fix because text
+`lf mon prune --dry-run` deleted its disposable stale receipt. Correct argument
+order restores preview behavior; all four text/JSON × preview/apply combinations
+now prove their filesystem effect and reported outcome. Exact process ownership
+and signaling remain in the existing prune implementation.
+
+Usage and telemetry call the same history query directly, removing two obsolete
+wrappers and an unused Home argument. Usage computes its parent-query window
+once and calls the existing Work label method directly. Session owns Ask dispatch
+without a duplicate branch in the root dispatcher. No parser or DTO changes;
+the catalog counts and the unresolved requirements above remain unchanged.
+
+Seven focused tests passed with inherited LF_*/LOOPFLOW_* removed and LF_BIN
+pinned to the source CLI: two Monitor tests, Exec paging/history, Task history
+without launch, Ask capture before provider startup, telemetry's preserved usage
+and missing cost, and the launch/readers test covering parent and historical Work
+queries. These use disposable stores and simulated providers; they establish no
+live provider result or remote readiness. One intermediate compile failed on a
+missed constant rename and was corrected before these passes. Review retained
+the separate bounded Wave history reader because its window and truncation
+answer a different query from complete parent and usage history.
+
+Formatting and all-target Clippy (`--jobs 4 -- -D warnings`) passed. Gate and CI
+retain broader validation; this compression does not settle the remaining Task
+continuation, planning, delivery, readiness or first-result obligations.

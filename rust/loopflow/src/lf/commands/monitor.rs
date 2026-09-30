@@ -136,11 +136,11 @@ fn parse_cursor(value: &str) -> Result<ExecCursor, String> {
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
         MonitorCommand::Active { json, watch, task } => {
-            return super::runs::list_active(*json, *watch, task.as_deref())
+            super::runs::list_active(*json, *watch, task.as_deref())
         }
-        MonitorCommand::Ps { json } => return super::top::run_ps(*json),
-        MonitorCommand::Top { json } => return super::top::run_top(*json),
-        MonitorCommand::Prune { dry_run, json } => return super::top::run_prune(*dry_run, *json),
+        MonitorCommand::Ps { json } => super::top::run_ps(*json),
+        MonitorCommand::Top { json } => super::top::run_top(*json),
+        MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
         MonitorCommand::Usage {
             json,
             days,
@@ -148,16 +148,14 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             wave,
             project,
             task,
-        } => {
-            return super::usage::run(
-                *json,
-                *days,
-                wave.as_deref(),
-                project.as_deref(),
-                task.as_deref(),
-                parent.as_deref(),
-            )
-        }
+        } => super::usage::run(
+            *json,
+            *days,
+            wave.as_deref(),
+            project.as_deref(),
+            task.as_deref(),
+            parent.as_deref(),
+        ),
         MonitorCommand::Activity {
             since,
             limit,
@@ -165,105 +163,94 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             project,
             task,
             json,
-        } => {
-            return super::activity::run(
-                since,
-                *limit,
-                wave.as_deref(),
-                project.as_deref(),
-                task.as_deref(),
-                *json,
-            )
-        }
-        _ => {}
-    }
-    if let MonitorCommand::Show {
-        id,
-        json,
-        events,
-        final_answer,
-        input,
-    } = command
-    {
-        return show(id, *json, *events, *final_answer, input.as_deref());
-    }
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_store(&storage_config_from_env()?).await?;
-        match command {
-            MonitorCommand::List {
-                json,
-                all,
-                limit,
-                after,
-                parent,
-                caller,
-                search,
-                outcome,
-                task,
-                wave,
-            } => {
-                let repo = if *all {
-                    None
-                } else {
-                    CanonicalRepo::current()?.map(|repo| repo.to_string())
-                };
-                let performed_work = match (task, wave) {
-                    (Some(task), _) => Some(ExecWorkFilter::Task(
+        } => super::activity::run(
+            since,
+            *limit,
+            wave.as_deref(),
+            project.as_deref(),
+            task.as_deref(),
+            *json,
+        ),
+        MonitorCommand::Show {
+            id,
+            json,
+            events,
+            final_answer,
+            input,
+        } => show(id, *json, *events, *final_answer, input.as_deref()),
+        MonitorCommand::List {
+            json,
+            all,
+            limit,
+            after,
+            parent,
+            caller,
+            search,
+            outcome,
+            task,
+            wave,
+        } => tokio::runtime::Runtime::new()?.block_on(async {
+            let store = open_store(&storage_config_from_env()?).await?;
+            let repo = if *all {
+                None
+            } else {
+                CanonicalRepo::current()?.map(|repo| repo.to_string())
+            };
+            let performed_work = match (task, wave) {
+                (Some(task), _) => Some(ExecWorkFilter::Task(
+                    store
+                        .sqlite
+                        .resolve_task_id(task, repo.as_deref())?
+                        .context("Task was not found")?,
+                )),
+                (_, Some(wave)) => Some(ExecWorkFilter::Wave(
+                    store
+                        .sqlite
+                        .resolve_wave_id(wave, repo.as_deref())?
+                        .context("Wave was not found")?,
+                )),
+                _ => None,
+            };
+            let filter = ExecFilter {
+                repo,
+                parent_exec_id: match parent {
+                    Some(parent) => Some(
                         store
-                            .sqlite
-                            .resolve_task_id(task, repo.as_deref())?
-                            .context("Task was not found")?,
-                    )),
-                    (_, Some(wave)) => Some(ExecWorkFilter::Wave(
-                        store
-                            .sqlite
-                            .resolve_wave_id(wave, repo.as_deref())?
-                            .context("Wave was not found")?,
-                    )),
-                    _ => None,
-                };
-                let filter = ExecFilter {
-                    repo,
-                    parent_exec_id: match parent {
-                        Some(parent) => Some(
-                            store
-                                .resolve_exec(parent)
-                                .await?
-                                .context("Parent Exec was not found")?
-                                .id,
-                        ),
-                        None => None,
-                    },
-                    caller_session_id: caller.clone(),
-                    command_contains: search.clone(),
-                    outcome: outcome.as_deref().map(|value| match value {
-                        "succeeded" => ExecOutcomeFilter::Succeeded,
-                        "failed" => ExecOutcomeFilter::Failed,
-                        "interrupted" => ExecOutcomeFilter::Interrupted,
-                        _ => ExecOutcomeFilter::Unknown,
-                    }),
-                    performed_work,
-                    ..Default::default()
-                };
-                let page = store.execs(&filter, after.as_ref(), *limit).await?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&page)?);
-                } else {
-                    for exec in &page.entries {
-                        print_exec(exec);
-                    }
-                    if let Some(next) = page.next {
-                        println!(
-                            "Continue with --after '{}' and the same filters",
-                            serde_json::to_string(&next)?
-                        );
-                    }
+                            .resolve_exec(parent)
+                            .await?
+                            .context("Parent Exec was not found")?
+                            .id,
+                    ),
+                    None => None,
+                },
+                caller_session_id: caller.clone(),
+                command_contains: search.clone(),
+                outcome: outcome.as_deref().map(|value| match value {
+                    "succeeded" => ExecOutcomeFilter::Succeeded,
+                    "failed" => ExecOutcomeFilter::Failed,
+                    "interrupted" => ExecOutcomeFilter::Interrupted,
+                    _ => ExecOutcomeFilter::Unknown,
+                }),
+                performed_work,
+                ..Default::default()
+            };
+            let page = store.execs(&filter, after.as_ref(), *limit).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&page)?);
+            } else {
+                for exec in &page.entries {
+                    print_exec(exec);
+                }
+                if let Some(next) = page.next {
+                    println!(
+                        "Continue with --after '{}' and the same filters",
+                        serde_json::to_string(&next)?
+                    );
                 }
             }
-            _ => unreachable!("other monitoring operations dispatched above"),
-        }
-        Ok(())
-    })
+            Ok(())
+        }),
+    }
 }
 
 fn print_exec(exec: &Exec) {

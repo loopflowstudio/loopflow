@@ -627,6 +627,49 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
     command
 }
 
+#[test]
+fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
+    let home = tempfile::tempdir().unwrap();
+    let directory = home.path().join("runtime/exec-processes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let receipt = directory.join("4294967295.json");
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema_version": 1,
+        "trace_id": "stale-trace",
+        "exec_id": "stale-exec",
+        "pid": u32::MAX,
+        "started_at": 1,
+    }))
+    .unwrap();
+
+    for json in [false, true] {
+        std::fs::write(&receipt, &bytes).unwrap();
+        for dry_run in [true, false] {
+            let mut args = vec!["mon", "prune"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            if json {
+                args.push("--json");
+            }
+            let output = command(home.path(), home.path(), &args).output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert_eq!(receipt.exists(), dry_run, "{args:?}");
+            if dry_run {
+                assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
+            }
+            if json {
+                let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(report["dry_run"], dry_run);
+                assert_eq!(report["removed_exec_receipts"], u32::from(!dry_run));
+            } else {
+                let action = if dry_run { "WOULD PRUNE" } else { "PRUNED" };
+                assert!(String::from_utf8_lossy(&output.stdout).contains(action));
+            }
+        }
+    }
+}
+
 fn wait_file(path: &Path, child: &mut Child) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while !path.exists() {

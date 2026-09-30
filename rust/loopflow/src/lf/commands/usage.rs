@@ -10,7 +10,7 @@ use crate::session_record::SessionHistory;
 
 const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;
-const RUN_WIDTH: usize = 22;
+const SESSION_WIDTH: usize = 22;
 const NUM_WIDTH: usize = 12;
 
 /// Print Session input usage without inventing completeness or provider finality.
@@ -22,11 +22,7 @@ pub fn run(
     task: Option<&str>,
     parent: Option<&str>,
 ) -> Result<()> {
-    let since = if parent.is_some() {
-        0
-    } else {
-        since_days(days)
-    };
+    let days = if parent.is_some() { 0 } else { days };
     let runs = crate::lf::commands::runs::collect_history(
         WorkFilter {
             wave,
@@ -34,13 +30,13 @@ pub fn run(
             task,
         },
         parent,
-        since,
+        since_days(days),
     )?;
     if json {
         println!("{}", serde_json::to_string(&runs)?);
         return Ok(());
     }
-    print_report(&runs, if parent.is_some() { 0 } else { days });
+    print_report(&runs, days);
     Ok(())
 }
 
@@ -66,7 +62,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     let colors = Colors::default();
     println!("{}SESSION USAGE ({window}){}", colors.bold, colors.reset);
     println!(
-        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  INPUT{reset}",
+        "{bold}{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  INPUT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         time = "TIME",
@@ -82,11 +78,11 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     );
     for run in runs {
         println!(
-            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<RUN_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
+            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
             time = format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
-            work = truncate(&display_work(run), WORK_WIDTH),
-            run = truncate(run.label(), RUN_WIDTH),
+            work = truncate(&run.work_label(), WORK_WIDTH),
+            run = truncate(run.label(), SESSION_WIDTH),
             input = format_optional(run.usage.input_tokens),
             output = format_optional(run.usage.output_tokens),
             cache = format_optional(run.usage.cache_read_tokens),
@@ -100,10 +96,6 @@ fn print_report(runs: &[SessionHistory], days: u32) {
             id = short_id(run.selector()),
         );
     }
-}
-
-fn display_work(run: &SessionHistory) -> String {
-    run.work_label()
 }
 
 fn format_optional(value: Option<i64>) -> String {

@@ -1,9 +1,6 @@
-//! `lf runs` — read retained AgentSession input and provider history.
+//! Read retained Session inputs and observe provider conversations.
 
-use std::{
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::{io::Read, path::PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -73,40 +70,17 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, b
     )?)
 }
 
-pub(crate) fn collect_runs_started_since(
-    filter: WorkFilter,
-    since: i64,
-) -> Result<Vec<SessionHistory>> {
-    collect_history(filter, None, since)
-}
-
+/// Select conversations in SQL before reading their subordinate history.
 pub(crate) fn collect_history(
     filter: WorkFilter,
     parent: Option<&str>,
     since: i64,
 ) -> Result<Vec<SessionHistory>> {
-    let path = crate::store::observability_database_path()?;
-    collect_runs_at(
-        &crate::store::observability_home_dir(),
-        &path,
-        filter,
-        parent,
-        since,
-    )
-}
-
-/// Select conversations in SQL before reading their subordinate history.
-fn collect_runs_at(
-    _lf_home: &Path,
-    database: &Path,
-    filter: WorkFilter,
-    parent: Option<&str>,
-    since: i64,
-) -> Result<Vec<SessionHistory>> {
+    let database = crate::store::observability_database_path()?;
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(database)?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
     Ok(store.conversation_history(
         filter.wave,
         filter.project,

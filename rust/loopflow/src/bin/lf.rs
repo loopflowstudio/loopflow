@@ -1513,9 +1513,6 @@ fn execute_command(
             cmd: loopflow::lf::HomeCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
-        Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::Ask { ask },
-        }) => loopflow::lf::commands::ask::run(ask),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
         Some(Commands::Account {
             cmd,

@@ -21,11 +21,15 @@ report open PRs and execution as exclusions before applying safe candidates.
 
 - Removed Task-only `rebase` dispatch; `task sync ISSUE` delegates to the sole
   integration command after the 2026-09-30 merge from main.
-- Remove the terminal-worker early return that strands its claim. Preserve the
+- Removed the terminal-worker early return that strands its claim. Preserve the
   bound worker fence, captured Flow until settlement, and authoritative merge gate.
-- Remove issue deletion's standalone placed-Task path: cancellation or completion
+- Removed issue deletion's standalone placed-Task path: cancellation or completion
   cleanup now precedes provider trash. Preserve history and confirmed-deletion
   retry evidence. No terminal-outcome reopening follows from execution recovery.
+
+- Removed the separate Done-worker finish path and the single-caller `settle_pr`
+  wrapper. One worker settlement path now retires both completed Tasks and final
+  Flow steps; checkout cleanup still follows provider stop and exact-claim settlement.
 
 ## Current implementation
 
@@ -191,3 +195,28 @@ CI ran. Configured acceptance remains the caller's post-installation obligation.
 
 Final `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
 `git diff --check` passed after the public cleanup-retry proof was added.
+
+## Final compression (2026-09-30)
+
+Worker settlement now shares its timestamp, bounded progress summary and exact
+claim retirement for final Flow steps and Tasks completed inside a turn. The
+existing final-step regression also proves a Done Task with remaining Flow steps
+retires once before reporting incomplete cleanup, preserves its checkout and
+never reopens success. Lifecycle repository resolution reuses `owning_wave`;
+PR settlement no longer passes through a single-caller wrapper. The command
+reference removes obsolete inferred-owner examples and uses issue-addressed Task
+PR operations or checkout-addressed PR/worktree/commit commands directly.
+
+Focused isolated proof passed 16 tests:
+
+```text
+cargo test -p loopflow --lib -- finished_task_or_final_skill_ claimed_autonomous_boundary_settles_once_ task_completion_ task_abandon task_sweep_ --test-threads=1
+```
+
+Inherited `LF_*` authority was removed and `LF_BIN` pinned to this checkout's
+compiled CLI. Provider responses remain simulated, with disposable stores and
+Git repositories/remotes. Configured post-installation acceptance remains
+outstanding; this pass performs no publication, installation or live cancellation.
+
+Final `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
+`git diff --check` passed. No broader gate or hosted CI ran.

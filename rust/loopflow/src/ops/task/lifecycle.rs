@@ -1,4 +1,4 @@
-//! Cancellation composes the existing provider, Task, PR and checkout owners.
+//! Task lifecycle composes the provider, PR, worker and checkout owners.
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
-use super::{block_on_task, task_error, task_store};
+use super::{block_on_task, owning_wave, task_error, task_store};
 
 /// Completion is durable before cleanup; failure never reverses the outcome.
 pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -44,7 +44,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         store.complete_task(task, None).await.map_err(task_error)?;
     }
     let result = async {
-        let wave = super::owning_wave(store, task).await?;
+        let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
         if task.worktree.exists()
             && std::fs::canonicalize(&task.worktree)? == std::fs::canonicalize(&repo)?
@@ -112,11 +112,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
         return Ok(None);
     };
     // Branch names are only unique inside their repository.
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("Task Wave is unavailable"))?;
+    let wave = owning_wave(&store, &task).await?;
     if main_repo_root(repo)? != main_repo_root(Path::new(wave.repo()))? {
         return Err(task_error("branch belongs to a Task in another repository"));
     }
@@ -155,13 +151,9 @@ pub(crate) fn notice_retained_task(
 }
 
 pub(crate) async fn record_abandoned_pr(repo: &Path, branch: &str) -> OpsResult<()> {
-    if let Some((store, task)) = branch_task(repo, branch).await? {
-        settle_pr(&store, &task, branch).await?;
-    }
-    Ok(())
-}
-
-async fn settle_pr(store: &SharedStore, task: &Task, branch: &str) -> OpsResult<()> {
+    let Some((store, task)) = branch_task(repo, branch).await? else {
+        return Ok(());
+    };
     for mut pr in store.task_prs(&task.id).await.map_err(task_error)? {
         if pr.branch == branch && pr.is_active() {
             let now = time::OffsetDateTime::now_utc();
@@ -539,19 +531,14 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
             let Some(task) = resolve_task(&store, selector).await? else {
                 return Ok(None);
             };
-            let wave = store
-                .get_wave(&task.wave_id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("Task Wave is unavailable"))?;
+            let wave = owning_wave(&store, &task).await?;
             Ok(Some(std::path::PathBuf::from(wave.repo())))
         })?;
         if let Some(repo) = retained {
             return main_repo_root(&repo).map_err(Into::into);
         }
     }
-    let root = crate::repo::discover_repo_root(directory)
+    crate::repo::discover_repo_root(directory)
         .map_err(task_error)?
-        .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))?;
-    Ok(root)
+        .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }

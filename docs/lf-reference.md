@@ -11,7 +11,7 @@ lf debug -c                         # investigate an error from the clipboard
 lf run feature                      # run a named flow or skill
 lf : "fix the broken link"           # run an inline prompt
 lf list                             # discover commands, skills, and flows
-lf help task pr                      # inspect pull-request operations
+lf help pr                          # inspect pull-request operations
 ```
 
 Run a skill or flow by name. Use the command tree to manage work, inspect
@@ -23,8 +23,8 @@ execution, and operate the machine.
 lf help                             # brief overview
 lf help --all                       # the complete command tree
 lf help task                        # concrete work and delivery
-lf help task pr land                 # explain one operation
-lf task pr land --help               # the same page
+lf help pr land                     # explain one operation
+lf pr land --help                   # the same page
 lf help debug                       # explain a definition without running it
 lf debug --help                     # the same definition page
 lf run debug --help                  # the same definition page
@@ -49,7 +49,8 @@ stable ordering rather than usage rankings.
 | `run`, `skill`, `flow` | Execute and inspect definitions |
 | `:` | Run an inline prompt |
 | `list`, `help` | Discover names and explain commands |
-| `task` | Manage concrete work, worktrees, commits, and pull requests |
+| `task` | Manage concrete work and address its PR operations by issue ID |
+| `pr`, `wt`, `commit` | Operate on pull requests, checkouts, and commits |
 | `wave` | Maintain goals, memory, conversations, schedules, and chapters |
 | `session` | Open conversations, ask for input, and complete reviews |
 | `monitor` (`mon`) | Inspect history, live activity, replay, and usage |
@@ -57,36 +58,17 @@ stable ordering rather than usage rankings.
 | `home` | Install Loopflow, inspect the machine, and reach other Homes |
 | `repo` | Release software, inspect CI, and configure repository integrations |
 
-## Omit an unambiguous owner
+## Address delivery by checkout or Task
 
 ```bash
-lf task pr land                     # canonical path
-lf pr land                          # omit task
-lf land                             # omit task and pr
-
-lf task publish                     # task pr publish
-lf repo publish                     # repo release publish
+lf pr land                          # operate in this checkout
+lf task pr DES-123 land             # select the Task's checkout by issue ID
+lf task sync DES-123 --plan         # inspect integration for that Task
 ```
 
-An exact command wins first. Otherwise, Loopflow searches beneath the owner
-already entered. One match expands to its full path. At the root, the search
-covers the whole command tree. Any number of leading owners can be omitted.
-
-Multiple matches print the choices and execute nothing:
-
-```text
-$ lf publish
-"publish" matches multiple commands:
-  lf task pr publish
-  lf repo release publish
-```
-
-Use an explicit owner to narrow the search. `lf task status` keeps its own
-meaning; inspecting just the PR is `lf task pr status`.
-
-Shortcuts have the same arguments and effects as their canonical command.
-`lf help land` shows `lf task pr land`. Examples below use full paths so the
-owner is visible; omitted-owner shortcuts are derived from that tree.
+Task actions reuse the PR and sync commands, including their flags. Use
+`lf help pr land` for landing options or `lf task status DES-123` for the
+Task's outcome and execution state.
 
 ### Long and short names
 
@@ -314,7 +296,7 @@ lf task list                        # work in this repository
 lf task list --wave designer
 lf task list --all                   # work across this Home's repositories
 lf task status                      # Task bound to this checkout
-lf task pr status                   # current branch's PR, with or without a Task
+lf pr status                        # current branch's PR, with or without a Task
 ```
 
 Task commands manage concrete work. Commit, sync, worktree, and PR operations
@@ -465,9 +447,6 @@ command. It does not reopen a terminal outcome or undelete a Linear issue.
 | Worktree | `wt create`, `wt delete` | Local checkout/branch; delete also removes the remote branch |
 | Integration | `sync`, `task sync ISSUE` | Integrate main or the recorded stack parent; preserve Task and PR outcomes |
 
-`task sync` replaces this branch's earlier `task rebase` spelling, without an
-alias, matching the root `sync` command.
-
 ### Read and edit another Task's files
 
 ```bash
@@ -490,11 +469,11 @@ operations require UTF-8 files within 1 MB and exclude symlinks and Git metadata
 ### Worktrees
 
 ```bash
-lf task worktree create parser
-lf task worktree create parser --plan
-lf task worktree switch parser
-lf task worktree list
-lf task worktree prune --dry-run
+lf wt create parser
+lf wt create parser --plan
+lf wt switch parser
+lf wt list
+lf wt prune --dry-run
 lf wt delete parser
 ```
 
@@ -510,8 +489,8 @@ separate destructive choice.
 ### Commit and sync
 
 ```bash
-lf task commit -m "Fix keyboard navigation in dialogs"
-lf task commit --no-add              # commit only the existing index
+lf commit -m "Fix keyboard navigation in dialogs"
+lf commit --no-add                  # commit only the existing index
 lf sync --plan                      # inspect the integration strategy
 lf sync                             # integrate and publish the branch with a lease
 ```
@@ -550,12 +529,12 @@ taking over an operation started outside Loopflow.
 ### Pull requests
 
 ```bash
-lf task pr open                     # push a draft and open its page
-lf task pr publish                  # push and mark ready, without opening a browser
-lf task pr checks --watch
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # request auto-merge and return
-lf task pr land                     # watch, repair CI, and finish merged
+lf pr open                          # push a draft and open its page
+lf pr publish                       # push and mark ready, without opening a browser
+lf pr checks --watch
+lf pr submit                        # prepare for a reviewer's merge click
+lf pr arm                           # request auto-merge and return
+lf pr land                          # watch, repair CI, and finish merged
 ```
 
 These operations use the selected Task or checkout. An unbound branch uses
@@ -581,11 +560,11 @@ reviewable commit, and integrate the branch before publication. They preserve
 valid reviewer-facing copy and update Task merge consequences.
 
 ```bash
-lf task pr publish --title "Make dialog navigation follow tab order" \
+lf pr publish --title "Make dialog navigation follow tab order" \
   --body "Keyboard focus now follows the visible controls."
-lf task pr land -c                   # merge, then complete the owning Task
-lf task pr land --next focus-ring    # merge, then continue the same Task
-lf task pr next focus-ring           # reconcile a merge performed elsewhere
+lf task pr DES-123 land -c          # merge, then complete the owning Task
+lf pr land --next focus-ring        # merge, then continue the same Task
+lf pr next focus-ring               # reconcile a merge performed elsewhere
 ```
 
 Bare land keeps the Task open. `-c` requests completion after authoritative

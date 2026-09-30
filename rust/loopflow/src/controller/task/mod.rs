@@ -657,20 +657,15 @@ async fn finish_claimed_task_boundary(
     text: &str,
 ) -> Result<()> {
     let work = WorkRef::Task(task.id.clone());
-    match store.work_status(&work).await? {
-        crate::durable::WorkStatus::Done => {
-            // The delivery operation records success while this worker still
-            // owns its checkout. Only now has the provider/operation stopped.
-            store.finish_task_flow(task, claim, Some(text)).await?;
-            crate::ops::task::cleanup_completed_task(store, task).await?;
-            return Ok(());
-        }
-        crate::durable::WorkStatus::Abandoned => return Ok(()),
-        crate::durable::WorkStatus::Ready => {}
+    let work_status = store.work_status(&work).await?;
+    if work_status == crate::durable::WorkStatus::Abandoned {
+        return Ok(());
     }
     task.updated_at = time::OffsetDateTime::now_utc();
 
-    if status == Lifecycle::Interrupted || !flow_completed {
+    if work_status == crate::durable::WorkStatus::Ready
+        && (status == Lifecycle::Interrupted || !flow_completed)
+    {
         return settle_claimed_task_position(store, task, flow, claim, text).await;
     }
 
@@ -682,6 +677,9 @@ async fn finish_claimed_task_boundary(
             (!summary.is_empty()).then_some(summary.as_str()),
         )
         .await?;
+    // Delivery may record success inside this turn. The provider has stopped
+    // and the exact claim has settled before cleanup can remove its checkout.
+    crate::ops::task::cleanup_completed_task(store, task).await?;
     Ok(())
 }
 
@@ -3626,60 +3624,87 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn final_skill_completion_removes_the_flow_without_restarting_it() {
-        let (store, mut task, _) = human_task_fixture().await;
-        let mut position = super::start_task_flow(&task, "task-design").unwrap();
-        position.invocation.steps.truncate(1);
-        position.cursor.iteration = 3;
-        let position = store.set_flow_position(&task.id, position).await.unwrap();
-        let owner = TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
-            pid: 101,
-            started_at: 1_700_000_000,
-        };
-        let claim = match store
-            .claim_task_worker(
-                &task.id,
-                &position.invocation.id,
-                position.version,
-                &owner,
-                time::OffsetDateTime::now_utc(),
-            )
-            .await
-            .unwrap()
-        {
-            TaskWorkerClaimOutcome::Claimed(claim) => claim,
-            outcome => panic!("unexpected claim outcome: {outcome:?}"),
-        };
-        let claim = store
-            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
-            .await
-            .unwrap();
-        let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
-        let completed = super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
-        assert!(completed);
-        assert_eq!(position.cursor.iteration, 3);
-        super::finish_claimed_task_boundary(
-            &store,
-            &mut task,
-            &mut position,
-            &claim,
-            Lifecycle::Completed,
-            completed,
-            "done",
-        )
-        .await
-        .unwrap();
-
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
-        assert_eq!(
-            store
-                .work_status(&WorkRef::Task(task.id.clone()))
+    async fn finished_task_or_final_skill_retires_the_worker_without_restarting() {
+        for task_done in [false, true] {
+            let (store, mut task, _) = human_task_fixture().await;
+            let mut position = super::start_task_flow(&task, "task-design").unwrap();
+            if !task_done {
+                position.invocation.steps.truncate(1);
+            }
+            position.cursor.iteration = 3;
+            let position = store.set_flow_position(&task.id, position).await.unwrap();
+            let owner = TaskWorkerOwner {
+                trace_id: TraceId::new(),
+                exec_id: ExecId::new(),
+                pid: 101,
+                started_at: 1_700_000_000,
+            };
+            let claim = match store
+                .claim_task_worker(
+                    &task.id,
+                    &position.invocation.id,
+                    position.version,
+                    &owner,
+                    time::OffsetDateTime::now_utc(),
+                )
                 .await
-                .unwrap(),
-            crate::durable::WorkStatus::Ready
-        );
+                .unwrap()
+            {
+                TaskWorkerClaimOutcome::Claimed(claim) => claim,
+                outcome => panic!("unexpected claim outcome: {outcome:?}"),
+            };
+            let claim = store
+                .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
+                .await
+                .unwrap();
+            let mut position = store.flow_position(&task.id).await.unwrap().unwrap();
+            let completed =
+                super::finish_task_flow_turn(&mut position, Lifecycle::Completed).unwrap();
+            assert_eq!(completed, !task_done);
+            if task_done {
+                store.complete_task(&task, None).await.unwrap();
+            }
+            assert_eq!(position.cursor.iteration, 3);
+            let result = super::finish_claimed_task_boundary(
+                &store,
+                &mut task,
+                &mut position,
+                &claim,
+                Lifecycle::Completed,
+                completed,
+                "done",
+            )
+            .await;
+            if task_done {
+                // Even incomplete delivery cleanup must retire the exact worker,
+                // without advancing into the remaining review or reopening success.
+                assert!(result.unwrap_err().to_string().contains("unsettled PR"));
+                assert!(task.worktree.exists());
+            } else {
+                result.unwrap();
+            }
+
+            assert!(store.flow_position(&task.id).await.unwrap().is_none());
+            assert_eq!(
+                store
+                    .work_status(&WorkRef::Task(task.id.clone()))
+                    .await
+                    .unwrap(),
+                if task_done {
+                    crate::durable::WorkStatus::Done
+                } else {
+                    crate::durable::WorkStatus::Ready
+                }
+            );
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
+                    .count(),
+                1
+            );
+        }
     }
 
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {

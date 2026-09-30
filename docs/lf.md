@@ -123,8 +123,8 @@ explicitly. See [Authoring](authoring.md) to define either.
 
 ```bash
 lf task checkout EXP-12              # prepare a Task's worktree without starting it
-lf task worktree create csv-export   # create a worktree without a tracked Task
-lf task commit -m "Add CSV export"  # save local changes
+lf wt create csv-export             # create a worktree without a tracked Task
+lf commit -m "Add CSV export"       # save local changes
 lf sync --plan                       # inspect the integration strategy
 lf task pr EXP-12 checks --watch     # follow the PR's checks
 lf task sync EXP-12 --plan           # inspect this Task's integration
@@ -149,7 +149,7 @@ definition and feedback. See [decision and retry controls](lf-reference.md#flow-
 
 ```bash
 lf help                             # overview
-lf help task pr land                 # arguments and effects of one operation
+lf help pr land                      # arguments and effects of one operation
 lf help feature                     # inspect a workflow without starting it
 lf list                             # commands, skills, and flows
 lf help --all                       # full command tree

@@ -41,13 +41,15 @@ trashing the issue, preserving Task/PR/Run history.
 | Recover interrupted execution | `task run ISSUE --reason TEXT` | Retry saved boundary after correcting the blocker |
 | Delete checkout | `wt delete BRANCH` | Remote branch + local checkout/branch; retain PR and Task outcomes |
 
-Validation: 15 focused completion/deletion tests passed, plus composed
+Validation: the final compression passed 16 focused worker-settlement, completion,
+cancellation and sweep tests. Earlier 15 focused completion/deletion tests passed, plus composed
 cancellation/deletion, sweep and parser proofs, and the empty-successor landing
 regression. Formatting, all-target Clippy and diff checks passed. Real disposable Git repositories/remotes and simulated provider
 responses were used; no live cancellation is claimed. Review preserved empty
 successor history for retries and moved completion writeback to the owning repo
-after discovering that cleanup removes the old path. Exact commands, earlier
-fixture failures and static results are retained in the working design.
+after discovering that cleanup removes the old path. Worker retirement now uses one finish path for final Flow steps and Tasks completed
+inside a turn. Exact commands, earlier fixture failures and static results are
+retained in the working design.
 
 Configured acceptance remains after landing and installation, as Jack Heart's
 supervising steer directs: disposable Task abandonment, configured Wave sweep

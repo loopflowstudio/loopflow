@@ -226,7 +226,14 @@ fields and no DTO defaults.
 ### Retained layout and focus
 
 Keep `SessionsWorkspaceRegistry` as the window-local owner, replacing its current
-String path key with the resolved Home/worktree identity. Keep its shared
+String path key with the resolved Home/worktree identity. Implementation inspection
+also found path-only `TaskWorkspaceSnapshot` and `WorktreeLayoutStore` inputs:
+carry owning Home and resolved checkout through prepared Task readings and outer
+worktree selection before changing the registry key. An unstarted Task need not
+have a Session from which to borrow this identity. Do not infer its Home from the
+Wave, use a path-only alias, or create a second workspace while Home evidence loads.
+Generic local shells need the existing read-only `lf home id --json` identity;
+retain known identity on a failed refresh. Keep its shared
 `GhosttySurfacePool` and each workspace's `MultiplexerStore` and `TaskFilesStore`.
 Reconcile Session existence against the successful repository inventory before
 updating workspace membership. A Session leaving one group is not an absent or

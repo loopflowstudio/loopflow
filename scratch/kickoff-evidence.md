@@ -369,3 +369,19 @@ raw Ask keys, and the configured desktop/provider walkthrough. Do not publish th
 internal cut as completion of Unit 1. The headless run has no rendering environment;
 `uv run python scripts/test.py --ui-host` and the configured live Ask/Flow handoff
 require the maintained desktop host. No hosted UI or live provider proof was attempted.
+
+
+Next-cut source finding: `TaskWorkspaceSnapshot` and `WorktreeLayoutStore` carry
+paths without Home identity. The retained-workspace cut must propagate that
+identity through those existing readers/selections too; a dictionary-only change
+would leave prepared Tasks and generic shell navigation ambiguous. The plan now
+names this dependency. The unintegrated collapse draft was removed; production
+code remains at the verified first-cut checkpoint. No new worktree or worker was
+created, and no PR was published.
+
+Required configured proof remains blocked by the run's supplied lack of a
+rendering environment: `uv run python scripts/test.py --ui-host` and the opening
+real-provider Ask/Flow handoff must run on the configured desktop host. The
+implement skill requires stopping dependent work when required proof cannot run.
+The completed compilation and fixture proofs above do not release this boundary
+or make Unit 1 ready to ship.

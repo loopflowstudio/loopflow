@@ -14,7 +14,7 @@ LOO-298's other scratch files describe the parent work, not this Task's scope.
 
 ## Remaining work
 
-1. The supervising Flow owns compression, integration, broader gate, publication
+1. The supervising Flow owns integration, broader gate, publication
    and Jack's interactive demo. Stay on the code Flow until LOO-298 lands;
    synchronize by merge, never rebase. No push or landing ran in this pass.
 2. After landing, use installed `lf` to create Release's Linear Initiative and
@@ -72,6 +72,22 @@ and minimal-reader checks after adding view verification. All-target Clippy,
 formatting, diff checks, migration-history validation (56 shipped migrations
 unchanged) and architecture checks passed. Website doc copies were regenerated.
 These are focused implementation checks; no affected-suite or full gate ran.
+
+Compression removes the old relocation fallback for children with unrelated
+paths. Directory parentage now supplies each child's destination directly;
+the move list itself drives the parent-first traversal. Discovery fetches only
+the final Wave after reconciliation and skips redundant updates of newly created
+rows. Parent validation and relocation SQL are expanded for readability.
+The existing relocation proof now includes a grandchild through rename, repository
+move and recovery, retaining its identity and parent links.
+
+Compression verification passed 45 tests (34 Wave, seven binding/history and
+four repository relocation), all-target Clippy, formatting and diff checks.
+Log: `.lf/tmp/subwaves/compress-verification.log`. The run used a disposable Home
+with inherited LF_/LOOPFLOW_ authority removed; resource preflight reported
+40.9 GiB free above the 32 GiB reserve. Prior prompt and migration evidence remains
+recorded above; this pass did not rerun those suites or establish installed/demo
+acceptance.
 
 ## The dream
 

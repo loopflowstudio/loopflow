@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -242,48 +242,27 @@ async fn plan_moves(
     root: Wave,
     target: WaveLocator,
 ) -> Result<Vec<PlannedWaveMove>> {
-    let rehome = root.repo() != target.repo().to_string();
-    let rename = root.slug() != target.slug();
     let mut moves = vec![PlannedWaveMove {
-        wave: root.clone(),
+        wave: root,
         target,
         retire_collision: None,
     }];
-    if !rehome && !rename {
-        return Ok(moves);
-    }
-
-    let mut pending = VecDeque::from([root.id().clone()]);
-    while let Some(parent) = pending.pop_front() {
-        for child in store.list_child_waves(&parent).await? {
-            pending.push_back(child.id().clone());
-            let target_slug =
-                relocated_descendant_slug(root.slug(), moves[0].target.slug(), child.slug());
-            if !rehome && target_slug.is_none() {
-                continue;
-            }
+    // Parents precede children so the store can resolve each destination parent.
+    let mut next = 0;
+    while next < moves.len() {
+        for child in store.list_child_waves(moves[next].wave.id()).await? {
             moves.push(PlannedWaveMove {
                 target: WaveLocator::new(
-                    moves[0].target.repo().clone(),
-                    target_slug.as_deref().unwrap_or(child.slug()),
+                    moves[next].target.repo().clone(),
+                    &format!("{}/{}", moves[next].target.slug(), child.name()),
                 )?,
                 wave: child,
                 retire_collision: None,
             });
         }
+        next += 1;
     }
     Ok(moves)
-}
-
-fn relocated_descendant_slug(root: &str, target: &str, candidate: &str) -> Option<String> {
-    let relative = Path::new(candidate).strip_prefix(root).ok()?;
-    if relative.as_os_str().is_empty() {
-        return None;
-    }
-    Path::new(target)
-        .join(relative)
-        .to_str()
-        .map(str::to_string)
 }
 
 async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {

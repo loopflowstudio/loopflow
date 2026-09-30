@@ -934,7 +934,16 @@ fn validate_wave_parent(
                 "Wave directory parent belongs to another repository".into(),
             ));
         }
-        let cycle: bool = conn.query_row("WITH RECURSIVE ancestors(id,parent_wave_id) AS (SELECT id,parent_wave_id FROM waves WHERE id=?1 UNION SELECT w.id,w.parent_wave_id FROM waves w JOIN ancestors a ON w.id=a.parent_wave_id) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)", params![parent, id], |row| row.get(0))?;
+        let cycle: bool = conn.query_row(
+            "WITH RECURSIVE ancestors(id, parent_wave_id) AS (
+                SELECT id, parent_wave_id FROM waves WHERE id = ?1
+                UNION
+                SELECT w.id, w.parent_wave_id FROM waves w
+                JOIN ancestors a ON w.id = a.parent_wave_id
+             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ?2)",
+            params![parent, id],
+            |row| row.get(0),
+        )?;
         if cycle {
             return Err(StoreError::InvalidData(
                 "Wave parent would create a cycle".into(),
@@ -1925,7 +1934,11 @@ impl SqliteStore {
                 row.get(0)
             })?;
         validate_wave_parent(&tx, id, name, &repo, parent)?;
-        tx.execute("UPDATE waves SET name=?2, parent_wave_id=?3 WHERE id=?1 AND (name != ?2 OR parent_wave_id IS NOT ?3)", params![id, name, parent])?;
+        tx.execute(
+            "UPDATE waves SET name = ?2, parent_wave_id = ?3
+             WHERE id = ?1 AND (name != ?2 OR parent_wave_id IS NOT ?3)",
+            params![id, name, parent],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -2021,25 +2034,21 @@ impl SqliteStore {
                 .map_or((None, update.target.slug()), |(parent, name)| {
                     (Some(parent), name)
                 });
+            let repo = update.target.repo().to_string();
             let parent: Option<WaveId> = match parent_slug {
-                Some(slug) => Some(tx.query_row("SELECT id FROM wave_addresses WHERE repo=?1 AND slug=?2 AND retired_at IS NULL", params![update.target.repo().to_string(), slug], |row| row.get(0))?),
+                Some(slug) => Some(tx.query_row(
+                    "SELECT id FROM wave_addresses
+                     WHERE repo = ?1 AND slug = ?2 AND retired_at IS NULL",
+                    params![repo, slug],
+                    |row| row.get(0),
+                )?),
                 None => None,
             };
-            validate_wave_parent(
-                &tx,
-                &update.wave_id,
-                name,
-                &update.target.repo().to_string(),
-                parent.as_ref(),
-            )?;
+            validate_wave_parent(&tx, &update.wave_id, name, &repo, parent.as_ref())?;
             tx.execute(
-                "UPDATE waves SET repo = ?2, name = ?3, parent_wave_id = ?4 WHERE id = ?1 AND (repo != ?2 OR name != ?3 OR parent_wave_id IS NOT ?4)",
-                params![
-                    update.wave_id,
-                    update.target.repo().to_string(),
-                    name,
-                    parent
-                ],
+                "UPDATE waves SET repo = ?2, name = ?3, parent_wave_id = ?4
+                 WHERE id = ?1 AND (repo != ?2 OR name != ?3 OR parent_wave_id IS NOT ?4)",
+                params![update.wave_id, repo, name, parent],
             )?;
         }
         tx.commit()?;

@@ -186,9 +186,9 @@ pub async fn ensure_wave_row(
     use crate::store::StoreError;
     let locator = WaveLocator::discover(main_repo, name)
         .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    let repo = locator.repo().to_string();
     let mut parent: Option<WaveId> = None;
     let mut prefix = String::new();
-    let mut selected = None;
     for segment in locator.slug().split('/') {
         if !prefix.is_empty() {
             prefix.push('/');
@@ -210,7 +210,7 @@ pub async fn ensure_wave_row(
             )));
         }
         if let Some(existing) = store.get_wave(&id).await? {
-            if existing.is_retired() || existing.repo() != locator.repo().to_string() {
+            if existing.is_retired() || existing.repo() != repo {
                 return Err(StoreError::InvalidData(format!(
                     "Wave {id} belongs to another repository or is retired"
                 )));
@@ -225,16 +225,16 @@ pub async fn ensure_wave_row(
                     )));
                 }
             }
+            store
+                .reconcile_wave_directory(&id, segment, parent.as_ref())
+                .await?;
         } else {
-            let mut wave = Wave::new(id.clone(), segment.to_string(), locator.repo().to_string());
+            let mut wave = Wave::new(id.clone(), segment.to_string(), repo.clone());
             if let Some(parent) = &parent {
                 wave = wave.with_parent(parent.clone());
             }
             store.create_wave(&wave).await?;
         }
-        store
-            .reconcile_wave_directory(&id, segment, parent.as_ref())
-            .await?;
         if config.as_ref().is_none_or(|config| config.id.is_none()) {
             config::update_wave_goal_config(main_repo, &prefix, |map| {
                 map.insert(
@@ -245,10 +245,13 @@ pub async fn ensure_wave_row(
             })
             .map_err(StoreError::InvalidData)?;
         }
-        parent = Some(id.clone());
-        selected = store.get_wave(&id).await?;
+        parent = Some(id);
     }
-    selected.ok_or_else(|| StoreError::InvalidData("empty Wave address".into()))
+    store.get_wave_at(&locator).await?.ok_or_else(|| {
+        StoreError::InvalidData(format!(
+            "Wave {name} disappeared during directory discovery"
+        ))
+    })
 }
 
 #[cfg(test)]

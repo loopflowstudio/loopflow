@@ -372,9 +372,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(team_error.to_string().contains("repository Team"));
 
-    author_wave(&repo_a, "infrastructure/child", "chord-child");
+    author_wave(&repo_a, "infrastructure/child", "child");
     let child = registered_wave(&repo_a, "child").with_parent(alpha.id().clone());
     store.create_wave(&child).await.unwrap();
+    author_wave(&repo_a, "infrastructure/child/leaf", "grandchild");
+    let grandchild = registered_wave(&repo_a, "leaf").with_parent(child.id().clone());
+    store.create_wave(&grandchild).await.unwrap();
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
@@ -441,7 +444,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         ],
     );
     assert_eq!(relocation["wave_id"], alpha.id().as_str());
-    assert_eq!(relocation["waves_moved"], 2);
+    assert_eq!(relocation["waves_moved"], 3);
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
     assert_eq!(renamed.slug(), "platform");
     assert_eq!(
@@ -452,6 +455,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(renamed_child.slug(), "platform/child");
     assert!(repo_a.join("wave/platform/child/GOAL.md").is_file());
+    let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_a.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
@@ -489,6 +496,11 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let moved_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(moved_child.repo(), moved.repo());
     assert_eq!(moved_child.slug(), "platform/child");
+    let moved_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(moved_grandchild.repo(), moved.repo());
+    assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_d.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .pm_snapshot(alpha.id())

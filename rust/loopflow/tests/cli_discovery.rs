@@ -380,26 +380,20 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     let tree = clap::Command::new("lf")
         .subcommand(
-            clap::Command::new("task").subcommand(
-                clap::Command::new("pr")
-                    .visible_alias("pull-request")
-                    .subcommand(clap::Command::new("land")),
-            ),
+            clap::Command::new("task")
+                .subcommand(clap::Command::new("pr").subcommand(clap::Command::new("land"))),
         )
         .subcommand(clap::Command::new("repo").subcommand(clap::Command::new("pr")))
         .subcommand(clap::Command::new("monitor"))
+        .subcommand(clap::Command::new("landing"))
+        .subcommand(clap::Command::new("__internal").hide(true))
         .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());
-    assert_eq!(resolve("pull-request").unwrap().unwrap(), ["task", "pr"]);
     assert_eq!(resolve("mon").unwrap().unwrap(), ["monitor"]);
-    assert!(tree
-        .find_subcommand("monitor")
-        .unwrap()
-        .get_all_aliases()
-        .next()
-        .is_none());
+    assert_eq!(resolve("__internal").unwrap().unwrap(), ["__internal"]);
+    assert!(resolve("__int").unwrap().is_none());
     assert!(resolve("p").is_err());
     let collision = tree.clone().subcommand(clap::Command::new("money"));
     assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
@@ -453,4 +447,30 @@ fn repository_commands_have_one_owner_and_derived_shorthand() {
         assert_eq!(command.get_all_aliases().count(), 0);
     }
     assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn command_tree_has_no_registered_aliases() {
+    fn check(command: &clap::Command) {
+        assert_eq!(
+            command.get_all_aliases().count(),
+            0,
+            "{}",
+            command.get_name()
+        );
+        for arg in command.get_arguments() {
+            assert!(
+                arg.get_all_aliases().unwrap_or_default().is_empty(),
+                "{arg}"
+            );
+            assert!(
+                arg.get_all_short_aliases().unwrap_or_default().is_empty(),
+                "{arg}"
+            );
+        }
+        for child in command.get_subcommands() {
+            check(child);
+        }
+    }
+    check(&loopflow::lf::navigation::command_tree());
 }

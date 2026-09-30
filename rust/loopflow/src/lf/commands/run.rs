@@ -1920,7 +1920,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             None,
         );
         assert!(!seed.contains("<lf:loopflow>"));
-        assert!(!seed.contains("lf task commit"));
+        assert!(!seed.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]

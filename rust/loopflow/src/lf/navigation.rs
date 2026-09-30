@@ -13,10 +13,6 @@ pub fn command_tree() -> Command {
     command
 }
 
-fn named(command: &Command, name: &str) -> bool {
-    command.get_name() == name || command.get_all_aliases().any(|alias| alias == name)
-}
-
 fn descendants(
     command: &Command,
     name: &str,
@@ -30,7 +26,7 @@ fn descendants(
     {
         let mut path = prefix.to_vec();
         path.push(child.get_name().to_string());
-        if named(child, name) || (abbreviated && child.get_name().starts_with(name)) {
+        if child.get_name() == name || (abbreviated && child.get_name().starts_with(name)) {
             matches.push(path.clone());
         }
         descendants(child, name, &path, matches, abbreviated);
@@ -43,7 +39,10 @@ pub fn resolve_child(
     prefix: &[String],
 ) -> Result<Option<Vec<String>>, clap::Error> {
     // Hidden callbacks are still exact commands; they never become shortcuts.
-    if let Some(child) = command.get_subcommands().find(|child| named(child, name)) {
+    if let Some(child) = command
+        .get_subcommands()
+        .find(|child| child.get_name() == name)
+    {
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
@@ -84,13 +83,8 @@ fn flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Arg> {
     command.get_arguments().find(|arg| {
         if let Some(long) = value.strip_prefix("--") {
             arg.get_long() == Some(long)
-                || arg.get_all_aliases().unwrap_or_default().contains(&long)
         } else if let Some(short) = value.strip_prefix('-').and_then(|v| v.chars().next()) {
             arg.get_short() == Some(short)
-                || arg
-                    .get_all_short_aliases()
-                    .unwrap_or_default()
-                    .contains(&short)
         } else {
             false
         }

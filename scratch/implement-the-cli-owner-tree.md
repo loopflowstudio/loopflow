@@ -542,3 +542,9 @@ implement the concept cull with consumer preservation; complete Monitor,
 local discovery, child readiness and real first-provider-result proof; reconcile
 all preview docs; demonstrate counts and open choices for Jack. No publication,
 landing, completed Task or chosen Flow navigation follows from this correction.
+
+Compression after `43fa2059a` removes unused alias handling, table cloning and
+the separate root argument-table type; prompt tests check the included guide
+instead of duplicating command spellings. Discovery/documentation (13 + 2),
+CLI argument handling (30), focused prompt/launch (40), formatting, all-target
+Clippy (four jobs) and diff checks passed. Remaining scope is unchanged.

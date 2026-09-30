@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
@@ -34,14 +34,8 @@ impl FlagTables {
         if let Some(short) = arg.get_short() {
             flags.insert(format!("-{short}"));
         }
-        for alias in arg.get_all_short_aliases().into_iter().flatten() {
-            flags.insert(format!("-{alias}"));
-        }
         if let Some(long) = arg.get_long() {
             flags.insert(format!("--{long}"));
-        }
-        for alias in arg.get_all_aliases().into_iter().flatten() {
-            flags.insert(format!("--{alias}"));
         }
     }
 
@@ -59,23 +53,13 @@ impl FlagTables {
     }
 }
 
-#[derive(Clone, Default)]
 struct CommandArgTables {
     /// Flags owned directly by this command.
     direct: FlagTables,
     /// Flags owned here or by any descendant, used only to find the command path.
     recursive: FlagTables,
-    /// Direct subcommands, indexed by canonical name and aliases.
+    /// Direct subcommands, indexed by canonical name.
     subcommands: HashMap<String, CommandArgTables>,
-}
-
-/// What `reorder_args` needs to know about the CLI, derived from the clap
-/// definition so argument reordering and parsing use the same flag ownership.
-struct ArgTables {
-    /// Top-level subcommands, indexed by canonical name and aliases.
-    commands: HashMap<String, CommandArgTables>,
-    /// Top-level flags accepted on either side of an unambiguous command.
-    top_level: FlagTables,
 }
 
 fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
@@ -89,10 +73,7 @@ fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
     for subcommand in command.get_subcommands() {
         let child = command_arg_tables(subcommand);
         recursive.extend(&child.recursive);
-        let names = std::iter::once(subcommand.get_name()).chain(subcommand.get_all_aliases());
-        for name in names {
-            subcommands.insert(name.to_string(), child.clone());
-        }
+        subcommands.insert(subcommand.get_name().to_string(), child);
     }
 
     CommandArgTables {
@@ -102,32 +83,10 @@ fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
     }
 }
 
-fn arg_tables() -> &'static ArgTables {
-    static TABLES: OnceLock<ArgTables> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        let mut cli = Cli::command();
-        // Materialize the built-ins (help subcommand, -h/--help, -V/--version).
-        cli.build();
-
-        let mut commands = HashMap::new();
-        for sub in cli.get_subcommands() {
-            let table = command_arg_tables(sub);
-            let names = std::iter::once(sub.get_name()).chain(sub.get_all_aliases());
-            for name in names {
-                commands.insert(name.to_string(), table.clone());
-            }
-        }
-
-        let mut top_level = FlagTables::default();
-        for arg in cli.get_arguments() {
-            top_level.insert(arg);
-        }
-
-        ArgTables {
-            commands,
-            top_level,
-        }
-    })
+/// Derive flag ownership from the same command tree used for navigation.
+fn arg_tables() -> &'static CommandArgTables {
+    static TABLES: OnceLock<CommandArgTables> = OnceLock::new();
+    TABLES.get_or_init(|| command_arg_tables(&loopflow::lf::navigation::command_tree()))
 }
 
 fn flag_name(arg: &str) -> &str {
@@ -139,11 +98,11 @@ fn has_inline_value(arg: &str) -> bool {
 }
 
 fn is_value_flag(arg: &str) -> bool {
-    arg_tables().top_level.takes_value(arg)
+    arg_tables().direct.takes_value(arg)
 }
 
 fn is_known_flag(arg: &str) -> bool {
-    arg_tables().top_level.contains(arg)
+    arg_tables().direct.contains(arg)
 }
 
 fn push_flag(args: &[String], output: &mut Vec<String>, index: &mut usize, takes_value: bool) {
@@ -189,7 +148,7 @@ fn normalize_ssh_args(mut args: Vec<String>) -> Vec<String> {
     }
 
     let ssh_args = &arg_tables()
-        .commands
+        .subcommands
         .get("ssh")
         .expect("ssh command has derived argument metadata")
         .direct;
@@ -350,7 +309,7 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
     let Some(target_index) = first_target_index(rest) else {
         return args;
     };
-    if let Some(command) = arg_tables().commands.get(rest[target_index].as_str()) {
+    if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
         // `lf ssh` has a deliberate positional boundary: origin options come
         // before the target and every later token belongs to the remote lf.
         // Moving global flags across that boundary changes which machine owns
@@ -1841,8 +1800,8 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args, validate_work_selector,
-        CwdGuard, EnvGuard,
+        format_task_pr_line, normalize_ssh_args, reorder_args, validate_work_selector, CwdGuard,
+        EnvGuard,
     };
 
     use clap::Parser;
@@ -1986,65 +1945,6 @@ mod tests {
         assert!(line.contains("linear token expired"), "{line}");
         // The publication reading survives alongside the degraded linkage.
         assert!(line.contains("GitHub #931"), "{line}");
-    }
-
-    #[test]
-    fn derived_tables_cover_commands_and_flags() {
-        let tables = arg_tables();
-        for command in [
-            ":",
-            "desktop",
-            "screenshot",
-            "account",
-            "release",
-            "repo",
-            "task",
-            "flow",
-            "skill",
-            "discord",
-            "usage",
-            "top",
-            "list",
-            "run",
-            "wave",
-            "runs",
-            "help",
-        ] {
-            assert!(tables.commands.contains_key(command), "command {command}");
-        }
-        for flag in [
-            "--docs",
-            "-m",
-            "--model",
-            "--max-turns",
-            "-w",
-            "--wave",
-            "--task",
-        ] {
-            assert!(tables.top_level.value.contains(flag), "value flag {flag}");
-        }
-        for flag in [
-            "-c",
-            "--clipboard",
-            "--yolo",
-            "-i",
-            "-b",
-            "--tui",
-            "--ide",
-            "--chrome",
-            "--no-chrome",
-            "--diff-files",
-            "--no-diff-files",
-            "--diff",
-            "--no-diff",
-            "--no-loopflow",
-            "-h",
-            "--help",
-            "-V",
-            "--version",
-        ] {
-            assert!(tables.top_level.boolean.contains(flag), "bool flag {flag}");
-        }
     }
 
     #[test]

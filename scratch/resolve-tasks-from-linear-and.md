@@ -79,6 +79,24 @@ Main was not rebased or merged. The supplied installed `lf` has no merge command
 or merge option; the requested merge-only integration remains with the caller.
 Publication, Flow navigation and Task completion were not performed.
 
+Compression removed the deferred-future wrapper around stack-parent lookup,
+reused the placement plan's resolved default branch, and consolidated worktree
+creation's repeated path checks and result construction. Review found that the
+adoption change also removed the occupied-path preparation check: an unrelated
+directory could let issue creation succeed before checkout failed. The existing
+regression reproduced this in `.lf/tmp/task-adoption-compress-focused.log`.
+Preparation now refuses that collision before filing; actual Git worktrees still
+adopt, and execution rechecks the destination after provider work.
+
+Final compression proof: five Task-preparation tests and the worktree creation/
+reuse test passed with all-target Clippy in
+`.lf/tmp/task-adoption-compress-final.log`. The public adoption proof passed its
+three scenarios and four populated migration prerequisites again after the fix
+in `.lf/tmp/task-adoption-compress-public-final.log`; its container was removed.
+Formatting and diff checks passed. These retain the fixture limits above; no
+installed or live-provider acceptance is established. Resource preflight passed
+at 41.2 GiB free; the later sample remained above the 32 GiB reserve at 39 GiB.
+
 ## Implementation checkpoint — 2026-09-29
 
 ### Compression blocked by disk reserve — 2026-09-30

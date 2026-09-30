@@ -699,8 +699,14 @@ async fn prepare_new_task(
         .filter(|branch| !branch.is_empty());
     let mut plan = plan_branch_placement(main_repo, segment, branch)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
-    let default_branch = get_default_branch(main_repo).map_err(task_error)?;
-    let stack_parent = options.stack_on.as_deref().map(|parent_issue| async move {
+    // Fail before filing an issue; execution checks again after provider work.
+    if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
+        return Err(task_error(format!(
+            "worktree path already exists: {}",
+            plan.worktree_path.display()
+        )));
+    }
+    let stack_parent = if let Some(parent_issue) = options.stack_on.as_deref() {
         let store = task_store().await?;
         let parent_task = store
             .get_task_by_issue(parent_issue)
@@ -725,11 +731,9 @@ async fn prepare_new_task(
                 parent_task.worktree.display()
             )));
         }
-        Ok(parent)
-    });
-    let stack_parent = match stack_parent {
-        Some(parent) => Some(parent.await?),
-        None => None,
+        Some(parent)
+    } else {
+        None
     };
     let mut base_commit = match &stack_parent {
         Some(parent) => {
@@ -745,7 +749,7 @@ async fn prepare_new_task(
             })?
         }
         None => {
-            let (_, base_commit) = resolve_upstream_base(main_repo, &default_branch)?;
+            let (_, base_commit) = resolve_upstream_base(main_repo, &plan.base_ref)?;
             base_commit
         }
     };

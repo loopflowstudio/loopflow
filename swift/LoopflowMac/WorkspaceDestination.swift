@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import Loopflow
-import Observation
 import SwiftUI
 
 /// Inspection destinations never confer launch or process-control authority.

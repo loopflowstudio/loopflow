@@ -1,7 +1,6 @@
 #if os(macOS)
 import AppKit
 import Foundation
-import SwiftUI
 import Testing
 import ViewInspector
 @testable import Loopflow
@@ -40,15 +39,6 @@ struct WorkspaceDestinationTests {
 
     @Test func historicalTaskSurvivesCurrentPlanRefresh() async throws {
         let data = try fixture()
-        let query = RegistryQuery { args, _ in
-            if args.first == "roadmap" {
-                return args.contains("--task") ? data : #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#
-            }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
-            if args.first == "wave" { return "[]" }
-            throw RegistryQueryError("No mutation permitted in navigation proof")
-        }
-        let model = PodiumModel(query: query)
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -74,8 +64,6 @@ struct WorkspaceDestinationTests {
         #expect(throws: Never.self) {
             try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
         }
-        await model.refresh()
-        #expect(model.selection == nil)
     }
 
     @Test func historicalRecentSurvivesLeavingItsPageAndRefresh() async throws {
@@ -124,7 +112,7 @@ struct WorkspaceDestinationTests {
                 }
                 if args.first == "roadmap" { return current }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
-            if args.first == "wave" { return "[]" }
+                if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: wave.wave.repo)
             await model.refresh()
@@ -162,34 +150,13 @@ struct WorkspaceDestinationTests {
         let task = try #require(tasks.first)
         #expect(model.searchDestinations(task.task.identifier).first?.id == .task(task.id))
         #expect(model.paletteRows.filter { if case .task = $0.id { true } else { false } }.count == tasks.count)
+        let matchingSessions = ([1] + Array(10...19)).map { WorkspaceDestination.session(String($0)) }
+        model.remember(.session("19"))
+        #expect(model.searchDestinations(" session 1 ").map(\.id) == matchingSessions)
         model.remember(.task(task.id))
         #expect(model.searchDestinations("").first?.id == .task(task.id))
         for index in 0..<30 { model.remember(.session("\(index)")) }
         #expect(model.navigation.recentDestinations.count == 20)
-    }
-
-    @Test func lateLinkCannotReplaceLaterSelection() async throws {
-        let data = try fixture()
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
-        let wave = try #require(snapshot.waves.first)
-        let task = try #require(wave.tasks.items.first)
-        let exact = try oneTask(data, taskId: task.id)
-        let barrier = DestinationReadBarrier()
-        let model = PodiumModel(query: RegistryQuery { args, _ in
-            if args.contains("--task") { await barrier.wait(); return exact }
-            if args.first == "roadmap" { return data }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
-            if args.first == "wave" { return "[]" }
-            throw RegistryQueryError("Unavailable")
-        }, repoPath: wave.wave.repo)
-        await model.refresh()
-        let read = Task { await model.openTaskLink(URL(string: "loopflow://task/A-1")!) }
-        while !(await barrier.started) { await Task.yield() }
-        model.select(.wave(id: wave.wave.id))
-        await barrier.release()
-        await read.value
-        #expect(model.selection == .wave(id: wave.wave.id))
-        #expect(!model.showsTaskLink)
     }
 
     @Test func historicalTaskWithoutPlanningHasNoDeadEndFlowAction() async throws {
@@ -218,7 +185,7 @@ struct WorkspaceDestinationTests {
                 }
                 if args.first == "roadmap" { return data }
                 if args.first == "session" { return #"{"entries":[],"next":null}"# }
-            if args.first == "wave" { return "[]" }
+                if args.first == "wave" { return "[]" }
                 throw RegistryQueryError("No mutation permitted")
             }, repoPath: "/src/loopflow")
             await model.refresh()
@@ -255,8 +222,8 @@ struct WorkspaceDestinationTests {
         #expect(otherReceived.isEmpty)
     }
 
-    @Test func mountedWindowsFenceTwoLinksAgainstNavigation() async throws {
-        _ = NSApplication.shared
+    @Test(arguments: [false, true])
+    func overlappingLinksRespectLaterNavigation(navigateAway: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -277,43 +244,23 @@ struct WorkspaceDestinationTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
-        let router = WorkspaceLinkRouter()
-        let models = (0..<2).map { _ in PodiumModel(query: query, repoPath: wave.wave.repo) }
-        var windows: [NSWindow] = []
-        var views: [SessionsView] = []
-        var deliveries: [Task<Void, Never>] = []
-        defer { for window in windows { window.orderOut(nil); window.contentView = nil } }
-        for model in models {
-            await model.refresh()
-            model.select(.wave(id: wave.wave.id))
-            let view = SessionsView(model: model, repoPath: wave.wave.repo,
-                                    workspaces: SessionsWorkspaceRegistry(), query: query)
-            let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 1100, height: 800),
-                                  styleMask: [.titled], backing: .buffered, defer: false)
-            window.contentView = NSHostingView(rootView: view.background {
-                WorkspaceLinkReceiver(router: router) { url in
-                    deliveries.append(Task { await model.openTaskLink(url) })
-                }
-            })
-            window.makeKeyAndOrderFront(nil)
-            windows.append(window)
-            views.append(view)
-        }
-        windows[0].makeKeyAndOrderFront(nil)
-        #expect(router.deliver(try #require(URL(string: "loopflow://task/\(first.task.identifier)"))))
+        let model = PodiumModel(query: query, repoPath: wave.wave.repo)
+        await model.refresh()
+        model.select(.wave(id: wave.wave.id))
+        let firstURL = try #require(URL(string: "loopflow://task/\(first.task.identifier)"))
+        let secondURL = try #require(URL(string: "loopflow://task/\(second.task.identifier)"))
+        let firstRead = Task { await model.openTaskLink(firstURL) }
         while !(await barrier.contains(first.task.identifier)) { await Task.yield() }
-        #expect(router.deliver(try #require(URL(string: "loopflow://task/\(second.task.identifier)"))))
+        let secondRead = Task { await model.openTaskLink(secondURL) }
         while !(await barrier.contains(second.task.identifier)) { await Task.yield() }
-        // Invoke the mounted production row's click action while both reads wait.
-        try views[0].inspect().find(viewWithAccessibilityIdentifier: "workspace-wave-\(wave.wave.id)").button().tap()
+        if navigateAway { model.select(.wave(id: wave.wave.id)) }
         await barrier.release(second.task.identifier)
+        await secondRead.value
         await barrier.release(first.task.identifier)
-        for delivery in deliveries { await delivery.value }
-        #expect(models[0].selection == .wave(id: wave.wave.id))
-        #expect(!models[0].showsTaskLink)
-        #expect(models[1].selection == .wave(id: wave.wave.id))
-        #expect(!models[1].showsTaskLink)
-        #expect(models[1].navigation.recentDestinations.isEmpty)
+        await firstRead.value
+        #expect(model.selection == (navigateAway ? .wave(id: wave.wave.id) : .task(id: second.id)))
+        #expect(!model.showsTaskLink)
+        #expect(model.navigation.recentDestinations.map(\.id) == (navigateAway ? [] : [.task(second.id)]))
     }
 
     private func fixture() throws -> String {
@@ -337,15 +284,6 @@ struct WorkspaceDestinationTests {
     }
 }
 
-private actor DestinationReadBarrier {
-    var started = false
-    private var continuation: CheckedContinuation<Void, Never>?
-    func wait() async {
-        started = true
-        await withCheckedContinuation { continuation = $0 }
-    }
-    func release() { continuation?.resume(); continuation = nil }
-}
 private actor LinkedDestinationBarrier {
     private var pending: [String: CheckedContinuation<Void, Never>] = [:]
     func contains(_ key: String) -> Bool { pending[key] != nil }

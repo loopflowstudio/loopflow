@@ -201,13 +201,6 @@ public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiab
         }
     }
 
-    public var groupIDs: Set<String> {
-        switch self {
-        case .node(_, let paths): Set(paths.values.flatMap { $0.flatMap(\.groupIDs) })
-        case .group(let id, _, let items): Set(items.flatMap(\.groupIDs)).union([id])
-        }
-    }
-
     public var nodeKeys: [UInt32] {
         switch self {
         case .node(let key, let paths): [key] + paths.keys.sorted().flatMap { paths[$0]!.flatMap(\.nodeKeys) }
@@ -225,10 +218,15 @@ public struct FlowTemplateProjection {
     public init(graph: FlowGraph, items: [FlowTemplateItem], expanded: Set<String>) {
         var visible: [UInt32: UInt32] = [:]
         var groups: [UInt32: String] = [:]
-        func highestKey(_ nodes: [FlowNode]) -> UInt32 {
-            nodes.map { max($0.key, highestKey($0.paths.flatMap(\.steps))) }.max() ?? 0
+        var sourceNodes: [UInt32: FlowNode] = [:]
+        func index(_ nodes: [FlowNode]) {
+            for node in nodes {
+                sourceNodes[node.key] = node
+                for path in node.paths { index(path.steps) }
+            }
         }
-        var next = highestKey(graph.steps) + 1
+        index(graph.steps)
+        var next = (sourceNodes.keys.max() ?? 0) + 1
         func nodes(_ items: [FlowTemplateItem]) -> [FlowNode] {
             items.flatMap { item -> [FlowNode] in
                 switch item {
@@ -237,11 +235,12 @@ public struct FlowTemplateProjection {
                     let groupKey = next
                     next += 1
                     groups[groupKey] = id
-                    for key in item.nodeKeys { visible[key] = groupKey }
-                    return [FlowNode(key: groupKey, id: nil, label: "▸ \(name) · \(item.nodeKeys.count)",
+                    let keys = item.nodeKeys
+                    for key in keys { visible[key] = groupKey }
+                    return [FlowNode(key: groupKey, id: nil, label: "▸ \(name) · \(keys.count)",
                                      kind: .op, human: false, returnsTo: nil, sources: [], paths: [])]
                 case .node(let key, let paths):
-                    guard let node = graph.node(key) else { return [] }
+                    guard let node = sourceNodes[key] else { return [] }
                     visible[key] = key
                     return [FlowNode(key: key, id: node.id, label: node.label, kind: node.kind,
                                      human: node.human, returnsTo: node.returnsTo, sources: node.sources,

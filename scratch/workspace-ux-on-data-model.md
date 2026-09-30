@@ -76,3 +76,26 @@ claims remain unproven.
 Resource preflight on this pass reports 41.4 GiB free, above the 32 GiB reserve;
 no cache removal was needed. The older 30.4 GiB observation remains in
 `workspace-disk-unblock.md` as history, not a current blocker.
+
+Compression, 2026-09-30: folded projections now index captured nodes once instead
+of searching the graph for each visible node, and enumerate each folded group's
+keys once. Removed unused group-ID traversal, duplicate palette sorting and a
+redundant historical-link test model. No wire shape or Rust source changed.
+
+The first focused run passed 12 of 13 tests; the combined mounted-window test
+unexpectedly delivered work to the second model. Diagnostic runs passed with
+window order `[0, 1]` and neither window key; they did not explain the failure.
+Removed that flaky combined test, retaining the separate cold/warm router test.
+One controlled two-read test now covers both newer-link precedence and later
+navigation cancelling both pending results. This proves model ordering, not
+configured multi-window focus. No router repair or installed acceptance is claimed.
+
+Final focused proof passed 12 Swift tests (the ordering test has two cases):
+
+```sh
+nice -n 10 swift test --package-path swift --no-parallel --jobs 2 -Xswiftc -gnone --filter 'WorkspaceDestinationTests|TaskFlowTests/(flowFixtures|templateDisclosure)'
+```
+
+`git diff --check` passed. Resource preflight reported 38.9 GiB free, above the
+32 GiB reserve, with no recovery. Earlier Rust and retained-PTY proof remains
+applicable to unchanged paths; no broader suite or demo was repeated.

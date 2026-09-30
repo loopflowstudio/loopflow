@@ -71,21 +71,16 @@ extension PodiumModel {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let rows = paletteRows
         func rank(_ row: WorkspacePaletteRow) -> Int {
+            if query.isEmpty {
+                return navigation.recentDestinations.firstIndex { $0.id == row.id } ?? Int.max
+            }
             let labels = [row.key.lowercased(), row.title.lowercased()]
             if labels.contains(query) { return 0 }
             if labels.contains(where: { $0.hasPrefix(query) }) { return 1 }
             return 2
         }
-        if query.isEmpty {
-            let recent = navigation.recentDestinations
-            return rows.enumerated().sorted { lhs, rhs in
-                let l = recent.firstIndex { $0.id == lhs.element.id } ?? Int.max
-                let r = recent.firstIndex { $0.id == rhs.element.id } ?? Int.max
-                return l == r ? lhs.offset < rhs.offset : l < r
-            }.map(\.element)
-        }
         return rows.enumerated().filter {
-            [$0.element.title, $0.element.detail, $0.element.key].contains { $0.localizedCaseInsensitiveContains(query) }
+            query.isEmpty || [$0.element.title, $0.element.detail, $0.element.key].contains { $0.localizedCaseInsensitiveContains(query) }
         }.sorted { lhs, rhs in
             let l = rank(lhs.element), r = rank(rhs.element)
             return l == r ? lhs.offset < rhs.offset : l < r

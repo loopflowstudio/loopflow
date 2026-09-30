@@ -1,35 +1,32 @@
-# v0.12.28
+# v0.12.29
 
-<!-- loopflow:release-notes=narrative;gate=safe -->
+v0.12.29 gives conversations and Flows durable records so reconnecting preserves conversation identity and resuming a Flow uses its captured progress. Task and taskless execution now share one driver, with retries retaining the conversation and history keeping failed-turn evidence. Upgrade for clearer recovery and discoverable history, but review the cutover limits below before converting an existing installation.
 
-v0.12.28 makes finishing work more predictable: Task lifecycle commands coordinate issue, PR, checkout, and branch cleanup while preserving delivery history and reporting incomplete cleanup. Contributor verification also fits unattended runs, with focused checks during implementation and broader acceptance at gate. Upgrade for fewer manual cleanup steps and Desktop checks that run without a display session or permission dialogs.
+## Pick up the same conversation
 
-## Finish or cancel work with its cleanup attached
+Conversations now retain their identity independently of the command process or client driving them. Discovery and history make it easier to find prior work and understand what happened across reconnects.
 
-Task outcomes now own the cleanup that previously required separate commands. Completion protects unmerged local work, cancellation closes retained unmerged PRs, and retries preserve effects that already succeeded.
+- Find conversations with `lf session list`, name one with `lf session rename SESSION "Review notes"`, and reconnect with `lf session connect SESSION`. Read its recorded history with `lf session history SESSION --json`.
+- Codex clients can reconnect without restarting the live engine. Feedback, failed-turn evidence, and original usage attribution are retained.
+- Sessions can be permanently bound to Tasks, including completed Tasks. Desktop preserves terminals and drafts through discovery and pane replacement.
 
-- Use `lf task abandon` with an issue ID, retained branch, or the current checkout to cancel the Linear issue and local Task, close retained unmerged PRs, and remove their checkouts and branches. Retries still work after the checkout disappears.
-- Completed delivery is cleaned after its worker stops and settles its claim. Cleanup preserves dirty files and branch tips beyond the merged head. Standalone PR landing also cleans up; bare Task landing retains the checkout for continued work.
-- `lf task delete` cancels unfinished placed work or cleans completed delivery before trashing the issue. Task, PR, and Run history remain readable.
-- Preview old-chapter cleanup with `lf task sweep --json`, including eligible open issues in archived Projects. `--apply` rechecks membership before cancellation. Worker claims, open PRs, unreconciled merges, dirty checkouts, and unavailable evidence prevent cancellation.
-- Live or unresolved workers block cancellation and deletion; pending cancellation prevents new worker claims. Cleanup failures report how to retry.
+## Resume Flows from recorded progress
 
-## Verify changes without a display session
+Task and taskless Flows use the same driver and captured progression. A retry keeps the conversation, while only the selected successful native completion advances the Flow.
 
-Verification now belongs to the phase that can use its results. Implementation stays focused on changed code, while gate owns affected suites and automated acceptance; unavailable infrastructure routes checks to a capable environment without counting them as passed.
+- Skills and mechanical steps execute through ordinary commands. Loop passes remain positions within one FlowSession.
+- Indexed discovery covers Sessions, command executions, and saved Flows.
+- SQLite records give each kind of history an explicit owner: Exec records an actual `lf` process, AgentSession owns a conversation, and FlowSession owns a started Flow. These replace the previous Run owner.
 
-- Implement and compress run changed-code builds and focused tests. Gate runs broader checks once and reuses applicable results. Actual build and test failures still require repair.
-- Default Desktop verification runs under WindowServer denial in gate and CI. It inspects production Work views in four states and invokes the real navigation button.
-- Window, Metal, PTY, and hosted UI checks become optional diagnostics. The default gate drops the duplicate Desktop build and window-capture step.
-- Headless inspection does not prove visual rendering or native integration correctness. Those remain part of opt-in diagnostics and demo/review.
+## Carry active work into the next plan
+
+Linear Project status now owns chapter planning and history, and Projects supply the default Flow. Plan rotation preserves started work while limiting retirement to backlog proven untouched.
+
+- Started Tasks survive rotation.
+- Backlog with uncertain evidence is not automatically retired.
 
 ## Operational notes
 
-- **Command migration:** replace `lf wt remove` and `lf wt rm` with `lf wt delete`. The shared deletion operation removes remote branches too. Lower-level PR and worktree operations retain the Task outcome.
-- **Operate by issue:** `lf task pr ISSUE ACTION` and `lf task sync ISSUE` address delivery operations through the Task's issue.
-- **Validation:** lifecycle proofs used simulated provider responses with real disposable Git repositories and remotes; configured abandonment and sweep acceptance remain pending after installation. The later verification change records passing Python, Rust, headless Swift, architecture, multiplatform boundary, Xcode compilation, and lint checks. CI owns the remaining matrix.
-
-## Small changes
-
-- A per-skill check-time and context collector adds a dated baseline. Runtime savings remain unmeasured pending comparison with later Runs.
-- Scratch check summaries are kept to one line to reduce repeated verification context.
+- **Cutover:** historical import and intermediate-schema compatibility have been removed. Finished history is not imported. Installed conversion still requires a consistent database/filesystem backup and rehearsal of current-state retention; see the [cutover status](docs/architecture-reference.md#cutover-status).
+- **Acceptance still open:** configured provider, Desktop, and Linear acceptance remain pending. The Session commands above are a suggested walkthrough, not evidence of completed acceptance.
+- **Validation:** recorded gate evidence includes passing Python and website suites, formatting, and all-target Clippy. Full Rust and Swift runs had failures followed by focused repair checks; those repairs do not establish a clean full run of the final head. See the [retained gate evidence](wave/infrastructure/MEMORY.md#data-model-and-performance-decisions-reconciled-2026-09-30).

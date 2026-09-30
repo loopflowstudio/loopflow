@@ -248,21 +248,21 @@ public final class MultiplexerStore {
         }
     }
 
-    /// Drops panes for Sessions that left the current Session list. This is
-    /// reconciliation, not a user close, so it does not create an undo entry.
-    public func reconcileSessions(_ sessionIds: Set<String>) {
+    /// Removes confirmed resolved or moved Sessions without creating an undo entry.
+    public func removeSessions(_ sessionIds: Set<String>) {
         let stale = layout.allPanes.filter { pane in
             guard case .session(let id) = pane.content else { return false }
-            return !sessionIds.contains(id)
+            return sessionIds.contains(id)
         }
         let undoIsStale = closedState?.layout.allPanes.contains { pane in
             guard case .session(let id) = pane.content else { return false }
-            return !sessionIds.contains(id)
+            return sessionIds.contains(id)
         } == true
         guard !stale.isEmpty || undoIsStale else { return }
 
         for pane in stale {
             collapsedPaneIds.remove(pane.id)
+            if zoomedPaneId == pane.id { zoomedPaneId = nil }
             if layout.allPanes.count == 1 {
                 layout = .leaf(PaneState(id: pane.id, content: .empty))
             } else if let updated = layout.removing(pane.id) {
@@ -271,9 +271,6 @@ public final class MultiplexerStore {
         }
         if layout.pane(for: focusedPaneId) == nil {
             focusedPaneId = layout.firstPane.id
-        }
-        if let zoomedPaneId, layout.pane(for: zoomedPaneId) == nil {
-            self.zoomedPaneId = nil
         }
         closedState = nil
         _notify()

@@ -111,6 +111,10 @@ the retained Sessions workspace; keep these predecessors deleted. Preserve file 
 processes, and direct Session completion in the surviving window-owned registry.
 Replace path-only registry/outer-slot keys with Home and checkout identity; keep
 terminal identity independent of grouping. Focused retention tests own this proof.
+The compression pass also removes full-inventory reconciliation from the pane
+store and the view-owned file-focus backup. Explicit Session removals preserve
+other repositories' panes and invalidate resolved Sessions in Undo; file
+visibility derives from the retained preference and current zoom.
 
 Jack Heart's supervising direction places configured desktop/provider proof at
 the final demo boundary. Local implementation and focused proof continue before
@@ -272,8 +276,9 @@ leaves. Do not implement collapse through `close` or `reconcileSessions`.
 Expanding an unopened Session explicitly invokes the existing open path; listing
 or focusing an already mounted surface does not launch another provider.
 
-Use existing zoom state for terminal focus. Store whether files were visible in
-the workspace focus state and restore it when exiting focus. Keep file documents
+Use existing zoom state for terminal focus. Keep the file-visibility preference
+in the workspace and hide files while zoomed; exiting focus exposes that same
+preference without a second saved value or view lifecycle callback. Keep file documents
 and shell identities alive across Task changes. Presentation-only reconciliation
 must not interpret a failed Session refresh as an empty inventory and remove panes.
 A confirmed resolved Session can leave the live layout and remain in history.
@@ -375,6 +380,9 @@ alternatives and repeat targets; determine reachable next interactive occurrence
 by traversing automated nodes with a visited set. Preserve route conditions and
 references into the detailed graph rather than enumerating every possible path.
 A Flow with no human stages presents one background span with inspectable work.
+Prune routes ending at other interactive stages before reverse reachability.
+Otherwise a repeat back to the source stage can incorrectly contribute work to
+its exit edge even though that work requires another interactive visit.
 
 Do not manufacture one named YAML Flow for every edge. Current composed Flows can
 span several interactive stages. Label transitions with their authored Flow

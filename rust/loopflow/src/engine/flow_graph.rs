@@ -202,11 +202,17 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
             }
         }
         for target in targets {
-            // Keep only routes that can reach this target before another stage.
+            // Stop at every other stage before walking backward. In particular,
+            // a repeat back to the source cannot leak work into its exit edge.
+            let candidates: Vec<_> = reachable_routes
+                .iter()
+                .copied()
+                .filter(|route| route.to == target || !boundaries.contains(route.to.as_str()))
+                .collect();
             let mut ancestors = BTreeSet::from([target]);
             loop {
                 let before = ancestors.len();
-                for route in &reachable_routes {
+                for route in &candidates {
                     if ancestors.contains(route.to.as_str()) {
                         ancestors.insert(route.from.as_str());
                     }
@@ -215,13 +221,10 @@ fn project_interaction_nodes(steps: &[FlowNode]) -> InteractionGraph {
                     break;
                 }
             }
-            let selected: Vec<_> = reachable_routes
-                .iter()
-                .filter(|route| {
-                    ancestors.contains(route.to.as_str())
-                        && (route.to == target || !boundaries.contains(route.to.as_str()))
-                })
-                .map(|route| (*route).clone())
+            let selected: Vec<_> = candidates
+                .into_iter()
+                .filter(|route| ancestors.contains(route.to.as_str()))
+                .cloned()
                 .collect();
             let nodes = selected
                 .iter()
@@ -526,6 +529,34 @@ mod tests {
         assert!(background.interactions.stages.is_empty());
         assert_eq!(background.interactions.transitions.len(), 1);
         assert_eq!(background.interactions.transitions[0].nodes, ["0", "1"]);
+    }
+
+    #[test]
+    fn participation_exit_excludes_work_that_requires_another_review() {
+        let graph = FlowGraph::new(
+            "review-loop",
+            &[
+                skill("build", Some("build"), false, None),
+                skill("review", None, true, None),
+                skill("decide", None, false, Some("build")),
+            ],
+        );
+        let exit = graph
+            .interactions
+            .transitions
+            .iter()
+            .find(|edge| edge.from == "1" && edge.to == "@end")
+            .unwrap();
+        assert_eq!(exit.nodes, ["2"]);
+        assert_eq!(exit.routes.len(), 2);
+        assert!(exit.routes.iter().all(|route| route.to != "0"));
+        let repeat = graph
+            .interactions
+            .transitions
+            .iter()
+            .find(|edge| edge.from == "1" && edge.to == "1")
+            .unwrap();
+        assert_eq!(repeat.nodes, ["0", "2"]);
     }
 
     #[test]

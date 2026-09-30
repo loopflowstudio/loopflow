@@ -197,7 +197,7 @@ struct MultiplexerStoreTests {
         let store = MultiplexerStore()
         store.load(sessionId: "session-1")
 
-        store.reconcileSessions([])
+        store.removeSessions(["session-1"])
 
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
@@ -212,7 +212,7 @@ struct MultiplexerStoreTests {
         store.load(sessionId: "session-1")
         store.close(store.focusedPaneId)
 
-        store.reconcileSessions(retained ? ["session-1"] : [])
+        store.removeSessions(retained ? [] : ["session-1"])
 
         #expect(store.canUndoClose == retained)
         store.undoClose()

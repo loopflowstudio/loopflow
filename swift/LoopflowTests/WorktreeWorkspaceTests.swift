@@ -12,6 +12,31 @@ func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
+    @Test("Files follow focus while the workspace view is absent")
+    func focusRetainsFilePreference() {
+        let workspace = SessionsWorkspace()
+        let panes = workspace.multiplexer
+        workspace.showsFiles = true
+        workspace.fileWidth = 620
+        panes.reveal(sessionId: "design")
+        let design = panes.focusedPaneId
+        panes.toggleZoom(design)
+        #expect(!workspace.showsFiles)
+        panes.setCollapsed(paneId: design, collapsed: true)
+        #expect(workspace.showsFiles)
+        panes.toggleZoom(design)
+        panes.removeSessions(["design"])
+        #expect(workspace.showsFiles)
+        #expect(workspace.fileWidth == 620)
+        #expect(panes.zoomedPaneId == nil)
+        #expect(panes.focusedPane.content == .empty)
+
+        workspace.showsFiles = false
+        workspace.toggleFocus(panes.focusedPaneId)
+        workspace.toggleFocus(panes.focusedPaneId)
+        #expect(!workspace.showsFiles)
+    }
+
     @Test("Equal paths on different Homes retain separate layouts and documents")
     func homesAreDistinct() {
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
@@ -54,6 +79,9 @@ struct WorktreeWorkspaceTests {
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let source = registry.workspace(for: fixtureWorkspace("/first"))
         let target = registry.workspace(for: fixtureWorkspace("/second"))
+        let otherRepo = registry.workspace(for: fixtureWorkspace("/other-repo"))
+        otherRepo.multiplexer.reveal(sessionId: "unrelated")
+        let otherLayout = otherRepo.multiplexer.layout
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/session.json"))
         var record = try JSONDecoder().decode(SessionRecord.self, from: data)
@@ -69,9 +97,27 @@ struct WorktreeWorkspaceTests {
         #expect(source.multiplexer.pane(forSessionId: record.id) == nil)
         #expect(source.multiplexer.shellCommands[shell] == ["server"])
         #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
+        #expect(otherRepo.multiplexer.layout == otherLayout)
+        // Absence from another repository's reading cannot remove a retained pane.
+        registry.reconcileMembership([])
+        #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
+        #expect(otherRepo.multiplexer.layout == otherLayout)
         #if GHOSTTY_ENABLED
         #expect(target.surfaces.view(for: .session(record.id)) === view)
         #endif
+    }
+
+    @Test("A confirmed resolution removes a closed Session from Undo without touching other Sessions")
+    func resolutionInvalidatesUndo() {
+        let registry = SessionsWorkspaceRegistry()
+        let panes = registry.workspace(for: fixtureWorkspace("/repo")).multiplexer
+        panes.reveal(sessionId: "retained")
+        panes.reveal(sessionId: "resolved")
+        panes.close(panes.focusedPaneId)
+        #expect(panes.canUndoClose)
+        registry.removeSessions(["resolved"])
+        #expect(!panes.canUndoClose)
+        #expect(panes.pane(forSessionId: "retained") != nil)
     }
 
     @Test("Switching worktrees restores companion terminals, layout and focus")

@@ -500,3 +500,30 @@ explicitly unavailable on the observing Home; no new remote query or local path
 canonicalization has been substituted for owning-Home evidence. Verify that case
 on the configured Homes before claiming complete remote association. No PR was
 published and no provider Ask was opened by this implementation pass.
+
+Compression of the retained-workspace cut, 2026-09-30:
+
+- File visibility now derives from the retained preference and multiplexer zoom.
+  The duplicate focus backup and view lifecycle callback are removed. Collapsing
+  or resolving the focused pane restores files even while its view is absent.
+- Pane removal accepts confirmed Session IDs. Repository-local readings no longer
+  remove another repository's retained panes, and a resolved Session cannot return
+  through Undo. Moving a Session still preserves its native surface.
+- Selection reuses the existing focused-pane Session lookup, including conversations
+  running inside shells. The first focused run exposed an outdated Monitor fixture
+  that still grouped by attribution and expected the old Task overview. Correcting
+  its checkout evidence exposed a real focus-handler bug that cleared shell-hosted
+  Session selection. Both are fixed; the final native-shell proof passes.
+- Flow projection excludes other interactive boundaries before reverse traversal.
+  A review-loop exit now contains only work reachable without another review;
+  the repeat edge keeps its build steps. Shared fixtures drop the spurious routes.
+
+Executed proof: 8 `engine::flow_graph::tests`, 11 `dto_fixtures`, and 89 Swift tests
+passed. The Swift command was `swift test --package-path swift --no-parallel
+--filter 'WorktreeWorkspaceTests|MultiplexerStoreTests|TaskMonitorTests|SessionsStoreTests|WorkspaceNavigationTests|TaskFilesTests|TaskFlowTests'`.
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and
+the Xcode fallback `build-for-testing` command recorded above passed. Rust/Ask
+retry behavior is unchanged from the preceding focused proof. These are local
+model, simulated-transport, native fixture-shell and compilation results. Configured
+desktop/provider continuation, remote owning-Home association and measured layout
+performance remain mandatory at the final demo before shipping.

@@ -264,8 +264,7 @@ struct WorkspaceNavigator: View {
         }
     }
 
-    /// Exact open conversations on a Task, by name. Clicking the count inspects
-    /// the Task overview without entering any one of them.
+    /// Open an exact available conversation from its Task or collapsed Wave.
     private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
         let names = sessions.map(\.title).joined(separator: ", ")
         return Menu {

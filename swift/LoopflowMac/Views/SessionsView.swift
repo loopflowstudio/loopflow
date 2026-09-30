@@ -21,20 +21,17 @@ final class PaneHover {
 @MainActor
 @Observable
 final class SessionsWorkspace {
-    var showsFiles = false
+    private var filesExpanded = false
+    // Focus hides files without changing the retained layout preference.
+    var showsFiles: Bool {
+        get { filesExpanded && multiplexer.zoomedPaneId == nil }
+        set { filesExpanded = newValue }
+    }
     var fileWidth: CGFloat = 700
     var showsDetails = false
-    var filesBeforeFocus: Bool?
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
-        if multiplexer.zoomedPaneId == nil {
-            filesBeforeFocus = showsFiles
-            showsFiles = false
-        } else if multiplexer.zoomedPaneId == paneId {
-            showsFiles = filesBeforeFocus ?? showsFiles
-            filesBeforeFocus = nil
-        }
         multiplexer.toggleZoom(paneId)
     }
     func setCollapsed(paneId: String, collapsed: Bool) {
@@ -118,23 +115,19 @@ final class SessionsWorkspaceRegistry {
 
     func removeSessions(_ ids: Set<String>) {
         for workspace in workspaces.values {
-            let sessions = Set(workspace.multiplexer.layout.allPanes.compactMap { pane -> String? in
-                if case .session(let id) = pane.content { return id }
-                return nil
-            })
-            workspace.multiplexer.reconcileSessions(sessions.subtracting(ids))
+            workspace.multiplexer.removeSessions(ids)
         }
     }
 
-    /// Inventory establishes existence before location changes remove old placements.
-    /// Neither moving a Session nor hiding its pane releases its native surface.
+    /// A repository reading establishes moves, not absence from the whole window.
+    /// Removing old placements never releases their native surfaces.
     func reconcileMembership(_ records: [SessionRecord]) {
         let locations = Dictionary(uniqueKeysWithValues: records.compactMap { record in
             record.workspace.map { (record.id, $0.identity) }
         })
         for (identity, workspace) in workspaces {
-            let ids = Set(records.filter { locations[$0.id] == identity || locations[$0.id] == nil }.map(\.id))
-            workspace.multiplexer.reconcileSessions(ids)
+            let moved = Set(locations.compactMap { id, location in location != identity ? id : nil })
+            workspace.multiplexer.removeSessions(moved)
         }
     }
 
@@ -582,8 +575,9 @@ struct SessionsContentView: View {
         }
         .onChange(of: multiplexer.focusedPaneId) { _, _ in
             guard terminalsVisible, model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-            if case .session(let id) = multiplexer.focusedPane.content { navigation.selectedSessionId = id }
-            else { navigation.selectedSessionId = nil }
+            if !focusedPaneSessions.contains(where: { $0.id == navigation.selectedSessionId }) {
+                navigation.selectedSessionId = focusedPaneSessions.first?.id
+            }
         }
         .onChange(of: taskIdentity, initial: true) { _, _ in
             if navigation.selectedSessionId == nil, let work = model.selection, work.kind == .task {
@@ -749,8 +743,8 @@ struct SessionsContentView: View {
     private func enterTask(_ work: WorkReference) {
         guard let identity = taskIdentity else { return }
         let panes = workspaces.workspace(for: identity).multiplexer
-        if case .session(let id) = panes.focusedPane.content {
-            navigation.selectedSessionId = id
+        if let session = focusedPaneSessions.first {
+            navigation.selectedSessionId = session.id
             return
         }
         guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
@@ -907,7 +901,7 @@ struct SessionsContentView: View {
             Task { @MainActor in
                 defer { completing = nil }
                 guard await store.complete(item.id) else { return }
-                multiplexer.reconcileSessions(Set(store.sessions.map(\.id)))
+                workspaces.removeSessions([item.id])
                 store.releaseSurface(item.id)
             }
         } label: {
@@ -1044,15 +1038,6 @@ private struct WorktreeTerminalsView: View {
             ContentUnavailableView("Panes collapsed", systemImage: "rectangle.compress.vertical",
                 description: Text("Expand a conversation or shell from the list."))
         }
-        }
-        .onChange(of: store.zoomedPaneId) { previous, current in
-            if previous == nil, current != nil, workspace.filesBeforeFocus == nil {
-                workspace.filesBeforeFocus = workspace.showsFiles
-                workspace.showsFiles = false
-            } else if current == nil, let files = workspace.filesBeforeFocus {
-                workspace.showsFiles = files
-                workspace.filesBeforeFocus = nil
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
             if let source = notification.object as? MultiplexerStore, source === store {

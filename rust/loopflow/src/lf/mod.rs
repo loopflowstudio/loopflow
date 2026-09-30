@@ -1465,11 +1465,12 @@ pub enum HomeCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Inspect cached credentials and subscription windows; verify explicitly
+    /// Refresh managed account status and subscription windows
     Status {
         provider: Option<String>,
+        /// Inspect cached evidence without contacting providers or the origin broker
         #[arg(long)]
-        verify: bool,
+        cached: bool,
         #[arg(long)]
         details: bool,
         #[arg(long)]

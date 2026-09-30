@@ -199,8 +199,8 @@ Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
-Inspect `lf auth status` before proposing an account repair. It is offline;
-use `lf auth status --verify --json` for managed provider acceptance. Local
+Inspect `lf auth status --cached` before proposing an account repair. It is offline;
+use `lf auth status --json` for managed provider acceptance. Local
 service state and managed logins are separate evidence. OAuth client
 credentials resolve from environment first, then Doppler when configured. For
 a repository using Doppler, give `doppler run -- lf auth connect <provider>` when those

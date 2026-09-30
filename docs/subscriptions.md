@@ -107,8 +107,9 @@ same account ID so fallback and resume do not silently change identities.
 ## Inspect account state
 
 ```bash
-lf auth status                       # offline managed and local evidence
-lf auth status claude --verify       # request managed Claude observations
+lf auth status                       # refresh managed identity and usage
+lf auth status claude                # refresh one provider
+lf auth status --cached              # offline managed and local evidence
 lf auth status --details --json      # sources, saved browsers, full timestamps
 ```
 
@@ -122,17 +123,17 @@ uninspected. Cached inspection reads account state without starting a provider,
 decrypting local tokens or creating an encryption key. The CLI records the
 command's Exec in its Home; this can initialize an empty store, but creates no
 account, route or conversation. An inherited account lease carries no cached identity catalog:
-plain status reports forwarded identities as uninspected without contacting the
+`--cached` reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;
-`--verify` reports local server verification unavailable.
+live status reports local server verification unavailable.
 
-`auth status --verify` persists recognized managed subscription windows before
+`auth status` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
 check `resets_at` before treating a recorded percentage as current. `lf usage`
-reports recorded provider token/cost usage separately. With `--verify`, status
+reports recorded provider token/cost usage separately. By default, status
 reads forwarded identity metadata from the origin broker, without acquiring a remote credential or
 verifying remote accounts. An unavailable broker leaves local evidence visible.
 
@@ -148,7 +149,7 @@ does not imply successful authentication. Cron-host requires accepted managed
 evidence:
 
 ```bash
-lf auth status --verify --json |
+lf auth status --json |
   jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")'
 ```
 

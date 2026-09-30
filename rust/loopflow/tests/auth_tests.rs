@@ -43,8 +43,8 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
         if json {
             command.arg("--json");
         }
-        if verify {
-            command.arg("--verify");
+        if !verify {
+            command.arg("--cached");
         }
         let output = command.output().unwrap();
         assert!(
@@ -87,7 +87,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
             .unwrap(),
         vec![seeded]
     );
-    // Explicit verification can inspect metadata, but a disconnected origin
+    // Default live status can inspect metadata, but a disconnected origin
     // still cannot suppress the local report or expose the handle in an error.
     let verified: serde_json::Value = serde_json::from_str(&inspect(true, true)).unwrap();
     assert!(verified["forwarded_accounts_diagnostic"]
@@ -198,7 +198,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
 }
 
 #[test]
-fn status_verify_separates_cached_state_from_live_provider_state() {
+fn status_refreshes_by_default_and_cached_preserves_evidence() {
     let home = tempfile::TempDir::new().expect("lf home");
     let active_home = home.path().join("accounts/codex/active");
     let revoked_home = home.path().join("accounts/codex/revoked");
@@ -274,31 +274,73 @@ esac
         .block_on(store.upsert_provider_account_limits(
             "codex",
             &ProviderAccountId::parse("active").unwrap(),
-            &[loopflow::store::AccountLimitWindow {
-                window: "weekly".into(),
-                used_percent: 34,
-                resets_at: None,
-                plan: None,
-            }],
+            &[
+                loopflow::store::AccountLimitWindow {
+                    window: "weekly".into(),
+                    used_percent: 34,
+                    resets_at: None,
+                    plan: None,
+                },
+                loopflow::store::AccountLimitWindow {
+                    window: "session".into(),
+                    used_percent: 100,
+                    resets_at: Some(1),
+                    plan: None,
+                },
+            ],
             "stream",
         ))
         .unwrap();
-    let old_weekly = runtime
+    let original_windows = runtime
         .block_on(store.provider_account_limits(None))
-        .unwrap()[0]
+        .unwrap();
+    let old_weekly = original_windows
+        .iter()
+        .find(|window| window.window == "weekly")
+        .unwrap()
         .clone();
     let cached_output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .output()
         .expect("read cached auth accounts");
     assert!(cached_output.status.success());
     assert!(String::from_utf8_lossy(&cached_output.stdout)
         .contains("auth: cached connected · not checked"));
+    assert!(String::from_utf8_lossy(&cached_output.stdout).contains("session: usage unknown"));
+    assert!(!String::from_utf8_lossy(&cached_output.stdout).contains("100% used"));
 
-    // The first verification's own JSON reports the persisted credential state,
-    // not the seeded pre-verification cache.
+    // Failed and incomplete refreshes must not turn an expired full window into
+    // either current fullness or invented capacity. Preserve dated observations.
+    for unavailable in [true, false] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command.args(["auth", "status", "codex"]);
+        if unavailable {
+            command.env("PATH", "/nonexistent");
+        } else {
+            command.env("LF_TEST_EMPTY_USAGE", "1");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("session: usage unknown"));
+        assert!(!text.contains("100% used"));
+        assert!(!text.contains("0% used"));
+        assert!(text.contains(if unavailable {
+            "verification unavailable"
+        } else {
+            "usage response has no recognized percentage windows"
+        }));
+        assert_eq!(
+            runtime
+                .block_on(store.provider_account_limits(None))
+                .unwrap(),
+            original_windows
+        );
+    }
+
+    // The live report includes persisted credential state and fresh usage.
     let verified_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify", "--json"])
+        .args(["auth", "status", "codex", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -324,19 +366,21 @@ esac
         .unwrap();
     assert_eq!(active_row["cached_credential_state"], "connected");
     assert_eq!(active_row["verification"], "accepted");
+    assert_eq!(active_row["windows"][0]["used_percent"], 12);
+    assert_eq!(active_row["windows"][0]["resets_at"], 1900000000);
     assert_eq!(
         active_row["verified_windows"],
         serde_json::json!(["session"])
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .output()
         .expect("run auth verify");
 
     assert!(
         output.status.success(),
-        "lf auth status --verify failed: {}",
+        "lf auth status failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -367,13 +411,14 @@ esac
     assert_eq!(observed[0].plan.as_deref(), Some("team"));
     assert_eq!(observed[0].source, "poll");
     assert!(stdout.contains("session: 12%"));
+    assert!(stdout.contains("12% used, 88% left"));
 
     let before = runtime
         .block_on(store.list_provider_accounts(None))
         .unwrap();
     // A second process must read stored observations with the provider unavailable.
     let cached = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -405,7 +450,7 @@ esac
     let credential_path = home.path().join("accounts/codex/active/auth.json");
     let credentials_before = std::fs::read(&credential_path).unwrap();
     let cached_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--json"])
+        .args(["auth", "status", "codex", "--cached", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -451,7 +496,7 @@ esac
 
     std::fs::remove_file(home.path().join("accounts/codex/active/auth.json")).unwrap();
     let missing = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -484,7 +529,7 @@ esac
         .unwrap();
     fs2::FileExt::lock_exclusive(&lock).unwrap();
     let busy = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -513,7 +558,7 @@ esac
         ))
         .unwrap();
     let unknown = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .env("LF_TEST_EMPTY_USAGE", "1")
         .output()
         .unwrap();
@@ -633,7 +678,7 @@ fn cached_auth_records_its_exec_without_creating_account_state() {
         .env("LF_HOME", &lf_home)
         .env("LF_DB_PATH", lf_home.join("loopflow.db"))
         .env("PATH", "/nonexistent")
-        .args(["auth", "status", "--json"])
+        .args(["auth", "status", "--cached", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -714,9 +759,8 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     let status = |verify: bool, server_email: &str| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         cmd.args(["auth", "status", "codex", "--json"]);
-        if verify {
-            cmd.arg("--verify");
-        } else {
+        if !verify {
+            cmd.arg("--cached");
             cmd.env("PATH", "/nonexistent");
         }
         let out = cmd
@@ -879,7 +923,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         (401, "rejected", CredentialState::Missing),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["auth", "status", "codex", "--verify", "--json"])
+            .args(["auth", "status", "codex", "--json"])
             .env("LF_TEST_ACCOUNT_ERROR", code.to_string())
             .output()
             .unwrap();

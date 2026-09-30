@@ -68,10 +68,10 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
     match cmd {
         AuthCommand::Status {
             provider,
-            verify,
+            cached,
             details,
             json,
-        } => auth_status::run(provider.as_deref(), *verify, *details, *json).await,
+        } => auth_status::run(provider.as_deref(), !*cached, *details, *json).await,
         AuthCommand::Disconnect { provider, email } => match email {
             Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,

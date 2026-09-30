@@ -1,8 +1,8 @@
 # Evidence for LOO-298
 
-2026-09-29 · Jack Heart requires code-complete implementation, concept review with
-him, resolved findings and final gates before verified merge. Publication is a
-checkpoint. This ledger separates current proof from configured acceptance.
+2026-09-30 · Jack Heart requires code-complete implementation, his demo, resolved
+findings and final gates before verified merge. The current feature Flow has no
+separate slice or concept-review step. Publication is a checkpoint. This ledger separates current proof from configured acceptance.
 
 Prior results, failures and exact log references remain in
 [the preceding committed ledger](https://github.com/loopflowstudio/loopflow/blob/d6dc8c43b73872b8b6e71b0996468d2432b23102/scratch/evidence.md)

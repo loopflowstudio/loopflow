@@ -378,9 +378,9 @@ even when its driver has exited. An earlier success, helper completion or stale 
 advance the current selection. Missing capture data is reported without replacing
 it with today's catalog; missing external-effect evidence requires inspection.
 
-A `human:true` step appears as a Flow Session. The reviewer saves feedback and
-revised artifacts, then calls `lf session ready "feedback and remaining work"`.
-The human ends the conversation with `lf session complete <session-id>`.
+A `human:true` step opens an interactive AgentSession at the FlowSession's
+selected boundary. The reviewer saves feedback and revised artifacts, then calls `lf session ready "feedback and remaining work"`.
+The reviewer ends the conversation with `lf session complete <session-id>`.
 Completion returns feedback to the next step. A following loop-decide interprets
 it and records Advance or Iterate against its own authored edge. Human reviews
 have no implicit revision target. Closing the provider, marking ready, or

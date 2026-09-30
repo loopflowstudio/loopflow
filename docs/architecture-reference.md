@@ -605,13 +605,17 @@ create FlowSessions, claims or lifecycles.
 Exact completion and continuation settle in the existing version/claim
 transaction. Execution, review and driver locking use the same FlowSession that
 the Task selects. Task and taskless execution use one driver and need no synthetic
-planning records. The cutover-status table tracks removal of the current child
-representation; existing history must survive that forward migration.
+planning records. The forward `fold_flow_passes` migration archives original
+root/child rows, moves history and conversation membership to the root, and
+retains the deepest current pass's selection. Child rows and their ownership
+machinery are removed; configured acceptance and complete historical import
+remain open in the cutover-status table.
 
-A decision records Advance or Iterate for its selected successful agent completion.
-Failure or interruption cannot submit a verdict. A keyed unblock Ask returns
-feedback for reassessment at that same boundary. Review definitions and feedback
-survive source deletion, restart and repeated completion. There is no alternate
+A decision returns Advance, Iterate or Blocked from its selected successful
+agent completion. Blocked requires a reason and opens a keyed Ask; answered
+feedback continues the same conversation at that boundary. Only Advance and
+Iterate move the cursor. Failure or interruption cannot submit a verdict.
+Review definitions and feedback survive source deletion, restart and repeated completion. There is no alternate
 file-backed cursor. Recovery of an uncertain mechanical effect still requires
 inspection; cursor settlement alone cannot establish exactly-once external effects.
 

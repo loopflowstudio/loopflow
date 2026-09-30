@@ -262,6 +262,10 @@ Test skill body.
         fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         let evidence =
             "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
+        fs::create_dir_all(tmp.path().join("wave/infrastructure/release")).unwrap();
+        for wave in ["infrastructure", "infrastructure/release"] {
+            fs::write(tmp.path().join(format!("wave/{wave}/MEMORY.md")), &evidence).unwrap();
+        }
         for index in 0..14 {
             fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
         }
@@ -280,8 +284,7 @@ Test skill body.
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".into()),
-                wave: Some("infrastructure".into()),
-                wave_memory: Some(evidence.clone()),
+                wave: Some("infrastructure/release".into()),
                 message: Some(message.clone()),
                 surface: Surface::Headless,
                 ..Default::default()
@@ -295,7 +298,13 @@ Test skill body.
         assert!(tokens <= INPUT_TOKENS, "{tokens}");
         assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
         assert!(
-            count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
+            prepared
+                .components
+                .docs
+                .iter()
+                .filter(|doc| doc.source == DocumentSource::Wave)
+                .map(|doc| count_tokens(&doc.content))
+                .sum::<usize>()
                 <= MEMORY_TOKENS
         );
         assert!(
@@ -317,7 +326,17 @@ Test skill body.
             .unwrap()
             .collect();
         assert_eq!(sources.len(), 3);
-        assert_eq!(prepared.components.budget_decisions.len(), 3);
+        assert_eq!(prepared.components.budget_decisions.len(), 4);
+        assert!(
+            config
+                .task_prompt
+                .find("<lf:file path=\"wave/infrastructure/MEMORY.md\">")
+                .unwrap()
+                < config
+                    .task_prompt
+                    .find("<lf:file path=\"wave/infrastructure/release/MEMORY.md\">")
+                    .unwrap()
+        );
         let path = sources
             .iter()
             .map(|entry| entry.as_ref().unwrap().path())
@@ -385,13 +404,19 @@ Test skill body.
         let intent = "> $kickoff\n> ok just run kickoff here then";
         fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
         fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        fs::create_dir_all(tmp.path().join("wave/product")).unwrap();
+        fs::write(
+            tmp.path().join("wave/product/MEMORY.md"),
+            "Jack previously invoked $kickoff.",
+        )
+        .unwrap();
         let prepared = prepare_exec_prompt(
             &default_test_config(),
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
                 agent: Some("codex".into()),
-                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                wave: Some("product".into()),
                 message: Some(
                     "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
                         .into(),

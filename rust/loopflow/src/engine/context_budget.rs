@@ -49,10 +49,27 @@ fn bound_source(
 
 pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), CoreError> {
     let repo_root = Path::new(&components.repo_root);
-    if let Some(memory) = &mut components.wave_memory {
-        // Memory can combine ancestor Waves from another checkout. Retain the
-        // exact gathered text rather than pointing at a different local file.
-        let bounded = bound_source(&memory.content, MEMORY_TOKENS, 64 * 1024, repo_root)?;
+    let memories: Vec<_> = components
+        .docs
+        .iter_mut()
+        .filter(|doc| doc.source == DocumentSource::Wave && doc.path.ends_with("/MEMORY.md"))
+        .collect();
+    let memory_tokens = memories
+        .iter()
+        .map(|doc| count_tokens(&doc.content))
+        .sum::<usize>()
+        .max(MEMORY_TOKENS);
+    let memory_bytes = memories
+        .iter()
+        .map(|doc| doc.content.len())
+        .sum::<usize>()
+        .max(64 * 1024);
+    // Share the collection budget in proportion to source size, preserving
+    // ancestor order and each document's attribution and complete source.
+    for memory in memories {
+        let tokens = count_tokens(&memory.content) * MEMORY_TOKENS / memory_tokens;
+        let bytes = memory.content.len() * (64 * 1024) / memory_bytes;
+        let bounded = bound_source(&memory.content, tokens, bytes, repo_root)?;
         record_reduction(
             &mut components.budget_decisions,
             &memory.content,

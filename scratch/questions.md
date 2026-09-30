@@ -17,3 +17,10 @@ and [subwave assumptions](subwave-questions.md) own this Task's scope.
 
 Configured provider/Desktop acceptance, live planning ownership and schedule
 activation remain unproven. Local fixture success does not close them.
+
+Sync reconciliation · 2026-09-30: retain main's aggregate memory budget across
+ancestor and selected Wave documents, dividing capacity in proportion to source
+size while retaining document order, attribution and complete source snapshots.
+This is an implementation choice combining the two changes, not a new planning
+decision from Jack Heart. Main's reference escaping also applies to native Wave
+seeds. Task completion uses the repository path and the derived Wave address.

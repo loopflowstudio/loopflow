@@ -27,6 +27,8 @@ Inherited LOO-298 scratch notes were removed under the supervising session's
 
 ## Implementation and proof · 2026-09-30
 
+Sync proof: `cargo test -p loopflow --lib -- large_task_launch_stays_within_context_budget_and_preserves_sources reference_rendering_preserves_live_requests_and_original_components attributed_context_keeps_escaped_reference_sources skill_launch_seed_activates_only_the_selected_skill_from_references implement_launch_treats_kickoff_plan_and_intent_as_references skill_exec_seed_carries_wave_files_before_the_message` — five passed; the ordering assertion was corrected to match file tags and passed on its focused rerun; `cargo test -p loopflow --test golden_prompt` passed. Logs: `.lf/tmp/subwaves/sync-verification.log`, `sync-golden.log`; disposable Home, inherited authority cleared, 41.9 GiB resource preflight. Broader verification and push remain with the supervising Flow.
+
 The Release follow-through uses the authored Infrastructure and Release Markdown
 in a disposable checkout/Home through the compiled `lf-prompt` executable. Both
 selected-Wave prompts passed: each selected file appears once, ancestors precede

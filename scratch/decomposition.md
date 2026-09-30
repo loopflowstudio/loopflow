@@ -50,3 +50,28 @@ After both slices merge, rebase #1296 through Loopflow and publish the remainder
 do not land, close, rename or complete it. Preserve the original branch history
 and all scratch evidence throughout extraction. Record standalone results and
 authoritative merge receipts below; fixture success is not configured acceptance.
+
+## Standalone verification and review
+
+- `resource-recovery` / [#1358](https://github.com/loopflowstudio/loopflow/pull/1358):
+  all 12 resource tests pass; Ruff and diff checks pass. Original implementation
+  and test hunks were applied unchanged. Hosted PR and merge-queue checks passed.
+  `lf pr land -c` confirmed merge `1f5f0c4e45c79ca45cd1b6f4c0cdf7427ae9f12e`.
+- `pr-publication-continuity` / [#1359](https://github.com/loopflowstudio/loopflow/pull/1359):
+  all 50 runnable PR/Task-authority/Task-range cases pass (one skipped), no
+  fail-fast. Formatting, all-target Clippy with warnings denied, and diff checks
+  pass. Logs: `.lf/tmp/decomposition-pr-tests.log` and
+  `.lf/tmp/decomposition-pr-clippy.log`. The resource preflight passed above the
+  32 GiB reserve. Hosted PR and merge-queue checks passed. GitHub confirms merge
+  `00cf9dffe840d0c96c579667b8da22dfa03939bc` at 2026-09-30 17:00:33 UTC.
+  The `lf pr land -c` watcher returned "no auto-merge request" at this boundary;
+  a direct authoritative read showed MERGED, with no queue entry or merge request.
+  No duplicate merge or repair operation followed that counterexample.
+
+Review kept acknowledged identity persistence and later Linear linkage together;
+an incomplete hunk extraction would have removed writeback. Inspection corrected
+that extraction before building. The slice retains promotion-failure copy,
+head-pinned merge invalidation and retry behavior without schema or model changes.
+Both slice PRs target main and carry no LOO-298 Task binding. Installed control
+commands clear inherited Task/Run authority for these independent checkouts;
+source proofs use private Homes. No branch binary accesses the installed Home.

@@ -7,6 +7,28 @@ forward migration. The implementation and review below remain historical evidenc
 Keep their behavioral proofs, rewrite assertions around positions, and delete
 tests whose only claim is that child rows exist.
 
+## Forward-migration constraints observed during CI repair · 2026-09-30
+
+Source inspection adds concrete obligations to the already accepted pass removal:
+
+- `flow_events.flow_id` and `agent_sessions.flow_session_id` own live membership;
+  selected agent starts and mechanical starts keep their exact sequence IDs.
+- `import_evidence.historical_flow_id` is a generated foreign key extracted from
+  the original imported payload. Deleting a child row without reconciling that
+  reference breaks populated upgrades. Preserve the original payload and its
+  historical selector while moving runtime ownership to the root.
+- Pending review identity includes the old invocation and position. Retaining
+  only `pending_session_id` while changing the Flow identity/version is not enough:
+  the existing review token and its completion checks must still consume the
+  same saved feedback once.
+- A root waiting on a descendant does not hold the active cursor. Copy the
+  descendant's cursor, selected capture/start, operation start and review state
+  before deleting children, and invalidate old worker settlement capabilities.
+
+These are source observations, not an executed migration or another product
+choice. The CI repair leaves child FlowSessions in place. The historical review
+below documents the implementation being replaced, not current acceptance.
+
 LOO-298 · Implementation boundary, 2026-09-29.
 
 Jack's accepted contract requires durable children for runtime loop passes. The

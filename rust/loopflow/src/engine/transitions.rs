@@ -368,18 +368,18 @@ mod tests {
     }
 
     #[test]
-    fn navigation_reads_old_names_but_writes_advance_and_iterate_only() {
+    fn decisions_read_old_names_and_write_current_values() {
         for (saved, decision, canonical) in [
             ("continue", FlowDecision::Iterate, "iterate"),
             ("repeat", FlowDecision::Iterate, "iterate"),
             ("complete", FlowDecision::Advance, "advance"),
             ("next", FlowDecision::Advance, "advance"),
+            ("blocked", FlowDecision::Blocked, "blocked"),
         ] {
             let decoded: FlowDecision = serde_json::from_value(saved.into()).unwrap();
             assert_eq!(decoded, decision);
             assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
         }
-        assert!(serde_json::from_value::<FlowDecision>("blocked".into()).is_err());
     }
 
     #[test]

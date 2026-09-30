@@ -617,6 +617,7 @@ mod tests {
                 "LF_HOME",
                 "LF_RUN_DIR",
                 "LF_RUN_ID",
+                crate::lf::WORK_DECLARATION_ENV,
             ]
             .map(|name| (name, std::env::var_os(name)));
             std::env::set_var("LF_CONTROL_DB_PATH", directory.path().join("registry.db"));
@@ -624,6 +625,7 @@ mod tests {
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
             std::env::set_var("LF_RUN_ID", capture.run_id().as_str());
+            std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::run_record::write_provider_session(
                 &capture.artifact_dir(),
                 "saved-session",

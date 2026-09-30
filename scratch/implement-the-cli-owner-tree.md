@@ -805,3 +805,50 @@ the other duplicated the public Task-file workflow. Route scope conflicts remain
 in public CLI coverage. Isolated `lf::tests` (50), `cli_discovery` (13),
 `task_diff_tests` (1), formatting, all-target Clippy (four jobs) and diff checks
 passed. Production behavior, compiled command counts and remaining scope are unchanged.
+
+### Task changed-file slice review · 2026-09-30
+
+Reviewed `1735f4e94..1be96f83c` against the Task directive, catalog and full
+target, reusing the preceding reviews of the active diff from `a6b1bc3df`.
+**Pass for this slice; gap for whole-Task readiness.** No bounded production
+defect found. `TaskCommand::Changes` and its dispatch selection are removed;
+Desktop's file inventory now calls `task diff --files`. Current callers and
+documentation agree. The predecessor spelling remains only in the rejection
+test and historical evidence. Files and patches retain their consumed DTOs,
+shared placement/base resolution and existing revision/save implementation.
+File access still bypasses lifecycle reconciliation and reads recorded placement;
+it does not establish LOO-334's future Linear/Git discovery contract. No new
+storage writer, fallback reader, alias or execution authority was introduced.
+
+Fresh executed proof, with inherited `LF_*` removed and `LF_BIN` pinned to this
+checkout's `target/debug/lf`:
+
+- `cargo test -p loopflow --test task_diff_tests --jobs 4`: 1 passed. The public
+  CLI preserves recorded/head/pinned bases, rename identity, staged/unstaged/
+  untracked paths, draft non-mutation and revision-checked saves on real disposable
+  Git data. Task registration is a fixture; no planning or provider is contacted.
+- `cargo test -p loopflow --test cli_discovery removed_options_and_aliases_report_usage_errors_without_effects --jobs 4`:
+  1 passed. Retired Changes, incompatible files/path/draft inputs and conflicting
+  Account route scopes return exit 2, empty stdout and no Home state creation.
+- `git diff --check`: passed. Reuse the recorded unchanged-source Swift decoding,
+  documentation, parser, formatting and all-target Clippy passes. No rendered
+  Desktop, live provider, installed acceptance or broader-suite pass is claimed.
+
+Measured `1735f4e94..1be96f83c`: **+16 / −17 production Rust lines**, plus
+**+1 / −1 Swift consumer line**, using physical-line difflib comparison and
+excluding test modules, integration tests, examples/scripts, docs/generated
+output and scratch. Compression changes tests only; this review changes evidence
+only. Retained compiled counts remain **136 commands below root, 431 flags,
+91 positionals, zero aliases** (17 hidden commands).
+
+Convergence holds: `7285df603` replaced duplicate Account readers; `ac882b020`
+replaces the Changes leaf and Desktop caller; `1be96f83c` removes obsolete tests.
+These are not two consecutive implementation passes replacing nothing. Next
+refresh committed LOO-298/334/340 evidence and integrate coherent destinations
+with saved-execution preservation before dependent Monitor/discovery cuts. Keep
+the copied-Flow counterexample unresolved until proved. Remaining catalog and
+R01–R10 work, account ownership/provider bundles, destination child readiness,
+the real first-provider-result walkthrough, final docs/counts and Jack Heart's
+demo remain required. Preserve open Monitor choices. Whole-design Done when
+does not hold; this review does not publish, land, complete the Task or select
+Flow navigation.

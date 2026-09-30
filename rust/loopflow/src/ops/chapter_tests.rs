@@ -24,6 +24,7 @@ use time::OffsetDateTime;
 
 fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
     PmProject {
+        revision: None,
         id: id.into(),
         name: name.into(),
         slug: name.into(),
@@ -141,6 +142,7 @@ fn lost_creation_has_one_identity_on_every_home() {
 
 fn task(state: &str) -> PmItem {
     PmItem {
+        revision: None,
         id: "issue".into(),
         identifier: "FIX-1".into(),
         url: None,
@@ -149,8 +151,8 @@ fn task(state: &str) -> PmItem {
         rank: 0,
         completed: state == "completed",
         state: Some(state.into()),
-        project_id: "old".into(),
-        project: "old".into(),
+        project_id: Some("old".into()),
+        project: Some("old".into()),
         team_id: "team-1".into(),
         assignee: None,
     }
@@ -776,7 +778,7 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     .unwrap();
     assert_eq!(provider.lock().await.projects["a-old"], expected);
     let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
-    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+    let snapshot = snapshot.snapshot;
     let synced = snapshot
         .projects
         .iter()
@@ -1009,7 +1011,7 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
             .unwrap()
             .unwrap();
         let snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+        let snapshot = snapshot.snapshot;
         let successor = successor_id(&format!("initiative-{name}"), "next");
         let current = super::select_current(name, &snapshot.projects).unwrap();
         assert_eq!(current.id, successor);
@@ -1028,10 +1030,10 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
         assert_eq!(adopted.wave_id, *wave.id());
         assert_eq!(adopted.plan.id.as_str(), successor);
         assert_eq!(adopted.plan.status, ProjectStatus::Started);
-        assert!(snapshot
-            .items
-            .iter()
-            .any(|item| { item.id == format!("{name}-started") && item.project_id == successor }));
+        assert!(snapshot.items.iter().any(|item| {
+            item.id == format!("{name}-started")
+                && item.project_id.as_deref() == Some(successor.as_str())
+        }));
         if name == "a" {
             assert_eq!(previous.id, task.project_id);
             let moved = store.get_task(&task.id).await.unwrap().unwrap();
@@ -1139,7 +1141,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert!(snapshot
                 .items
                 .iter()
-                .any(|item| item.id == "a-started" && item.project_id == "a-old"));
+                .any(|item| item.id == "a-started" && item.project_id.as_deref() == Some("a-old")));
             let store = super::pm_store().await.unwrap();
             assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);

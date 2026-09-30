@@ -15,7 +15,7 @@ The goal supplies no new Codex retry-policy decision.
 2. [Main handoff](parallel-execution.md): implementation and next proof.
 3. [Full remaining scope](remaining-work.md): no slice substitutes for completion.
 4. [Import preservation](import-preservation.md) and [Chapters](chapters.md).
-5. [Evidence](evidence.md) and [open assumptions](questions.md).
+5. [Evidence](evidence.md) and [open assumptions](data-model-questions.md).
 
 The complete finish includes native continuity/authority, final history/wire and
 reader removal, bounded discovery/paging, populated import and attribution,

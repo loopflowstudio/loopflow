@@ -418,8 +418,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
 }
 
 #[tokio::test]
-async fn provider_revisions_and_webhooks_converge_without_execution() {
-    use crate::webhook::{ingest_event, parse_event};
+async fn provider_revisions_and_change_receipts_converge_without_execution() {
     let fixture = Fixture::new().await;
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
@@ -478,17 +477,11 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                     .unwrap(),
                 confirmed
             );
-            let change = json!({"type":"Issue","action":"update","data":{"id":"issue-1",
-            "updatedAt":"2026-09-29T12:00:00.125Z"},"updatedFrom":{"stateId":"old"}});
-            let (event, _) = parse_event(change.to_string().as_bytes()).unwrap();
-            ingest_event(
-                &fixture.store,
-                event,
-                "viewer",
-                time::OffsetDateTime::now_utc(),
-            )
-            .await
-            .unwrap();
+            fixture
+                .store
+                .observe_pm_issue_change("issue-1", Some("2026-09-29T12:00:00.125Z"), false)
+                .await
+                .unwrap();
             let mut delayed = confirmed.clone();
             delayed.observed_at += 20;
             fixture
@@ -516,19 +509,13 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .put_pm_task(&scope, "linear", confirmed.clone())
                 .await
                 .unwrap();
-            // Duplicate and older webhook delivery cannot invalidate an equal/newer observation.
+            // Duplicate and older change receipts cannot invalidate an equal/newer observation.
             for revision in ["2026-09-29T12:00:00.125Z", "2026-09-29T12:00:00.123Z"] {
-                let mut replay = change.clone();
-                replay["data"]["updatedAt"] = json!(revision);
-                let (event, _) = parse_event(replay.to_string().as_bytes()).unwrap();
-                ingest_event(
-                    &fixture.store,
-                    event,
-                    "viewer",
-                    time::OffsetDateTime::now_utc(),
-                )
-                .await
-                .unwrap();
+                fixture
+                    .store
+                    .observe_pm_issue_change("issue-1", Some(revision), false)
+                    .await
+                    .unwrap();
             }
             assert_eq!(
                 read_task_planning_async(&repo, "issue-1", PmRefresh::Never)
@@ -537,21 +524,11 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 confirmed
             );
             // A content edit without ordering evidence still invalidates planning.
-            let unknown = json!({"type":"Issue","action":"update",
-                "data":{"id":"issue-1","title":"Unordered edit"},
-                "updatedFrom":{"title":"Previous title"}});
-            let (event, _) = parse_event(unknown.to_string().as_bytes()).unwrap();
-            assert_eq!(
-                ingest_event(
-                    &fixture.store,
-                    event,
-                    "viewer",
-                    time::OffsetDateTime::now_utc(),
-                )
+            fixture
+                .store
+                .observe_pm_issue_change("issue-1", None, false)
                 .await
-                .unwrap(),
-                crate::webhook::WebhookOutcome::PlanningInvalidated
-            );
+                .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
@@ -566,17 +543,11 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                     .unwrap(),
                 confirmed
             );
-            let mut removal = change;
-            removal["action"] = json!("remove");
-            let (event, _) = parse_event(removal.to_string().as_bytes()).unwrap();
-            ingest_event(
-                &fixture.store,
-                event,
-                "viewer",
-                time::OffsetDateTime::now_utc(),
-            )
-            .await
-            .unwrap();
+            fixture
+                .store
+                .observe_pm_issue_change("issue-1", Some("2026-09-29T12:00:00.125Z"), true)
+                .await
+                .unwrap();
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
             fixture
                 .store
@@ -597,16 +568,11 @@ async fn provider_revisions_and_webhooks_converge_without_execution() {
                 .items
                 .is_empty());
             // A removal received before acquisition also fences future list/detail writes.
-            removal["data"]["id"] = json!("issue-2");
-            let (event, _) = parse_event(removal.to_string().as_bytes()).unwrap();
-            ingest_event(
-                &fixture.store,
-                event,
-                "viewer",
-                time::OffsetDateTime::now_utc(),
-            )
-            .await
-            .unwrap();
+            fixture
+                .store
+                .observe_pm_issue_change("issue-2", Some("2026-09-29T12:00:00.125Z"), true)
+                .await
+                .unwrap();
             let mut uncached = original;
             uncached.item.id = "issue-2".into();
             uncached.item.identifier = "FIX-2".into();

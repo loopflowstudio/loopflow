@@ -639,7 +639,7 @@ Count dispatched Task loops that settle without rescue.
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            snapshot: serde_json::from_value(project_payload).expect("parse PM snapshot"),
+            snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
     select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");

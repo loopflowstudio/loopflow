@@ -400,7 +400,8 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
         let registered = store.list_projects(Some(wave.id())).await?;
-        let projects = row.snapshot
+        let projects = row
+            .snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
@@ -842,7 +843,9 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     let mut planning = row.snapshot;
     let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
     planning.projects.retain(|project| project.id == current.id);
-    planning.items.retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
+    planning
+        .items
+        .retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
     Ok(Some(planning))
 }
 

@@ -122,7 +122,7 @@ pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmP
         .ok_or_else(|| {
             error("Project planning is unavailable; run `lf wave sync --wave <wave>`")
         })?;
-    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(error)?;
+    let snapshot = snapshot.snapshot;
     select_current(wave.name(), &snapshot.projects)
 }
 
@@ -471,8 +471,11 @@ async fn rotation_tasks(
             .client
             .issue_ownership(task.plan.id.as_str())
             .await
-            .map_err(error)?;
-        if item.project_id != predecessor.id && item.project_id != entry.successor_id {
+            .map_err(error)?
+            .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
+        if item.project_id.as_deref() != Some(predecessor.id.as_str())
+            && item.project_id.as_deref() != Some(entry.successor_id.as_str())
+        {
             return Err(error(format!(
                 "{} moved outside this chapter transition",
                 item.identifier
@@ -498,7 +501,7 @@ pub(crate) async fn sync_projects(
         for item in snapshot
             .items
             .iter()
-            .filter(|item| item.project_id == plan.id)
+            .filter(|item| item.project_id.as_deref() == Some(plan.id.as_str()))
         {
             if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
                 if task.project_id != project.id {
@@ -672,9 +675,10 @@ async fn apply_rotation(
             .client
             .issue_ownership(&decision.task.id)
             .await
-            .map_err(error)?;
+            .map_err(error)?
+            .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
         let task = store.get_task_by_issue(&item.id).await.map_err(error)?;
-        if item.project_id == entry.successor_id {
+        if item.project_id.as_deref() == Some(entry.successor_id.as_str()) {
             if let Some(task) = task {
                 store
                     .move_chapter_task(&task.id, &local.id)
@@ -683,7 +687,7 @@ async fn apply_rotation(
             }
             continue;
         }
-        if item.project_id != predecessor.id {
+        if item.project_id.as_deref() != Some(predecessor.id.as_str()) {
             return Err(error(format!(
                 "{} moved outside this transition",
                 item.identifier
@@ -711,8 +715,9 @@ async fn apply_rotation(
                     .client
                     .issue_ownership(&decision.task.id)
                     .await
-                    .map_err(error)?;
-                if confirmed.project_id != entry.successor_id {
+                    .map_err(error)?
+                    .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
+                if confirmed.project_id.as_deref() != Some(entry.successor_id.as_str()) {
                     return Err(error("Task transfer is not confirmed"));
                 }
                 if let Some(task) = task {
@@ -731,8 +736,9 @@ async fn apply_rotation(
                     .client
                     .issue_ownership(&decision.task.id)
                     .await
-                    .map_err(error)?;
-                if confirmed.project_id != predecessor.id
+                    .map_err(error)?
+                    .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
+                if confirmed.project_id.as_deref() != Some(predecessor.id.as_str())
                     || confirmed.state.as_deref() != Some("canceled")
                 {
                     return Err(error("Task cancellation is not confirmed"));
@@ -749,7 +755,8 @@ async fn apply_rotation(
     }
     let remaining = rotation_tasks(store, wave, ctx, entry).await?;
     if remaining.iter().any(|task| {
-        task.task.project_id == predecessor.id && task.disposition != TaskDisposition::Historical
+        task.task.project_id.as_deref() == Some(predecessor.id.as_str())
+            && task.disposition != TaskDisposition::Historical
     }) {
         return Err(error(
             "predecessor still has unfinished Tasks; refresh and retry",

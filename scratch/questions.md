@@ -64,6 +64,21 @@ loop-decide owns navigation; this review supplies approval and feedback only.
   including agent shell commands. Report the lock in Task status. Verify Codex,
   Claude and OpenCode launch environments; inherited `LF_BIN` alone is not a lock.
 
+## Stack integration finding — 2026-09-30
+
+LOO-298's remote `b21f657fc` is now integrated locally and PR #1354 targets its
+branch. Earlier statements below that its code is absent are historical.
+The required disposable harness now fails while materializing the combined
+migration frontier: `normalize_pm_planning` removes `pm_snapshots` before
+`project_status_chapters` uses it; reversing those migrations also removes
+`wave_chapters` before archival evidence migration. Exact draft-prefix validation
+prevents treating a reordered catalog as preservation of existing draft stores.
+Preserve checksums and both frontiers; resolve this migration integration before
+runtime succession or two-worker claims. No equality/timestamp shortcut, private
+store merge or migration-history rewrite is selected. See the current slice in
+the working design for executed evidence and integration gaps. No new product
+decision or duplicate Ask is needed merely to record this technical blocker.
+
 ## Still open
 
 - **Installation copy provenance (implementation finding, 2026-09-30):** local

@@ -75,10 +75,11 @@ Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
 mutation refreshes share one writer: older provider revisions cannot overwrite
 newer facts, and conflicting facts at an equal revision fail without replacement.
 Complete responses must include nullable fields; omission cannot clear known data.
-Signed issue webhooks invalidate planning even without execution. A complete read
-at or beyond the event's revision repairs the invalidation. Removal receipts fence
-later reads, including when the event arrived before the issue was cached.
-Webhook payloads do not replace complete planning entities. Project facts also
+Stored change receipts invalidate planning even without execution. A complete read
+at or beyond the receipt's revision repairs the invalidation. Removal receipts fence
+later reads, including when the receipt arrived before the issue was cached.
+Receipts do not replace complete planning entities. The former daemon webhook
+ingress is removed; these store operations do not establish live event delivery. Project facts also
 carry `revision`; a newer Project observation updates independently of the issue's
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
@@ -91,17 +92,13 @@ last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty; acquiring ordered relationship evidence remains future work.
 
 Chapter rollover transfers unfinished work and settles backlog before completing
-each predecessor Project in Linear, then archiving it. Completion uses the first
-completed status in the current status's team or workspace scope. A refused or
-unconfirmed completion leaves the operation unfinished; retry reads the provider's
-state before repeating an effect whose response was lost. Closing the Project
-does not complete transferred Tasks or change historical KR results.
+each predecessor Project in Linear. It confirms provider completion before recording
+the Project. Closing the Project does not complete transferred Tasks or change
+historical KR results. Current Project selection follows provider status.
 
-The successful archive acknowledgement is recorded before refreshing the current
-plan. Archived predecessors leave current views, retain history, and cannot return
-through a delayed list. Completed chapter receipts preserve archival evidence on
-migration; they do not assert that older operations completed the provider Project.
-External archive acquisition and restoration remain unimplemented.
+The planning store can retain explicit archival acknowledgements. Integrating
+archival into the provider-backed chapter operation and preserving old acknowledgements
+across the combined migration frontier remain unfinished.
 
 ## Capture a Flow once
 

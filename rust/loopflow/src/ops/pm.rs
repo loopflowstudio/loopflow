@@ -823,15 +823,6 @@ async fn load_show_snapshot(
     }
 }
 
-pub(crate) async fn fetch_pm_snapshot(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-) -> OpsResult<PmSnapshot> {
-    let store = pm_store().await?;
-    fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await
-}
-
 async fn fetch_pm_snapshot_with_store(
     repo: &Path,
     wave: &str,

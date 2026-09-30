@@ -2,7 +2,7 @@
 
 LOO-298 · Realigned 2026-09-30 for Jack Heart. Order follows Jack's direction
 "do the deepest cuts first." Work top down. Decisions and their wording are in
-[questions](questions.md); the accepted model is
+[questions](data-model-questions.md); the accepted model is
 [data-model-one-table-per.md](data-model-one-table-per.md).
 
 ## Model now in force

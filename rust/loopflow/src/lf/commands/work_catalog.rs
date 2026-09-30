@@ -2,13 +2,12 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use crate::store::SqliteStore;
 
 use anyhow::{anyhow, Result};
 
 use crate::durable::WorkRef;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::WorkIdentity;
+use crate::store::sqlite::{SqliteStore, WorkIdentity};
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkCatalog {
@@ -44,10 +43,6 @@ impl WorkOwner {
 }
 
 impl WorkCatalog {
-    pub(crate) fn load() -> Result<Self> {
-        Self::load_at(&crate::store::observability_database_path()?)
-    }
-
     pub(crate) fn load_at(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());

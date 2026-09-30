@@ -16,6 +16,7 @@ use loopflow::machine_install::{
 };
 use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
+use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::TaskEventKind;
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
@@ -399,7 +400,6 @@ fn normal_promotion_preserves_pending_task_review() {
     };
     let targets = tempfile::tempdir().unwrap();
     let public_cli = targets.path().join("lf");
-    let public_daemon = targets.path().join("lfd");
     let published = std::path::PathBuf::from(
         std::env::var_os("TASK_PROOF_PUBLISHED_DIR")
             .expect("harness supplies a release-provenance predecessor"),
@@ -411,10 +411,6 @@ fn normal_promotion_preserves_pending_task_review() {
             "promote",
             "--cli-target",
             public_cli.to_str().unwrap(),
-            "--daemon-source",
-            published.join("lfd").to_str().unwrap(),
-            "--daemon-target",
-            public_daemon.to_str().unwrap(),
         ],
     )
     .output()
@@ -453,12 +449,19 @@ fn normal_promotion_preserves_pending_task_review() {
     });
     invocation.steps = vec![operation.clone(), review, operation];
     runtime
-        .block_on(task.store.set_flow_position(
+        .block_on(task.store.start_task_flow(
             &task.task.id,
-            loopflow::durable::FlowPosition {
-                task_id: task.task.id.clone(),
+            loopflow::durable::FlowSession {
+                parent_id: None,
+                task_id: Some(task.task.id.clone()),
+                wave_id: Some(task.task.wave_id.clone()),
+                cwd: task.task.worktree.clone(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                finished: false,
                 invocation,
-                session_run_id: None,
+                pending_session_id: None,
                 ready_summary: None,
                 cursor: Default::default(),
                 version: 0,
@@ -480,10 +483,10 @@ fn normal_promotion_preserves_pending_task_review() {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let position = loop {
         let position = runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap();
-        if position.session_run_id.is_some() && position.claim.is_none() {
+        if position.pending_session_id.is_some() && position.claim.is_none() {
             break position;
         }
         assert!(
@@ -494,7 +497,7 @@ fn normal_promotion_preserves_pending_task_review() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_eq!(position.cursor.index, 1);
-    let review = position.session_run_id.as_ref().unwrap().as_str();
+    let review = position.pending_session_id.as_ref().unwrap().as_str();
     let before = command(&public_cli, &["session", "open", review, "--json"])
         .output()
         .unwrap();
@@ -516,10 +519,6 @@ fn normal_promotion_preserves_pending_task_review() {
             env!("CARGO_BIN_EXE_lf"),
             "--cli-target",
             public_cli.to_str().unwrap(),
-            "--daemon-source",
-            env!("CARGO_BIN_EXE_lfd"),
-            "--daemon-target",
-            public_daemon.to_str().unwrap(),
         ],
     )
     .output()
@@ -543,14 +542,14 @@ fn normal_promotion_preserves_pending_task_review() {
         .unwrap();
     assert_eq!(
         runtime
-            .block_on(copied.flow_position(&task.task.id))
+            .block_on(copied.task_flow(&task.task.id))
             .unwrap()
             .as_ref(),
         Some(&position)
     );
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .as_ref(),
         Some(&position)
@@ -604,10 +603,17 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         },
     ));
     let review_index = invocation.steps.iter().position(|step| matches!(step, loopflow::engine::ConcreteStep::Skill(skill) if skill.policy.human)).unwrap();
-    let position = loopflow::durable::FlowPosition {
-        task_id: task.task.id.clone(),
+    let position = loopflow::durable::FlowSession {
+        parent_id: None,
+        task_id: Some(task.task.id.clone()),
+        wave_id: Some(task.task.wave_id.clone()),
+        cwd: task.task.worktree.clone(),
+        message: None,
+        model: None,
+        current_attempt: None,
+        finished: false,
         invocation,
-        session_run_id: None,
+        pending_session_id: None,
         ready_summary: None,
         cursor: loopflow::engine::ExecutionCursor {
             index: review_index,
@@ -620,7 +626,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         updated_at: time::OffsetDateTime::now_utc(),
     };
     runtime
-        .block_on(task.store.set_flow_position(&task.task.id, position))
+        .block_on(task.store.start_task_flow(&task.task.id, position))
         .unwrap();
     let installation = installation::Installation::new(home.path());
     let command = |cli: &Path, args: &[&str]| unbound_command(cli, repo.path(), args);
@@ -633,10 +639,10 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         String::from_utf8_lossy(&started.stderr)
     );
     let position = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
-    let review = position.session_run_id.as_ref().unwrap().as_str();
+    let review = position.pending_session_id.as_ref().unwrap().as_str();
     let before = command(&installation.cli, &["session", "open", review, "--json"])
         .output()
         .unwrap();
@@ -758,7 +764,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         position
@@ -792,7 +798,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         position
@@ -845,7 +851,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_some()
     {
@@ -888,7 +894,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .is_none());
     // Reopening retained provider history must keep the caller's terminal and
     // input, not turn the interactive conversation into a captured command.
-    let interactive = loopflow::durable::RunId::new().to_string();
+    let interactive = format!("run_{}", uuid::Uuid::new_v4().simple());
     let interactive_dir = home
         .path()
         .join("runs")
@@ -969,12 +975,12 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
     let mut conflicting_position = position.clone();
     conflicting_position.invocation =
         loopflow::engine::invocation::QueuedInvocation::load(repo.path(), "task-design").unwrap();
-    conflicting_position.session_run_id = None;
+    conflicting_position.pending_session_id = None;
     conflicting_position.ready_summary = None;
     conflicting_position.cursor = Default::default();
     assert_ne!(conflicting_position.invocation.id, position.invocation.id);
     runtime
-        .block_on(later_store.set_flow_position(&task.task.id, conflicting_position.clone()))
+        .block_on(later_store.start_task_flow(&task.task.id, conflicting_position.clone()))
         .unwrap();
     let ambiguous = invoke(&["task", "run", "INF-123", "--json"]);
     assert!(!ambiguous.status.success());
@@ -984,12 +990,12 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         String::from_utf8_lossy(&ambiguous.stderr)
     );
     assert!(runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
     assert_eq!(
         runtime
-            .block_on(later_store.flow_position(&task.task.id))
+            .block_on(later_store.task_flow(&task.task.id))
             .unwrap(),
         Some(conflicting_position)
     );

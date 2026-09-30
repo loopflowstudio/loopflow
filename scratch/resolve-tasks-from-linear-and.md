@@ -17,6 +17,79 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### This slice — LOO-298 stack integration, 2026-09-30 (blocked)
+
+Jack Heart's authorized local rebase is complete onto remote
+`jack-heart/data-model-one-table-per` at `b21f657fc61517d3eaa3718e5938b27416c21048`.
+The local parent branch had newer unpublished work; it was not used or edited.
+Incoming notes were preserved at `ace478084` before replay; replay ends at `a9d7ec2fd`. PR #1354 now targets
+`jack-heart/data-model-one-table-per`, verified through GitHub readback. Installed
+`lf` has no standalone retarget command; the exact authorized base-only mutation
+used `gh pr edit 1354 --base jack-heart/data-model-one-table-per`. No branch push,
+publication, merge or host promotion occurred; GitHub's head still predates this
+local integration.
+
+**Integrated concepts:** retained LOO-298's Exec/AgentSession/FlowSession and shared
+ordinary command execution, provider-backed Project chapter selection, and removal
+of daemon/webhook ingress and old Swift contract tests. Chapter readers now consume
+normalized planning directly and represent absent issue acquisition explicitly.
+Removed the unused snapshot-fetch wrapper and duplicate Project-status DTOs.
+The removed webhook transport test now exercises stored change receipts directly;
+it no longer claims signed ingress. Its assertions remain unexecuted on this tree.
+Parent assumptions survive at [data-model-questions.md](data-model-questions.md).
+
+**Required proof failed before promotion:**
+`uv run python scripts/test_task_installation.py` exited 1 after materializing the
+40 combined drafts in a disposable Docker source copy. The release build panicked:
+`build canonical schema at 0.12.25.001_release: no such table: pm_snapshots`.
+Container `b1f4c812f2069852b13398c0e1d97bb40b3ef1a83ee00dc0fd183c19c246a83d`
+was removed by the harness. Docker 29.4.0 responded; the earlier
+`e6e1f0a11850` container was already absent. This replaces the runner blocker with
+a reproduced migration-composition failure. No installation or worker test ran.
+
+**Counterexample to a simple rebase:** `normalize_pm_planning` drops
+`pm_snapshots`; parent `project_status_chapters` still reads/updates that table.
+Moving the latter first is insufficient: it drops `wave_chapters`, which
+`pm_project_evidence` reads to retain confirmed archives. The development migrator
+also requires an exact applied-draft prefix, so reordering cannot establish
+preservation of the two existing draft frontiers. Neither branch's migration SQL
+or applied checksums was rewritten. A suffix-only draft cannot repair a failure
+that occurs before reaching it. Stop dependent runtime/ownership work until an
+explicit migration integration handles released history and both populated draft
+frontiers. This is technical implementation work, not permission to erase history
+or to choose copy succession from equality or timestamps.
+
+**Observed checks:** `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `git diff --check` and
+`uv run python scripts/check_migrations.py` pass. The migration checker confirms
+55 shipped files unchanged and draft structure; it does not execute the combined
+SQL and therefore does not contradict the harness failure.
+`cargo test -p loopflow --lib complete_and_archive_project` passes both adapter
+cases. This narrow proof validates retained refusal/confirmation behavior only;
+the parent's chapter operation does not yet consume that archival adapter.
+No affected suite, full gate, live provider or installed acceptance ran.
+
+**Measurement:** compile reconciliation after replay (`a9d7ec2fd` → working tree)
+adds **29 / removes 54** non-test physical Rust lines. Counts exclude test modules,
+standalone test files, scripts, docs, scratch, generated artifacts and inherited
+parent work. Rebase replay itself is not counted as new authorship or deletion.
+The switched production consumer is chapter planning's typed normalized snapshot
+read; this pass does not establish a replaced worker/discovery path.
+
+**Remaining integration:** installation fixtures compile against FlowSession but
+retain unexecuted historical manifest/Run-event assumptions and need actual
+AgentSession/Exec evidence, exact review completion and the second worker. The
+normal-promotion fixture no longer requests the removed daemon artifact. Runtime
+Session discovery still needs to replace its manifest lookup with the integrated
+Session owner, preserving Ask, ordinary Flow and artifact aliases. Restore chapter
+archive retry/preservation proof on provider-backed rotation; do not reintroduce
+chapter receipts. Port execution/action/Swift fixture coverage to the surviving
+consumers. The harness's former six-case receipt predates this model and is not
+reusable. All acceptance cases 1–15, local/contextual planning, recursive locks,
+delayed startup and the command story remain required. Relationship repair remains
+with its existing pending Ask; no new product policy, Flow verdict or Task
+disposition follows from this blocked integration.
+
 ### Unblock direction — 2026-09-30
 
 Jack Heart's supervising session relayed his instruction to stack LOO-334 on

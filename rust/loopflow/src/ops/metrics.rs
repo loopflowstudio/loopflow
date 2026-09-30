@@ -546,11 +546,10 @@ mod tests {
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            payload: serde_json::to_string(&crate::pm::PmSnapshot {
+            snapshot: crate::pm::PmSnapshot {
                 projects: vec![projects[0].clone()],
                 items: vec![],
-            })
-            .unwrap(),
+            },
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
@@ -568,11 +567,10 @@ mod tests {
                 metric_id: "task-loop-trust".into(),
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 1.0 },
             });
-        snapshot.payload = serde_json::to_string(&crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::pm::PmSnapshot {
             projects: vec![targeted_project],
             items: vec![],
-        })
-        .unwrap();
+        };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
@@ -581,11 +579,10 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| matches!(metric.evidence, MetricEvidenceDto::Met { value: 1.0, .. })));
-        snapshot.payload = serde_json::to_string(&crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::pm::PmSnapshot {
             projects: projects.to_vec(),
             items: vec![],
-        })
-        .unwrap();
+        };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await

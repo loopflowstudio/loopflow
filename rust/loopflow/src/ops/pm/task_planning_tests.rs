@@ -106,19 +106,19 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
         json!({"initiative":{"projects":page(vec![project])}})
-        } else if query.contains("query ProjectOwnership") {
-            if vars["id"] == project["id"] {
-                json!({"project":project})
-            } else if vars["id"] == "project-1" {
-                // Rotation preserves the predecessor even after membership listing omits it.
-                let mut previous = project.clone();
-                previous["id"] = json!("project-1");
-                previous["name"] = json!("Chapter");
-                previous["status"] = json!({"type":"completed"});
-                json!({"project":previous})
-            } else {
-                json!({"project":null})
-            }
+    } else if query.contains("query ProjectOwnership") {
+        if vars["id"] == project["id"] {
+            json!({"project":project})
+        } else if vars["id"] == "project-1" {
+            // Rotation preserves the predecessor even after membership listing omits it.
+            let mut previous = project.clone();
+            previous["id"] = json!("project-1");
+            previous["name"] = json!("Chapter");
+            previous["status"] = json!({"type":"completed"});
+            json!({"project":previous})
+        } else {
+            json!({"project":null})
+        }
     } else if query.contains("query ListProjectIssues") {
         let mut state = state.lock().await;
         if !state.issues.is_empty() && state.fail_confirmation {

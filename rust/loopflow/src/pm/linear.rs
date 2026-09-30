@@ -1028,13 +1028,13 @@ impl LinearClient {
                 .into_iter()
                 .chain(page.nodes)
                 .filter(|status| {
-                    status.status.r#type == COMPLETED_STATE_TYPE
-                        && status.status.team_id == current.team_id
+                    status.type_ == crate::pm::ProjectStatus::Completed
+                        && status.team_id == current.team_id
                 })
                 .min_by(|left, right| {
                     left.position
                         .total_cmp(&right.position)
-                        .then_with(|| left.status.id.cmp(&right.status.id))
+                        .then_with(|| left.id.cmp(&right.id))
                 });
             if !page.page_info.has_next_page {
                 break;
@@ -1049,7 +1049,7 @@ impl LinearClient {
             }
             after = Some(cursor);
         }
-        selected.map(|status| status.status.id).ok_or_else(|| {
+        selected.map(|status| status.id).ok_or_else(|| {
             PmError::Message(format!(
                 "Linear has no completed Project status in the scope of status {}",
                 current.id
@@ -2102,26 +2102,6 @@ struct ProjectStatusRef {
     r#type: String,
     #[serde(rename = "teamId", deserialize_with = "Option::deserialize")]
     team_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ProjectStatusCandidate {
-    #[serde(flatten)]
-    status: ProjectStatusRef,
-    position: f64,
-}
-
-#[derive(Deserialize)]
-struct ProjectStatusesData {
-    #[serde(rename = "projectStatuses")]
-    project_statuses: ProjectStatusesConnection,
-}
-
-#[derive(Deserialize)]
-struct ProjectStatusesConnection {
-    nodes: Vec<ProjectStatusCandidate>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
 }
 
 #[derive(Deserialize)]

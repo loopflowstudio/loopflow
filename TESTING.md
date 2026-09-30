@@ -633,7 +633,7 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 ```
 
 This copies source into a disposable Linux container, materializes its draft
-migrations and builds release-provenance and development CLI/daemon pairs with
+migrations and builds release-provenance and development CLIs with
 two Cargo jobs. The promotion case starts with real published promotion into an
 empty disposable account, runs an operation to a pending Task review, then invokes
 local promotion through `install promote --from-build`. It requires ordinary
@@ -641,11 +641,11 @@ status and Session continuation to retain that review after the database copy.
 Normal-copy continuation remains an unpassed regression; two-worker succession
 remains additional acceptance work.
 
-The other cases author installation records selecting the compiled CLI/daemon.
+The other cases author installation records selecting the compiled CLI.
 An ELF trailer gives the installed CLI a distinct identity: byte-identical copies
 are installed too, regardless of path. No host Home, credentials or installation
 is mounted.
-The harness also runs planning-only `task status` by identifier and UUID against
+The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
 That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
 acquisition with simulated Linear responses, including missing Projects, partial

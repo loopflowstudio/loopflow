@@ -26,7 +26,7 @@ use crate::engine::worktrees::{
 };
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::land::{finish_arm_after_rebase, LandOptions};
+use crate::ops::land::{finish_arm_after_sync, LandOptions};
 use crate::ops::pr::{current_pr, merge_gate_state, PrCopy};
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
@@ -1615,7 +1615,7 @@ fn prepare_release_in_worktree(
     progress.status("Enqueuing release PR for merge...");
     let pr_copy = release_pr_copy(wt_path, target, version)?;
     let options = release_land_options(Some(pr_copy));
-    let pr = finish_arm_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
+    let pr = finish_arm_after_sync(wt_path, &options, progress)?.ok_or_else(|| {
         OpsError::Message("release land completed without a pull request".to_string())
     })?;
     let head_sha = pr.head_sha.ok_or_else(|| {

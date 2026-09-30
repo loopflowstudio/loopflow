@@ -45,7 +45,7 @@ execution owner in the accepted model.
 | **Worktree** | A second copy of your project on disk, on its own branch. Loopflow gives each task one, so tasks never overwrite each other. |
 | **Pull request**, **PR** | A proposal to add a branch's changes to main, where they can be reviewed first. |
 | **Merge**, **land** | Adding a branch's changes to main. |
-| **Rebase** | Replaying your changes on top of the newest main, so the two fit together. |
+| **Sync** | Merging updates from main or a stack parent into your branch while keeping its commit history. |
 | **CI** | Continuous integration: automatic checks that run on every pull request. |
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |

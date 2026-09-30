@@ -354,7 +354,7 @@ pub struct TaskPr {
     pub base_commit: String,
     /// Selected parent PR, or `None` when rooted on the default branch.
     /// Selection does not move Git: `base_commit` remains the child's last
-    /// recorded fork until rebase succeeds. The link clears after the parent
+    /// recorded fork until sync succeeds. The link clears after the parent
     /// merges and this PR collapses onto main.
     pub parent_pr_id: Option<TaskPrId>,
     pub publication: Option<PrPublication>,

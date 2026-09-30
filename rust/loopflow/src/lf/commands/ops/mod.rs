@@ -1,6 +1,6 @@
 use crate::engine::agent::{exec_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
+use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
@@ -18,14 +18,14 @@ use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
-    commit_workflow, continue_rebase_after_authorization, continue_rebase_for_resolution,
-    create_or_update_pr, current_pr, finish_arm_after_rebase, finish_submit_after_rebase,
-    plan_rebase, preview_release_notes, rebase_class_name, rebase_strategy_name,
-    rebase_with_recovery, recover_rebase, release_bump, release_check, release_notes,
-    release_publish, release_run, release_status, release_tag, start_rebase_for_resolution, submit,
-    AbandonOptions, CommitOptions, CronHost, CronOutcome, CronSource, CronSpec, CronTargetKind,
-    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
+    commit_workflow, continue_sync_after_authorization, continue_sync_for_resolution,
+    create_or_update_pr, current_pr, finish_arm_after_sync, finish_submit_after_sync, plan_sync,
+    preview_release_notes, recover_sync, release_bump, release_check, release_notes,
+    release_publish, release_run, release_status, release_tag, submit, sync_class_name,
+    sync_strategy_name, sync_with_recovery, AbandonOptions, CommitOptions, CronHost, CronOutcome,
+    CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, SyncOptions,
+    SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -216,77 +216,97 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_rebase(
+pub fn run_sync(
     onto: Option<&str>,
     plan_only: bool,
     manual: bool,
-    continue_rebase: bool,
+    continue_sync: bool,
+    abort: bool,
+    adopt: bool,
+) -> Result<()> {
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+    run_sync_in(
+        &repo_root,
+        onto,
+        plan_only,
+        manual,
+        continue_sync,
+        abort,
+        adopt,
+    )
+}
+
+pub(crate) fn run_sync_in(
+    repo_root: &Path,
+    onto: Option<&str>,
+    plan_only: bool,
+    manual: bool,
+    continue_sync: bool,
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
     let progress = &CliProgress;
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf rebase")?;
-    if onto.is_some() && (continue_rebase || abort) {
+    if onto.is_some() && (continue_sync || abort) {
         return Err(anyhow!(
-            "a rebase target cannot be combined with --continue or --abort"
+            "a sync target cannot be combined with --continue or --abort"
         ));
     }
-    if adopt && !(continue_rebase || abort) {
+    if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf rebase --continue` or `lf rebase --abort`"
+            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
         ));
     }
-    if continue_rebase {
+    if continue_sync {
         if adopt {
-            continue_rebase_after_authorization(&repo_root, true, || {
+            continue_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
-                    &repo_root,
+                    repo_root,
                     crate::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
         } else {
-            continue_rebase_for_resolution(&repo_root, false)?;
+            continue_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Rebase complete; branch remains local.");
+        progress.status("Sync complete; branch remains local.");
         return Ok(());
     }
     if abort {
         if adopt {
-            abort_rebase_after_authorization(&repo_root, true, || {
+            abort_sync_after_authorization(repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
-                    &repo_root,
+                    repo_root,
                     crate::work::task::TaskPrRepairKind::ManualGitRepair,
                 )
                 .map(|_| ())
             })?;
         } else {
-            abort_rebase_for_resolution(&repo_root, false)?;
+            abort_sync_for_resolution(repo_root, false)?;
         }
-        progress.status("Rebase aborted.");
+        progress.status("Sync aborted.");
         return Ok(());
     }
     let started = Instant::now();
-    let default = get_default_branch(&repo_root)?;
+    let default = get_default_branch(repo_root)?;
     let upstream = format!("origin/{default}");
-    let on_main = current_branch(&repo_root)?.as_deref() == Some(&default);
+    let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
     if !plan_only {
-        crate::ops::checkout::refresh_main(&repo_root, progress)?;
+        crate::ops::checkout::refresh_main(repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
             progress.status("Main is current; unpublished commits and edits remain local.");
             return Ok(());
         }
     }
-    // A Task stack owns its rebase target: the live parent branch until merge,
+    // A Task stack owns its sync target: the live parent branch until merge,
     // then the default branch. An explicit override could silently drop work.
     let stacked = if on_main {
         None
     } else {
-        crate::ops::task::task_stack(&repo_root)?
+        crate::ops::task::task_stack(repo_root)?
     };
     if stacked.is_some() && onto.is_some() {
         return Err(anyhow!(
-            "stacked Task rebases choose their parent automatically; omit --onto"
+            "stacked Task syncs choose their parent automatically; omit the target"
         ));
     }
     let stacked_onto = stacked
@@ -295,53 +315,38 @@ pub fn run_rebase(
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { upstream } else { default.clone() };
-    let plan = plan_rebase(
-        &repo_root,
+    let plan = plan_sync(
+        repo_root,
         stacked_onto.as_deref().or(onto).or(Some(&default_target)),
         fork_base.clone(),
     )?;
-    let onto_ref = plan.base_ref.clone();
     if plan_only {
-        print_rebase_plan(&plan);
+        print_sync_plan(&plan);
         return Ok(());
     }
-    if manual {
-        return start_rebase_for_resolution(
-            &repo_root,
-            &RebaseOptions {
-                onto: onto_ref,
-                push: false,
-                fork_base,
-            },
-            progress,
-        )
-        .map(|_| ())
-        .map_err(Into::into);
-    }
-    let recovery_config = load_config_or_default(Some(&repo_root));
-    let (verification, agent_launched) =
-        crate::ops::checkout::with_preserved_edits(&repo_root, || {
-            match rebase_with_recovery(
-                &repo_root,
-                &RebaseOptions {
-                    onto: onto_ref.clone(),
-                    push: !on_main,
-                    fork_base,
-                },
-                progress,
-            ) {
+    let options = SyncOptions {
+        onto: plan.base_ref.clone(),
+        push: !manual && !on_main,
+        fork_base,
+    };
+    let (verification, agent_launched) = if manual {
+        (sync_with_recovery(repo_root, &options, progress)?, false)
+    } else {
+        let recovery_config = load_config_or_default(Some(repo_root));
+        crate::ops::checkout::with_preserved_edits(repo_root, || {
+            match sync_with_recovery(repo_root, &options, progress) {
                 Ok(verification) => Ok((verification, false)),
-                Err(OpsError::RebaseConflict {
+                Err(OpsError::SyncConflict {
                     onto,
                     detail,
                     recovery,
                 }) => Ok((
-                    resolve_rebase_conflict(
-                        &repo_root,
+                    resolve_sync_conflict(
+                        repo_root,
                         &onto,
                         &detail,
                         recovery,
-                        is_avoidable_rebase_class(&plan.class),
+                        is_avoidable_sync_class(&plan.class),
                         progress,
                         &recovery_config,
                     )
@@ -350,25 +355,29 @@ pub fn run_rebase(
                 )),
                 Err(err) => Err(err),
             }
-        })?;
+        })?
+    };
     if let Some(stacked) = stacked.as_ref() {
-        crate::ops::task::record_stack_rebase(
+        crate::ops::task::record_stack_sync(
             stacked,
             &verification.target_sha,
             stacked.parent_branch.is_none(),
         )?;
     }
+    if manual {
+        return Ok(());
+    }
     record_ops_metric(
-        &repo_root,
+        repo_root,
         serde_json::json!({
-            "op": "rebase",
+            "op": "sync",
             "branch": plan.branch,
             "base_ref": plan.base_ref,
-            "class": rebase_class_name(&plan.class),
-            "strategy": rebase_strategy_name(&plan.strategy),
+            "class": sync_class_name(&plan.class),
+            "strategy": sync_strategy_name(&plan.strategy),
             "unique_commits": verification.unique_commits,
             "changed_files": plan.changed_files.len(),
-            "protected": matches!(plan.class, crate::ops::RebaseClass::Protected),
+            "protected": matches!(plan.class, crate::ops::SyncClass::Protected),
             "scratch_stashed": plan.scratch_stashed,
             "agent_launched": agent_launched,
             "duration_ms": started.elapsed().as_millis(),
@@ -378,38 +387,38 @@ pub fn run_rebase(
     Ok(())
 }
 
-fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
+fn print_sync_plan(plan: &crate::ops::SyncPlan) {
     println!("branch: {}", plan.branch);
     println!("base: {}", plan.base_ref);
     if let Some(fork_base) = &plan.fork_base {
         println!("fork_base: {fork_base}");
     }
-    println!("class: {}", rebase_class_name(&plan.class));
-    println!("strategy: {}", rebase_strategy_name(&plan.strategy));
+    println!("class: {}", sync_class_name(&plan.class));
+    println!("strategy: {}", sync_strategy_name(&plan.strategy));
     println!("unique_commits: {}", plan.unique_commits);
     println!("changed_files: {}", plan.changed_files.len());
     println!(
         "protected: {}",
-        matches!(plan.class, crate::ops::RebaseClass::Protected)
+        matches!(plan.class, crate::ops::SyncClass::Protected)
     );
 }
 
-/// Hand a conflicted rebase to exactly one recovery agent under the owning
+/// Hand a conflicted sync to exactly one recovery agent under the owning
 /// operation's scoped ids. The agent continues the existing sequencer; the
 /// caller keeps ownership and performs verification and the single push.
-fn resolve_rebase_conflict(
+fn resolve_sync_conflict(
     repo_root: &Path,
     onto: &str,
     detail: &str,
-    recovery: Option<Box<crate::ops::RebaseRecovery>>,
+    recovery: Option<Box<crate::ops::SyncRecovery>>,
     avoidable: bool,
     progress: &impl Progress,
     config: &Config,
-) -> Result<crate::ops::RebaseVerification> {
+) -> Result<crate::ops::SyncVerification> {
     let recovery =
-        recovery.ok_or_else(|| anyhow!("rebase conflict has no owned recovery operation"))?;
+        recovery.ok_or_else(|| anyhow!("sync conflict has no owned recovery operation"))?;
     let context = format!(
-        "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another rebase or push.\n</lf:rebase-conflict>"
+        "<lf:sync-conflict>\nSync onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another sync or push.\n</lf:sync-conflict>"
     );
     if avoidable {
         crate::ops::task::record_task_pr_repair(
@@ -417,11 +426,11 @@ fn resolve_rebase_conflict(
             crate::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
         )?;
     }
-    progress.status("Launching rebase agent to resolve conflicts...");
-    Ok(recover_rebase(*recovery, |env| {
+    progress.status("Launching sync agent to resolve conflicts...");
+    Ok(recover_sync(*recovery, |env| {
         exec_skill_agent(
             repo_root,
-            "rebase-conflicts",
+            "sync-conflicts",
             Some(&context),
             Some(env),
             config,
@@ -430,33 +439,33 @@ fn resolve_rebase_conflict(
     })?)
 }
 
-fn is_avoidable_rebase_class(class: &crate::ops::RebaseClass) -> bool {
+fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
     matches!(
         class,
-        crate::ops::RebaseClass::StaleEmpty
-            | crate::ops::RebaseClass::ScratchOnly
-            | crate::ops::RebaseClass::GeneratedOnly
+        crate::ops::SyncClass::StaleEmpty
+            | crate::ops::SyncClass::ScratchOnly
+            | crate::ops::SyncClass::GeneratedOnly
     )
 }
 
 #[cfg(test)]
-mod rebase_performance_tests {
-    use super::is_avoidable_rebase_class;
-    use crate::ops::RebaseClass;
+mod sync_performance_tests {
+    use super::is_avoidable_sync_class;
+    use crate::ops::SyncClass;
 
     #[test]
-    fn disposable_rebase_classes_make_an_agent_launch_a_repair_incident() {
-        assert!(is_avoidable_rebase_class(&RebaseClass::StaleEmpty));
-        assert!(is_avoidable_rebase_class(&RebaseClass::ScratchOnly));
-        assert!(is_avoidable_rebase_class(&RebaseClass::GeneratedOnly));
-        assert!(!is_avoidable_rebase_class(&RebaseClass::CleanAuthored));
-        assert!(!is_avoidable_rebase_class(&RebaseClass::Protected));
+    fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
+        assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
+        assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
+        assert!(is_avoidable_sync_class(&SyncClass::GeneratedOnly));
+        assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
+        assert!(!is_avoidable_sync_class(&SyncClass::Protected));
     }
 }
 
-/// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
+/// Run a PR-mutating op; on a sync conflict, launch the sync agent to
 /// resolve it and retry once. A second conflict is a real error.
-fn with_rebase_retry<T>(
+fn with_sync_retry<T>(
     repo_root: &Path,
     label: &str,
     progress: &impl Progress,
@@ -464,12 +473,12 @@ fn with_rebase_retry<T>(
 ) -> Result<T> {
     match op(repo_root, false) {
         Ok(value) => Ok(value),
-        Err(OpsError::RebaseConflict {
+        Err(OpsError::SyncConflict {
             onto,
             detail,
             recovery,
         }) => {
-            resolve_rebase_conflict(
+            resolve_sync_conflict(
                 repo_root,
                 &onto,
                 &detail,
@@ -478,7 +487,7 @@ fn with_rebase_retry<T>(
                 progress,
                 &load_config_or_default(Some(repo_root)),
             )?;
-            progress.status(&format!("Retrying {label} after rebase..."));
+            progress.status(&format!("Retrying {label} after sync..."));
             op(repo_root, true).map_err(Into::into)
         }
         Err(err) => Err(err.into()),
@@ -496,9 +505,9 @@ pub(crate) fn land_repo(
     progress: &impl Progress,
 ) -> Result<()> {
     // The wave home stays put on land — no rotation, no cd.
-    let pr = with_rebase_retry(repo_root, "land", progress, |repo, integrated| {
+    let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_rebase(repo, options, progress)
+            finish_arm_after_sync(repo, options, progress)
         } else {
             arm(repo, options, progress)
         }
@@ -511,9 +520,9 @@ pub(crate) fn land_repo(
 
 fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    with_rebase_retry(&repo_root, "arm", progress, |repo, integrated| {
+    with_sync_retry(&repo_root, "arm", progress, |repo, integrated| {
         if integrated {
-            finish_arm_after_rebase(repo, options, progress)
+            finish_arm_after_sync(repo, options, progress)
         } else {
             arm(repo, options, progress)
         }
@@ -523,9 +532,9 @@ fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
 
 fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    with_rebase_retry(&repo_root, "submit", progress, |repo, integrated| {
+    with_sync_retry(&repo_root, "submit", progress, |repo, integrated| {
         if integrated {
-            finish_submit_after_rebase(repo, options, progress)
+            finish_submit_after_sync(repo, options, progress)
         } else {
             submit(repo, options, progress)
         }
@@ -1498,7 +1507,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
-        WtCommand::Remove { name, force } => wt_remove(name, *force),
+        WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
 }
@@ -1569,7 +1578,7 @@ fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
 }
 
 /// Local ops telemetry lives under the git-ignored `.lf/tmp/` tree so read-only
-/// operations (`rebase --plan`, status, dispatch) never dirty a tracked
+/// operations (`sync --plan`, status, dispatch) never dirty a tracked
 /// worktree. Single source of truth: `crate::ops::telemetry`.
 use crate::ops::telemetry::record_ops_metric;
 
@@ -1766,47 +1775,9 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     Ok(())
 }
 
-fn wt_remove(name: &str, force: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-
-    // Find the worktree by short name or directory name
-    let worktrees = list_worktrees(&main_repo)?;
-    let target = worktrees.iter().find(|wt| {
-        sibling_worktree_name(&wt.path).as_deref() == Some(name)
-            || wt
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy() == name)
-                .unwrap_or(false)
-    });
-
-    let wt = match target {
-        Some(wt) => wt,
-        None => return Err(anyhow!("no worktree found for '{}'", name)),
-    };
-
-    if wt.path == repo_root {
-        return Err(anyhow!("cannot remove the current worktree"));
-    }
-
-    let default_branch = get_default_branch(&main_repo)?;
-    if wt.branch.as_deref() == Some(&default_branch) {
-        return Err(anyhow!("cannot remove the main worktree"));
-    }
-
-    if !force && wt.dirty {
-        return Err(anyhow!(
-            "worktree has uncommitted changes (use --force to override)"
-        ));
-    }
-
-    let branch = wt.branch.clone();
-    crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
-    if let Some(branch) = branch {
-        let _ = delete_local_branch(&main_repo, &branch);
-    }
-    println!("Removed {}", name);
+fn wt_delete(name: &str, force: bool) -> Result<()> {
+    crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
+    println!("Deleted {name}");
     Ok(())
 }
 
@@ -2129,7 +2100,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 /// Launch an agent with a named skill when an ops command needs judgment.
 ///
 /// Used when mechanical operations hit a situation that requires agent
-/// reasoning — e.g., rebase conflicts that need conflict resolution.
+/// reasoning — e.g., sync conflicts that need conflict resolution.
 fn exec_skill_agent(
     repo_root: &Path,
     skill_name: &str,
@@ -2151,7 +2122,7 @@ fn exec_skill_agent(
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
-                // Rebase conflicts already name the affected paths in `context`.
+                // Sync conflicts already name the affected paths in `context`.
                 // Embedding every authored file here makes the task prompt grow
                 // with the branch and can exceed the OS argument limit before
                 // the resolver starts. The agent has the repository as its cwd

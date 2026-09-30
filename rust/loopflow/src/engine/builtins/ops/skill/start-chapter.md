@@ -27,7 +27,7 @@ Lead with experienced improvements, remaining friction, active work, and gaps.
 Ask what mattered, surprised, or should become possible; reflect the user's
 language and unresolved tensions. Discuss any Wave boundary changes.
 
-**Gate 1:** the user explicitly accepts direction before scoped planning Runs.
+**Gate 1:** the user explicitly accepts direction before scoped planning contributions.
 In an interactive session, ask in the conversation. Headless, use `lf ask` and wait
 for an explicit completed decision. Silence, elapsed time, or provider exit is
 not acceptance. Existing accepted direction remains valid; do not ask again.
@@ -41,9 +41,9 @@ These notes do not own live planning or recovery.
 ## Shape one plan per Wave
 
 Launch bounded `lf -b --wave <name> wave/start-chapter "<chapter name, accepted
-brief, exact prior ledger>"` Runs. For a proposed uninitialized Wave use an
-unbound Run with its exact name and boundary. Children propose, return agree or
-challenge, and never mutate live planning. Do not launch Project planning Runs.
+brief, exact prior ledger>"` contributions. For a proposed uninitialized Wave use an
+unbound contribution with its exact name and boundary. Children propose, return agree or
+challenge, and never mutate live planning. Do not launch Project planning contributions.
 
 Keep each complete proposal and exact JSON plan in scratch. Preview the whole
 repository with `lf repo new-chapter <name> --dry-run --json`; there is no

@@ -25,6 +25,50 @@ impl SqliteStore {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
+    /// Only an exact completion consumed by this Flow node acknowledges direction.
+    /// Missing evidence replays input; retries and other nodes cannot consume it.
+    pub(crate) fn completed_step_steer_id(
+        &self,
+        flow: &crate::durable::FlowSession,
+    ) -> StoreResult<i64> {
+        let node = flow
+            .invocation
+            .node_id(&flow.cursor)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let inputs: Vec<String> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut query = conn.prepare(
+                "SELECT DISTINCT capture.receipt_key FROM flow_events consumed
+                 JOIN session_events done ON done.seq=consumed.session_event
+                 JOIN session_events start ON start.session_id=done.session_id
+                    AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
+                    AND start.kind='started'
+                 JOIN session_events capture ON capture.seq=start.captured_event AND capture.kind='captured'
+                 WHERE consumed.flow_id=?1 AND consumed.node=?2 AND consumed.kind='consumed'
+                    AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'",
+            )?;
+            let rows = query.query_map(params![flow.id(), node], |row| row.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let mut through = 0;
+        for input in inputs {
+            for event in self.input_events(&input)? {
+                if event["type"] != "user_input" {
+                    continue;
+                }
+                let op = event["op"].as_str().unwrap_or_default();
+                let id = if op == "steer_seed_through" {
+                    event["text"].as_str().and_then(|id| id.parse::<i64>().ok())
+                } else {
+                    op.strip_prefix("steer_transport_accepted:")
+                        .and_then(|id| id.parse().ok())
+                };
+                through = through.max(id.unwrap_or(0));
+            }
+        }
+        Ok(through)
+    }
+
     /// Original input order survives importing earlier observations after later ones.
     pub(crate) fn input_events(&self, input: &str) -> StoreResult<Vec<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

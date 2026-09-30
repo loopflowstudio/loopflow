@@ -32,8 +32,8 @@ jobs:
         run: uv run python scripts/check_ci_proof.py
 
   architecture-check:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,13 +41,18 @@ jobs:
       - name: Verify the architecture map
         run: uv run python scripts/check_architecture.py
 
+  # Scratch belongs to work in progress. Delivery clears it before publishing
+  # a landing candidate; queue/main runs must never accept that exemption.
   scratch-clear:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
+    outputs:
+      candidate: ${{ steps.scratch.outputs.candidate }}
     steps:
       - uses: actions/checkout@v7
-      - name: Verify scratch/ is clear
+      - name: Select landing candidates and enforce queue scratch cleanup
+        id: scratch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ ! -d scratch ]; then
             echo "scratch/ is missing"
@@ -56,17 +61,23 @@ jobs:
 
           EXTRA=$(find scratch -mindepth 1 ! -path 'scratch/.gitkeep' -print)
           if [ -n "$EXTRA" ]; then
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "Checkpoint: hosted proof is deferred until scratch/ is clear." | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "candidate=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "scratch/ must be clear before landing"
             echo "$EXTRA"
             exit 1
           fi
+          echo "candidate=true" >> "$GITHUB_OUTPUT"
 
   # Lint and test are split so the clippy compile and the test compile run on
   # separate runners in parallel instead of back-to-back on one critical path.
   # Distinct cache keys keep the clippy-artifact and rustc-artifact caches apart.
   rust-lint:
-    needs: merge-proof
-    if: ${{ !cancelled() }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -90,8 +101,8 @@ jobs:
         run: /usr/bin/time -v cargo clippy --all-targets -- -D warnings
 
   rust-test:
-    needs: merge-proof
-    if: ${{ !cancelled() }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -113,7 +124,7 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
       - name: Run Rust tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
-        run: /usr/bin/time -v cargo nextest run --all
+        run: /usr/bin/time -v cargo nextest run --all --no-fail-fast
       - name: Prove checkout refresh through the CLI
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
@@ -122,8 +133,8 @@ jobs:
           LOOPFLOW_TEST_LF="$PWD/target/debug/lf" /usr/bin/time -v uv run pytest python/tests/test_checkout_refresh.py
 
   task-installation:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -134,8 +145,8 @@ jobs:
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.
   migration-check:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -150,8 +161,8 @@ jobs:
         run: uv run python scripts/check_migrations.py
 
   python-test:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -160,8 +171,8 @@ jobs:
         run: uv run pytest python/tests/
 
   website-test:
-    needs: merge-proof
-    if: ${{ !cancelled() && needs.merge-proof.outputs.reuse != 'true' }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' && needs.merge-proof.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -171,8 +182,8 @@ jobs:
         working-directory: website
 
   e2e-smoke:
-    needs: merge-proof
-    if: ${{ !cancelled() }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -191,8 +202,8 @@ jobs:
         run: /usr/bin/time -v tests/e2e/test_smoke.sh
 
   swift-test:
-    needs: merge-proof
-    if: ${{ !cancelled() }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -225,16 +236,16 @@ jobs:
       - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         run: /usr/bin/time -l cargo build -p loopflow --bin lf
-      - name: Run Swift tests
+      - name: Build Desktop and run headless model and view tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash
         # Failure locations come from #file/#line, so debug info is unnecessary.
-        # Native proofs share AppKit's main actor; concurrent suites starve
-        # async observations and invalidate their timing budgets.
+        # swift test builds LoopflowMac. Display-session diagnostics are opt-in;
+        # production view inspection and control actions need no app launch.
         run: |
           mkdir -p "$RUNNER_TEMP/swift-tests"
           swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
-          /usr/bin/time -l swift test --package-path swift --no-parallel -Xswiftc -gnone \
+          /usr/bin/time -l scripts/test_desktop.sh -Xswiftc -gnone \
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
@@ -252,20 +263,6 @@ jobs:
       - name: Check Swift multiplatform boundaries
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
-      - name: Prove the control room renders its four states distinctly
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
-        # Unlike the hosted XCUITest (which needs Automation permission and so
-        # lives behind the `--ui-host` gate), this launches the built app
-        # directly and renders each state's window through SnapshotService
-        # (cacheDisplay, no Screen Recording or Automation permission needed),
-        # then asserts the four states at two widths are pairwise distinct. It
-        # is the CI-runnable half of the control-room state proof — fixture
-        # lookup and state-forwarding regressions fail this step.
-        run: |
-          # The Swift test target depends on LoopflowMac and already builds it.
-          test -x swift/.build/debug/LoopflowMac
-          /usr/bin/time -l scripts/prove_wave_surface_states.sh
-        timeout-minutes: 15
       - name: Record Swift source timestamps
         if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/swift_cache.py save
@@ -279,8 +276,8 @@ jobs:
           key: ${{ steps.swift-inputs.outputs.key }}
 
   loopflow-ui-test:
-    needs: merge-proof
-    if: ${{ !cancelled() }}
+    needs: [merge-proof, scratch-clear]
+    if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -346,7 +343,9 @@ jobs:
           key: ${{ steps.xcode-inputs.outputs.key }}
 
   tests-result:
-    if: always()
+    # A skipped checkpoint is not proof. Only PR checkpoints may skip the
+    # aggregate; a failed classifier must still produce a failing required check.
+    if: ${{ always() && (github.event_name != 'pull_request' || needs.scratch-clear.result != 'success' || needs.scratch-clear.outputs.candidate != 'false') }}
     runs-on: ubuntu-latest
     needs:
       - merge-proof

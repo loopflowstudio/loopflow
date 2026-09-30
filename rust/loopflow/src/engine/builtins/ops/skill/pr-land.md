@@ -16,13 +16,13 @@ lf pr land -c              # complete the Task after merge
 lf pr land --next <slug>   # continue its serial PR chain
 ```
 
-The operation owns preparation, rebase, publication, exact-head auto-merge,
+The operation owns preparation, sync, publication, exact-head auto-merge,
 CI observation and repair. It consumes valid prepared copy or generates it
 through pr-message; use explicit title/body only for an intentional override.
 Check the resulting PR's scope, claims and evidence limits. Do not duplicate
 its Git/GitHub mutations or launch another landing watcher.
 
-If rebase or CI fails, use the named recovery path in this checkout and retry
+If sync or CI fails, use the named recovery path in this checkout and retry
 with the same disposition. Rerunning land resumes a retained blocker without
 inventing an empty commit. Preserve uncertainty about external effects and
 require authoritative merge evidence before reporting success or completion.

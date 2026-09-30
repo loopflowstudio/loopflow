@@ -250,9 +250,9 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let adapted = Target::Command(step.item.clone()).into_flow();
     assert_eq!(adapted.items, flow.items);
 
-    let saved = serde_json::json!({"Op": {
+    let saved = serde_json::json!({"Command": {
         "item": {"command": "pr", "args": ["land", "--local"]},
-        "flow_parents": ["commands"]
+        "sources": ["commands"]
     }});
     let restored: ConcreteStep = serde_json::from_value(saved.clone()).unwrap();
     assert_eq!(restored, steps[0]);

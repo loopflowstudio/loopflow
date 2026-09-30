@@ -43,8 +43,8 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
         if json {
             command.arg("--json");
         }
-        if verify {
-            command.arg("--verify");
+        if !verify {
+            command.arg("--cached");
         }
         let output = command.output().unwrap();
         assert!(
@@ -87,7 +87,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
             .unwrap(),
         vec![seeded]
     );
-    // Explicit verification can inspect metadata, but a disconnected origin
+    // Default live status can inspect metadata, but a disconnected origin
     // still cannot suppress the local report or expose the handle in an error.
     let verified: serde_json::Value = serde_json::from_str(&inspect(true, true)).unwrap();
     assert!(verified["forwarded_accounts_diagnostic"]
@@ -112,7 +112,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     let fixture = loopflow_test_support::TestRepo::new();
     let repository = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(fixture.path())
-        .args(["rebase", "--plan"])
+        .args(["sync", "--plan"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -144,6 +144,7 @@ fn account(account_id: &str, home: std::path::PathBuf) -> ProviderAccount {
         ),
         observed_email: None,
         observed_subject: None,
+        observed_credential_digest: None,
         observed_plan: None,
         credential_state: CredentialState::Connected,
         routing_state: RoutingState::Automatic,
@@ -198,7 +199,7 @@ fn headless_connect_without_a_saved_profile_names_recovery_without_registering()
 }
 
 #[test]
-fn status_verify_separates_cached_state_from_live_provider_state() {
+fn status_refreshes_by_default_and_cached_preserves_evidence() {
     let home = tempfile::TempDir::new().expect("lf home");
     let active_home = home.path().join("accounts/codex/active");
     let revoked_home = home.path().join("accounts/codex/revoked");
@@ -274,31 +275,72 @@ esac
         .block_on(store.upsert_provider_account_limits(
             "codex",
             &ProviderAccountId::parse("active").unwrap(),
-            &[loopflow::store::AccountLimitWindow {
-                window: "weekly".into(),
-                used_percent: 34,
-                resets_at: None,
-                plan: None,
-            }],
+            &[
+                loopflow::store::AccountLimitWindow {
+                    window: "weekly".into(),
+                    used_percent: 34,
+                    resets_at: None,
+                    plan: None,
+                },
+                loopflow::store::AccountLimitWindow {
+                    window: "session".into(),
+                    used_percent: 100,
+                    resets_at: Some(1),
+                    plan: None,
+                },
+            ],
             "stream",
         ))
         .unwrap();
-    let old_weekly = runtime
+    let original_windows = runtime
         .block_on(store.provider_account_limits(None))
-        .unwrap()[0]
-        .clone();
+        .unwrap();
+    let old_weekly = original_windows
+        .iter()
+        .find(|window| window.window == "weekly")
+        .unwrap();
     let cached_output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .output()
         .expect("read cached auth accounts");
     assert!(cached_output.status.success());
-    assert!(String::from_utf8_lossy(&cached_output.stdout)
-        .contains("auth: cached connected · not checked"));
+    let cached_text = String::from_utf8_lossy(&cached_output.stdout);
+    assert!(cached_text.contains("auth: cached connected · not checked"));
+    assert!(cached_text.contains("session: usage unknown"));
+    assert!(!cached_text.contains("100% used"));
 
-    // The first verification's own JSON reports the persisted credential state,
-    // not the seeded pre-verification cache.
+    // Failed and incomplete refreshes must not turn an expired full window into
+    // either current fullness or invented capacity. Preserve dated observations.
+    for (key, value, diagnostic) in [
+        ("PATH", "/nonexistent", "verification unavailable"),
+        (
+            "LF_TEST_EMPTY_USAGE",
+            "1",
+            "usage response has no recognized percentage windows",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(["auth", "status", "codex"])
+            .env(key, value)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("session: usage unknown"));
+        assert!(!text.contains("100% used"));
+        assert!(!text.contains("0% used"));
+        assert!(text.contains(diagnostic));
+        assert_eq!(
+            runtime
+                .block_on(store.provider_account_limits(None))
+                .unwrap(),
+            original_windows
+        );
+    }
+
+    // The live report includes persisted credential state and fresh usage.
     let verified_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify", "--json"])
+        .args(["auth", "status", "codex", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -324,19 +366,21 @@ esac
         .unwrap();
     assert_eq!(active_row["cached_credential_state"], "connected");
     assert_eq!(active_row["verification"], "accepted");
+    assert_eq!(active_row["windows"][0]["used_percent"], 12);
+    assert_eq!(active_row["windows"][0]["resets_at"], 1900000000);
     assert_eq!(
         active_row["verified_windows"],
         serde_json::json!(["session"])
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .output()
-        .expect("run auth verify");
+        .expect("refresh auth status");
 
     assert!(
         output.status.success(),
-        "lf auth status --verify failed: {}",
+        "lf auth status failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -356,7 +400,7 @@ esac
         .block_on(store.provider_account_limits(None))
         .unwrap();
     assert_eq!(observed.len(), 2);
-    assert_eq!(observed[1], old_weekly);
+    assert_eq!(&observed[1], old_weekly);
     assert!(stdout
         .lines()
         .find(|line| line.contains("weekly: 34%"))
@@ -366,14 +410,14 @@ esac
     assert_eq!(observed[0].resets_at, Some(1900000000));
     assert_eq!(observed[0].plan.as_deref(), Some("team"));
     assert_eq!(observed[0].source, "poll");
-    assert!(stdout.contains("session: 12%"));
+    assert!(stdout.contains("session: 12% used, 88% left"));
 
     let before = runtime
         .block_on(store.list_provider_accounts(None))
         .unwrap();
     // A second process must read stored observations with the provider unavailable.
     let cached = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -405,7 +449,7 @@ esac
     let credential_path = home.path().join("accounts/codex/active/auth.json");
     let credentials_before = std::fs::read(&credential_path).unwrap();
     let cached_json = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--json"])
+        .args(["auth", "status", "codex", "--cached", "--json"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -451,7 +495,7 @@ esac
 
     std::fs::remove_file(home.path().join("accounts/codex/active/auth.json")).unwrap();
     let missing = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex"])
+        .args(["auth", "status", "codex", "--cached"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -484,7 +528,7 @@ esac
         .unwrap();
     fs2::FileExt::lock_exclusive(&lock).unwrap();
     let busy = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -513,7 +557,7 @@ esac
         ))
         .unwrap();
     let unknown = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["auth", "status", "codex", "--verify"])
+        .args(["auth", "status", "codex"])
         .env("LF_TEST_EMPTY_USAGE", "1")
         .output()
         .unwrap();
@@ -633,7 +677,7 @@ fn cached_auth_records_its_exec_without_creating_account_state() {
         .env("LF_HOME", &lf_home)
         .env("LF_DB_PATH", lf_home.join("loopflow.db"))
         .env("PATH", "/nonexistent")
-        .args(["auth", "status", "--json"])
+        .args(["auth", "status", "--cached", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -714,9 +758,8 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
     let status = |verify: bool, server_email: &str| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         cmd.args(["auth", "status", "codex", "--json"]);
-        if verify {
-            cmd.arg("--verify");
-        } else {
+        if !verify {
+            cmd.arg("--cached");
             cmd.env("PATH", "/nonexistent");
         }
         let out = cmd
@@ -879,7 +922,7 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
         (401, "rejected", CredentialState::Missing),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["auth", "status", "codex", "--verify", "--json"])
+            .args(["auth", "status", "codex", "--json"])
             .env("LF_TEST_ACCOUNT_ERROR", code.to_string())
             .output()
             .unwrap();
@@ -934,5 +977,148 @@ fn managed_connect_requires_email_before_starting_browser() {
             .block_on(store.get_provider_account("codex", &unlabeled.account_id))
             .unwrap(),
         Some(unlabeled)
+    );
+}
+
+#[test]
+fn banked_resets_require_explicit_redemption_and_reuse_attempt_identity() {
+    let home = tempfile::TempDir::new().unwrap();
+    let script = r#"#!/bin/sh
+while IFS= read -r request; do
+  id=$(printf '%s' "$request" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$request" in
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{}}\n' "$id";;
+    *'"method":"account/read"'*)
+      printf '{"id":%s,"result":{"account":{"type":"chatgpt","email":"active@example.com","planType":"pro"}}}\n' "$id";;
+    *'"method":"account/rateLimits/read"'*)
+      if [ "$consumed" = 1 ] && [ -f "$CODEX_HOME/fail-refresh" ]; then exit 0; fi
+      if [ -f "$CODEX_HOME/spent" ]; then used=0; count=1; else used=100; count=2; fi
+      printf '{"id":%s,"result":{"rateLimits":{"primary":{"usedPercent":%s,"windowDurationMins":300,"resetsAt":4102444800}},"rateLimitResetCredits":{"availableCount":%s,"credits":[{"id":"fixture-credit","resetType":"codexRateLimits","status":"available","grantedAt":1700000000,"expiresAt":4102444800,"title":null,"description":null}]}}}\n' "$id" "$used" "$count";;
+    *'"method":"account/rateLimitResetCredit/consume"'*)
+      consumed=1
+      key=$(printf '%s' "$request" | sed -n 's/.*"idempotencyKey":"\([^"]*\)".*/\1/p')
+      if [ -f "$CODEX_HOME/outcome" ]; then outcome=$(cat "$CODEX_HOME/outcome")
+      elif [ -f "$CODEX_HOME/spent" ]; then
+        if [ "$(cat "$CODEX_HOME/spent")" = "$key" ]; then outcome=alreadyRedeemed; else outcome=noCredit; fi
+      else printf '%s' "$key" > "$CODEX_HOME/spent"; outcome=reset; fi
+      if [ -f "$CODEX_HOME/lose-response" ]; then exit 0; fi
+      printf '{"id":%s,"result":{"outcome":"%s"}}\n' "$id" "$outcome";;
+  esac
+done
+"#;
+    let _env = EnvGuard::with_lf_home(&[("codex", script)], home.path());
+    let native = home.path().join("accounts/codex/active");
+    std::fs::create_dir_all(&native).unwrap();
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email":"active@example.com","sub":"active-user"}).to_string());
+    std::fs::write(
+        native.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    runtime
+        .block_on(store.upsert_provider_account(&account("active", native.clone())))
+        .unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(args)
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let live = run(&["auth", "status", "codex", "--json"]);
+    assert_eq!(live["accounts"][0]["reset_credits"]["availableCount"], 2);
+    assert_eq!(
+        live["accounts"][0]["reset_credits"]["credits"][0]["status"],
+        "available"
+    );
+    let cached = run(&["auth", "status", "codex", "--cached", "--json"]);
+    assert!(cached["accounts"][0]["reset_credits"].is_null());
+    assert!(
+        !native.join("spent").exists(),
+        "status cannot spend a reset"
+    );
+    let args = [
+        "auth",
+        "redeem-reset",
+        "codex",
+        "active@",
+        "--idempotency-key",
+        "fixture-attempt",
+        "--json",
+    ];
+    std::fs::write(native.join("fail-refresh"), "").unwrap();
+    let redeemed = run(&args);
+    assert_eq!(redeemed["outcome"], "reset");
+    assert_eq!(redeemed["before"]["windows"][0]["used_percent"], 100);
+    assert!(redeemed["after"].is_null());
+    assert!(redeemed["refresh_error"].is_string());
+    let text = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(&args[..args.len() - 1])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("alreadyRedeemed"));
+    assert!(text.contains("Before:\n  session: 0% used, 100% left"));
+    assert!(text.contains("After:\n  unknown;"));
+    std::fs::remove_file(native.join("fail-refresh")).unwrap();
+    let retried = run(&args);
+    assert_eq!(retried["outcome"], "alreadyRedeemed");
+    assert_eq!(retried["after"]["reset_credits"]["availableCount"], 1);
+    assert_eq!(retried["after"]["windows"][0]["used_percent"], 0);
+    for outcome in ["nothingToReset", "noCredit"] {
+        std::fs::write(native.join("outcome"), outcome).unwrap();
+        let report = run(&args);
+        assert_eq!(report["outcome"], outcome);
+        assert_eq!(report["after"]["reset_credits"]["availableCount"], 1);
+    }
+    let windows = runtime
+        .block_on(store.provider_account_limits(Some("codex")))
+        .unwrap();
+    assert_eq!(windows[0].used_percent, 0);
+    std::fs::remove_file(native.join("spent")).unwrap();
+    std::fs::remove_file(native.join("outcome")).unwrap();
+    std::fs::write(native.join("lose-response"), "").unwrap();
+    let lost = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(!lost.status.success());
+    assert!(String::from_utf8_lossy(&lost.stderr).contains("--idempotency-key fixture-attempt"));
+    std::fs::remove_file(native.join("lose-response")).unwrap();
+    let recovered = run(&args);
+    assert_eq!(recovered["outcome"], "alreadyRedeemed");
+    assert_eq!(recovered["after"]["reset_credits"]["availableCount"], 1);
+    // Changed native identity refuses the spend even though the service still reports active@.
+    let wrong = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email":"wrong@example.com","sub":"wrong-user"}).to_string());
+    std::fs::write(
+        native.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{wrong}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let refused = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert_eq!(
+        std::fs::read_to_string(native.join("spent")).unwrap(),
+        "fixture-attempt"
     );
 }

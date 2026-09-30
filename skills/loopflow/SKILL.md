@@ -14,7 +14,7 @@ Loopflow is one binary, `lf`: the CLI for daily work and the API agents call
 to launch, steer, and observe other agents. It owns git, worktrees,
 delegation, and release plumbing in repos that use it. Route those operations
 through `lf`, not around it — doing them by hand breaks worktree placement,
-release state, and Run authority.
+release state, and execution authority.
 
 Check availability; install only if the user asks:
 
@@ -30,7 +30,7 @@ status and start a Session when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
-receives `LOOPFLOW.md` automatically, writes through its exact Work/Run
+receives `LOOPFLOW.md` automatically, writes through its exact Work and execution
 authority, and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
@@ -41,7 +41,7 @@ lf pr publish --title "..."         # push + create/update PR, print state+URL (
 lf pr submit                         # done; the user clicks merge
 lf pr land                           # done; loopflow lands it hands-off
 lf pr land -c                        # land and complete the owning Task
-lf rebase --plan                     # show strategy; bare `lf rebase` applies it
+lf sync --plan                       # show strategy; bare `lf sync` applies it
 lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
@@ -86,7 +86,7 @@ reconstructing it from processes, worktrees, or Linear:
 
 ```bash
 lf wave list --json              # every durable Wave and its Home/runtime evidence
-lf wave status <wave> --json   # one Wave's Work hierarchy, Runs, and Task conditions
+lf wave status <wave> --json   # one Wave's Work hierarchy, Sessions, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
@@ -100,7 +100,7 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf wave place <wave-id> <home-id>          # only while no Run is live
+lf wave place <wave-id> <home-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there

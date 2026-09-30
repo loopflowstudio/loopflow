@@ -21,7 +21,7 @@ lf install schedule         # check at login and weekly (macOS)
 lf install schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf rebase` inside a repository to update its checkout.
+Use `lf sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -204,7 +204,7 @@ each `.md` URL, use the curated
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
 lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf rebase                                    # refresh main and integrate it into this worktree
+lf sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local --use  # build and pin this checkout against a disposable Home
 lf install                                   # return to the latest published release and reliable Home
 uv run python scripts/install.py local        # build only under local-bin/

@@ -523,6 +523,31 @@ the manually transferred Tasks, without importing old turns or driver authority.
   Synthetic second-Home proofs exercise retries and missing evidence; they do
   not imply a second deployed client or a distributed transaction.
 
+**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
+are checkpointed locally; publication/merge is not established by this entry.
+The release-materialized full Rust run recorded 2,004 passes, seven failures and
+17 skips. Focused repair runs cover all seven failures; the original receipt
+remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
+291-case run had one obsolete import fixture; its eight-case observation repair,
+app/runner builds, boundary check and eight distinct fixture captures passed.
+Formatting, final all-target Clippy, architecture and immutable migration checks
+passed. Required hosted CI still owns the final landing candidate.
+
+The runtime finding was cursor order: stable-ID Session pages must retain ID
+order through projection, or renamed titles can repeat/skip records. Stacking
+fixtures must use the dedicated transaction and establish a published parent;
+generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
+launched a real conflict agent in its disposable repository before that repair;
+output reports no push, but native credential effects were not audited. Provider
+stubs now contain that failure path. This does not establish configured acceptance.
+
+At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
+is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
+it is not a net reduction or a parsed statement count. The retained density
+measurement still names its earlier candidate. Installed conversion remains
+subject to the frozen-snapshot/quiescence obligations above; this gate neither
+migrates nor promotes.
+
 Lessons from implementing it (2026-09-29–30):
 
 - Hosted CI stops at the first failure; one round showed 907 of 2,010 tests

@@ -328,24 +328,24 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WtCommand,
     },
-    /// Rebase current branch onto target (default: main)
-    Rebase {
-        /// Print the planned rebase strategy without mutating git
-        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
+    /// Merge upstream into the current branch (default: main or stack parent)
+    Sync {
+        /// Print the planned sync strategy without mutating git
+        #[arg(long, conflicts_with_all = ["manual", "continue_sync", "abort"])]
         plan: bool,
-        /// Keep the rebase local and leave conflicts for this process to resolve
-        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+        /// Keep the sync local and leave conflicts for this process to resolve
+        #[arg(long, conflicts_with_all = ["plan", "continue_sync", "abort"])]
         manual: bool,
-        /// Stage resolved conflict paths and continue the local rebase
+        /// Stage resolved conflict paths and continue the local sync
         #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
-        continue_rebase: bool,
-        /// Abort the local rebase in progress
-        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+        continue_sync: bool,
+        /// Abort the local sync in progress
+        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_sync"])]
         abort: bool,
-        /// Explicitly claim a raw rebase that has no Loopflow owner
+        /// Explicitly claim a raw merge that has no Loopflow owner
         #[arg(long, conflicts_with_all = ["plan", "manual"])]
         adopt: bool,
-        /// Branch to rebase onto
+        /// Branch to merge into the current branch
         onto: Option<String>,
     },
     /// Commit changes
@@ -588,7 +588,7 @@ pub enum Commands {
     #[command(
         name = "op",
         hide = true,
-        about = "Removed; the operations are top-level (`lf pr`, `lf rebase`, `lf wt`, `lf task`)",
+        about = "Removed; the operations are top-level (`lf pr`, `lf sync`, `lf wt`, `lf task`)",
         arg_required_else_help = true
     )]
     RetiredOp {
@@ -854,7 +854,7 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
         "submit" => "use `lf pr submit`".to_string(),
         "land" => "use `lf pr land`".to_string(),
         "dispatch" => "use `lf task run <issue-id>`".to_string(),
-        "auth" | "commit" | "cron" | "doctor" | "rebase" | "release" | "sync-skills" | "wt" => {
+        "auth" | "commit" | "cron" | "doctor" | "sync" | "release" | "sync-skills" | "wt" => {
             format!("use `lf {sub}`")
         }
         _ => "the operations are top-level now — see `lf --help`".to_string(),
@@ -1078,6 +1078,18 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Run a PR action in the Task's checkout, passing its flags through unchanged
+    Pr {
+        issue: String,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Integrate the Task with its base using the ordinary sync operation
+    Sync {
+        issue: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Complete planning work, or a placed Task whose pull requests are settled
     Complete {
         issue: String,
@@ -1086,7 +1098,23 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Delete a Task from Linear and reconcile its local record
+    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    Abandon {
+        /// Issue ID or branch; defaults to the Task in this checkout
+        issue: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview open issues outside current chapters; apply safe cancellations explicitly
+    Sweep {
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
     Delete { issue: String },
     /// Edit a Task's title or notes, before or after placement
     Edit {
@@ -1098,10 +1126,13 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
-    /// Read the comment thread, or append direction without starting execution
+    /// Read the thread or publish a comment; agent comments default to progress
     Comment {
         issue: String,
         message: Option<String>,
+        /// Deliver new direction even when publishing from an agent Run
+        #[arg(long, requires = "message")]
+        steer: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
         #[arg(long)]
@@ -1134,6 +1165,30 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl TaskCommand {
+    pub fn selector(&self) -> Option<&str> {
+        match self {
+            Self::Worker { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
+            Self::Checkout { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Changes { issue, .. }
+            | Self::Diff { issue, .. }
+            | Self::File { issue, .. }
+            | Self::Save { issue, .. }
+            | Self::Pr { issue, .. }
+            | Self::Sync { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Delete { issue }
+            | Self::Edit { issue, .. }
+            | Self::Comment { issue, .. }
+            | Self::Interrupt { issue, .. }
+            | Self::Wait { issue, .. }
+            | Self::Restart { issue, .. } => Some(issue),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -1273,7 +1328,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
+    /// Prepare a PR to land: sync, clear scratch, mark ready, and assign it
     /// to you. Nothing merges until you click merge on GitHub.
     Submit {
         #[arg(long)]
@@ -1465,11 +1520,12 @@ pub enum HomeCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AuthCommand {
-    /// Inspect cached credentials and subscription windows; verify explicitly
+    /// Refresh managed account status and subscription windows
     Status {
         provider: Option<String>,
+        /// Inspect cached evidence without contacting providers or the origin broker
         #[arg(long)]
-        verify: bool,
+        cached: bool,
         #[arg(long)]
         details: bool,
         #[arg(long)]
@@ -1516,6 +1572,19 @@ pub enum AuthCommand {
         chrome_profile: Vec<String>,
         #[arg(long)]
         clear_chrome_profiles: bool,
+    },
+    /// Spend one banked Codex reset for this named login
+    RedeemReset {
+        provider: String,
+        email: String,
+        /// Reuse this key when retrying the same redemption
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        /// Opaque credit ID returned by live status (otherwise the service chooses)
+        #[arg(long)]
+        credit_id: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Configure and inspect managed account routing
     Route {
@@ -1640,9 +1709,8 @@ pub enum WtCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove a worktree
-    #[command(alias = "rm")]
-    Remove {
+    /// Delete a worktree and its local and remote branch; retain PR and Task outcomes
+    Delete {
         /// Worktree name to remove
         name: String,
         #[arg(short = 'f', long = "force")]
@@ -1654,6 +1722,51 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn task_lifecycle_commands_keep_lower_flags_and_remove_worktree_aliases() {
+        let parsed = Cli::try_parse_from([
+            "lf",
+            "task",
+            "pr",
+            "LOO-355",
+            "publish",
+            "--title",
+            "A title",
+            "--body",
+            "Two paragraphs",
+        ])
+        .unwrap();
+        let Some(Commands::Task {
+            cmd: TaskCommand::Pr { issue, args },
+        }) = parsed.command
+        else {
+            panic!("Task PR action")
+        };
+        assert_eq!(issue, "LOO-355");
+        let lower = Cli::try_parse_from(
+            std::iter::once("lf".into())
+                .chain(std::iter::once("pr".into()))
+                .chain(args),
+        )
+        .unwrap();
+        assert!(
+            matches!(lower.command, Some(Commands::Pr { cmd: Some(PrCommand::Publish { title: Some(title), body: Some(body), .. }) }) if title == "A title" && body == "Two paragraphs")
+        );
+        for args in [
+            vec!["lf", "task", "abandon"],
+            vec!["lf", "task", "abandon", "LOO-355"],
+            vec!["lf", "task", "sweep", "--apply", "--json"],
+            vec!["lf", "task", "sync", "LOO-355", "--plan"],
+            vec!["lf", "wt", "delete", "feature"],
+        ] {
+            Cli::try_parse_from(args).unwrap();
+        }
+        assert!(Cli::try_parse_from(["lf", "task", "rebase", "LOO-355"]).is_err());
+        for removed in ["remove", "rm"] {
+            assert!(Cli::try_parse_from(["lf", "wt", removed, "feature"]).is_err());
+        }
+    }
 
     #[test]
     fn consolidated_commands_parse_without_old_namespaces() {
@@ -1707,7 +1820,7 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         for verb in [
-            "abandon", "recover", "enable", "disable", "prepare", "resume", "advance",
+            "recover", "enable", "disable", "prepare", "resume", "advance",
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
@@ -1921,10 +2034,17 @@ mod tests {
     }
 
     #[test]
-    fn auth_has_six_leaves_and_rejects_retired_paths() {
+    fn auth_commands_reject_retired_paths() {
         let command = Cli::command();
         let auth = command.find_subcommand("auth").unwrap();
-        for name in ["status", "connect", "disconnect", "set", "route"] {
+        for name in [
+            "status",
+            "connect",
+            "disconnect",
+            "set",
+            "route",
+            "redeem-reset",
+        ] {
             assert!(auth.find_subcommand(name).is_some());
         }
         for args in [
@@ -2564,6 +2684,7 @@ mod tests {
                     message,
                     json,
                     wave: _,
+                    steer: _,
                 },
         }) = steer.command
         else {
@@ -2572,6 +2693,21 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message.as_deref(), Some("take the smaller approach"));
         assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123"]).is_ok());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "lf",
+                "task",
+                "comment",
+                "INF-123",
+                "--steer",
+                "keep the API"
+            ])
+            .unwrap()
+            .command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Comment { steer: true, .. }
+            })
+        ));
         assert!(
             Cli::try_parse_from(["lf", "task", "edit", "INF-123", "--notes", "revised"]).is_ok()
         );
@@ -2758,22 +2894,25 @@ mod tests {
     }
 
     #[test]
-    fn rebase_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "rebase", "--manual", "origin/main"])
-            .expect("parse manual rebase");
+    fn sync_manual_recovery_modes_are_explicit_and_exclusive() {
+        let manual = Cli::try_parse_from(["lf", "sync", "--manual", "origin/main"])
+            .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Rebase {
+            Some(Commands::Sync {
                 manual: true,
-                continue_rebase: false,
+                continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
             }) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "rebase", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "rebase", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "sync", "--plan", "--manual"]).is_err());
+        assert!(
+            matches!(Cli::try_parse_from(["lf", "rebase"]).unwrap().command, Some(Commands::External(parts)) if parts == ["rebase"])
+        );
     }
 
     #[test]

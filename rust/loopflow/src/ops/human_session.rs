@@ -12,9 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::durable::{FlowSession, WorkRef};
 use crate::engine::Skill;
 use crate::session::{AgentSession, WorkSource};
-use crate::session_record::{
-    ProviderSessionRef, SessionCaptureManifest, SessionTitleSource, RUN_DIR_ENV,
-};
+use crate::session_record::{SessionCaptureManifest, SessionTitleSource, RUN_DIR_ENV};
 use crate::store::SharedStore;
 use crate::work::task::{Task, TaskId};
 
@@ -962,43 +960,32 @@ async fn owned_target(
     })
 }
 
-/// Where an interactive Run's provider keeps its history and client receipts.
-struct NativeRun {
+/// The provider and local client receipts for a conversation's current input.
+struct NativeSession<'a> {
     dir: PathBuf,
-    provider: String,
+    provider: &'a str,
 }
 
-impl NativeRun {
-    fn of(session: &crate::session::AgentSession) -> Result<Self> {
+impl<'a> NativeSession<'a> {
+    fn of(session: &'a AgentSession) -> Result<Self> {
         Ok(Self {
             dir: local_session_run_dir(&session.artifact_key)
                 .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?,
             provider: session
                 .provider
-                .clone()
+                .as_deref()
                 .ok_or_else(|| anyhow!("Session {} Run has no recorded provider", session.id))?,
         })
     }
 
     fn clients(&self) -> Result<Vec<crate::session_record::ProviderClientRef>> {
-        crate::lf::commands::util::active_provider_clients(&self.dir, &self.provider)
-    }
-
-    fn history(
-        &self,
-        store: &SharedStore,
-        session: &crate::session::AgentSession,
-    ) -> Result<ProviderSessionRef> {
-        store
-            .sqlite
-            .input_provider_session(&session.artifact_key)?
-            .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))
+        crate::lf::commands::util::active_provider_clients(&self.dir, self.provider)
     }
 
     fn stop_clients(&self, reason: crate::session_record::ProviderClientStopReason) -> Result<()> {
         crate::lf::commands::util::replace_provider_clients(
             &self.dir,
-            &self.provider,
+            self.provider,
             &self.clients()?,
             reason,
         )
@@ -1098,7 +1085,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession)
             .await?
             .ok_or_else(|| anyhow!("Task {} Home {} disappeared", task.id, placement.home_id))?;
         if home.route == "local" {
-            return stop_native_client(&run_id);
+            return stop_session_client(&run_id);
         }
         let repo = crate::engine::wave_home::resolve_home_relative_repo(&task.worktree)
             .map_err(anyhow::Error::msg)?;
@@ -1182,6 +1169,8 @@ async fn serve_flow_locked(
         token: Box::new(token.clone()),
     })?;
     let (position, reserved) = store.reserve_review_run(position).await?;
+    let accounts = position.invocation.accounts.clone().unwrap_or_default();
+    let _accounts = accounts.activate()?;
     let agent = select_review_agent(&store, &task, &position).await?;
     let reservation = ReviewCaptureReservation {
         captured: reserved.captured.context("review has no captured event")?,
@@ -1195,7 +1184,11 @@ async fn serve_flow_locked(
         .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
-        .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?);
+        .env(REVIEW_CAPTURE_ENV, serde_json::to_string(&reservation)?)
+        .env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            accounts.env_value()?,
+        );
     let mut child = spawn_session_exec(&mut command, &reserved.artifact_key).await?;
     drop(launch_lock);
     let status = child.wait().await.context("wait for review skill")?;
@@ -1359,10 +1352,18 @@ pub(crate) async fn open(
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
         {
-            let native = NativeRun::of(session)?;
-            let provider_session = native.history(store, session)?;
+            let native = NativeSession::of(session)?;
+            let provider_session = store
+                .sqlite
+                .input_provider_session(&session.artifact_key)?
+                .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))?;
+            if resume {
+                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+                if mode == OpenMode::Replace {
+                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+                }
+            }
             if resume
-                && mode != OpenMode::Replace
                 && native.provider == "codex"
                 && connect_live_codex(store, session, &native.dir, &provider_session).await?
             {
@@ -1372,27 +1373,17 @@ pub(crate) async fn open(
                     .ok_or_else(|| session_not_found(&session.id))?;
                 return surface(store, &session).await;
             }
-            if resume {
-                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-            }
-            match mode {
-                OpenMode::Refuse if !native.clients()?.is_empty() => {
-                    require_session_action(
-                        SessionKind::Conversation,
-                        SessionState::Active,
-                        SessionActionKind::Open,
-                    )?;
-                }
-                OpenMode::Replace if resume => {
-                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?
-                }
-                OpenMode::Replace => {}
-                OpenMode::Refuse | OpenMode::Try => {}
+            if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
+                require_session_action(
+                    SessionKind::Conversation,
+                    SessionState::Active,
+                    SessionActionKind::Open,
+                )?;
             }
             let mut result = surface(store, session).await?;
             if resume {
                 crate::lf::commands::util::resume_session(
-                    &native.provider,
+                    native.provider,
                     session.model.as_deref(),
                     &session.cwd,
                     &session.artifact_key,
@@ -1553,8 +1544,8 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
         SessionTarget::Row { session }
             if session.kind == crate::session::SessionKind::Conversation =>
         {
-            let native = NativeRun::of(session)?;
-            crate::lf::commands::util::stop_provider_session(&native.dir, &native.provider)?;
+            let native = NativeSession::of(session)?;
+            crate::lf::commands::util::stop_provider_session(&native.dir, native.provider)?;
             store
                 .complete_session(&session.id, session.captured)
                 .await?;
@@ -1570,7 +1561,7 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
                     .await?;
                 // The answer is durable before teardown can interrupt this caller
                 // or fail. A cleanup failure must not strand the waiting caller.
-                if let Err(error) = stop_native_client(&session.artifact_key) {
+                if let Err(error) = stop_session_client(&session.artifact_key) {
                     tracing::warn!(session_id = %session.id, run_id = %session.artifact_key,
                         error = %format!("{error:#}"),
                         "Ask completion saved, but its native Session could not be stopped");
@@ -1693,10 +1684,6 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session Run"),
     }
-}
-
-pub(crate) fn stop_session_client(run_id: &String) -> Result<()> {
-    stop_native_client(run_id)
 }
 
 /// A Session as its row and its current Run describe it.
@@ -2071,27 +2058,20 @@ pub(crate) fn resume_native_session(
     if session.artifact_key != *run_id {
         bail!("Session {} changed its input before resume", session.id);
     }
-    let native = NativeRun::of(&session)?;
-    let dir = native.dir;
+    let native = NativeSession::of(&session)?;
     let Some(provider_session) = store.sqlite.input_provider_session(run_id)? else {
         return Ok(false);
     };
-    crate::lf::commands::util::require_provider_session_exec(&dir)?;
-    let clients = crate::lf::commands::util::active_provider_clients(&dir, &native.provider)?;
-    crate::lf::commands::util::replace_provider_clients(
-        &dir,
-        &native.provider,
-        &clients,
-        crate::session_record::ProviderClientStopReason::Moved,
-    )?;
+    crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::lf::commands::util::resume_session_with_env(
-        &native.provider,
+        native.provider,
         session.model.as_deref(),
         &session.cwd,
         &session.artifact_key,
-        &dir,
+        &native.dir,
         &provider_session,
         &environment,
         launch_lock.take(),
@@ -2100,7 +2080,7 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-fn stop_native_client(run_id: &String) -> Result<()> {
+pub(crate) fn stop_session_client(run_id: &String) -> Result<()> {
     #[cfg(test)]
     if action_test::stop(run_id) {
         return Ok(());
@@ -2677,6 +2657,7 @@ mod tests {
                 })
                 .collect();
             std::env::set_var("LF_HOME", home.path());
+            std::env::set_var("LF_DB_PATH", home.path().join("registry.db"));
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
             let manifest = SessionCaptureManifest {
                 schema_version: 1,

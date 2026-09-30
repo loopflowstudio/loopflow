@@ -154,9 +154,10 @@ const SUMMARY_SELECT: &str = "SELECT s.id,c.receipt_key AS artifact_key,s.title,
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
-fn summary_query(page: &str) -> String {
+fn summary_query(page: &str, by_id: bool) -> String {
     // Ask purpose is explicitly independent of its caller's Flow, including
     // before its prepared input is launched. Other missing membership is unknown.
+    let order = if by_id { "s.id" } else { "s.title,s.id" };
     format!("WITH page AS MATERIALIZED ({page}),
         flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
             WHERE f.id IN (SELECT flow_session_id FROM page))
@@ -172,7 +173,7 @@ fn summary_query(page: &str) -> String {
         LEFT JOIN tasks t ON t.id=s.task_id
         LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
-        ORDER BY s.title,s.id", super::flows::FLOW_METADATA_COLUMNS)
+        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS)
 }
 
 fn read_summary(
@@ -232,7 +233,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (page, values) = inventory_query(filter, SUMMARY_SELECT)?;
-        let mut query = conn.prepare(&summary_query(&page))?;
+        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some()))?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
         rows.map(|row| row?).collect()
     }
@@ -243,7 +244,7 @@ impl SqliteStore {
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1")),
+            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false),
             [id],
             read_summary,
         )
@@ -1408,7 +1409,7 @@ mod metadata_tests {
                 ..SessionFilter::default()
             };
             let (page, values) = super::inventory_query(&filter, super::SUMMARY_SELECT).unwrap();
-            let sql = super::summary_query(&page);
+            let sql = super::summary_query(&page, filter.after.is_some());
             let plan: Vec<String> = conn
                 .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                 .unwrap()
@@ -1670,5 +1671,17 @@ mod metadata_tests {
         let second = store.session_summaries(&filter).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");
+        filter.after = Some(String::new());
+        filter.limit = 2;
+        assert_eq!(
+            store
+                .session_summaries(&filter)
+                .unwrap()
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"],
+            "renaming must not reorder the ID page used to build its cursor"
+        );
     }
 }

@@ -639,9 +639,12 @@ released schema and both recorded pre-stack draft histories, including rollback
 and rejection of altered history. The promotion case starts with real published promotion into an
 empty disposable account, runs an operation to a pending Task review, then invokes
 local promotion through `install promote --from-build`. It requires ordinary
-status and Session continuation to retain that review after the database copy.
-It then completes that exact review and requires a second real worker, one Flow
-completion, and journal command paths matching the verified installation digests.
+status, run and Session continuation to retain that review in its original
+execution directory after the database copy, with predecessor bytes poisoning
+PATH, LF_BIN and LF_CONTROL_BIN. It then completes that exact review and requires
+a second real worker, one Flow completion, and journal command paths matching the
+verified installation digests. The backup must remain untouched; independent
+feedback written to its review must make subsequent lookup report a conflict.
 The terminal transport is simulated. Until this case passes, normal-copy
 continuation and two-worker succession remain unproven.
 

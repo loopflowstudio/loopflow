@@ -972,12 +972,17 @@ After an installation switch, use the same Task or Session identifier. The
 selected CLI continues the recorded invocation and review in place; it does not
 copy execution into the new database. Forwarded Session commands retain the
 caller's terminal so provider conversations can receive input and display output.
-Discovery by Ask and ordinary Flow Session identifiers remains unfinished.
-Multiple physical execution copies remain
-an explicit conflict, even when their Task IDs match. Incompatible data reports
-the location and preserves the pending work without migration.
-This conflict also affects execution copied by local installation promotion;
-automatic continuation across those copies is not implemented yet.
+Session discovery reads the recorded conversation and captured-input identity.
+Local promotion records its backup source and the copied Task execution in the
+installation receipt. An unchanged backup routes back to the original execution
+directory using the selected CLI. A missing source, changed copy, or copies
+without that provenance remain explicit conflicts, even when Task IDs match.
+Incompatible data reports the location and preserves pending work without
+migration. Taskless conversation copies still require an unambiguous location.
+The development CLI's production-database restriction still applies. Switching
+from published execution to a development installation therefore locates the
+original Task but cannot continue it in that production database. Automatic
+succession across that boundary remains unfinished.
 
 New `create --run` operations use the selected installation. Source `task run`
 delegates there or to a discovered retained execution; non-launching source

@@ -17,7 +17,104 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
-### Current slice — receipt-pinned installation continuation, 2026-09-30
+### Current slice — recorded installation copies, 2026-09-30
+
+Incoming direction: preserve normal promotion's complete Flow copies while making
+ordinary status/run/review continuation find their original execution. Keep the
+selected runtime independent of the store. Genuine independent copies remain
+conflicts; neither equal IDs, timestamps nor selected-store preference settle them.
+
+The existing SwitchReceipt now records the actual backup source and per-Task
+fingerprints of copied execution after migration, before activation. Source
+identity is fixed at TargetPrepared; the baseline is fixed at Advancing and
+survives recovery. Prior selection alone was insufficient: fresh development
+promotion copies the reliable database even when `prior` names a development
+store. No database table or execution lifecycle is added. Old receipts omit the
+new optional fields on reserialization, preserving immutable retry bytes; they
+provide no copy evidence and cannot silently authorize routing.
+
+Discovery compares the backup with its baseline, retaining the original execution
+owner while it progresses. A changed copy, missing source or unknown baseline
+stays unresolved. Task, PR/delivery, FlowSession, AgentSession, linked Exec and
+subordinate history rows contribute to the comparison. New schema columns change
+the comparison; this cut does not guess across subsequent schema changes or
+rebaseline an exposed copy. Taskless conversation-copy succession remains open.
+Session discovery reads AgentSession and captured-event identity rather than
+searching manifest files. Forwarded readiness retains its exact capture/token and
+uses the owning store's existing check; it does not advance the Flow.
+
+The normal-promotion fixture now expects the original execution directory to
+progress and the copied Flow to remain untouched, matching acceptance cases 6
+and 15. It poisons PATH, LF_BIN and LF_CONTROL_BIN with the predecessor, invokes
+public status/run/open/ready/complete, requires two worker command identities and
+one Flow completion, then changes the copied review feedback and requires a
+conflict. Terminal transport remains simulated. The old expectation that the
+copy should progress is superseded; both pre-continuation Flow comparisons stay.
+
+First focused run: four populated migration checks passed. Promotion then failed
+on the baseline reader's obsolete `steers` query; current Steers are already in
+Task events. Removed that query rather than treating a missing table as empty.
+Log: `.lf/tmp/loo334-copy-continuation.log`.
+
+Second focused run: all four migration checks passed; published first-install
+advance/recovery, Task-owned recovery/promotion refusal, the first worker,
+review publication, local promotion and both full Flow comparisons passed.
+Public status then reached the resolved original store and failed with
+`development lf (...) refuses production database /home/lf-task-proof/.lf/loopflow.db;
+use an installed release lf`. Log: `.lf/tmp/loo334-copy-continuation-2.log`.
+The failure is `store::guard_development_database`, before the owning Task can
+be read. The new conflict is between selecting development bytes and preserving
+the published execution directory. Later continuation/divergence assertions were
+not reached. Do not call the fixture green or relax the production-data boundary.
+
+Dependent implementation stops for contract review. Using the retained release
+changes the selected-runtime requirement; transferring execution into the copy
+changes the preserved-directory/no-transfer requirement and requires a real
+ownership handoff; permitting selected development bytes to write the production
+store changes installation isolation. None is silently selected here. The
+receipt/lookup change remains reviewable but does not complete succession.
+
+The required durable decision handoff was attempted with `lf ask`, describing
+all three policy alternatives and requesting no host action. It failed before
+opening a Session: `Error: Task "LOO-334" is not registered`. No new Ask was
+created, no attribution/store overrides were used, and the existing separate
+relationship-repair Ask was not modified. Return this concrete conflict to the
+caller; do not repair the registration or weaken isolation to reach the review.
+
+Production Rust against `2d63d6488`: **+244 / −32 lines** (net +212), including
+the new copy-evidence reader, excluding tests/test-helper fields, docs and
+scratch. No source migration changes.
+
+Final source checks:
+
+- `uv run python scripts/test_task_installation.py`: **failed** at the same
+  production-database refusal after **3 + 1 populated migration passes**, both
+  CLI builds and all selected integration-target compilations. The first public
+  case reaches the original store after preserving both full Flow comparisons;
+  the remaining nine public cases and all later continuation assertions do not
+  run. Log: `.lf/tmp/loo334-copy-required.log`. The disposable container was
+  removed by the harness. No host installation/data was mounted.
+- `cargo fmt --check`: passed. `CARGO_BUILD_JOBS=2 nice -n 10 cargo clippy
+  --all-targets -- -D warnings`: passed; log
+  `.lf/tmp/loo334-copy-clippy-final.log`. `git diff --check`: passed.
+
+These checks do not establish review completion, a second worker, divergence
+refusal, configured providers or installed acceptance. The whole design's
+acceptance cases 1–15 remain open; this is a failed behavioral proof with a
+concrete policy counterexample, not a gate or delivery result.
+
+Review also caught two preservation details: a lone backup cannot inherit
+ownership when its recorded source is missing, and optional receipt fields must
+not add null bytes when retrying an immutable older receipt. Both are addressed.
+The copy fingerprint is local recorded evidence, not a distributed write lock;
+concurrent independent writes can still make a later lookup ambiguous.
+
+No change to the pending relationship-repair Ask. Recursive locks and provider
+shell PATH, independent Session discovery, chapter archive integration and the
+full acceptance matrix remain open. No publication, host promotion, Task
+completion or whole-design acceptance follows from this slice.
+
+### Earlier slice — receipt-pinned installation continuation, 2026-09-30
 
 The incoming migration review is preserved at `3b4cd6592`. This cut removes the
 ordinary-selection dependency from `advance_switch`; the initiating promotion

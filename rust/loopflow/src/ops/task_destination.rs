@@ -47,7 +47,10 @@ pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
 /// Locate retained execution through installation receipts, without opening a
 /// foreign store for migration or copying its records into the current store.
 pub(crate) fn existing_task(issue: &str) -> Result<Option<ChildExecutionContext>> {
-    existing_execution(|database| Ok(!task_ids(database, issue)?.is_empty()))
+    existing_execution(|database| {
+        let ids = task_ids(database, issue)?;
+        Ok((!ids.is_empty()).then_some(ids))
+    })
 }
 
 pub(crate) fn existing_session(id: &str) -> Result<Option<ChildExecutionContext>> {
@@ -58,19 +61,20 @@ pub(crate) fn existing_session(id: &str) -> Result<Option<ChildExecutionContext>
         return existing_task(task);
     }
     existing_execution(|database| {
-        let home = database
-            .parent()
-            .context("execution database has no directory")?;
-        match crate::run_record::resolve_manifest(home, id) {
-            Ok(_) => Ok(true),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error.into()),
-        }
+        let store = crate::store::sqlite::SqliteStore::open_read_only(database)?;
+        let session = store.session(id)?.or(store.session_for_artifact(id)?);
+        Ok(session.map(|session| {
+            session
+                .task_id
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect()
+        }))
     })
 }
 
 fn existing_execution(
-    contains: impl Fn(&Path) -> Result<bool>,
+    contains: impl Fn(&Path) -> Result<Option<BTreeSet<String>>>,
 ) -> Result<Option<ChildExecutionContext>> {
     #[cfg(test)]
     let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
@@ -94,24 +98,72 @@ fn existing_execution(
         if !installation.store.exists() {
             continue;
         }
-        if contains(&installation.store).with_context(|| {
+        if let Some(tasks) = contains(&installation.store).with_context(|| {
             format!(
                 "execution location {} could not be inspected",
                 installation.store.display()
             )
         })? {
-            found.push(installation.store);
+            found.push((installation.store, tasks));
         }
     }
-    let database = match found.as_slice() {
-        [] => return Ok(None),
-        [database] => database,
+    // A retained backup is not another execution owner until it has changed.
+    // The source must also be present; provenance never manufactures missing work.
+    let receipts = machine_install::retained_receipts(&root)?;
+    let mut copies = BTreeSet::new();
+    for (index, (database, tasks)) in found.iter().enumerate() {
+        if tasks.is_empty() {
+            continue;
+        }
+        for receipt in &receipts {
+            let (Some(source), Some(baseline)) = (&receipt.copied_from, &receipt.copied_tasks)
+            else {
+                continue;
+            };
+            if receipt.phase != machine_install::SwitchPhase::Settled
+                || !crate::store::same_database_file(database, &receipt.target.store)?
+                || !tasks.iter().all(|task| baseline.contains_key(task))
+            {
+                continue;
+            }
+            if !found.iter().any(|(path, ids)| {
+                ids == tasks && crate::store::same_database_file(path, source).unwrap_or(false)
+            }) {
+                return Err(anyhow!(
+                    "execution in {} was copied from {}; its source execution could not be located",
+                    database.display(),
+                    source.display()
+                ));
+            }
+            let mut unchanged = true;
+            for task in tasks {
+                unchanged &= match baseline.get(task) {
+                    Some(expected) => {
+                        machine_install::execution_copy::unchanged(database, task, expected)?
+                    }
+                    None => false,
+                };
+            }
+            if unchanged {
+                copies.insert(index);
+            }
+        }
+    }
+    let locations = found
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !copies.contains(index))
+        .map(|(_, (path, _))| path)
+        .collect::<Vec<_>>();
+    let database = match locations.as_slice() {
+        [] if found.is_empty() => return Ok(None),
+        [database] => *database,
         _ => {
             return Err(anyhow!(
                 "execution exists in multiple distinct locations: {}",
                 found
                     .iter()
-                    .map(|path| path.display().to_string())
+                    .map(|(path, _)| path.display().to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             ))
@@ -224,8 +276,20 @@ pub(crate) fn forward_session(
     context: &ChildExecutionContext,
     cwd: &Path,
     args: &[String],
+    readiness: bool,
 ) -> Result<()> {
     let mut command = command(context, cwd, args);
+    if readiness {
+        // Preserve the exact review's capture token; the owning store fences it.
+        for name in [
+            crate::durable::RUN_ID_ENV,
+            crate::ops::human_session::HUMAN_SESSION_ENV,
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+    }
     #[cfg(unix)]
     {
         Err(command.exec()).context("continue Session through installed lf")

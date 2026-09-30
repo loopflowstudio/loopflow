@@ -191,6 +191,8 @@ fn retain_installation_and_select_store(store: &std::path::Path) {
         },
         app_was_running: false,
         disposable_store_owned: false,
+        copied_from: None,
+        copied_tasks: None,
     };
     receipt.validate().unwrap();
     fs::create_dir_all(root.join("receipts")).unwrap();
@@ -644,6 +646,15 @@ fn normal_promotion_preserves_pending_task_review() {
             .as_ref(),
         Some(&position)
     );
+    let poison = transport.path().join("lf");
+    std::os::unix::fs::symlink(&original_cli.path, &poison).unwrap();
+    let command = |cli: &Path, args: &[&str]| {
+        let mut child = command(cli, args);
+        child
+            .env("LF_BIN", &original_cli.path)
+            .env("LF_CONTROL_BIN", &original_cli.path);
+        child
+    };
     let status = command(&public_cli, &["task", "status", "INF-123", "--json"])
         .output()
         .unwrap();
@@ -654,6 +665,21 @@ fn normal_promotion_preserves_pending_task_review() {
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["execution"]["task_id"], task.task.id.to_string());
+    let continued = command(&public_cli, &["task", "run", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        continued.status.success(),
+        "{}",
+        String::from_utf8_lossy(&continued.stderr)
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .as_ref(),
+        Some(&position)
+    );
     let reopened = command(&public_cli, &["session", "open", review, "--json"])
         .output()
         .unwrap();
@@ -667,7 +693,7 @@ fn normal_promotion_preserves_pending_task_review() {
     assert_eq!(reopened["cwd"], before["cwd"]);
 
     let resumed = runtime
-        .block_on(copied.task_flow(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
     let step = resumed.current();
@@ -707,7 +733,7 @@ fn normal_promotion_preserves_pending_task_review() {
     );
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while runtime
-        .block_on(copied.task_flow(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_some()
     {
@@ -725,7 +751,7 @@ fn normal_promotion_preserves_pending_task_review() {
         .unwrap();
     selected_cli.verify().unwrap();
     let conn =
-        Connection::open_with_flags(&active.selection.store, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        Connection::open_with_flags(home.join("loopflow.db"), OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();
     let commands = conn
         .prepare("SELECT command FROM execs WHERE command LIKE '%__worker%' ORDER BY started_at,id")
@@ -753,16 +779,37 @@ fn normal_promotion_preserves_pending_task_review() {
         hex::encode(Sha256::digest(fs::read(&selected_cli.path).unwrap())),
         selected_cli.sha256
     );
-    assert_eq!(runtime.block_on(copied.task_events_after(&task.task.id,0)).unwrap().iter()
+    assert_eq!(runtime.block_on(task.store.task_events_after(&task.task.id,0)).unwrap().iter()
         .filter(|e|matches!(&e.kind,TaskEventKind::FlowFinished{invocation_id,..} if invocation_id==&position.invocation.id)).count(),1);
     assert_eq!(
         runtime
-            .block_on(task.store.task_flow(&task.task.id))
+            .block_on(copied.task_flow(&task.task.id))
             .unwrap()
             .as_ref(),
         Some(&position),
-        "continuation must not rewrite the retained predecessor store"
+        "continuation must not claim the installation's backup"
     );
+    let copied_session = runtime.block_on(copied.session(review)).unwrap().unwrap();
+    runtime
+        .block_on(copied.ready_session(
+            review,
+            copied_session.captured,
+            "Independent copy feedback",
+        ))
+        .unwrap();
+    let conflicted = command(&public_cli, &["task", "status", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(!conflicted.status.success());
+    assert!(
+        String::from_utf8_lossy(&conflicted.stderr).contains("multiple distinct locations"),
+        "{}",
+        String::from_utf8_lossy(&conflicted.stderr)
+    );
+    assert!(runtime
+        .block_on(task.store.task_flow(&task.task.id))
+        .unwrap()
+        .is_none());
     eprintln!("promotion worker evidence: predecessor={} sha256={} selected={} sha256={} commands={commands:?}",
         original_cli.path.display(),original_cli.sha256,selected_cli.path.display(),selected_cli.sha256);
 }

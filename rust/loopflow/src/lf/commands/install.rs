@@ -2266,6 +2266,8 @@ fn promote_local_candidate(
         },
         app_was_running: false,
         disposable_store_owned: false,
+        copied_from: None,
+        copied_tasks: None,
     };
     crate::machine_install::write_switch(&root, &switch)?;
 
@@ -2336,10 +2338,12 @@ fn promote_local_candidate(
         if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
             return Err(restore_before_local_advance(&root, &switch, lock, error));
         }
-        if let Err(error) =
-            _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
-        {
+        let source = crate::store::production_database_path();
+        if let Err(error) = _copy_store_for_candidate(&source, &target_store) {
             return Err(restore_before_local_advance(&root, &switch, lock, error));
+        }
+        if source.exists() {
+            switch.copied_from = Some(source);
         }
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
@@ -2347,6 +2351,7 @@ fn promote_local_candidate(
         return Err(restore_before_local_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
+    record_execution_copy(&root, &mut switch)?;
 
     activate_prepared_machine_switch(
         &root,
@@ -2688,6 +2693,19 @@ fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Resu
     }
 }
 
+fn record_execution_copy(
+    root: &Path,
+    receipt: &mut crate::machine_install::SwitchReceipt,
+) -> Result<()> {
+    if receipt.copied_from.is_some() && receipt.copied_tasks.is_none() {
+        receipt.copied_tasks = Some(crate::machine_install::execution_copy::task_fingerprints(
+            &receipt.target.store,
+        )?);
+        crate::machine_install::write_switch(root, receipt)?;
+    }
+    Ok(())
+}
+
 fn advance_switch_store(
     root: &Path,
     mut receipt: crate::machine_install::SwitchReceipt,
@@ -2869,6 +2887,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::machine_install::write_switch(&root, &receipt)?;
     }
 
+    record_execution_copy(&root, &mut receipt)?;
     let activation_phase = matches!(
         receipt.phase,
         crate::machine_install::SwitchPhase::Advancing
@@ -3034,6 +3053,8 @@ fn promote_published_from_machine_install(
         },
         app_was_running: false,
         disposable_store_owned: false,
+        copied_from: None,
+        copied_tasks: None,
     };
     crate::machine_install::write_switch(&root, &switch)?;
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {

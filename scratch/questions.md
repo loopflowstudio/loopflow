@@ -256,3 +256,23 @@ infer it from list omission or recreate it. The populated source/canonical proof
 and Docker blocker are recorded in the working design. This implementation choice
 changes no relationship-ordering, outage-admission or connection-transition policy;
 the independent pending decision remains open.
+
+### LOO-334 pass 8 — installation backup ownership
+
+An installation backup does not relocate an active Task. Preserve its original
+execution directory and route the selected executable there. The promotion
+receipt records the actual backup source (which can differ from `prior`) and a
+baseline of each copied Task's owners and history after migration, before
+activation. A changed copy or missing baseline remains ambiguous. The public
+proof previously expected the copied store to progress; change that expectation
+to match acceptance cases 6 and 15's unchanged execution directory. This is an
+implementation choice, not new approval, a merge of stores, or host promotion.
+
+Counterexample: the second public proof resolves that original directory, then
+`guard_development_database` rejects the selected development executable against
+the published store. The original-directory assumption cannot satisfy selected
+development runtime and current isolation together. Contract reconciliation is
+required before implementing continuation; no boundary has been weakened.
+The attempted durable `lf ask` failed before opening a Session with
+`Error: Task "LOO-334" is not registered`. No replacement attribution or
+database override was attempted; the existing relationship-repair Ask is separate.

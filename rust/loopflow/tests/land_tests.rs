@@ -1861,7 +1861,7 @@ fi"#;
         let repair_launches = repo.bare_path().join("repair-launches.log");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         if flow {
-            command.args(["flow", "repair-proof", "-b", "--no-loopflow"]);
+            command.args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"]);
         } else {
             command.args([
                 "pr",

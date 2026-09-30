@@ -1615,7 +1615,7 @@ mod durable_store_tests {
         let managed = store
             .start_task_flow(&task_id, &autonomous_position(&task_id))
             .unwrap();
-        // `lf --task X flow review-design`: a Flow about the Task, not its Flow.
+        // `lf --as task:X flow review-design`: a Flow about the Task, not its Flow.
         let about = crate::engine::invocation::QueuedInvocation::new(
             "review-design",
             managed.invocation.steps.clone(),

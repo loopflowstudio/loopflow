@@ -54,7 +54,7 @@ private actor SessionFixtureStore {
         if args == ["session", "list", "--json", "--page", "--interactive", "all", "--limit", "100"] {
             return #"{"entries":\#(unresolved ? "[\(kind.record)]" : "[]"),"next":null}"#
         }
-        if args.starts(with: ["session", "open", kind.id]), args.contains("--json") {
+        if args.starts(with: ["session", "connect", kind.id]), args.contains("--json") {
             guard unresolved else { throw RegistryQueryError("Session \(kind.id) was not found") }
             return kind.record
         }

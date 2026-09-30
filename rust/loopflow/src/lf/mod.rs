@@ -28,6 +28,14 @@ pub enum DiffContext {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LaunchMode {
+    Interactive,
+    Batch,
+    Tui,
+    Ide,
+}
+
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
@@ -78,21 +86,9 @@ pub struct Cli {
     #[arg(long)]
     pub yolo: bool,
 
-    /// Run interactively
-    #[arg(short = 'i', long = "interactive")]
-    pub interactive: bool,
-
-    /// Run in batch/headless mode
-    #[arg(short = 'b', long = "batch")]
-    pub batch: bool,
-
-    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
-    #[arg(long, conflicts_with = "ide")]
-    pub tui: bool,
-
-    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
-    #[arg(long)]
-    pub ide: bool,
+    /// Choose the provider surface; omission inherits configuration and terminal context
+    #[arg(long, value_enum)]
+    pub mode: Option<LaunchMode>,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -106,20 +102,16 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
-    /// Select Wave Work, or qualify a selected Task
-    #[arg(short = 'w', long = "wave")]
+    /// Resolved Wave context for an admitted launch.
+    #[arg(skip)]
     pub wave: Option<String>,
 
-    /// Select Task Work
-    #[arg(long = "task", value_name = "ISSUE")]
+    /// Resolved Task context for an admitted launch.
+    #[arg(skip)]
     pub task: Option<String>,
 
     /// Select one Work for a direct skill, flow or inline prompt
-    #[arg(
-        long = "as",
-        value_name = "WORK",
-        conflicts_with_all = ["wave", "task"]
-    )]
+    #[arg(long = "as", value_name = "WORK")]
     pub as_work: Option<String>,
 
     /// Keep a Work-bound internal launch in this exact checkout.
@@ -140,16 +132,10 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--batch".to_string()];
+        let mut args = vec!["--mode".to_string(), "batch".to_string()];
         for (flag, enabled) in [
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
-            ("--chrome", self.chrome),
-            ("--no-chrome", self.no_chrome),
-            ("--diff-files", self.diff_files),
-            ("--no-diff-files", self.no_diff_files),
-            ("--diff", self.diff),
-            ("--no-diff", self.no_diff),
             ("--no-loopflow", self.no_loopflow),
         ] {
             if enabled {
@@ -163,6 +149,20 @@ impl Cli {
         ] {
             for value in values {
                 args.extend([flag.to_string(), value.clone()]);
+            }
+        }
+        for (flag, value) in [
+            (
+                "--chrome",
+                self.chrome.and_then(|value| value.to_possible_value()),
+            ),
+            (
+                "--diff",
+                self.diff.and_then(|value| value.to_possible_value()),
+            ),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
         if let Some(model) = &self.model {
@@ -184,10 +184,7 @@ impl Cli {
             only_account: self.only_account.clone(),
             account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
-            interactive: self.interactive,
-            batch: self.batch,
-            tui: self.tui,
-            ide: self.ide,
+            mode: self.mode,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -245,23 +242,21 @@ pub struct ScreenshotArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Inspect recorded lf processes and their command outcomes
-    Exec {
+    /// Show waiting, blocked, active, and finished work with next actions
+    #[command(args_conflicts_with_subcommands = true)]
+    Monitor {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        all: bool,
         #[command(subcommand)]
-        cmd: commands::exec::ExecCommand,
+        cmd: Option<commands::monitor::MonitorCommand>,
     },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
-    },
-    /// Open or focus Loopflow.app
-    Desktop,
-    /// Capture a URL or local HTML file without claiming the user's browser
-    Screenshot {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
     },
     /// Internal owner-loss supervisor for one browser capture.
     #[command(name = "__screenshot-supervisor", hide = true)]
@@ -272,20 +267,10 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
-    /// Open a durable session and wait for the user to complete it
-    Ask {
-        #[command(flatten)]
-        ask: AskArgs,
-    },
     /// Inspect and continue Sessions
     Session {
         #[command(subcommand)]
         cmd: SessionCommand,
-    },
-    /// Install the latest published Loopflow release from any directory
-    Install {
-        #[command(subcommand)]
-        cmd: Option<InstallCommand>,
     },
     /// Refresh account access and capacity, or manage logins and routing
     #[command(args_conflicts_with_subcommands = true)]
@@ -314,25 +299,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: HomeCommand,
     },
-    /// Compile loopflow skills into your home vendor Skills directories.
-    #[command(name = "sync-skills", hide = true)]
-    SyncSkills {
-        /// Confirm writes under ~/ without prompting
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-        /// Keep stale loopflow-generated skills
-        #[arg(long = "no-prune")]
-        no_prune: bool,
-    },
     /// Bridge new Discord messages to finite Wave Runs
     Discord {
         #[command(subcommand)]
         cmd: DiscordCommand,
-    },
-    /// Local launchd jobs that run lf commands on a schedule
-    Cron {
-        #[command(subcommand)]
-        cmd: CronCommand,
     },
     /// Manage Wave identity, placement and planning
     Wave {
@@ -344,58 +314,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show direct provider-authored usage from Home-local Run records
-    Usage {
-        /// Emit Run usage evidence as JSON
-        #[arg(long)]
-        json: bool,
-        /// Run window, in days (zero means all time)
-        #[arg(long, default_value_t = 30)]
-        days: u32,
-        /// Limit to Runs attributed to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Limit to Runs attributed to one Project
-        #[arg(long)]
-        project: Option<String>,
-        /// Limit to Runs attributed to one Task
-        #[arg(long)]
-        task: Option<String>,
-    },
     /// Internal: render the repository maintainer scorecard for telemetry-daily
     #[command(name = "__telemetry-scorecard", hide = true)]
     TelemetryScorecard {
         /// Emit structured JSON for operator automation
-        #[arg(long)]
-        json: bool,
-    },
-    /// Print one parseable snapshot of live Loopflow call trees
-    Ps {
-        /// Emit the versioned activity snapshot as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Refresh live Loopflow call trees on a terminal; print once when redirected
-    Top {
-        /// Emit one versioned activity snapshot as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reap registered orphan providers and remove dead process receipts
-    Prune {
-        /// Show exact targets without changing process or receipt state
-        #[arg(long)]
-        dry_run: bool,
-        /// Emit the versioned prune report as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
-    Doctor {
-        /// Diagnose repository planning without changing it
-        #[arg(long)]
-        planning: bool,
-        /// Emit the audit as JSON
         #[arg(long)]
         json: bool,
     },
@@ -426,113 +348,10 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Show one ordered record of durable Work, Run, PR, and Steer facts
-    Activity {
-        /// Relative window (7d, 24h, 30m) or RFC3339 start
-        #[arg(long, default_value = "7d")]
-        since: String,
-        /// Maximum rows after Work filters (1-200)
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Scope to one Wave by name
-        #[arg(long)]
-        wave: Option<String>,
-        /// Scope to one Project by slug
-        #[arg(long)]
-        project: Option<String>,
-        /// Scope to one Task by Linear identifier
-        #[arg(long)]
-        task: Option<String>,
-        /// Emit the typed activity snapshot as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show recent agent-backed skill runs with context and token evidence
-    Runs {
-        /// Observe current provider-backed Runs without the history window or cap
-        #[arg(long, conflicts_with_all = ["run", "parent", "wave", "project"])]
-        active: bool,
-        /// Retain discovery and stream active snapshots until stdin closes
-        #[arg(long, requires_all = ["active", "json"])]
-        watch: bool,
-        /// Inspect one Run by full id or unambiguous displayed prefix
-        #[arg(conflicts_with_all = ["parent", "task", "project", "wave"])]
-        run: Option<String>,
-        /// List every direct child of one Run, without the recent-history cap
-        #[arg(long, conflicts_with_all = ["run", "task", "project", "wave"])]
-        parent: Option<String>,
-        /// Print the Run's append-only event stream verbatim
-        #[arg(
-            long,
-            requires = "run",
-            conflicts_with_all = ["final_answer", "json"]
-        )]
-        events: bool,
-        /// Print the Run's last durable provider conclusion
-        #[arg(
-            long = "final",
-            requires = "run",
-            conflicts_with_all = ["events", "json"]
-        )]
-        final_answer: bool,
-        /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
-        #[arg(long)]
-        task: Option<String>,
-        /// Drill to one roadmap Project by slug
-        #[arg(long)]
-        project: Option<String>,
-        /// Scope to one Wave by name
-        #[arg(long)]
-        wave: Option<String>,
-        /// Emit the run history as JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Launch the exact provider request recorded by a prior Run as a child Run.
+    /// Launch the immutable provider request retained for a captured input.
     Replay {
-        /// Full Run id or an unambiguous displayed prefix
+        /// Captured input identity or an unambiguous displayed prefix
         run: String,
-    },
-    /// Run lf on a Home or SSH host carrying your local credentials.
-    ///
-    /// Resolves local credentials and forwards a foreground account lease over
-    /// SSH; Loopflow writes no managed provider credential on the remote. The
-    /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh <home-id> pr open`.
-    Ssh {
-        /// Prefer this origin account when the remote lf chooses a provider.
-        #[arg(
-            id = "ssh_preferred_provider_account",
-            long = "account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_restricted_provider_account"
-        )]
-        origin_account: Vec<String>,
-        /// Restrict remote provider launches to these origin accounts.
-        #[arg(
-            id = "ssh_restricted_provider_account",
-            long = "only-account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_preferred_provider_account"
-        )]
-        origin_only_account: Vec<String>,
-        /// HomeId (preferred), SSH alias, or user@host
-        target: String,
-        /// Repository path on the remote, relative to $HOME
-        #[arg(long = "repo")]
-        repo: Option<String>,
-        /// Doppler secret to resolve locally and forward as an env var
-        /// (repeatable). The Doppler token itself is never forwarded.
-        #[arg(long = "secret")]
-        secret: Vec<String>,
-        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
-        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
-        #[arg(long = "forward-agent")]
-        forward_agent: bool,
-        /// Arguments for the remote lf. The target is the boundary: every
-        /// argument after it belongs to the remote invocation.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        lf_args: Vec<String>,
     },
     /// Execute one captured Flow boundary in its own process.
     #[command(name = "__flow-step", hide = true)]
@@ -622,6 +441,11 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Open a durable session and wait for the user to complete it
+    Ask {
+        #[command(flatten)]
+        ask: AskArgs,
+    },
     /// Read this conversation's native start, usage and completion receipts
     History {
         id: String,
@@ -663,7 +487,7 @@ pub enum SessionCommand {
         search: Option<String>,
     },
     /// Connect to the live conversation, or resume its saved history
-    #[command(name = "connect", alias = "open")]
+    #[command(name = "connect")]
     Open {
         id: String,
         #[arg(long)]
@@ -719,12 +543,17 @@ pub enum SessionCommand {
     #[command(name = "serve-ask", hide = true)]
     ServeAsk { run_id: String },
     /// Stop one exact native provider Run after its review completes
-    #[command(name = "stop-run", hide = true)]
-    StopRun { run_id: String },
+    #[command(name = "stop-client", hide = true)]
+    StopClient { input: String },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Local launchd jobs that run lf commands on a schedule
+    Cron {
+        #[command(subcommand)]
+        cmd: CronCommand,
+    },
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     List {
@@ -1370,6 +1199,78 @@ pub enum RepoCommand {
 /// Inspect and observe durable Homes.
 #[derive(Debug, Subcommand)]
 pub enum HomeCommand {
+    /// Open or focus Loopflow.app
+    Desktop,
+    /// Capture a URL or local HTML file without claiming the user's browser
+    Screenshot {
+        #[command(flatten)]
+        screenshot: ScreenshotArgs,
+    },
+    /// Install the latest published Loopflow release from any directory
+    Install {
+        #[command(subcommand)]
+        cmd: Option<InstallCommand>,
+    },
+    /// Compile loopflow skills into your home vendor Skills directories.
+    #[command(name = "sync-skills", hide = true)]
+    SyncSkills {
+        /// Confirm writes under ~/ without prompting
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+        /// Keep stale loopflow-generated skills
+        #[arg(long = "no-prune")]
+        no_prune: bool,
+    },
+    /// Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
+    Doctor {
+        /// Diagnose repository planning without changing it
+        #[arg(long)]
+        planning: bool,
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run lf on a Home or SSH host carrying your local credentials.
+    ///
+    /// Resolves local credentials and forwards a foreground account lease over
+    /// SSH; Loopflow writes no managed provider credential on the remote. The
+    /// Doppler token is never forwarded — name specific secrets with `--secret`
+    /// to resolve them locally. Example: `lf ssh <home-id> pr open`.
+    Ssh {
+        /// Prefer this origin account when the remote lf chooses a provider.
+        #[arg(
+            id = "ssh_preferred_provider_account",
+            long = "account",
+            value_name = "SELECTOR",
+            conflicts_with = "ssh_restricted_provider_account"
+        )]
+        origin_account: Vec<String>,
+        /// Restrict remote provider launches to these origin accounts.
+        #[arg(
+            id = "ssh_restricted_provider_account",
+            long = "only-account",
+            value_name = "SELECTOR",
+            conflicts_with = "ssh_preferred_provider_account"
+        )]
+        origin_only_account: Vec<String>,
+        /// HomeId (preferred), SSH alias, or user@host
+        target: String,
+        /// Repository path on the remote, relative to $HOME
+        #[arg(long = "repo")]
+        repo: Option<String>,
+        /// Doppler secret to resolve locally and forward as an env var
+        /// (repeatable). The Doppler token itself is never forwarded.
+        #[arg(long = "secret")]
+        secret: Vec<String>,
+        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
+        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
+        #[arg(long = "forward-agent")]
+        forward_agent: bool,
+        /// Arguments for the remote lf. The target is the boundary: every
+        /// argument after it belongs to the remote invocation.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        lf_args: Vec<String>,
+    },
     /// Print the configured participant display name.
     User {
         #[arg(long)]
@@ -1630,7 +1531,7 @@ mod tests {
                 "home_00000000000000000000000000000001",
             ],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "doctor", "--planning", "--json"],
+            vec!["lf", "home", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
@@ -1658,6 +1559,7 @@ mod tests {
     fn screenshot_requires_an_output_and_accepts_a_viewport() {
         let cli = Cli::try_parse_from([
             "lf",
+            "home",
             "screenshot",
             "page.html",
             "--output",
@@ -1668,20 +1570,24 @@ mod tests {
             "844",
         ])
         .expect("parse screenshot");
-        let Some(Commands::Screenshot { screenshot }) = cli.command else {
+        let Some(Commands::Home {
+            cmd: crate::lf::HomeCommand::Screenshot { screenshot },
+        }) = cli.command
+        else {
             panic!("expected screenshot command");
         };
         assert_eq!(screenshot.source, "page.html");
         assert_eq!(screenshot.output, PathBuf::from("capture.png"));
         assert_eq!((screenshot.width, screenshot.height), (390, 844));
-        assert!(Cli::try_parse_from(["lf", "screenshot", "page.html"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "home", "screenshot", "page.html"]).is_err());
     }
 
     #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
-        assert!(command.render_long_help().to_string().contains("install"));
-        let help = command
+        let home = command.find_subcommand_mut("home").unwrap();
+        assert!(home.render_long_help().to_string().contains("install"));
+        let help = home
             .find_subcommand_mut("install")
             .unwrap()
             .render_long_help()
@@ -1689,12 +1595,16 @@ mod tests {
         assert!(help.contains("schedule"));
         assert!(!help.contains("preflight"));
         assert!(matches!(
-            Cli::try_parse_from(["lf", "install"]).unwrap().command,
-            Some(Commands::Install { cmd: None })
+            Cli::try_parse_from(["lf", "home", "install"])
+                .unwrap()
+                .command,
+            Some(Commands::Home {
+                cmd: crate::lf::HomeCommand::Install { cmd: None }
+            })
         ));
-        assert!(Cli::try_parse_from(["lf", "install", "schedule"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "install", "status"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "install", "preflight"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "home", "install", "schedule"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "home", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "home", "install", "preflight"]).is_ok());
     }
 
     #[test]
@@ -1750,7 +1660,8 @@ mod tests {
     fn direct_work_selector_accepts_an_inline_question() {
         let cli = Cli::try_parse_from([
             "lf",
-            "--batch",
+            "--mode",
+            "batch",
             "--as",
             "wave:product",
             ":",
@@ -1788,66 +1699,6 @@ mod tests {
                 repo: Some(repo),
                 json: true,
             } }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
-        ));
-    }
-
-    #[test]
-    fn activity_accepts_composed_work_filters() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "activity",
-            "--since",
-            "24h",
-            "--limit",
-            "100",
-            "--wave",
-            "live",
-            "--project",
-            "control-room",
-            "--task",
-            "W2-140",
-            "--json",
-        ])
-        .expect("parse Activity query");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Activity {
-                since,
-                limit: 100,
-                wave: Some(wave),
-                project: Some(project),
-                task: Some(task),
-                json: true,
-            }) if since == "24h"
-                && wave == "live"
-                && project == "control-room"
-                && task == "W2-140"
-        ));
-    }
-
-    #[test]
-    fn runs_exposes_direct_children_and_final_answers() {
-        let children = Cli::try_parse_from(["lf", "runs", "--parent", "abc123", "--json"])
-            .expect("parse direct child query");
-        assert!(matches!(
-            children.command,
-            Some(Commands::Runs {
-                run: None,
-                parent: Some(parent),
-                json: true,
-                ..
-            }) if parent == "abc123"
-        ));
-
-        let final_answer = Cli::try_parse_from(["lf", "runs", "abc123", "--final"])
-            .expect("parse final answer read");
-        assert!(matches!(
-            final_answer.command,
-            Some(Commands::Runs {
-                run: Some(run),
-                final_answer: true,
-                ..
-            }) if run == "abc123"
         ));
     }
 
@@ -1922,6 +1773,7 @@ mod tests {
     fn ssh_parser_respects_the_internal_target_boundary() {
         let cli = Cli::try_parse_from([
             "lf",
+            "home",
             "ssh",
             "--account",
             "reserve",
@@ -1935,13 +1787,14 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ssh { origin_account, lf_args, .. })
+            Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { origin_account, lf_args, .. } })
                 if origin_account == vec!["reserve"]
                     && lf_args == vec!["task", "pursue"]
         ));
 
         let after_host = Cli::try_parse_from([
             "lf",
+            "home",
             "ssh",
             "mini",
             "--",
@@ -1954,7 +1807,7 @@ mod tests {
         assert!(after_host.account.is_empty());
         assert!(matches!(
             after_host.command,
-            Some(Commands::Ssh { lf_args, .. })
+            Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { lf_args, .. } })
                 if lf_args == vec!["--account", "reserve", "task", "pursue"]
         ));
     }
@@ -2331,46 +2184,6 @@ mod tests {
     }
 
     #[test]
-    fn top_is_a_first_class_machine_dashboard() {
-        let cli = Cli::try_parse_from(["lf", "top"]).expect("parse top");
-        assert!(matches!(cli.command, Some(Commands::Top { json: false })));
-
-        let cli = Cli::try_parse_from(["lf", "ps", "--json"]).expect("parse ps");
-        assert!(matches!(cli.command, Some(Commands::Ps { json: true })));
-        assert!(Cli::try_parse_from(["lf", "ps", "--sort", "tokens"]).is_err());
-
-        let cli = Cli::try_parse_from(["lf", "prune", "--dry-run", "--json"])
-            .expect("parse process prune");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Prune {
-                dry_run: true,
-                json: true,
-            })
-        ));
-    }
-
-    #[test]
-    fn usage_exposes_the_direct_run_window_and_work_drill() {
-        let cli =
-            Cli::try_parse_from(["lf", "usage", "--days", "7", "--task", "LOO-265", "--json"])
-                .expect("parse direct usage");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Usage {
-                json: true,
-                days: 7,
-                wave: None,
-                project: None,
-                task: Some(task),
-            })
-                if task == "LOO-265"
-        ));
-        assert!(Cli::try_parse_from(["lf", "usage", "--refresh"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "usage", "--cached"]).is_err());
-    }
-
-    #[test]
     fn task_completion_has_one_public_command() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -2535,19 +2348,26 @@ mod tests {
 
     #[test]
     fn cli_separates_ask_completion_from_flow_decisions() {
-        let ask = Cli::try_parse_from(["lf", "ask", "Review", "this", "branch"])
+        let ask = Cli::try_parse_from(["lf", "session", "ask", "Review", "this", "branch"])
             .expect("parse human Ask");
         assert!(matches!(
             ask.command,
-            Some(Commands::Ask { ask }) if ask.question == ["Review", "this", "branch"] && ask.skill.is_none()
+            Some(Commands::Session { cmd: crate::lf::SessionCommand::Ask { ask } }) if ask.question == ["Review", "this", "branch"] && ask.skill.is_none()
         ));
 
-        let ask =
-            Cli::try_parse_from(["lf", "ask", "--skill", "unblock", "Resolve", "this blocker"])
-                .expect("parse skill-selected Ask");
+        let ask = Cli::try_parse_from([
+            "lf",
+            "session",
+            "ask",
+            "--skill",
+            "unblock",
+            "Resolve",
+            "this blocker",
+        ])
+        .expect("parse skill-selected Ask");
         assert!(matches!(
             ask.command,
-            Some(Commands::Ask { ask }) if ask.skill.as_deref() == Some("unblock")
+            Some(Commands::Session { cmd: crate::lf::SessionCommand::Ask { ask } }) if ask.skill.as_deref() == Some("unblock")
                 && ask.question == ["Resolve", "this blocker"]
         ));
 
@@ -2568,7 +2388,7 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
 
-        let open = Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace"])
+        let open = Cli::try_parse_from(["lf", "session", "connect", "run_123", "--replace"])
             .expect("parse replacement open");
         assert!(matches!(
             open.command,
@@ -2581,10 +2401,10 @@ mod tests {
                 }
             }) if id == "run_123"
         ));
-        assert!(
-            Cli::try_parse_from(["lf", "session", "open", "run_123", "--replace", "--try",])
-                .is_err()
-        );
+        assert!(Cli::try_parse_from(
+            ["lf", "session", "connect", "run_123", "--replace", "--try",]
+        )
+        .is_err());
 
         let rename = Cli::try_parse_from([
             "lf",
@@ -2649,6 +2469,7 @@ mod tests {
     fn install_promote_requires_a_local_build_for_fresh_forks() {
         let cli = Cli::try_parse_from([
             "lf",
+            "home",
             "install",
             "promote",
             "--from-build",
@@ -2660,16 +2481,19 @@ mod tests {
         .expect("parse local promotion");
         assert!(matches!(
             cli.command,
-            Some(Commands::Install {
-                cmd: Some(InstallCommand::Promote {
-                    from_build: Some(_),
-                    fresh: true,
-                    ..
-                })
+            Some(Commands::Home {
+                cmd: crate::lf::HomeCommand::Install {
+                    cmd: Some(InstallCommand::Promote {
+                        from_build: Some(_),
+                        fresh: true,
+                        ..
+                    })
+                }
             })
         ));
         assert!(Cli::try_parse_from([
             "lf",
+            "home",
             "install",
             "promote",
             "--fresh",

@@ -42,7 +42,7 @@ struct SessionsStoreTests {
         await store.select("second")
 
         #expect(item(store, "first")?.state == .pending)
-        #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "open", "second"])
+        #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
     }
 
     @Test("Selecting an active Session leaves its other terminal running until Move here")
@@ -50,7 +50,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args == ["session", "open", "native", "--json", "--replace"])
+                #expect(args == ["session", "connect", "native", "--json", "--replace"])
                 return session(id: "native", state: "closed", kind: "conversation")
             }
         )
@@ -291,7 +291,7 @@ private func session(id: String, state: String, kind: String = "flow", replacing
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
       "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
-      "open_argv": ["lf", "session", "open", "\(id)"\(replacing ? ", \"--replace\"" : "")]
+      "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """
 }

@@ -10,7 +10,7 @@ or inspect its cron schedule:
 
 ```bash
 lf wave status <wave> --json
-lf --wave <wave> wave/operate
+lf --as wave:<wave> wave/operate
 lf cron list
 ```
 
@@ -25,7 +25,7 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf runs --task INF-123 --json
+lf usage --days 0 --task INF-123 --json
 lf session list
 ```
 
@@ -41,7 +41,7 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
-Task status and `lf runs` show up to 50 Runs started in the last seven days.
+Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
@@ -49,7 +49,7 @@ Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf session open <session-id>
+lf session connect <session-id>
 lf session complete <session-id>       # return saved review or Ask feedback
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
@@ -87,7 +87,7 @@ After repairing provider access, retry the Task or Project operation:
 lf task run INF-123 --reason "provider credentials repaired"
 ```
 
-Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
+Wave planning uses finite conversations. Invoke `lf --as wave:<wave> wave/operate`
 for another planning pass; it has no resident Project process to resume.
 
 Other options:

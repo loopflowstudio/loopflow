@@ -13,7 +13,7 @@ lf ssh <home-id> --wave product wave/operate
 ## Local by default
 
 ```bash
-lf runs                                # runs recorded on this Home
+lf monitor list                                # runs recorded on this Home
 lf ps --json                           # OS-live processes on this Home
 lf wave status product                 # planning and runtime view resolved here
 
@@ -62,14 +62,14 @@ no signal authority.
 ```bash
 lf ps --json
 lf top
-lf prune --dry-run
+lf mon prune --dry-run
 ```
 
 The outer command journal records command receipts. `lf ps` and `lf top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf prune` removes dead command receipts and may reap only registered orphan
+`lf mon prune` removes dead command receipts and may reap only registered orphan
 OpenCode process groups whose ownership is known. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 

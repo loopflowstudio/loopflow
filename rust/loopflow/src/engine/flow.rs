@@ -493,7 +493,7 @@ fn warn_retired_interactive(name: &str, content: &str) {
     });
     if has_interactive && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed) {
         eprintln!(
-            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --batch now select the launch surface"
+            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --mode batch now select the launch surface"
         );
     }
 }

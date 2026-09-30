@@ -169,7 +169,9 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if matches!(
         crate::lf::Cli::try_parse_from(args),
         Ok(crate::lf::Cli {
-            command: Some(crate::lf::Commands::Ssh { .. }),
+            command: Some(crate::lf::Commands::Home {
+                cmd: crate::lf::HomeCommand::Ssh { .. }
+            }),
             ..
         })
     ) {

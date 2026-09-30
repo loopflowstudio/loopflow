@@ -84,7 +84,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         result.stdout
     };
     let first: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--parent",
@@ -104,7 +104,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     assert_eq!(first.entries[0].outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
     let second: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--parent",
@@ -126,12 +126,16 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: Exec =
-        serde_json::from_slice(&invoke(&["exec", "show", &ids[1].as_str()[..20], "--json"]))
-            .unwrap();
+    let detail: Exec = serde_json::from_slice(&invoke(&[
+        "monitor",
+        "show",
+        &ids[1].as_str()[..20],
+        "--json",
+    ]))
+    .unwrap();
     assert_eq!(detail, second.entries[0]);
     let caller: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--caller",
@@ -165,9 +169,16 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
-        vec!["exec", "list", "--all", "--task", "PROOF-1", "--json"],
-        vec!["exec", "list", "--all", "--task", task.as_str(), "--json"],
-        vec!["exec", "list", "--all", "--wave", "historical", "--json"],
+        vec!["monitor", "list", "--all", "--task", "PROOF-1", "--json"],
+        vec![
+            "monitor",
+            "list",
+            "--all",
+            "--task",
+            task.as_str(),
+            "--json",
+        ],
+        vec!["monitor", "list", "--all", "--wave", "historical", "--json"],
     ] {
         let page: ExecPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
@@ -218,7 +229,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         let result = command(
             home.path(),
             repo.path(),
-            &["exec", "list", "--wave", "historical", "--json"],
+            &["monitor", "list", "--wave", "historical", "--json"],
         )
         .output()
         .unwrap();
@@ -232,14 +243,14 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     let ambiguous = command(
         home.path(),
         repos[0].path(),
-        &["exec", "list", "--all", "--wave", "historical", "--json"],
+        &["monitor", "list", "--all", "--wave", "historical", "--json"],
     )
     .output()
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
     let explicit: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--wave",
@@ -248,9 +259,13 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     ]))
     .unwrap();
     assert_eq!(explicit.entries[0].id, ids[0]);
-    let zero = command(home.path(), home.path(), &["exec", "list", "--limit", "0"])
-        .output()
-        .unwrap();
+    let zero = command(
+        home.path(),
+        home.path(),
+        &["monitor", "list", "--limit", "0"],
+    )
+    .output()
+    .unwrap();
     assert_eq!(zero.status.code(), Some(2));
 }
 
@@ -1051,4 +1066,73 @@ fn serve_gate(
             });
         }
     })
+}
+
+#[tokio::test]
+async fn monitor_separates_waiting_finished_and_missing_observations() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    for id in ["waiting", "finished", "unobserved"] {
+        reserve_session(&store, id, home.path());
+    }
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "UPDATE agent_sessions SET ready_summary='Review the API' WHERE id='waiting'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE agent_sessions SET completed_at=2 WHERE id='finished'",
+            [],
+        )
+        .unwrap();
+    let output = command(home.path(), home.path(), &["monitor", "--all", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let overview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let items = overview["items"].as_array().unwrap();
+    for (id, state, reason, action) in [
+        (
+            "waiting",
+            "waiting",
+            "Review the API",
+            "lf session connect waiting",
+        ),
+        (
+            "finished",
+            "finished",
+            "completion is recorded",
+            "lf session history finished",
+        ),
+        (
+            "unobserved",
+            "unknown",
+            "No current provider observation",
+            "lf session history unobserved",
+        ),
+    ] {
+        let item = items.iter().find(|item| item["id"] == id).unwrap();
+        assert_eq!(item["state"], state);
+        assert!(item["reason"].as_str().unwrap().contains(reason));
+        assert_eq!(item["next_action"], action);
+    }
+    assert!(overview["recent_commands"]["entries"].is_array());
+    assert!(overview["active"]["gaps"].is_array());
+    assert!(overview["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["state"] != "active"));
+    for args in [["ps", "--help"], ["top", "--help"], ["mon", "--help"]] {
+        let help = command(home.path(), home.path(), &args).output().unwrap();
+        assert!(help.status.success(), "{help:?}");
+        assert!(String::from_utf8_lossy(&help.stdout).contains("monitor"));
+    }
 }

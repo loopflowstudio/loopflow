@@ -1901,7 +1901,7 @@ fn generate_notes_file(
     let context_path = context_file.path().to_string_lossy().to_string();
 
     let mut cmd = Command::new("lf");
-    cmd.arg("--batch")
+    cmd.args(["--mode", "batch"])
         .arg("release-notes")
         .arg(format!(
             "Write notes only to {} (LF_RELEASE_NOTES_OUTPUT). Do not modify any other file, \

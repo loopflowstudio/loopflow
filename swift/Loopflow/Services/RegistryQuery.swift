@@ -151,7 +151,7 @@ public struct RegistryQuery: Sendable {
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
     public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
-        let stdout = try await run(["runs", "--task", task, "--json"], cwd)
+        let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
         return try Self.decode([SessionHistory].self, from: stdout)
     }
 
@@ -215,7 +215,7 @@ public struct RegistryQuery: Sendable {
         replacing: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "open", id, "--json"]
+        var args = ["session", "connect", id, "--json"]
         if replacing { args.append("--replace") }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)

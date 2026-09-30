@@ -846,7 +846,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
     server.held.clear()
     server.release.clear()
     child = subprocess.Popen(
-        [str(binary), "-b", "--model", "codex", ":", "held conversation"],
+        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
         cwd=work,
         env=env,
         stdout=subprocess.PIPE,
@@ -943,7 +943,7 @@ def _flow_blocked_contract(
     ]
     log = (work / "flow.log").open("w+")
     driver = subprocess.Popen(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--model", "codex", "flow", "native-proof", "--mode", "batch", "--no-loopflow"],
         cwd=work,
         env=env,
         stdout=log,
@@ -1107,7 +1107,7 @@ def _flow_decision_retry_contract(
         server.commands[3] = shlex.join([sys.executable, str(child), "launch"])
         server.commands[5] = shlex.join([sys.executable, str(child), "release"])
     command = _command(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--model", "codex", "flow", "native-proof", "--mode", "batch", "--no-loopflow"],
         work=work,
         env=env,
         timeout=90,
@@ -1174,7 +1174,7 @@ def _flow_automatic_retry_contract(
     (work / ".lf/flows/native-proof.yaml").write_text("- native-proof\n")
     server.fail = server.transient = True
     command = _command(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--model", "codex", "flow", "native-proof", "--mode", "batch", "--no-loopflow"],
         work=work,
         env=env,
         timeout=90,
@@ -1260,7 +1260,7 @@ def _flow_retry_contract(
     (work / ".lf/flows/native-proof.yaml").write_text("- native-proof\n")
     server.fail = True
     failed = _command(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--model", "codex", "flow", "native-proof", "--mode", "batch", "--no-loopflow"],
         work=work,
         env=env,
         timeout=60,
@@ -1366,7 +1366,7 @@ def _flow_driver_loss_contract(
     (work / ".lf/skills/native-proof.md").write_text("Run the held fixture command.")
     (work / ".lf/flows/native-proof.yaml").write_text("- native-proof\n")
     child = subprocess.Popen(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--model", "codex", "flow", "native-proof", "--mode", "batch", "--no-loopflow"],
         cwd=work,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -1555,7 +1555,7 @@ def _flow_driver_loss_contract(
 def _launch_contract(binary: Path, work: Path, env: dict[str, str], results: dict) -> None:
     _init_repo(work, env)
     launch = _command(
-        [str(binary), "-b", "--model", "codex", ":", "Run the fixture command."],
+        [str(binary), "--mode", "batch", "--model", "codex", ":", "Run the fixture command."],
         work=work,
         env=env,
         timeout=60,

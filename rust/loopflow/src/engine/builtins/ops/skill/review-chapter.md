@@ -35,7 +35,7 @@ their measurement windows and instrument revisions where available. Missing
 target evidence is unknown; an evidenced omitted target is unset. Later shipment
 cannot prove a promise inside an earlier interval.
 
-Launch one bounded `lf -b --wave <name> wave/review-chapter "<chapter name,
+Launch one bounded `lf --mode batch --wave <name> wave/review-chapter "<chapter name,
 Project ID, interval, exact starting KR ledger>"` per resolvable Wave. Supply
 the available evidence and its gaps; there is no Project review tier. Retain
 returned reports and launch references. A failed or unfinished child is

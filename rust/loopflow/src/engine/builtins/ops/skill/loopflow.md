@@ -26,7 +26,7 @@ Add `--all` to see every repository's review steps on this machine. The same
 repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
 status` is already single-Wave and repo-resolved.
 
-When the User selects a Session, run `lf session open <session-id> --json`.
+When the User selects a Session, run `lf session connect <session-id> --json`.
 It prepares or recovers the boundary's ordinary provider Run and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
@@ -162,14 +162,14 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
+Use `lf home id`, then `lf --as wave:<wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
 Prepare a Task without launching it with `lf checkout <issue> --json`.
-For one bounded contribution use `lf --task <issue> research "<question>"` or
-`lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
+For one bounded contribution use `lf --as task:<issue> research "<question>"` or
+`lf --as wave:<wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
 selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
 asserts the existing identity. A bounded Run does not advance the Work's Flow
 or claim exclusive ownership. Task execution uses its existing checkout.
@@ -195,7 +195,7 @@ An explicitly selected Flow governs even when it differs from that default.
 When work seems stuck, run `lf top` before guessing; redirected output gives one
 frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
-Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
+Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 

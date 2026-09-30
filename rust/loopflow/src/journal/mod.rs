@@ -323,7 +323,7 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
         warn!(
             error = failure,
             "ambient wave identity failed validation; run attributed to no wave \
-             — pass --wave <name> to recover"
+             — pass --as wave:<name> to recover"
         );
     }
     emit(

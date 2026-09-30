@@ -594,7 +594,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if provider_session_id.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
+            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.",
             command.program,
             outcome.status,
         ))

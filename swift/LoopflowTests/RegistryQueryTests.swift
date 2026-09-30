@@ -1,4 +1,4 @@
-// RegistryQuery decodes the `lf wave list/status/roadmap/runs --json` wire snapshots. The
+// RegistryQuery decodes the `lf wave list/status/roadmap/usage --json` wire snapshots. The
 // runner is injected, so these exercise parsing without spawning `lf`.
 
 import Foundation
@@ -482,7 +482,7 @@ struct RegistryQueryTests {
             switch args {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "open", session.id, "--json"]:
+            case ["session", "connect", session.id, "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")

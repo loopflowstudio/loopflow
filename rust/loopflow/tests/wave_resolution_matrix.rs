@@ -83,12 +83,11 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["activity"],
+    &["monitor", "activity"],
     &["repo", "ci"],
-    &["cron", "list"],
-    &["exec", "list"],
-    &["runs"],
-    &["usage"],
+    &["wave", "cron", "list"],
+    &["monitor", "list"],
+    &["monitor", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -98,12 +97,12 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
     &["wave", "relocate"],
     &["discord", "serve"],
-    &["cron", "preflight"],
-    &["cron", "sync"],
-    &["cron", "run"],
-    &["cron", "history"],
-    &["cron", "trigger"],
-    &["cron", "remove"],
+    &["wave", "cron", "preflight"],
+    &["wave", "cron", "sync"],
+    &["wave", "cron", "run"],
+    &["wave", "cron", "history"],
+    &["wave", "cron", "trigger"],
+    &["wave", "cron", "remove"],
 ];
 
 const COMMANDS: &[Cmd] = &[
@@ -146,8 +145,9 @@ const COMMANDS: &[Cmd] = &[
     },
     Cmd {
         id: "cron add",
-        path: &["cron", "add"],
+        path: &["wave", "cron", "add"],
         base_args: &[
+            "wave",
             "cron",
             "add",
             "--flow",
@@ -696,6 +696,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "wave",
             "cron",
             "add",
             "--flow",

@@ -563,7 +563,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     }
     if absent > 0 {
         // Never silent: a large count is a signal the registry has drifted from
-        // the filesystem and wants a `lf prune`/reconcile sweep.
+        // the filesystem and wants a `lf mon prune`/reconcile sweep.
         eprintln!(
             "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
              (dead worktrees); they cannot run and do not gate promotion"

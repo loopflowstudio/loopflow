@@ -14,7 +14,8 @@ repository without a registered Task.
 
 - Task owns PR, `wt`, commit and rebase operations. Repo owns releases.
 - Monitor owns the selected monitoring operations. Jack retains ps/top;
-  the catalog leaves runs-derived active/watch/detail choices open at demo.
+  the catalog retains active streaming and raw/final Session evidence because
+  process snapshots do not answer those questions.
   Its overview joins existing Work, Session and process observations, reporting
   waiting, blocked, active and finished items with reason and next action.
   Missing observation never proves liveness or completion.
@@ -48,17 +49,45 @@ No competing model migration belongs here.
    monitor and account on real state, and one operation from every owner.
    Label simulated services separately. Help output and fixtures alone cannot
    establish this proof or an autonomous lifecycle.
-5. Docs and generated copies describe implemented behavior; Jack reviews at demo.
+5. Docs and generated copies describe implemented behavior. The supervising
+   session owns shipping; Jack Heart removed the demo wait.
 
 ## Current work after the latest steer
 
-Rebase onto main first; reconcile #1360's deleted service commands and their
-arguments. Merge independent duplicate readers C002/C028/C134, updating Desktop,
-help, documentation and public-CLI proofs together. Finish the remaining owner
-and option cuts and integrate actual Exec/Session readers for Monitor. Jack Heart
-removed the demo wait and delegated monitoring keep-or-cut choices; selected
-choices are in the catalog's post-rebase section. The supervisor ships only after
-the final catalog and CLI match. This pass does not select Flow navigation.
+Main `3dc89bc9a` is integrated. The independent cull is checkpointed at
+`c553fd1be`. The actual LOO-298 model at `25548d567` is now integrated locally
+through `lf rebase --manual`; Git finished at `9896c8f14`. Loopflow's post-rebase
+Task-base update failed before any push (exact evidence below). Do not publish
+or describe this dependency integration as delivery-ready.
+
+The working cut uses those actual Exec/Session owners for Monitor and removes
+the parallel Exec/Runs parser roots. It consolidates launch modes and direct
+Work selection, and moves Home operations, Ask and Cron with their consumers.
+Remaining work includes final focused/static proof, the complete current catalog,
+managed-Flow equivalence, planning discovery, destination readiness and the real
+first-provider-result proof. These are not waived by removing the demo wait.
+
+### Integration counterexample
+
+`lf rebase --manual 25548d567` and Loopflow-owned continuations completed Git
+replay, then returned:
+
+> Task LOO-338 PR base 3dc89bc9a062 and 25548d567 have diverged with no common
+> lineage at the recorded base. Refused before any push.
+
+No sequencer remains; `lf rebase --plan main` reports protected direct rebase,
+218 unique commits and approximately 494 changed files. No raw Git recovery,
+PR-base mutation, push, installed-store migration or sibling edit followed.
+The model branch has independent rewritten ancestry; integration cannot be
+reported as an ordinary small main-based CLI patch.
+
+The model also disproves the catalog's claimed equivalence between Task run and
+`--as task:X flow`: `start_task_flow` writes the managed Task pointer, while
+ordinary Flow capture writes independent attribution. The existing
+`bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone`
+proof explicitly requires that separation. Deleting Task continuation now would
+lose saved managed work. Stop that dependent deletion until the owning contract
+is reconciled; do not add another executor or silently retarget saved work.
 
 ## Slice ledger
 
@@ -956,3 +985,56 @@ not renamed. Refreshed LOO-298 `25548d567` and LOO-334 `1fd99a284` contracts rep
 older dependency assumptions. `lf rebase --plan 25548d567` reports direct rebase
 of 28 commits, touching 268 files; no integration has yet been applied. The full
 catalog/CLI agreement and remaining requirements are not complete.
+
+### Monitor and launch cut on integrated model · 2026-09-30
+
+The latest Jack Heart steer removes the demo wait and delegates monitoring
+keep-or-cut calls. Keep ps/top; merge duplicate Exec/Runs inventory into Monitor
+list; retain active conversation discovery/NDJSON and stdin lifetime because
+process snapshots lack them; retain Session raw events and final conclusions,
+requiring Session identity plus optional owned input. Keep usage's accounting
+window, missingness and historical Work filters separately from command outcomes.
+Keep replay's explicit effect and Session connect's native continuation separate.
+
+Monitor overview projects existing Session, FlowSession, live-process and Exec
+readers; no new persistent owner. Waiting/blocked/finished carry reasons and next
+actions. Missing process evidence remains unknown. Inventories preserve cursors
+and observation gaps. Home owns install/screenshot/doctor/SSH/desktop/skill export;
+Session owns Ask, Wave owns Cron. Hidden screenshot startup remains exact-only.
+
+`--mode interactive|batch|tui|ide` replaces four launch flags; `--as` is the sole
+direct Work selector. Query-local Task/Wave filters remain. Internal resolved
+Task/Wave context remains captured by Flow children. Desktop launches and native
+handoffs use the same new inputs. No predecessor alias is registered.
+
+Review found early help now records its actual Exec when a compatible ledger
+exists, by LOO-298's deliberate `observe_process` path. It still creates no absent
+Home or agent Session. Updated the prior no-Exec test to assert no agent Session;
+no production journal rule was weakened. A parser-test edit briefly inserted
+control bytes through a malformed replacement; compilation failed and the bytes
+were corrected before continuing. Discovery then passed 15 tests. Documentation
+checking rejected bare prune after the owner move (process versus worktree);
+process examples now use `lf mon prune`. Pending final results follow here.
+
+Final focused checks for this cut (scrubbed LF_* and source-pinned LF_BIN):
+- CLI discovery 15 and documentation ambiguity 3 passed; parser library 44 and
+  CLI argument handling 28 passed. Home/SSH parser tests initially retained root
+  paths; corrected canonical expectations without adding aliases.
+- Monitor state projection 1, Exec paging/history 1, bound Task contribution 1,
+  and active NDJSON/EOF lifetime 1 passed. Real disposable stores/processes;
+  Task Flow provider output is simulated, not live provider acceptance.
+- Swift ConversationLaunch/RegistryQuery/Active observation: 26 passed. The
+  public CLI stream observed two real cat clients, rescan, exit and reader
+  cleanup. Initial failures exposed a stale removed-import fixture and a
+  mistakenly changed query-local Wave expectation. Fixture now seeds current
+  Session SQL like the Rust stream proof. A prior Swift compile failed because
+  a comment edit overlapped compilation; that attempt supplies no passing proof.
+- All-target Clippy (four jobs), formatting and diff checks passed. Compiled
+  extraction: 127 commands below root, 424 flags, 84 positionals, 16 hidden,
+  zero aliases. Baseline: 141/440/95/18/10; independent pre-model cut:
+  123/393/82/15/0. Actual model inputs are in cli-integrated-surface.md.
+
+No installed-store access, live provider login/result, remote Home launch or
+hosted publication was performed. Final readiness/discovery and managed-Flow
+catalog agreements remain unfinished. The rebase lineage refusal is preserved
+above; subsequent reconciliation must use Loopflow's operation.

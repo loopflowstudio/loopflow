@@ -73,9 +73,12 @@ pub fn execute_flow_command(
         Some(Commands::Repo {
             cmd: RepoCommand::Release { cmd },
         }) => execute_release(repo, cmd, progress),
-        Some(Commands::Doctor {
-            json,
-            planning: false,
+        Some(Commands::Home {
+            cmd:
+                crate::lf::HomeCommand::Doctor {
+                    json,
+                    planning: false,
+                },
         }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),

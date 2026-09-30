@@ -32,7 +32,7 @@ A Wave directing a task is the internal case:
 
 ```bash
 lf checkout INF-123                              # tracked Work, no execution
-lf --task INF-123 research "write scratch/api.md"    # independent conversation
+lf --as task:INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
@@ -82,8 +82,8 @@ merge, then replays only child-authored commits onto `main`.
 
 ```bash
 lf comment INF-123 "keep the public API" # post a Linear Task comment
-lf --wave <wave> wave/operate "prioritize the parser"
-lf --wave <wave> wave/operate "reassess Project priorities"
+lf --as wave:<wave> wave/operate "prioritize the parser"
+lf --as wave:<wave> wave/operate "reassess Project priorities"
 ```
 
 Comment on the Linear Task directly, or use `task comment`. Both reach only the
@@ -154,8 +154,8 @@ lf wave list --json                    # every durable Wave and its Home/runtime
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json                      # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
-lf runs --project parser --json
-lf runs --task INF-123 --json
+lf usage --days 0 --project parser --json
+lf usage --days 0 --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf ps --json                # one OS-live process frame
@@ -168,7 +168,7 @@ carries one typed fact with its execution, Task PR, or Steer evidence. Agents co
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Home. Use `lf ssh <home-id> ...`
-to execute the same read remotely. The historical `lf runs` interface and `lf usage` read that Home's evidence;
+to execute the same read remotely. The historical `lf monitor list` interface and `lf usage` read that Home's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

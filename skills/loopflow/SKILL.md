@@ -102,7 +102,7 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 ```bash
 lf home id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no Run is live
-lf --wave <wave> wave/operate                    # one finite pass here
+lf --as wave:<wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```

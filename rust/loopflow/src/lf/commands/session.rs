@@ -8,6 +8,9 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
+    if let SessionCommand::Ask { ask } = command {
+        return super::ask::run(ask);
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
@@ -28,6 +31,7 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Ask { .. } => unreachable!("Ask dispatch precedes the Session runtime"),
         SessionCommand::History {
             id,
             json,
@@ -171,8 +175,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_ask(&store, run_id).await
         }
-        SessionCommand::StopRun { run_id } => {
-            crate::ops::human_session::stop_session_client(run_id)
+        SessionCommand::StopClient { input } => {
+            crate::ops::human_session::stop_session_client(input)
         }
     }
 }

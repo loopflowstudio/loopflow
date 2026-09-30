@@ -102,7 +102,8 @@ pub(crate) async fn exec_driver(id: &str) -> Result<()> {
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let argv = vec![
         lf.display().to_string(),
-        "-b".into(),
+        "--mode".into(),
+        "batch".into(),
         "flow".into(),
         "resume".into(),
         id.into(),

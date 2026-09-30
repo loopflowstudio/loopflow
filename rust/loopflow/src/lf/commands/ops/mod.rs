@@ -791,6 +791,7 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             dry_run,
             json,
         } => {
+            let repo = crate::repo::working_directory()?;
             let rotation = crate::ops::chapter::new_chapter(&repo, name, *dry_run)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&rotation)?);

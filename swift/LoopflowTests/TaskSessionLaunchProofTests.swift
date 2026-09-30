@@ -85,7 +85,7 @@ struct TaskSessionLaunchProofTests {
             fi
             if [ "$mode" = "missing-helper" ]; then chmod -x "$0"; fi
             cat "$fixture_dir/receipt.json"
-        elif [ "$1" = "--interactive" ]; then
+        elif [ "$1" = "--mode" ] && [ "$2" = "interactive" ]; then
             printf '%s\n' "$@" > "$fixture_dir/conversation-args"
             pwd > "$fixture_dir/conversation-cwd"
             exec /bin/cat
@@ -195,7 +195,7 @@ struct TaskSessionLaunchProofTests {
                     .text().string() == checkout.lastPathComponent)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
-                #expect(args.hasPrefix("--interactive\n--task\nW2-131\n:\n"))
+                #expect(args.hasPrefix("--mode\ninteractive\n--as\ntask:W2-131\n:\n"))
                 let cwd = try String(contentsOf: directory.appendingPathComponent("conversation-cwd"), encoding: .utf8)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 #expect(URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path == checkout.resolvingSymlinksInPath().path)

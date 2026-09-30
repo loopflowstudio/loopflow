@@ -771,9 +771,10 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
     let mut command = Command::new(&spec.lf_path);
     command
         .args([
-            "--wave",
-            &spec.wave,
-            "--batch",
+            "--as",
+            &format!("wave:{}", spec.wave),
+            "--mode",
+            "batch",
             spec.target_kind.as_str(),
             "--",
             &spec.flow,

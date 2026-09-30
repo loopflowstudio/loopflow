@@ -1,7 +1,7 @@
 # Waves
 
 ```bash
-lf --wave shipper wave/operate "invoices first"
+lf --as wave:shipper wave/operate "invoices first"
 lf wave status shipper
 ```
 
@@ -21,9 +21,9 @@ Session for a conversation, or invoke `wave/operate` for a bounded planning pass
 ## Operate manually
 
 ```bash
-lf --wave shipper wave/operate "Review delivery and the checkout dependency"
+lf --as wave:shipper wave/operate "Review delivery and the checkout dependency"
 lf vsm-operate
-lf --wave shipper s2 : "Investigate the repeated checkout conflict"
+lf --as wave:shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
 `wave/operate` considers delivery, coordination, present capacity, adaptation
@@ -145,7 +145,7 @@ radius crosses storage, auth, or public APIs.
 ```
 
 Work placement records the owning Home. Use `lf cron`
-for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
+for scheduled commands and `lf --as wave:<name> wave/operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
 `s1`…`s5`. Goal authoring is covered in [Authoring → Goals](authoring.md#goals).
@@ -230,7 +230,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf runs --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf usage --days 0 --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -330,7 +330,7 @@ durable Task Work in its own stable sibling worktree:
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
 lf checkout INF-123
-lf --task INF-123 research "write scratch/retry-analysis.md"
+lf --as task:INF-123 research "write scratch/retry-analysis.md"
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 --flow incident

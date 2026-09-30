@@ -348,7 +348,7 @@ fn repository_team_matrix() {
     for args in [
         &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
-        &["roadmap", "--wave", "survival", "--json"][..],
+        &["roadmap", "--as", "wave:survival", "--json"][..],
     ] {
         let output = run_lf(&home, &repo, args);
         let error = String::from_utf8_lossy(&output.stderr);

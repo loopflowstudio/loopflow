@@ -53,7 +53,7 @@
       "target": "lf home user",
       "concept": "Configured participant display name",
       "follows": "LOO-338; Jack Heart 2026-09-30",
-      "decision_state": "implemented after main rebase; focused public CLI proof"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C002",
@@ -85,7 +85,7 @@
       "target": "lf home user",
       "concept": "Participant display name",
       "follows": "LOO-338; Jack Heart 2026-09-30",
-      "decision_state": "implemented after main rebase; focused public CLI proof"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C003",
@@ -144,7 +144,7 @@
       "target": "lf home desktop",
       "concept": "Desktop application activation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C005",
@@ -176,7 +176,7 @@
       "target": "lf home screenshot",
       "concept": "Raster capture of a page with a bounded browser lifetime",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C006",
@@ -262,7 +262,7 @@
       "target": "lf session ask",
       "concept": "Synchronous request for a new durable review conversation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C009",
@@ -358,7 +358,7 @@
       "target": "lf session connect",
       "concept": "Continuation of a durable AgentSession",
       "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C012",
@@ -515,12 +515,12 @@
           "runtime child"
         ]
       ],
-      "overlap": "Concept: Termination of the exact provider execution owned by a completed review. LOO-298 owns exact process evidence and Exec identity; migrate its child caller together.",
+      "overlap": "An Exec is an lf process; this callback stops a native client selected by capture identity. Calling it stop-exec would misstate its signal authority.",
       "verdict": "rename",
-      "target": "lf session stop-exec",
-      "concept": "Termination of the exact provider execution owned by a completed review",
+      "target": "lf session stop-client",
+      "concept": "Stop the precisely owned native client for a retained Session input",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented; selected autonomously under Jack Heart\u2019s latest steer"
     },
     {
       "row_id": "C018",
@@ -552,7 +552,7 @@
       "target": "lf home install",
       "concept": "Selection and activation of a verified machine installation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C019",
@@ -584,7 +584,7 @@
       "target": "lf home install schedule",
       "concept": "Automatic activation of published software on a machine schedule",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C020",
@@ -606,7 +606,7 @@
       "target": "lf home install recover-switch",
       "concept": "Recovery of an interrupted installation selection transaction",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C021",
@@ -638,7 +638,7 @@
       "target": "lf home install preflight",
       "concept": "Published-candidate compatibility with the selected installation store",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C022",
@@ -670,7 +670,7 @@
       "target": "lf home install local-preflight",
       "concept": "Development-candidate compatibility with an explicitly retained private store",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C023",
@@ -692,13 +692,13 @@
       "target": "lf home install advance-switch",
       "concept": "Receipt-authorized schema advancement by the pinned candidate",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C024",
       "path": "lf install promote",
       "owner": "lf home install",
-      "description": "Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence",
+      "description": "Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses \u2014 leaving every target unchanged \u2014 on incompatible schema or persisted executable evidence",
       "hidden": true,
       "source_line": 1189,
       "source_end": 1230,
@@ -719,12 +719,12 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Concept: Atomic activation of a specific candidate's CLI, daemon, app and store. Owns Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence; no equivalent operation identified.",
+      "overlap": "Concept: Atomic activation of a specific candidate's CLI, daemon, app and store. Owns Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses \u2014 leaving every target unchanged \u2014 on incompatible schema or persisted executable evidence; no equivalent operation identified.",
       "verdict": "rename",
       "target": "lf home install promote",
       "concept": "Atomic activation of a specific candidate's CLI, app and store",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C025",
@@ -740,7 +740,7 @@
       "target": "lf home install rollback",
       "concept": "Restoration of retained installed bytes compatible with the existing store",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C026",
@@ -820,7 +820,7 @@
       "target": "lf task pr",
       "concept": "Current pull request summary",
       "follows": "LOO-338; Jack Heart 2026-09-30",
-      "decision_state": "implemented after main rebase; focused public CLI proof"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C029",
@@ -1885,7 +1885,7 @@
       "target": "lf home sync-skills",
       "concept": "Export of authored skills into provider-native skill directories",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C069",
@@ -1917,7 +1917,7 @@
       "target": "lf wave cron",
       "concept": "Wave schedule declaration and execution namespace",
       "follows": "LOO-332",
-      "decision_state": "integration choice open"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C070",
@@ -1939,7 +1939,7 @@
       "target": "lf wave cron add",
       "concept": "Installation of one manually declared scheduled invocation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C071",
@@ -1971,7 +1971,7 @@
       "target": "lf wave cron list",
       "concept": "Installed schedule inventory",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C072",
@@ -2003,7 +2003,7 @@
       "target": "lf wave cron preflight",
       "concept": "Read-only feasibility of declared Wave schedules on their owning Home",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C073",
@@ -2035,7 +2035,7 @@
       "target": "lf wave cron sync",
       "concept": "Reconciliation of installed jobs with authored Wave schedule declarations",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C074",
@@ -2057,7 +2057,7 @@
       "target": "lf wave cron run",
       "concept": "Receipt-bearing execution of one scheduled invocation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C075",
@@ -2089,7 +2089,7 @@
       "target": "lf wave cron history",
       "concept": "Observed scheduled invocation outcomes",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C076",
@@ -2121,7 +2121,7 @@
       "target": "lf wave cron trigger",
       "concept": "Explicit firing of an installed scheduled invocation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C077",
@@ -2143,7 +2143,7 @@
       "target": "lf wave cron remove",
       "concept": "Removal of an installed scheduled invocation",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C078",
@@ -2349,7 +2349,7 @@
       ],
       "overlap": "Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired empty Wave registration cleanup",
       "follows": "LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -2435,7 +2435,7 @@
       ],
       "overlap": "Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired resident Wave lifecycle",
       "follows": "LOO-298; LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -2465,7 +2465,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "LOO-298 makes the chapter clock repository-wide. Preserve each Wave’s plan and transferred Task identity; do not keep a separate per-Wave boundary writer.",
+      "overlap": "LOO-298 makes the chapter clock repository-wide. Preserve each Wave\u2019s plan and transferred Task identity; do not keep a separate per-Wave boundary writer.",
       "verdict": "rename",
       "target": "lf repo new-chapter",
       "concept": "Repository-wide chapter boundary",
@@ -3233,7 +3233,7 @@
       "target": "lf monitor ps",
       "concept": "One current process observation",
       "follows": "Jack Heart 2026-09-30; LOO-298",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C117",
@@ -3265,7 +3265,7 @@
       "target": "lf monitor top",
       "concept": "Continuous process monitoring",
       "follows": "Jack Heart 2026-09-30; LOO-298",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C118",
@@ -3297,7 +3297,7 @@
       "target": "lf monitor prune",
       "concept": "Cleanup of proven owned orphan processes and stale process receipts",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C119",
@@ -3329,7 +3329,7 @@
       "target": "lf home doctor",
       "concept": "Diagnosis of ledger, installation and planning consistency",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C120",
@@ -3457,7 +3457,7 @@
       "target": "lf monitor activity",
       "concept": "Chronological changes in durable Work, delivery and direction",
       "follows": "LOO-298; LOO-334",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C124",
@@ -3484,12 +3484,12 @@
           "Desktop"
         ]
       ],
-      "overlap": "Jack selects the Monitor owner but leaves view/flag keep-or-cut choices open at demo. Compare A470–A481 against ps/top and Exec/AgentSession/FlowSession readers in the measurement table. Do not relabel Run records.",
+      "overlap": "Jack selects the Monitor owner but leaves view/flag keep-or-cut choices open at demo. Compare A470\u2013A481 against ps/top and Exec/AgentSession/FlowSession readers in the measurement table. Do not relabel Run records.",
       "verdict": "merge into",
       "target": "lf monitor",
       "concept": "Execution and conversation evidence inspection",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C125",
@@ -3545,7 +3545,7 @@
       ],
       "overlap": "Concept: Retired rejection-only namespace with no remaining operation. Retired namespace rejection shim; no operation remains.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired rejection-only namespace with no remaining operation",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
@@ -3580,7 +3580,7 @@
       "target": "lf home ssh",
       "concept": "Execution on a selected Home through an explicit SSH transport",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C130",
@@ -3730,7 +3730,7 @@
       "target": "lf help flow",
       "concept": "Read-only authored Flow compilation",
       "follows": "LOO-338; Jack Heart 2026-09-30",
-      "decision_state": "implemented after main rebase; focused public CLI proof"
+      "decision_state": "implemented on integrated Exec/Session tree; focused proof recorded in working design"
     },
     {
       "row_id": "C135",
@@ -3759,7 +3759,7 @@
       ],
       "overlap": "LOO-298 consumes the selected successful structured provider result. Remove in-turn cursor command; do not delete retained decision evidence.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side decision verdict",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -3791,7 +3791,7 @@
       ],
       "overlap": "LOO-298 selects branch through successful structured result, not an agent-issued navigation command.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side branch verdict",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -3823,7 +3823,7 @@
       ],
       "overlap": "LOO-298 records structured blocked result and keyed Ask returns to that conversation. Remove redundant in-turn decision mutation.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side blocked verdict",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -5871,7 +5871,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to resumable conversations and pending review obligations.",
@@ -6063,7 +6063,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to continuation of a durable agentsession.",
@@ -6494,7 +6494,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to conversation title with explicit authorship precedence.",
@@ -7241,7 +7241,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to published-candidate compatibility with the selected installation store.",
@@ -7384,7 +7384,7 @@
           "test"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to development-candidate compatibility with an explicitly retained private store.",
@@ -7981,10 +7981,10 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls read-only calculation of this mutation’s effects. Preview existing operation, no second writer. Plan/preview vocabulary requires demo decision R07.",
+      "overlap": "Controls read-only calculation of this mutation\u2019s effects. Preview existing operation, no second writer. Plan/preview vocabulary requires demo decision R07.",
       "verdict": "keep",
       "target": "--preview",
-      "concept": "Atomic activation of a specific candidate's CLI, app and store: read-only calculation of this mutation’s effects.",
+      "concept": "Atomic activation of a specific candidate's CLI, app and store: read-only calculation of this mutation\u2019s effects.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
     },
@@ -10593,7 +10593,7 @@
       ],
       "overlap": "Ignored: run_wt destructures List with ..; no effect (ops/mod.rs:1516).",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Inventory of physical checkouts and their branch facts: ignored worktree-list presentation switch.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
@@ -11569,7 +11569,7 @@
       ],
       "overlap": "LOO-340 makes observation live by default. Add --cached as the explicit no-contact mode; do not retain a redundant live toggle.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Provider access, identity and capacity: live account identity and capacity observation; replaced by the live default in LOO-340.",
       "follows": "LOO-339; LOO-340",
       "decision_state": "adopted target; implementation not implied"
@@ -13532,10 +13532,10 @@
       "description": "Print notes without updating manifests or release archives",
       "source_line": 1596,
       "callers": [],
-      "overlap": "Controls read-only calculation of this mutation’s effects. Preview existing operation, no second writer. Plan/preview vocabulary requires demo decision R07.",
+      "overlap": "Controls read-only calculation of this mutation\u2019s effects. Preview existing operation, no second writer. Plan/preview vocabulary requires demo decision R07.",
       "verdict": "keep",
       "target": "--preview",
-      "concept": "Authored release narrative and its archival destination: read-only calculation of this mutation’s effects.",
+      "concept": "Authored release narrative and its archival destination: read-only calculation of this mutation\u2019s effects.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
     },
@@ -14291,7 +14291,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to stable execution-destination identity of this machine.",
@@ -14481,7 +14481,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to observed network route to a known execution destination.",
@@ -14932,7 +14932,7 @@
           "test"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to installed schedule inventory.",
@@ -15509,7 +15509,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to observed scheduled invocation outcomes.",
@@ -15699,10 +15699,10 @@
           "test"
         ]
       ],
-      "overlap": "Controls waiting for the fired schedule’s receipt. Input to this operation; same spelling elsewhere selects that other object.",
+      "overlap": "Controls waiting for the fired schedule\u2019s receipt. Input to this operation; same spelling elsewhere selects that other object.",
       "verdict": "keep",
       "target": "--wait",
-      "concept": "Explicit firing of an installed scheduled invocation: waiting for the fired schedule’s receipt.",
+      "concept": "Explicit firing of an installed scheduled invocation: waiting for the fired schedule\u2019s receipt.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
     },
@@ -16001,7 +16001,7 @@
           "Desktop"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to repository-authored responsibilities.",
@@ -17063,7 +17063,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired empty Wave registration cleanup: owner name or local checkout/slug identity.",
       "follows": "LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17107,7 +17107,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired empty Wave registration cleanup: read-only preview of the selected mutation.",
       "follows": "LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17151,7 +17151,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared json protocol applied to retired empty wave registration cleanup.",
       "follows": "LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17193,7 +17193,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired empty wave registration cleanup.",
       "follows": "LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17334,7 +17334,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to execution placement of a durable responsibility.",
@@ -17657,7 +17657,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired resident Wave lifecycle: owner name or local checkout/slug identity.",
       "follows": "LOO-298; LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17694,7 +17694,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired resident Wave lifecycle: durable explanation for disposition or retry.",
       "follows": "LOO-298; LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17733,7 +17733,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared json protocol applied to retired resident wave lifecycle.",
       "follows": "LOO-298; LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -17770,7 +17770,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired resident wave lifecycle.",
       "follows": "LOO-298; LOO-334",
       "decision_state": "adopted target; implementation not implied"
@@ -18007,7 +18007,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to repository-wide chapter boundary.",
@@ -18150,7 +18150,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to recorded repository chapter boundaries.",
@@ -18705,7 +18705,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to allocation or recovery of a tracked task checkout without execution.",
@@ -19510,7 +19510,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to creation of a planning task with optional execution.",
@@ -19653,7 +19653,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to one task's disposition, execution evidence and available actions.",
@@ -20133,7 +20133,7 @@
           "test"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to inspection of checkout changes against a task's base.",
@@ -20372,7 +20372,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to revision-bearing content of one file and its recovery versions.",
@@ -20589,7 +20589,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to conditional replacement of file content with retained recovery bytes.",
@@ -20774,7 +20774,7 @@
           "test"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to successful disposition of a task after delivery settlement.",
@@ -21340,7 +21340,7 @@
           "Desktop"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to append-only direction and discussion for a task.",
@@ -21483,7 +21483,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to interruption of a task's current provider turn.",
@@ -21722,7 +21722,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to waiting for an observable task condition.",
@@ -22054,7 +22054,7 @@
           "Desktop"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to tracked source size and history measured in lines and tokens.",
@@ -22194,7 +22194,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to provider-authored consumption attributed to work.",
@@ -22474,7 +22474,7 @@
           "test"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to repository maintainer metric evaluation from recorded evidence.",
@@ -22708,7 +22708,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to home-wide history of failed-ci response and settlement.",
@@ -22802,7 +22802,7 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to one current process observation.",
@@ -22896,7 +22896,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to continuous process monitoring.",
@@ -23038,7 +23038,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to cleanup of proven owned orphan processes and stale process receipts.",
@@ -23180,7 +23180,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to diagnosis of ledger, installation and planning consistency.",
@@ -23320,7 +23320,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to discovery of executable commands and authored definitions.",
@@ -23600,7 +23600,7 @@
           "Desktop"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to repository portfolio of tasks and unlinked checkout/pr work.",
@@ -23976,7 +23976,7 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "--json",
       "concept": "Shared json protocol applied to chronological changes in durable work, delivery and direction.",
@@ -24704,7 +24704,7 @@
       "short_aliases": [],
       "row_id": "A498",
       "canonical": "lf op <removed>",
-      "owner": "—",
+      "owner": "\u2014",
       "description": "Select removed",
       "source_line": 600,
       "callers": [
@@ -24721,7 +24721,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Concept: Retired rejection-only namespace with no remaining operation. Retired namespace rejection shim; no operation remains.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired rejection-only namespace with no remaining operation: operand of a retired rejection shim.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
@@ -24745,7 +24745,7 @@
       "short_aliases": [],
       "row_id": "A499",
       "canonical": "lf op <rest>",
-      "owner": "—",
+      "owner": "\u2014",
       "description": "Select rest",
       "source_line": 602,
       "callers": [
@@ -24762,7 +24762,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Concept: Retired rejection-only namespace with no remaining operation. Retired namespace rejection shim; no operation remains.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired rejection-only namespace with no remaining operation: discarded passthrough of a retired rejection shim.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
@@ -24786,7 +24786,7 @@
       "short_aliases": [],
       "row_id": "A500",
       "canonical": "lf op --help",
-      "owner": "—",
+      "owner": "\u2014",
       "description": "Explain this canonical command without performing it",
       "source_line": 598,
       "callers": [
@@ -24803,7 +24803,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: Concept: Retired rejection-only namespace with no remaining operation. Retired namespace rejection shim; no operation remains.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired rejection-only namespace with no remaining operation.",
       "follows": "LOO-338 catalog and primary-source research",
       "decision_state": "adopted target; implementation not implied"
@@ -25404,7 +25404,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Controls machine serialization of this operation’s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
+      "overlap": "Controls machine serialization of this operation\u2019s documented result (never progress). Keep DTO contract; errors/progress on stderr, streams explicit (R03).",
       "verdict": "keep",
       "target": "lf flow list --json",
       "concept": "Shared json protocol applied to saved flowsession inventory.",
@@ -25668,7 +25668,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 consumes the selected successful structured provider result. Remove in-turn cursor command; do not delete retained decision evidence.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side decision verdict: verdict for a captured repeat boundary.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25715,7 +25715,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 consumes the selected successful structured provider result. Remove in-turn cursor command; do not delete retained decision evidence.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side decision verdict: durable completion, readiness or verdict explanation.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25762,7 +25762,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 consumes the selected successful structured provider result. Remove in-turn cursor command; do not delete retained decision evidence.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired command-side decision verdict.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25809,7 +25809,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 selects branch through successful structured result, not an agent-issued navigation command.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side branch verdict: command/definition path or checkout file path.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25856,7 +25856,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 selects branch through successful structured result, not an agent-issued navigation command.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired command-side branch verdict.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25903,7 +25903,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 records structured blocked result and keyed Ask returns to that conversation. Remove redundant in-turn decision mutation.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Retired command-side blocked verdict: durable explanation for disposition or retry.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -25950,7 +25950,7 @@
       ],
       "overlap": "Owning obsolete operation is removed: LOO-298 records structured blocked result and keyed Ask returns to that conversation. Remove redundant in-turn decision mutation.",
       "verdict": "delete",
-      "target": "—",
+      "target": "\u2014",
       "concept": "Shared help protocol applied to retired command-side blocked verdict.",
       "follows": "LOO-298",
       "decision_state": "adopted target; implementation not implied"
@@ -26360,7 +26360,7 @@
   "review": "2026-09-30 destination-aware concept cull; targets are not implementation counts",
   "shared_protocols": {
     "help": "One generated command/definition inspection protocol applied at each invocation. Repetition across distinct objects is syntax, not separate domain operations.",
-    "json": "One output protocol applied to each operation’s own DTO; no universal guessed schema, no progress on stdout."
+    "json": "One output protocol applied to each operation\u2019s own DTO; no universal guessed schema, no progress on stdout."
   },
   "navigation": "Exact commands first; unique owner omission and unique command-prefix resolution. mon is derived, not a registered alias. Guides use shortest unique spelling; references/help show canonical ownership."
 }

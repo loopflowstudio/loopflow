@@ -266,7 +266,7 @@ secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf observe` records the
 mutable SSH route for the stable HomeId. Placement is allowed only while no Run
-is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
+is live. `lf --as wave:<wave> wave/operate` makes a finite pass locally; prefix it with
 `lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
 changing placement, or starting a Wave; each changes durable execution state.
 
@@ -301,7 +301,7 @@ Accounts     GitHub + Linear connected
 Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
-Next         lf --wave designer wave/operate
+Next         lf --as wave:designer wave/operate
 Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 

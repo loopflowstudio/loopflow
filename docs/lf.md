@@ -1,11 +1,5 @@
 # lf CLI
 
-> Design draft. Discovery (`run`, `help`, `list`, typed definitions, and unique
-> command shorthand) and Task delivery owners are implemented on this branch.
-> Account with live and cached inspection, plus Repo release, tokens and CI,
-> are implemented. The other owner moves and Monitor overview below remain
-> unimplemented.
-
 ## Run a workflow
 
 ```bash
@@ -41,7 +35,7 @@ lf interrupt EXP-12                    # end the current provider turn
 lf task run EXP-12                     # continue with retained direction
 
 lf session list                        # find open conversations and reviews
-lf session open SESSION_ID             # join or resume one
+lf session connect SESSION_ID             # join or resume one
 lf session complete SESSION_ID         # return feedback to its caller
 ```
 
@@ -52,17 +46,17 @@ step decides whether to advance or revise; closing the terminal does neither.
 ## Inspect work
 
 ```bash
-lf monitor                          # proposed overview: waiting, blocked, active, finished
-lf task list                        # repository Tasks and unlinked checkout/PR work
+lf monitor                          # waiting, blocked, active, finished
+lf roadmap                          # current plans and recorded Task state
 lf wave status exports              # progress toward a Wave's goals
 lf mon activity --task EXP-12        # recorded changes to the work
 lf mon ps                           # snapshot of live processes and call trees
 lf mon top                          # continuously refresh the live view
-lf runs INPUT --final                # the recorded conclusion of one captured input
+lf monitor show SESSION --input INPUT --final                # the recorded conclusion of one captured input
 lf mon usage --days 30               # reported consumption
 ```
 
-The proposed overview includes the reason and next action for each item.
+The overview includes the reason and next action for each item.
 Inspection reads this computer. Live processes, recorded outcomes, and missing
 observations remain distinct. `mon` is short for `monitor`.
 `lf ps` and `lf top` resolve to the same operations through owner shorthand.
@@ -83,7 +77,7 @@ lf submit                              # prepare for a reviewer's merge click
 lf arm                                 # prepare, request auto-merge, and return
 lf land                                # prepare, watch, repair CI, and finish merged
 lf land -c                             # also complete the owning Task
-lf repo run patch                      # verify, prepare notes, tag, and publish a release
+lf release run patch                      # verify, prepare notes, tag, and publish a release
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land

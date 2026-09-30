@@ -1,7 +1,7 @@
 # Execution
 
 ```bash
-lf -b implement
+lf --mode batch implement
 lf session list --interactive false --json
 lf session connect SESSION
 ```

@@ -40,7 +40,7 @@ These notes do not own live planning or recovery.
 
 ## Shape one plan per Wave
 
-Launch bounded `lf -b --wave <name> wave/start-chapter "<chapter name, accepted
+Launch bounded `lf --mode batch --wave <name> wave/start-chapter "<chapter name, accepted
 brief, exact prior ledger>"` Runs. For a proposed uninitialized Wave use an
 unbound Run with its exact name and boundary. Children propose, return agree or
 challenge, and never mutate live planning. Do not launch Project planning Runs.

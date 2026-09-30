@@ -1,9 +1,9 @@
 # Planning
 
 ```bash
-lf --wave product wave/operate
+lf --as wave:product wave/operate
 lf checkout INF-124
-lf --task INF-124 research "write scratch/runtime.md"
+lf --as task:INF-124 research "write scratch/runtime.md"
 lf task run INF-124
 lf new-chapter 2026-10 --dry-run
 ```
@@ -142,7 +142,7 @@ Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
 lf comment INF-124 "keep the public name"
-lf --wave product wave/operate "review the current priorities"
+lf --as wave:product wave/operate "review the current priorities"
 ```
 
 Linear owns authored Task comments. Only the claimed Task advancer attempts live

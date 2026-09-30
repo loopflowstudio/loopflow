@@ -1,9 +1,5 @@
 # lf command reference
 
-> Design preview: the target CLI for this branch, not the installed binary.
-> Task delivery, Account with live and cached inspection, and Repo release/tokens/CI are implemented;
-> the remaining owner moves and Monitor overview are still in progress.
-
 For examples ordered by workflow, see [lf CLI](lf.md). This page lists
 individual controls, arguments, and effects.
 
@@ -71,8 +67,7 @@ lf repo publish                        # repo release publish
 
 An exact command wins first. Otherwise, Loopflow searches beneath the owner
 already entered. One exact match expands to its full path. If no exact name matches, a unique
-command-name prefix expands the same way (for example `mon` for `monitor` once
-that group is available). Multiple matches execute nothing. At the root, the search
+command-name prefix expands the same way (for example `mon` for `monitor`). Multiple matches execute nothing. At the root, the search
 covers the whole command tree. Any number of leading owners can be omitted.
 
 Multiple matches print the choices and execute nothing:
@@ -99,8 +94,7 @@ lf mon top                             # unique command prefix
 lf account
 ```
 
-Commands have one canonical name. `monitor` also has the selected short spelling
-`mon`, derived by unique-prefix resolution. Ambiguous prefixes fail; no extra
+Commands have one canonical name. `mon` resolves to `monitor` through unique-prefix resolution. Ambiguous prefixes fail; no extra
 registered aliases are added.
 Already-short names such as `pr`, `task`, and `land` use that one spelling.
 Print the machine identifier with `lf home id`. The account family has no
@@ -223,11 +217,11 @@ skills; XOR `flow:` accepts either kind.
 ### Context and launch options
 
 ```bash
-lf --task DES-123 run research "Map the runtime behavior"
-lf --wave designer skill wave/operate "Review the chapter evidence"
+lf --as task:DES-123 run research "Map the runtime behavior"
+lf --as wave:designer skill wave/operate "Review the chapter evidence"
 lf --as wave:designer : "Which outcome needs attention?"
 lf -m codex run implement --docs src/api/ -c
-lf skill design --tui
+lf skill design --mode tui
 ```
 
 `--task`, `--wave`, and `--as` select the work a direct launch concerns. They
@@ -245,10 +239,8 @@ an ordinary branch stays unbound.
 | `-c, --clipboard` | Include clipboard content |
 | `--diff files\|patch\|both\|none` | Select changed file bodies, patch, both, or neither; omission inherits config |
 | `--no-loopflow` | Omit Loopflow's operating guidance |
-| `-i, --interactive` | Run interactively |
-| `-b, --batch` | Run headlessly |
+| `--mode interactive\|batch\|tui\|ide` | Choose the launch surface; omission inherits configuration and terminal context |
 | `--max-turns N` | Bound provider turns for this launch |
-| `--tui` / `--ide` | Select terminal or supported provider-app handoff |
 | `--chrome on\|off` | Override browser automation; omission inherits config |
 
 Repository agent guidance, recursive scratch notes, and selected work context
@@ -413,9 +405,9 @@ FlowSession; their node and iteration positions distinguish their history.
 ## Task: concrete work and delivery
 
 ```bash
-lf task list                           # work in this repository
-lf task list --wave designer
-lf task list --all                     # work across this Home's repositories
+lf roadmap                             # current plans and recorded work
+lf roadmap --wave designer
+lf roadmap --all                        # plans across this Home's repositories
 lf task status                         # Task bound to this checkout
 lf task pr                      # current branch's PR, with or without a Task
 ```
@@ -424,8 +416,8 @@ Task commands manage concrete work. Commit, rebase, worktree, and PR operations
 also work in an ordinary checkout. They do not create an issue merely to satisfy
 the command path.
 
-Task list includes tracked Tasks and unlinked checkout/PR work, with missing
-issue links shown. Discovering that work does not create Task records.
+Roadmap joins planning evidence with recorded Task execution. Use `lf task wt list`
+for checkout inventory. Neither read creates a Task.
 
 ### Create and advance a Task
 
@@ -604,8 +596,8 @@ not invent another PR when settled work can already complete the Task.
 ```bash
 lf wave list
 lf wave status designer
-lf --wave designer : "Review the plan"
-lf --wave designer skill wave/operate "Review progress toward keyboard access"
+lf --as wave:designer : "Review the plan"
+lf --as wave:designer skill wave/operate "Review progress toward keyboard access"
 ```
 
 A Wave keeps long-term goals and persistent notes in `wave/NAME/GOAL.md` and
@@ -656,8 +648,8 @@ provider Projects.
 ### Conversations
 
 ```bash
-lf --wave product : "Which Task should own this change?"
-lf --wave product wave/operate "Review the current blockers"
+lf --as wave:product : "Which Task should own this change?"
+lf --as wave:product wave/operate "Review the current blockers"
 doppler run -- lf discord serve product
 ```
 
@@ -713,7 +705,7 @@ These examples use current spellings. The lifecycle contract and remaining
 implementation are in [cutover status](architecture-reference.md#cutover-status).
 
 ```bash
-lf -b implement
+lf --mode batch implement
 lf session list --interactive false --task INF-123 --json
 lf session connect SESSION
 lf session rename SESSION "Migration review"
@@ -782,56 +774,43 @@ feedback to the following decision, which owns navigation. Closing a pane,
 exiting a provider, or marking ready never completes that review implicitly.
 
 Session identity and captured-input selection come from SQLite. Exact Session
-IDs select their current input; `lf runs INPUT --json` reads its recorded history
+IDs select their current input; `lf monitor show SESSION --input INPUT --json` reads its recorded history
 without requiring the payload file. There is no legacy Home import command.
 
 ## Monitor: history and live activity
 
-The proposed `monitor` owner is not yet implemented. These examples use the
-current history commands; their retained inputs belong to AgentSession history.
-
 ```bash
-lf wave list --json                    # every durable Wave and its Home/runtime evidence
-lf wave list --current --json          # current Waves, including stopped ones
-lf wave status <wave> --json         # Work, Runs, conditions, and live metric_portfolio
-lf roadmap --json               # current plan plus that portfolio on every Wave
-lf activity                     # durable Work changes, newest first
-lf activity --task INF-123 --json # filter before the bounded typed snapshot
-lf runs                         # recent Home-local Run records
-lf runs --active --json          # live Sessions and observation gaps
-lf runs --active --watch --json  # retain discovery and stream snapshots (macOS)
-lf runs --active --task LOO-291  # exact Task attribution, independent of checkout
-lf runs --project parser        # one Project's Runs, filtered before the result cap
-lf runs --parent run_ab12 --json # every direct child Run, uncapped
-lf runs run_ab12                 # inspect one Run by unambiguous prefix
-lf runs run_ab12 --final         # print the last durable provider conclusion
-lf runs run_ab12 --events        # print its retained event stream
-lf usage --project parser        # direct Run usage for one Project
-lf usage --task INF-123 --json   # direct Run evidence for one Task
-lf session list                  # Sessions, Work paths, actions and unavailable reasons
-lf session open sess_ab12         # resume an open conversation after provider exit
-lf session open sess_ab12 --try   # let the provider arbitrate an active session
-lf session open sess_ab12 --replace # stop Loopflow's client, then continue here
-lf session open sess_ab12 --json --replace # prepare a takeover command without stopping it yet
-lf session complete sess_ab12     # finish it; provider history remains resumable
-lf replay run_ab12               # launch that request as a child Run
-lf usage --days 30              # direct provider-authored usage per Run
-lf usage --days 0 --json        # all Session history; zero means all time
-lf ci --since 7d                # CI repair attempts, latency, and outcomes
-lf ci --since 7d --json         # complete machine-wide incident receipt
-lf ps                            # one OS-live process and call-tree snapshot
-lf ps --json                     # versioned flat nodes with stable parent ids
-lf top                           # refresh the same snapshot every two seconds on a TTY
-lf top --json                    # emit once; redirected output also emits once without ANSI
-lf prune --dry-run               # list stale receipts and registered orphan process groups
-lf prune                         # remove those receipts and reap those process groups
-lf doctor                       # audit continuity, identity, lineage, coverage, receipts
-lf doctor --json                # machine-readable audit
+lf monitor                              # waiting, blocked, active, finished and unknown
+lf monitor --all --json                  # Home-wide overview with observation gaps
+lf monitor list --limit 25 --json        # recorded Execs with continuation cursor
+lf monitor list --parent EXEC --json     # direct child commands, including completed ones
+lf monitor show EXEC --json              # command outcome and execution evidence
+lf monitor show SESSION --final          # latest captured provider conclusion
+lf monitor show SESSION --input INPUT --events # retained evidence for one input
+lf monitor active --task INF-123 --json  # current Session/process linkage and gaps
+lf monitor active --watch --json         # NDJSON observation until stdin closes (macOS)
+lf monitor usage --days 30               # provider consumption, preserving unknown usage
+lf monitor usage --parent SESSION --json # captured child inputs without a date cutoff
+lf monitor activity --task INF-123 --json # durable Work changes
+lf monitor ps --json                     # current process and call-tree snapshot
+lf monitor top                          # refresh on a terminal; snapshot when redirected
+lf monitor prune --dry-run               # exact orphan process and stale receipt targets
+lf home doctor --json                    # consistency and continuity diagnosis
 ```
 
-Continue a conversation with `lf session connect SESSION`. The obsolete
-`lf runs INPUT --resume` entry is removed; `lf runs` only inspects history.
-`lf replay INPUT` separately launches its immutable recorded request.
+The overview reads the current repository, or all repositories with `--all`.
+It separates Session/FlowSession state, live provider observations and recorded
+Exec outcomes. Missing liveness remains unknown; saved progress is not proof of
+an active driver. Every item carries a reason and next action. JSON preserves
+observation gaps and continuation cursors when an inventory exceeds its page.
+
+`monitor list` replaces the duplicate command-history readers. Session usage
+retains its distinct accounting window and attribution filters. Active discovery
+retains its stream and stdin lifetime; `top --json` is only one process snapshot.
+`monitor show` accepts an Exec or Session identity, never a captured-input key
+alone. Use `--input` with its owning Session to inspect older retained evidence.
+Continue conversations with `lf session connect SESSION`; replaying an immutable
+request remains the separate `lf replay INPUT` launch operation.
 
 Session replacement and native client stopping require readable process evidence.
 If inspection fails, retry after it is available; the command leaves termination
@@ -840,7 +819,7 @@ cleanup failure, which is reported separately from completing the review.
 Native client publication and stopping share exact launch exclusion, so stopping waits
 for an in-flight launcher to publish its client before inspecting it. A Task
 with confirmed deletion cannot start an Ask or resume a native Session. Exact
-`runs --active --task ISSUE` still inspects its retained process evidence.
+`lf monitor active --task ISSUE` still inspects its retained process evidence.
 
 `lf wave list` reads the local Wave registry. `--current` excludes abandoned and retired
 registrations. `lf roadmap --all` spans repositories without inheriting the
@@ -896,12 +875,12 @@ planning and runtime projection. `lf roadmap` overlays the current
 Linear-backed plan without creating a second runtime model. `lf activity`
 orders durable Work creation, execution, Task PR, and Steer facts; it reuses
 `WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf runs --task` selects retained AgentSession input history from the
+events. `lf usage --days 0 --task` selects retained AgentSession input history from the
 Home's SQLite store before decoding its evidence. Each input keeps its original
 Work attribution, provider, usage and outcome across conversation continuation.
 The historical command and JSON names remain during the coordinated wire cutover.
 
-`lf runs --active` retains its command spelling and now returns live AgentSessions.
+`lf monitor active` returns live AgentSessions.
 Rows use stable Session `id`, `title`, current typed `work`, and verified `processes`;
 input replacement does not change their identity. The JSON collection is `sessions`,
 replacing `runs`. Per-input subjects, harness, model and repository metadata are
@@ -947,10 +926,10 @@ creation path as any other launch.
 None of these commands silently queries or aggregates another Home.
 
 ```bash
-lf exec list --task LOO-298 --json
-lf exec list --all --search 'pr land' --outcome failed --limit 25 --json
-lf exec list --all --parent EXEC_ID --json
-lf exec show EXEC_ID --json
+lf monitor list --task LOO-298 --json
+lf monitor list --all --search 'pr land' --outcome failed --limit 25 --json
+lf monitor list --all --parent EXEC_ID --json
+lf monitor show EXEC_ID --json
 ```
 
 Exec history records actual `lf` processes and observed command results.
@@ -981,7 +960,7 @@ Both commands read process identity from the selected Exec ledger and ownership
 registry without migration. They do not replay command journals to reconstruct
 Execs or treat a recorded command outcome as current OS liveness. Source builds
 retain the same private-data selection as other commands.
-`lf prune` is the separate write boundary. It removes dead Exec receipts and
+`lf mon prune` is the separate write boundary. It removes dead Exec receipts and
 reaps only OpenCode process groups whose registered owner is absent. It never
 kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
 
@@ -998,7 +977,7 @@ a missing credential continues through the healthy fallback route.
 selected provider accounts. Both flags are repeatable and accept
 `claude=<selector>` or `codex=<selector>`. They cannot be combined.
 
-Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
+Use the flags for Claude and Codex terminal sessions too (`--mode tui`): logging
 into a managed login with a bare `codex login` creates a second session and
 evicts the managed one ("needs re-login"); entering through lf shares one
 session.
@@ -1008,7 +987,7 @@ route, then the default route. If neither exists, all automatic managed logins
 are eligible and Loopflow skips known cooling or limited accounts. If no
 managed login exists, the provider CLI uses its ambient default credentials.
 
-`lf usage` reads the same Home-local Session history as `lf runs`, newest first.
+`lf usage` reads Home-local Session input and provider usage history, newest first.
 `--days` defaults to 30; zero selects all retained history. Original manifest/SQL time selects imported history; new captures use their
 event observation time. Native turns without a captured input use
 their own first observed receipt, preserving missing capture/start membership.
@@ -1030,7 +1009,7 @@ prevents counting recorder checkpoints twice. Without a retained baseline, usage
 reports the observed suffix as partial. A native completion supplies neither
 missing usage nor a command outcome.
 
-Recent `lf runs` summaries select their budget before reading history payloads,
+Session usage summaries select their window before reading history payloads,
 retaining every eligible unfinished entry. Exact Task and caller drills have no
 presentation cap. A Session selector reads its current captured event. Historical records from
 retired owners are not imported; configured-provider acceptance remains separate.

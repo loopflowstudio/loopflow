@@ -272,8 +272,8 @@ record, return.
 
 ```bash
 lf checkout INF-123
-lf --task INF-123 research "write scratch/runtime.md"
-lf --task INF-123 research "write scratch/prompts.md"
+lf --as task:INF-123 research "write scratch/runtime.md"
+lf --as task:INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
 lf submit
@@ -291,9 +291,9 @@ Task worker, piecemeal helper AgentSessions, or another system.
 ### Bounded Task advancement
 
 ```bash
-lf --wave product wave/operate        # one finite planning pass
+lf --as wave:product wave/operate        # one finite planning pass
 lf task run INF-123
-lf --wave <wave> wave/operate "ship invoices first"
+lf --as wave:<wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 

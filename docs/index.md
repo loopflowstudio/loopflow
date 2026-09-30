@@ -16,7 +16,7 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 ## The pieces
 
 ```bash
-lf -b implement
+lf --mode batch implement
 lf session list --interactive false --json
 lf session connect SESSION
 lf task run INF-123

@@ -99,7 +99,7 @@ the Flow. Controls are disabled with Rust's reason when they cannot be used.
 A pinned Flow without a live worker reads **Stopped** and offers **Resume**;
 there is no Pause until Loopflow can hold a Flow at a boundary.
 **Recent runs** under the Flow reads nothing until expanded; it then lists that
-Task's newest 50 Runs from the last seven days (`lf runs --task ID --json`) with each recorded
+Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
@@ -171,7 +171,7 @@ The shared Session projection supplies action labels, unavailable reasons and Wo
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
-Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
+Task FlowSteps run ordinary `lf --mode tui --as task:<id> <skill>` provider Runs.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
@@ -361,7 +361,7 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
 Verified Exec/process and native-client receipts establish activity independently
 of command outcomes. Input replacement keeps the same row; unresolved engine
 ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness

@@ -410,7 +410,7 @@ async fn launch_keyed_ask<F: Future<Output = Result<AgentSession>>>(
         && !ask_exec_is_running(&id).await?
     {
         // Keep the Session on failure. A retry can start the same Session;
-        // a published native Run is reopened only through `lf session open`.
+        // a published native Run is reopened only through `lf session connect`.
         exec_ask(&session).await.with_context(|| {
             format!("launch human Ask {id}; retry the same boundary to recover")
         })?;
@@ -520,7 +520,7 @@ pub(crate) async fn task_waiting_unblock(
 
 fn report_ask_wait(id: &str) {
     eprintln!(
-        "Waiting for human session {id}. Open it in Loopflow or with `lf session open {id}`."
+        "Waiting for human session {id}. Open it in Loopflow or with `lf session connect {id}`."
     );
 }
 
@@ -1105,7 +1105,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession)
         let command = vec![
             "lf".to_string(),
             "session".to_string(),
-            "stop-run".to_string(),
+            "stop-client".to_string(),
             run_id.to_string(),
         ];
         tokio::task::spawn_blocking(move || {
@@ -1191,7 +1191,7 @@ async fn serve_flow_locked(
     };
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--model", &agent, "--as", &selector])
+        .args(["--mode", "tui", "--model", &agent, "--as", &selector])
         .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
@@ -1277,7 +1277,8 @@ async fn serve_locked(
 
 async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "--mode".to_string(),
+        "tui".to_string(),
         "--model".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
@@ -2167,7 +2168,7 @@ pub(crate) fn human_open_argv(
         }
         argv.push(home_id.to_string());
     }
-    argv.extend(["session".to_string(), "open".to_string(), id.to_string()]);
+    argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
     Ok(argv)
 }
 
@@ -3650,7 +3651,7 @@ mod tests {
         }
         let argv = argv.unwrap();
 
-        assert_eq!(&argv[argv.len() - 3..], ["session", "open", "ask_123"]);
+        assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }
 

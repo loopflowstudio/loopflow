@@ -128,7 +128,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         fs::File::create(home.path().join("runtime/opencode-servers.json.lock")).unwrap();
     fs2::FileExt::lock_exclusive(&registry_lock).unwrap();
     let mut watch = Owned(
-        command(home.path(), &["runs", "--active", "--watch", "--json"])
+        command(home.path(), &["monitor", "active", "--watch", "--json"])
             .spawn()
             .unwrap(),
     );
@@ -176,7 +176,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     assert!(client.0.try_wait().unwrap().is_none());
 
     let mut broken = Owned(
-        command(home.path(), &["runs", "--active", "--watch", "--json"])
+        command(home.path(), &["monitor", "active", "--watch", "--json"])
             .spawn()
             .unwrap(),
     );

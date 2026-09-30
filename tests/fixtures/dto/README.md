@@ -13,7 +13,7 @@ consume this wire.
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
-`session.json` pins `lf session open --json`: one unresolved Task FlowStep
+`session.json` pins `lf session connect --json`: one unresolved Task FlowStep
 session, its explicit readiness state, and its exact Home-local attach route.
 
 `session_memberships.json` pins each Session's required `flow_membership`:

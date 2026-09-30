@@ -143,7 +143,7 @@ pub(crate) async fn prepare_exec(
         version: flow.version,
     };
     command
-        .arg("--tui")
+        .args(["--mode", "tui"])
         .env(flow_run::FLOW_STEP_ENV, serde_json::to_string(&step)?);
     if let Some(model) = &flow.model {
         command.args(["--model", model]);

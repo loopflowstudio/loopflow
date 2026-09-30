@@ -8,7 +8,7 @@ state records enough evidence to resume the workflow safely.
 
 ```bash
 lf checkout INF-123
-lf --task INF-123 implement
+lf --as task:INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
 lf land -c
@@ -208,7 +208,7 @@ Rerun `lf land` after resolving a blocker. It resumes the existing landing
 under a fresh supervisor generation, including when the SHA has not changed.
 The waiting CLI displays completed `ci-fix` conclusions from recorded conversation
 records for this worktree, while the local process supervises the landing. Use
-`lf runs <run> --final` to inspect a conclusion separately.
+`lf monitor list <run> --final` to inspect a conclusion separately.
 
 Watched repairs return `published` or `blocked` with a summary in their existing
 final answer. A blocked result names the required action. The watcher observes

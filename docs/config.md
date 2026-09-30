@@ -72,7 +72,7 @@ config files.
 | Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
-| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
+| Claude/Codex/OpenCode launch surface | `--mode tui` / `--mode ide` | `session.launch: tui` |
 | Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
 ## Context Assembly
@@ -341,7 +341,7 @@ This list is additive across global and repo config.
 ### Run Mode
 
 Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
+TTY. Automated flow nodes and `--mode batch` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
@@ -412,7 +412,7 @@ session:
 
 `tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
 Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
-link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
+link. OpenCode is terminal-only. The per-run flags `--mode tui` / `--mode ide` override
 this default.
 
 ### Summaries

@@ -164,7 +164,13 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
     assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
-    assert!(!home.path().join(".lf").exists());
+    let db = rusqlite::Connection::open(home.path().join(".lf/store.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 
     fs::write(
         repo.path().join(".lf/skills/list.md"),
@@ -208,9 +214,12 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         success(run(repo.path(), home.path(), &["help", "--", "task"])),
         success(run(repo.path(), home.path(), &["help", "task"]))
     );
-    assert!(
-        !home.path().join(".lf").exists(),
-        "help created runtime state"
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "inspection must not start an agent Session"
     );
 }
 
@@ -219,6 +228,15 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
+        &["--interactive"][..],
+        &["--batch"][..],
+        &["--tui"][..],
+        &["--ide"][..],
+        &["-i"][..],
+        &["-b"][..],
+        &["--wave", "exports"][..],
+        &["--task", "EXP-12"][..],
+        &["--mode", "invalid"][..],
         &["--no-diff"][..],
         &["--diff-files"][..],
         &["--no-diff-files"][..],
@@ -417,9 +435,9 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
     let adapted = Target::Command(step.item.clone()).into_flow();
     assert_eq!(adapted.items, flow.items);
 
-    let saved = serde_json::json!({"Op": {
+    let saved = serde_json::json!({"Command": {
         "item": {"command": "pr", "args": ["land", "--local"]},
-        "flow_parents": ["commands"]
+        "sources": ["commands"]
     }});
     let restored: ConcreteStep = serde_json::from_value(saved.clone()).unwrap();
     let ConcreteStep::Command(captured) = &restored else {
@@ -458,7 +476,7 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     );
     assert_eq!(
         normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
-        ["lf", "ssh", "somewhere", "show", "--help"]
+        ["lf", "home", "ssh", "somewhere", "show", "--help"]
     );
     assert_eq!(
         normalized(&["lf", "run", "land", "--", "--help"]),

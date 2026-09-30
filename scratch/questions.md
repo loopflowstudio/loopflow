@@ -41,3 +41,10 @@
   LOO-334 `1fd99a284` restarts its accepted planning design. Integrating either
   requires reconciling these actual owners with the now-deleted resident service;
   copying command names alone cannot satisfy Monitor or Task discovery.
+
+- 2026-09-30: Jack Heart's newest steer authorizes autonomous catalog decisions
+  and removes demo/review with him. The supervising session ships after focused
+  proof and catalog agreement. It does not authorize losing managed Task Flow
+  state. LOO-298 local integration exposed non-equivalence of ordinary attributed
+  Flow capture and managed Task continuation, plus a refused PR-base update.
+  Exact evidence and remaining obligations are in the working design.

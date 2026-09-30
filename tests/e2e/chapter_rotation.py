@@ -708,8 +708,8 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     _stop_provider(root)
     checkout = Path(before["task"]["worktree"])
     for label, command in (
-        ("direct", ["-b", "skill", "chapter-marker"]),
-        ("saved-flow", ["-b", "flow", "successor-proof"]),
+        ("direct", ["--mode", "batch", "skill", "chapter-marker"]),
+        ("saved-flow", ["--mode", "batch", "flow", "successor-proof"]),
     ):
         proof = root / label
         proof.mkdir()
@@ -738,7 +738,7 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
     proof.mkdir()
     try:
         _run(
-            [str(lf), "-b", "flow", "successor-proof"],
+            [str(lf), "--mode", "batch", "flow", "successor-proof"],
             checkout,
             {
                 **env,

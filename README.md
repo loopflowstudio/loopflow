@@ -84,9 +84,9 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave/operate        # one finite planning pass
-lf --wave designer wave/operate "ship the button audit first"
-lf --wave designer wave/operate        # one finite planning pass
+lf --as wave:designer wave/operate        # one finite planning pass
+lf --as wave:designer wave/operate "ship the button audit first"
+lf --as wave:designer wave/operate        # one finite planning pass
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -99,7 +99,7 @@ lf checkout INF-123                               # durable Task Work + worktree
 lf task run INF-123                                   # start end-to-end Task automation
 lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf interrupt INF-123                             # end this turn so fresh direction is read now
-lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
+lf --as task:INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect durable state
 lf arm -c                                          # request exact-head auto-merge and return
@@ -130,7 +130,7 @@ lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
-lf prune --dry-run     # inspect dead receipts and registered orphan providers
+lf mon prune --dry-run     # inspect dead receipts and registered orphan providers
 ```
 
 ## Sessions

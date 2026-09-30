@@ -50,17 +50,16 @@ No competing model migration belongs here.
 
 ## This slice
 
-Move Account ownership and its overview end to end from `f46efdfc6`.
-Replace the auth parser/dispatch owner, migrate current caller argv, recovery
-commands, skills and docs, and expose bare `lf account` through the existing
-cached status reader. Preserve the JSON schema and credential/capacity
-missingness; add actionable text without refreshing credentials. No account
-alias, store, credential reader or launch authority is introduced.
+Move Repo release, tokens and CI ownership end to end from `abf449df5`.
+Replace root parser variants, preserving the existing release operations and
+runtime scope, source measurement, and Home-wide CI reader. Migrate typed Flow
+release dispatch, publisher scripts, Desktop source measurements, instructions,
+docs and tests together. Prove canonical discovery, saved release command
+resolution, real disposable source measurement and local release operations.
 
-The complete target remains required. Repo, Home, Wave and Session moves,
-LOO-298 integration before Monitor, local discovery, child readiness, a real
-first-provider-result walkthrough and Jack's demo remain unfinished. This
-slice cannot establish whole-Task readiness or authorize landing.
+Home, Wave and Session moves, LOO-298 integration before Monitor, local discovery,
+child readiness, a real first-provider-result walkthrough and Jack's demo remain
+required. This slice does not authorize landing or establish whole-Task readiness.
 
 ## Slice ledger
 
@@ -409,3 +408,42 @@ the real disposable first-provider-result walkthrough, remaining catalog/R01–R
 requirements and Jack Heart's demo remain required. Full Done when claims do
 not hold; this review does not publish, land, complete the Task or choose Flow
 navigation.
+
+### Repo ownership and stop for cull · 2026-09-30
+
+Starting revision `abf449df5`. Replaced root Release/Tokens/Ci parser variants
+with Repo children, preserving release runtime capture, checkout source
+measurement, and checkout-independent Home CI evidence. Switched CLI and typed
+Flow dispatch, scheduled release definition, publisher argv, Desktop source
+measurement argv, instructions, recovery hints and docs together. Saved release
+command bytes still execute through derived navigation without rewriting them.
+
+Executed proof: `cargo test -p loopflow --test repo_commands --test cli_discovery
+--jobs 4` passed 3 operation tests and 12 discovery tests; `cargo test -p loopflow
+--lib ci_report_accepts_machine_wide_filters --jobs 4` and the same command with
+`scheduled_release_prefers_its_operation_flow_over_the_builtin_skill` each passed
+1 test. Real disposable Git/source data and local manifest bumps are exercised;
+no release is published. `swift test --package-path swift --filter
+repositorySourceMeasurements` passed 1 decoding/argv test with synthetic data
+(existing Ghostty linker symbol warnings remain). `uv run pytest
+python/tests/test_release_publisher.py -q` passed 6 simulated publisher tests.
+Formatting, all-target Clippy (four jobs), architecture inventory, Ruff on changed
+Python and diff checks passed. Website copies and architecture HTML were
+regenerated. Compiled catalog remains 139 commands below root / 17 hidden /
+436 flags / 92 positionals / zero extra aliases. No leaf reduction is claimed.
+Production Rust and builtin instructions: **+54 / −55** versus `abf449df5`, using
+Git line differences after removing test modules and free test functions;
+excludes integration/tests/helpers, scripts, examples, Swift, generated files,
+docs and scratch. Review retained CI's ability to inspect from outside Git and
+found the scheduled release definition still using predecessor bytes; it now
+authors the canonical path while the saved-definition proof retains old bytes.
+
+Jack Heart then stopped further owner moves and requested a concept-based cull
+before implementation continues. This checkpoint preserves already-tested work;
+it does not establish acceptance of the old verdicts. Jack also directed guides,
+skills and agent instructions to use the shortest unique invocation, kept `wt`
+as the command name, and required CI to catch documentation shortcut collisions.
+The next work is that verdict revision and those corrections. Home/Wave/Session
+moves, LOO-298/Monitor, discovery, child readiness, real provider proof and demo
+remain required, subject to the revised concept map. No publication, landing,
+Task completion or Flow navigation is authorized by this checkpoint.

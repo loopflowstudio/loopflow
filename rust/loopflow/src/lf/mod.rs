@@ -327,12 +327,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Release operations (run, check, notes, bump, tag, status)
-    Release {
-        #[command(subcommand)]
-        cmd: ReleaseCommand,
-    },
-    /// Repository provider administration
+    /// Repository releases, source measurement, CI evidence, and provider administration
     Repo {
         #[command(subcommand)]
         cmd: RepoCommand,
@@ -372,15 +367,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Measure this codebase: lines and tokens per directory (tracked files only)
-    Tokens {
-        /// Emit as JSON
-        #[arg(long)]
-        json: bool,
-        /// Walk git history instead: the codebase's size on each day it changed
-        #[arg(long, value_name = "DAYS")]
-        days: Option<u32>,
-    },
     /// Show direct provider-authored usage from Home-local Run records
     Usage {
         /// Emit Run usage evidence as JSON
@@ -403,21 +389,6 @@ pub enum Commands {
     #[command(name = "__telemetry-scorecard", hide = true)]
     TelemetryScorecard {
         /// Emit structured JSON for operator automation
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show how failed CI is detected, repaired, and landed across this Home
-    Ci {
-        /// Relative window (7d, 24h, 30m) or RFC3339 start
-        #[arg(long, default_value = "7d")]
-        since: String,
-        /// Scope to one Wave
-        #[arg(long)]
-        wave: Option<String>,
-        /// Scope to one GitHub owner/repo
-        #[arg(long)]
-        repo: Option<String>,
-        /// Emit the complete incident report as JSON
         #[arg(long)]
         json: bool,
     },
@@ -1397,6 +1368,36 @@ pub enum RepoCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Release operations (run, check, notes, bump, tag, status)
+    Release {
+        #[command(subcommand)]
+        cmd: ReleaseCommand,
+    },
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
+    },
+    /// Show how failed CI is detected, repaired, and landed across this Home
+    Ci {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one GitHub owner/repo
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit the complete incident report as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Reconcile linked Waves to the repository's Linear Team
     Reteam {
         #[arg(long)]
@@ -1801,6 +1802,7 @@ mod tests {
     fn ci_report_accepts_machine_wide_filters() {
         let cli = Cli::try_parse_from([
             "lf",
+            "repo",
             "ci",
             "--since",
             "24h",
@@ -1813,12 +1815,12 @@ mod tests {
         .expect("parse CI report");
         assert!(matches!(
             cli.command,
-            Some(Commands::Ci {
+            Some(Commands::Repo { cmd: RepoCommand::Ci {
                 since,
                 wave: Some(wave),
                 repo: Some(repo),
                 json: true,
-            }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
+            } }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
         ));
     }
 

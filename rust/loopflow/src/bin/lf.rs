@@ -1600,12 +1600,15 @@ fn execute_command(
         Some(Commands::Account { cmd, json }) => {
             loopflow::lf::commands::account::run(cmd.as_ref(), *json)
         }
-        Some(Commands::Release { cmd }) => {
-            in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_release(cmd))
-        }
-        Some(Commands::Repo { cmd }) => {
-            in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
-        }
+        Some(Commands::Repo { cmd }) => match cmd {
+            loopflow::lf::RepoCommand::Release { .. } => {
+                in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
+            }
+            loopflow::lf::RepoCommand::Tokens { .. } | loopflow::lf::RepoCommand::Ci { .. } => {
+                loopflow::lf::commands::ops::run_repo(cmd)
+            }
+            _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
+        },
         Some(Commands::Home { cmd }) => loopflow::lf::commands::home::run(cmd),
         Some(Commands::SyncSkills { yes, no_prune }) => {
             loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune)
@@ -1677,7 +1680,6 @@ fn execute_command(
         Some(Commands::Task { cmd }) => {
             in_repo_runtime(args, |repo| run_task_command(repo, cmd, cli))
         }
-        Some(Commands::Tokens { json, days }) => loopflow::lf::commands::tokens::run(*json, *days),
         Some(Commands::Usage {
             json,
             days,
@@ -1703,12 +1705,6 @@ fn execute_command(
             loopflow::ops::execute_flow_command(repo, &item, &loopflow::ops::NullProgress)
                 .map_err(Into::into)
         }),
-        Some(Commands::Ci {
-            since,
-            wave,
-            repo,
-            json,
-        }) => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         Some(Commands::Ps { json }) => loopflow::lf::commands::top::run_ps(*json),
         Some(Commands::Top { json }) => loopflow::lf::commands::top::run_top(*json),
         Some(Commands::Prune { dry_run, json }) => {

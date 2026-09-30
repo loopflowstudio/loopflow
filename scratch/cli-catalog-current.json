@@ -3089,12 +3089,41 @@
     "short_aliases": []
   },
   {
+    "about": "Repository releases, source measurement, CI evidence, and provider administration",
+    "aliases": [],
+    "hidden": false,
+    "kind": "command",
+    "path": [
+      "lf",
+      "repo"
+    ]
+  },
+  {
+    "action": "Help",
+    "defaults": [],
+    "global": false,
+    "help": "Print help",
+    "hidden": false,
+    "id": "help",
+    "kind": "argument",
+    "long": "help",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo"
+    ],
+    "required": false,
+    "short": "h",
+    "short_aliases": []
+  },
+  {
     "about": "Release operations (run, check, notes, bump, tag, status)",
     "aliases": [],
     "hidden": false,
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release"
     ]
   },
@@ -3110,6 +3139,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release"
     ],
     "required": false,
@@ -3123,6 +3153,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "run"
     ]
@@ -3139,6 +3170,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "run"
     ],
@@ -3158,6 +3190,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "run"
     ],
@@ -3177,6 +3210,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "run"
     ],
@@ -3191,6 +3225,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "check"
     ]
@@ -3207,6 +3242,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "check"
     ],
@@ -3226,6 +3262,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "check"
     ],
@@ -3240,6 +3277,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ]
@@ -3256,6 +3294,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ],
@@ -3275,6 +3314,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ],
@@ -3296,6 +3336,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ],
@@ -3315,6 +3356,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ],
@@ -3334,6 +3376,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "notes"
     ],
@@ -3348,6 +3391,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "bump"
     ]
@@ -3364,6 +3408,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "bump"
     ],
@@ -3383,6 +3428,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "bump"
     ],
@@ -3402,6 +3448,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "bump"
     ],
@@ -3416,6 +3463,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "tag"
     ]
@@ -3432,6 +3480,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "tag"
     ],
@@ -3451,6 +3500,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "tag"
     ],
@@ -3470,6 +3520,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "tag"
     ],
@@ -3484,6 +3535,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ]
@@ -3500,6 +3552,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ],
@@ -3519,6 +3572,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ],
@@ -3538,6 +3592,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ],
@@ -3559,6 +3614,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ],
@@ -3578,6 +3634,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "publish"
     ],
@@ -3592,6 +3649,7 @@
     "kind": "command",
     "path": [
       "lf",
+      "repo",
       "release",
       "status"
     ]
@@ -3608,6 +3666,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "status"
     ],
@@ -3627,6 +3686,7 @@
     "long_aliases": [],
     "path": [
       "lf",
+      "repo",
       "release",
       "status"
     ],
@@ -3635,14 +3695,55 @@
     "short_aliases": []
   },
   {
-    "about": "Repository provider administration",
+    "about": "Measure this codebase: lines and tokens per directory (tracked files only)",
     "aliases": [],
     "hidden": false,
     "kind": "command",
     "path": [
       "lf",
-      "repo"
+      "repo",
+      "tokens"
     ]
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": "Emit as JSON",
+    "hidden": false,
+    "id": "json",
+    "kind": "argument",
+    "long": "json",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "tokens"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": "Walk git history instead: the codebase's size on each day it changed",
+    "hidden": false,
+    "id": "days",
+    "kind": "argument",
+    "long": "days",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "tokens"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
   },
   {
     "action": "Help",
@@ -3656,7 +3757,118 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "repo"
+      "repo",
+      "tokens"
+    ],
+    "required": false,
+    "short": "h",
+    "short_aliases": []
+  },
+  {
+    "about": "Show how failed CI is detected, repaired, and landed across this Home",
+    "aliases": [],
+    "hidden": false,
+    "kind": "command",
+    "path": [
+      "lf",
+      "repo",
+      "ci"
+    ]
+  },
+  {
+    "action": "Set",
+    "defaults": [
+      "7d"
+    ],
+    "global": false,
+    "help": "Relative window (7d, 24h, 30m) or RFC3339 start",
+    "hidden": false,
+    "id": "since",
+    "kind": "argument",
+    "long": "since",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "ci"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": "Scope to one Wave",
+    "hidden": false,
+    "id": "wave",
+    "kind": "argument",
+    "long": "wave",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "ci"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": "Scope to one GitHub owner/repo",
+    "hidden": false,
+    "id": "repo",
+    "kind": "argument",
+    "long": "repo",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "ci"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": "Emit the complete incident report as JSON",
+    "hidden": false,
+    "id": "json",
+    "kind": "argument",
+    "long": "json",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "ci"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Help",
+    "defaults": [],
+    "global": false,
+    "help": "Print help",
+    "hidden": false,
+    "id": "help",
+    "kind": "argument",
+    "long": "help",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "repo",
+      "ci"
     ],
     "required": false,
     "short": "h",
@@ -9525,72 +9737,6 @@
     "short_aliases": []
   },
   {
-    "about": "Measure this codebase: lines and tokens per directory (tracked files only)",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "tokens"
-    ]
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Emit as JSON",
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "tokens"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Walk git history instead: the codebase's size on each day it changed",
-    "hidden": false,
-    "id": "days",
-    "kind": "argument",
-    "long": "days",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "tokens"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "tokens"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
     "about": "Show direct provider-authored usage from Home-local Run records",
     "aliases": [],
     "hidden": false,
@@ -9755,110 +9901,6 @@
     "path": [
       "lf",
       "__telemetry-scorecard"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Show how failed CI is detected, repaired, and landed across this Home",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "ci"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [
-      "7d"
-    ],
-    "global": false,
-    "help": "Relative window (7d, 24h, 30m) or RFC3339 start",
-    "hidden": false,
-    "id": "since",
-    "kind": "argument",
-    "long": "since",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "ci"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Scope to one Wave",
-    "hidden": false,
-    "id": "wave",
-    "kind": "argument",
-    "long": "wave",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "ci"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Scope to one GitHub owner/repo",
-    "hidden": false,
-    "id": "repo",
-    "kind": "argument",
-    "long": "repo",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "ci"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Emit the complete incident report as JSON",
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "ci"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "ci"
     ],
     "required": false,
     "short": "h",

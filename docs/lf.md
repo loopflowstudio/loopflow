@@ -2,7 +2,7 @@
 
 > Design draft. Discovery (`run`, `help`, `list`, typed definitions, and unique
 > command shorthand) and Task delivery owners are implemented on this branch.
-> Account and its cached overview are implemented. The other owner moves and
+> Account and its cached overview, plus Repo release, tokens and CI, are implemented. The other owner moves and
 > Monitor overview below remain unimplemented.
 
 ## Run a workflow

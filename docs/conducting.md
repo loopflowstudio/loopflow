@@ -108,7 +108,7 @@ Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
 `lf prune --dry-run` before cleanup. Plain `lf prune` removes stale Exec
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
-`lf ci` reads the local ledger, not GitHub: it reports how
+`lf repo ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
 
 ## Steer

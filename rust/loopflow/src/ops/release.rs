@@ -730,7 +730,7 @@ fn release_minor(
     if let Some(pair) = pair.as_ref().filter(|pair| !pair.completed) {
         if version_input.trim() != "minor" && normalize_version(version_input) != pair.version {
             return Err(OpsError::Message(format!(
-                "minor {} is still pending; resume it with `lf release run minor` before selecting {version_input}",
+                "minor {} is still pending; resume it with `lf repo release run minor` before selecting {version_input}",
                 pair.version
             )));
         }
@@ -814,7 +814,7 @@ fn release_minor(
         // runner. Keep this pair pending until its selected patch completes.
         if receipt.version != pair.patch_version {
             return Err(OpsError::Message(format!(
-                "completed preceding release {}; retry `lf release run minor` to finish {} and {}",
+                "completed preceding release {}; retry `lf repo release run minor` to finish {} and {}",
                 receipt.tag, pair.patch_version, pair.version
             )));
         }
@@ -828,7 +828,7 @@ fn release_minor(
             if receipt.version == pair.version => {}
         _ => {
             return Err(OpsError::Message(format!(
-                "minor {} remains pending; retry `lf release run minor` to finish the recorded pair",
+                "minor {} remains pending; retry `lf repo release run minor` to finish the recorded pair",
                 pair.version
             )));
         }

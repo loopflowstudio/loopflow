@@ -31,6 +31,34 @@ struct RegistryQueryTests {
         #expect(final.next == nil)
     }
 
+    @Test("Repository source measurements preserve tree and history data")
+    func repositorySourceMeasurements() async throws {
+        let query = RegistryQuery { args, repo in
+            guard repo == "/tmp/source" else { throw CocoaError(.fileReadNoSuchFile) }
+            switch args {
+            case ["repo", "tokens", "--json"]:
+                return """
+                {"path":"","name":"source","lines":2,"tokens":5,"children":[
+                  {"path":"source.txt","name":"source.txt","lines":2,"tokens":5,"children":[]}
+                ]}
+                """
+            case ["repo", "tokens", "--json", "--days", "7"]:
+                return """
+                [{"date":"2026-09-30","commit":"abc123","lines":2,"tokens":5,
+                  "slices":[{"ext":"txt","lines":2,"tokens":5}]}]
+                """
+            default: throw CocoaError(.featureUnsupported)
+            }
+        }
+        let tree = try await query.codebase(repoPath: "/tmp/source")
+        let history = try await query.codebaseHistory(repoPath: "/tmp/source", days: 7)
+        #expect(tree.children.first?.path == "source.txt")
+        #expect(tree.lines == 2)
+        #expect(history.first?.lines == tree.lines)
+        #expect(history.first?.tokens == tree.tokens)
+        #expect(history.first?.slices.first?.ext == "txt")
+    }
+
     @Test("lf wave list decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """

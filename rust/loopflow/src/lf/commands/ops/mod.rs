@@ -785,7 +785,6 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 }
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
-    let repo = crate::repo::working_directory()?;
     match cmd {
         RepoCommand::NewChapter {
             name,
@@ -812,7 +811,16 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             }
             Ok(())
         }
+        RepoCommand::Release { cmd } => run_release(cmd),
+        RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
+        RepoCommand::Ci {
+            since,
+            wave,
+            repo,
+            json,
+        } => crate::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         RepoCommand::Reteam { apply } => {
+            let repo = crate::repo::working_directory()?;
             let result = crate::ops::pm::pm_reteam(
                 &repo,
                 &crate::ops::pm::PmReteamOptions { apply: *apply },
@@ -1225,7 +1233,7 @@ fn scheduled_release_prefers_its_operation_flow_over_the_builtin_skill() {
     std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
     std::fs::write(
         repo.path().join(".lf/flows/release-run.yaml"),
-        "- cmd: release run patch\n",
+        "- cmd: repo release run patch\n",
     )
     .unwrap();
     assert_eq!(

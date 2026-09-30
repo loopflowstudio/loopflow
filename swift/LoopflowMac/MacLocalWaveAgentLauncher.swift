@@ -253,7 +253,7 @@ enum LocalWaveAgentLauncher {
 
         // Drain both pipes while the child is still writing. A pipe holds 64KB;
         // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf tokens --json` says about 120KB. `lf runs`/`lf doctor`
+        // that, and `lf repo tokens --json` says about 120KB. `lf runs`/`lf doctor`
         // are small, which is why this only ever bit the largest reader.
         let collector = OutputCollector()
         let group = DispatchGroup()

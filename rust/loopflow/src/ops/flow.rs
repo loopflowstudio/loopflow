@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use crate::engine::flow::Command as FlowCommand;
 use crate::engine::git::get_default_branch;
 use crate::engine::process::ProcessGroupGuard;
-use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, TaskCommand};
+use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, RepoCommand, TaskCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
@@ -70,7 +70,9 @@ pub fn execute_flow_command(
             )?;
             Ok(())
         }
-        Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
+        Some(Commands::Repo {
+            cmd: RepoCommand::Release { cmd },
+        }) => execute_release(repo, cmd, progress),
         Some(Commands::Doctor {
             json,
             planning: false,
@@ -385,7 +387,7 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "cmd item must be one of task pr open, task pr publish, task pr submit, task pr arm, task pr land, task pr abandon, task rebase, task commit, release, doctor, or the internal telemetry scorecard"
+        "cmd item must be one of task pr open, task pr publish, task pr submit, task pr arm, task pr land, task pr abandon, task rebase, task commit, repo release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }

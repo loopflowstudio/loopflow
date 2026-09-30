@@ -13,7 +13,7 @@ a new forward migration.
 
     uv run python scripts/check_migrations.py
 
-Stdlib only, so `lf release` can run it directly without a Python environment.
+Stdlib only, so `lf repo release` can run it directly without a Python environment.
 """
 
 from __future__ import annotations

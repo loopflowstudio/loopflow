@@ -84,7 +84,7 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
     &["activity"],
-    &["ci"],
+    &["repo", "ci"],
     &["cron", "list"],
     &["exec", "list"],
     &["runs"],

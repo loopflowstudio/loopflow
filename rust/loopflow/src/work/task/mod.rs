@@ -127,7 +127,7 @@ impl CiObservation {
     /// repairable ([`CiCheck::land_time_precondition`]): waking a body there
     /// spends a full turn on work whose only successful action is destructive.
     /// The reading still reports the failure — this refuses the wake, it does not
-    /// deny the red — so `lf ci` and `lf task status` are unchanged.
+    /// deny the red — so `lf repo ci` and `lf task status` are unchanged.
     pub fn repair_legal(&self) -> bool {
         if self.state != CiState::Failing {
             return false;
@@ -1118,7 +1118,7 @@ mod tests {
         assert!(failing("h1", &[]).repair_legal());
 
         // The reading stays honest — this refuses the wake, it does not deny the
-        // red. Status and `lf ci` still name the failure.
+        // red. Status and `lf repo ci` still name the failure.
         let obs = failing("h1", &["scratch-clear"]);
         assert_eq!(obs.state, super::CiState::Failing);
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);

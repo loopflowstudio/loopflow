@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use loopflow::engine::target::{resolve_definition, DefinitionKind, Target};
 use loopflow::engine::{compile_flow, load_flow, ConcreteStep};
 use loopflow::lf::navigation::normalize_args;
@@ -409,5 +409,34 @@ fn account_has_one_owner_without_predecessor_aliases() {
     .unwrap();
     assert!(help.contains("lf account"));
     assert!(help.contains("--json"));
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn repository_commands_have_one_owner_and_derived_shorthand() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let tree = Cli::command();
+    for (leaf, path) in [
+        ("release", vec!["repo", "release"]),
+        ("tokens", vec!["repo", "tokens"]),
+        ("ci", vec!["repo", "ci"]),
+    ] {
+        assert!(tree.find_subcommand(leaf).is_none());
+        let mut canonical = path.clone();
+        canonical.push("--help");
+        let help = success(run(repo.path(), home.path(), &canonical));
+        assert_eq!(
+            success(run(repo.path(), home.path(), &[leaf, "--help"])),
+            help
+        );
+        assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
+        let command = tree
+            .find_subcommand("repo")
+            .unwrap()
+            .find_subcommand(leaf)
+            .unwrap();
+        assert_eq!(command.get_all_aliases().count(), 0);
+    }
     assert!(!home.path().join(".lf").exists());
 }

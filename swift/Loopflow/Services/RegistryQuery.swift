@@ -1,6 +1,6 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
-// Planning and history are one-shot queries. Active Runs use one foreground
+// Planning and history are one-shot queries. Active Sessions use one foreground
 // observation per window so native receipt discovery survives between samples.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
@@ -28,23 +28,23 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
-    private let observe: @Sendable () async throws -> ActiveRunsObservation
+    private let observe: @Sendable () async throws -> ActiveSessionsObservation
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        watchActiveRuns: @escaping @Sendable () async throws -> ActiveRunsObservation = {
-            throw RegistryQueryError("Active Run observation is unavailable on this transport")
+        watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
+            throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
-        self.observe = watchActiveRuns
+        self.observe = watchActiveSessions
     }
 
-    /// Current Waves across the machine, including stopped Waves. The shared
+    /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
         let stdout = try await run(["wave", "list", "--all", "--current", "--json"], nil)
@@ -52,7 +52,7 @@ public struct RegistryQuery: Sendable {
         return snapshots.map { $0.toWave() }
     }
 
-    /// Every wave the registry knows (running and stopped alike), scoped to one
+    /// Every current Wave the registry knows, scoped to one
     /// repo. This replaces the old `/ws` connected snapshot — a point-in-time
     /// read the caller re-queries on a cadence, not a stream.
     public func waves(repoPath: String) async throws -> [Wave] {
@@ -61,26 +61,14 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's Project/Task work, plus the live loop state when its resident
-    /// is answering.
+    /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
-    public func chapterHistory(wave: String, cwd: String?) async throws -> [ChapterHistoryEntry] {
-        try Self.decode([ChapterHistoryEntry].self, from: await run(["wave", "history", "--wave", wave, "--json"], cwd))
-    }
 
-    public func chapter(wave: String, id: String, cwd: String?) async throws -> ChapterSnapshot {
-        try Self.decode(ChapterSnapshot.self, from: await run(["wave", "status", wave, "--chapter", id, "--json"], cwd))
-    }
-
-
-    /// Every durable plan row across the machine, joined to the same Task
-    /// references and live evidence as `lf wave status`. One subprocess reads every
-    /// Wave; an optional scope filters that shared snapshot at the source.
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
         if let wave {
@@ -104,11 +92,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
-    public func watchActiveRuns() async throws -> ActiveRunsObservation {
+    public func watchActiveSessions() async throws -> ActiveSessionsObservation {
         try await observe()
     }
 
-    /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
+    /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(
         since: String = "7d",
@@ -159,12 +147,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
-    /// Recent Runs attributed to one Task through the shared `lf runs` reader:
-    /// the last seven days, newest first, capped. Read-only; an unstarted Task
-    /// is neither prepared nor started by asking.
-    public func taskRuns(task: String, cwd: String?) async throws -> [RunSnapshot] {
+    /// Complete Task-attributed Session input/provider history. Read-only; querying
+    /// an unstarted Task neither prepares nor starts it.
+    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
         let stdout = try await run(["runs", "--task", task, "--json"], cwd)
-        return try Self.decode([RunSnapshot].self, from: stdout)
+        return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
@@ -210,10 +197,15 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
-    /// Sessions in this repository.
-    public func sessions(cwd: String? = nil) async throws -> [SessionRecord] {
-        let stdout = try await run(["session", "list", "--json"], cwd)
-        return try Self.decode([SessionRecord].self, from: stdout)
+    /// One bounded page, ordered by stable Session identity.
+    public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
+                            cwd: String? = nil) async throws -> SessionPage {
+        var args = ["session", "list", "--json", "--page"]
+        if includingHeadless { args += ["--interactive", "all"] }
+        args += ["--limit", "100"]
+        if let after { args += ["--after", after] }
+        let stdout = try await run(args, cwd)
+        return try Self.decode(SessionPage.self, from: stdout)
     }
 
     /// Open one Session and return its terminal command.
@@ -239,6 +231,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
+    public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {
+        let stdout = try await run(["session", "bind", "--dry-run", "--json", "--task", task, "--", id], cwd)
+        return try Self.decode(SessionBindingPreview.self, from: stdout)
+    }
+
+    public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "bind", "--json", "--task", taskId, "--", id], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
     /// Complete an interactive conversation, Flow review, or blocked Ask.
     public func completeSession(
         id: String,
@@ -258,23 +260,23 @@ public struct RegistryQuery: Sendable {
         if sync { _ = try await run(["wave", "sync", wave], cwd) }
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
-        return WavePlan(objective: objective, chapter: snapshot.chapter)
+        return WavePlan(objective: objective, projects: snapshot.projects)
     }
 
-    /// Direct provider-authored usage for recent Home-local Runs, optionally
+    /// Direct provider-authored usage from retained Session history, optionally
     /// drilled through the shared Wave → Project → Task attribution.
     public func usage(
         days: Int = 30,
         wave: String? = nil,
         project: String? = nil,
         task: String? = nil
-    ) async throws -> [RunSnapshot] {
+    ) async throws -> [SessionHistory] {
         var arguments = ["usage", "--days", String(days), "--json"]
         if let wave { arguments += ["--wave", wave] }
         if let project { arguments += ["--project", project] }
         if let task { arguments += ["--task", task] }
         let stdout = try await run(arguments, nil)
-        return try Self.decode([RunSnapshot].self, from: stdout)
+        return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -385,12 +387,13 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case wave, chapter, tasks
+        case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
@@ -421,58 +424,130 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
-    public let chapter: ChapterSummary?
+    public let projects: WorkEvidence<ProjectPlanningSnapshot>
+    public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
-    public let runs: WorkEvidence<RunSnapshot>
+    public let runs: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
-        WaveWorkMap(objective: wave.goal, chapter: chapter, tasks: tasks)
+        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, chapter, tasks, runs
+        case wave, projects, tasks, runs
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
 }
 
-/// One Home-local harness bundle from `lf runs --json`.
-public struct RunSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let id: String
-    public let parentRunId: String?
+/// Read-only history beneath a conversation's captured input; not a resumable Run.
+public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
+    public var id: String {
+        if let captured { return "\(sessionId):\(captured)" }
+        if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
+            return "\(sessionId):\(thread):\(turn)"
+        }
+        return sessionId
+    }
+    public let sessionId: String
+    public let captured: Int?
+    public let artifactKey: String?
+    public let callerArtifactKey: String?
     public let taskPrId: String?
     public let repo: String?
     public let worktree: String?
-    public let subjects: [RunSubjectAttribution]
+    public let taskId: String?
+    public let waveId: String?
+    public let taskIdentifier: String?
+    public let workSource: String?
+    public let waveName: String?
     public let skill: String?
-    public let outcome: String?
-    public let started: Int
+    public let observedAt: Int
     public let firstProviderAttemptAt: Int?
-    public let ended: Int?
-    public let usage: RunUsageSnapshot
+    public let recordedOutcome: String?
+    public let recordedAt: Int?
+    public let providers: [ProviderHistory]
+    public let usage: SessionUsage
     public let evidenceGaps: Int
     public let harness: String
     public let model: String?
     public let surface: String
 
+    public var status: String {
+        if !providers.isEmpty {
+            return providers.map { record in
+                switch record.reference {
+                case .nativeTurn: return record.outcome ?? "Unknown"
+                case .recordedAttempt: return "Recorded \(record.outcome ?? "unknown")"
+                }
+            }.joined(separator: " → ")
+        }
+        return recordedOutcome.map { "Recorded \($0)" } ?? "Unknown"
+    }
+
+    public var workLabel: String {
+        if providers.contains(where: { $0.taskId != taskId || $0.waveId != waveId }) {
+            return "Mixed/unknown · see provider history"
+        }
+        if let taskId { return "task/\(taskIdentifier ?? taskId)" }
+        if let waveId { return "wave/\(waveName ?? waveId)" }
+        return "—"
+    }
+
     enum CodingKeys: String, CodingKey {
-        case id, repo, worktree, subjects, skill, outcome, started, ended, usage, harness, model,
-            surface
-        case taskPrId = "task_pr_id"
-        case parentRunId = "parent_run_id"
-        case firstProviderAttemptAt = "first_provider_attempt_at"
-        case evidenceGaps = "evidence_gaps"
+        case repo, worktree, skill, providers, usage, harness, model, surface
+        case captured
+        case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
+        case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"
+        case taskIdentifier = "task_identifier", waveName = "wave_name", workSource = "work_source"
+        case observedAt = "observed_at", firstProviderAttemptAt = "first_provider_attempt_at"
+        case recordedOutcome = "recorded_outcome", recordedAt = "recorded_at", evidenceGaps = "evidence_gaps"
     }
 }
 
-public struct RunSubjectAttribution: Codable, Sendable, Hashable {
-    public let selector: String
-    public let source: String
+public struct ProviderHistory: Decodable, Sendable, Hashable {
+    public let reference: ProviderHistoryReference
+    public let execId: String?
+    public let taskId: String?
+    public let waveId: String?
+    public let startedAt: Int?
+    public let completedAt: Int?
+    public let outcome: String?
+    public let usage: SessionUsage
+    enum CodingKeys: String, CodingKey {
+        case reference, outcome, usage
+        case execId = "exec_id", taskId = "task_id", waveId = "wave_id"
+        case startedAt = "started_at", completedAt = "completed_at"
+    }
 }
 
-public struct RunUsageSnapshot: Decodable, Sendable, Hashable {
+public enum ProviderHistoryReference: Decodable, Sendable, Hashable {
+    case nativeTurn(thread: String, turn: String, startSeq: Int?, completionSeq: Int?)
+    case recordedAttempt(captured: Int, attemptKey: String)
+    private enum Keys: String, CodingKey {
+        case kind, thread, turn
+        case startSeq = "start_seq", completionSeq = "completion_seq"
+        case captured, attemptKey = "attempt_key"
+    }
+    private enum Kind: String, Decodable { case nativeTurn = "native_turn", recordedAttempt = "recorded_attempt" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .nativeTurn:
+            self = .nativeTurn(thread: try c.decode(String.self, forKey: .thread),
+                turn: try c.decode(String.self, forKey: .turn),
+                startSeq: try c.decodeIfPresent(Int.self, forKey: .startSeq),
+                completionSeq: try c.decodeIfPresent(Int.self, forKey: .completionSeq))
+        case .recordedAttempt:
+            self = .recordedAttempt(captured: try c.decode(Int.self, forKey: .captured),
+                attemptKey: try c.decode(String.self, forKey: .attemptKey))
+        }
+    }
+}
+
+public struct SessionUsage: Decodable, Sendable, Hashable {
     public let streams: Int
     public let finalStreams: Int
     public let gaps: Int

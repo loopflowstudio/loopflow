@@ -15,39 +15,20 @@ mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
+mod execs;
+mod flows;
 mod metrics;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 mod pr_landings;
 pub mod rows;
+mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
 pub use branch_data::isolate_branch_data;
-
-/// One row of the machine-grain run ledger (`run_events`): a lifecycle event
-/// for a run, flow, or skill, written directly by `lf` into the local store.
-///
-/// Lineage only. Provider usage lives in generic Run records.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunEventRow {
-    pub run_id: String,
-    pub process_id: String,
-    pub parent_process_id: Option<String>,
-    pub seq: i64,
-    pub ts: i64,
-    pub repo: Option<String>,
-    pub worktree: Option<String>,
-    pub wave: Option<String>,
-    pub node: String,
-    pub event: String,
-    pub command: Option<String>,
-    pub flow: Option<String>,
-    pub skill: Option<String>,
-    pub step_index: Option<i64>,
-    pub error: Option<String>,
-}
+pub(crate) use branch_data::observation_database_path;
 
 /// One wave's locally readable PM projection. Linear owns the payload; sync
 /// replaces this row atomically so readers never observe a partial refresh.
@@ -129,7 +110,7 @@ pub(crate) fn production_database_path() -> PathBuf {
 /// Development builds normally isolate writes under `.lf-dev/worktrees`.
 /// Observability is different: it must describe the Home that launched the
 /// process (after source CLI startup redirects installed Homes), and opening it
-/// through `open_run_ledger_read_only` cannot migrate
+/// through `open_execs_read_only` cannot migrate
 /// or otherwise mutate its schema. Explicit control authority wins, followed
 /// by an ordinary override, then the installed Home.
 pub(crate) fn authority_home_dir() -> PathBuf {
@@ -367,7 +348,7 @@ fn may_apply_migrations(
     Ok(advance == FrontierAdvance::Authorized)
 }
 
-fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
+pub(crate) fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
     if canonicalize_with_missing_tail(left)? == canonicalize_with_missing_tail(right)? {
         return Ok(true);
     }
@@ -1222,9 +1203,7 @@ pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
 }
 
 /// Open the machine's shared registry store only if one already exists.
-/// `None` means this machine has no registry yet; callers that instrument best-effort (lf
-/// self-registration, the wave server) treat that as "not instrumented" and
-/// stay silent rather than conjuring an empty db.
+/// Returns `None` if the registry is absent or incompatible; never creates it.
 pub async fn open_existing_store() -> Option<Store> {
     let cfg = crate::store::storage_config_from_env().ok()?;
     let StorageConfig::Sqlite { path } = &cfg;
@@ -1283,17 +1262,15 @@ pub async fn open_registry_for_authority() -> Result<Store, RegistryUnavailable>
 pub type SharedStore = Arc<Store>;
 #[cfg(test)]
 mod tests {
-    use super::sqlite::SqliteStore;
     use super::{
         default_lf_home_dir_for, guard_development_database, may_apply_migrations,
         read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
-        ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
+        ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::durable::{
-        Author, FlowPosition, RunId, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner,
-        WorkRef,
+        Author, FlowSession, TaskFlowBlocker, TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
     };
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -1508,12 +1485,40 @@ mod tests {
         }
     }
 
+    /// A fresh Task Flow at `cursor`, as `lf task run` starts one.
+    fn task_flow(
+        task: &Task,
+        invocation: crate::engine::invocation::QueuedInvocation,
+        cursor: crate::engine::ExecutionCursor,
+    ) -> FlowSession {
+        FlowSession {
+            invocation,
+            cursor,
+            version: 0,
+            task_id: Some(task.id.clone()),
+            wave_id: Some(task.wave_id.clone()),
+            cwd: task.worktree.clone(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
+            worker_generation: 0,
+            claim: None,
+            failure: None,
+            finished: false,
+            updated_at: OffsetDateTime::now_utc(),
+        }
+    }
+
     fn make_project(wave: &Wave) -> Project {
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .expect("current unix time");
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                flow: "feature".into(),
+                status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
@@ -1544,27 +1549,17 @@ mod tests {
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "code", 3, "review", None, false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: crate::engine::ExecutionCursor {
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 3, "review", None, false),
+                    crate::engine::ExecutionCursor {
                         index: 2,
                         iteration: 4,
                         ..Default::default()
                     },
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-
-                    updated_at: OffsetDateTime::now_utc(),
-                },
+                ),
             )
             .await
             .unwrap();
@@ -1584,7 +1579,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let claimed = store.flow_position(&task.id).await.unwrap().unwrap();
+        let claimed = store.task_flow(&task.id).await.unwrap().unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).await.unwrap().begun);
+        let claimed = store
+            .reserve_attempt(claimed.id(), claimed.version, claimed.claim.as_ref(), None)
+            .await
+            .unwrap();
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
         assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
         let mut successor = make_project(&wave);
@@ -1599,10 +1599,7 @@ mod tests {
         assert_eq!(moved.project_id, successor.id);
         assert_eq!(moved.worktree, task.worktree);
         assert_eq!(moved.plan, task.plan);
-        assert_eq!(
-            store.flow_position(&task.id).await.unwrap().unwrap(),
-            claimed
-        );
+        assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), claimed);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         store
             .append_task_event(
@@ -1614,20 +1611,10 @@ mod tests {
             )
             .await
             .unwrap();
-        let pending = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert!(!pending.is_empty());
-        assert!(store
-            .pending_observations(&crate::child::ObservationRecipient::Project {
-                project_id: predecessor.id
-            })
-            .await
-            .unwrap()
-            .is_empty());
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(events
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Failed { .. })));
     }
 
     #[tokio::test]
@@ -1648,27 +1635,17 @@ mod tests {
             .await
             .unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "code", 3, "review", None, false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: crate::engine::ExecutionCursor {
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 3, "review", None, false),
+                    crate::engine::ExecutionCursor {
                         index: 0,
                         iteration: 1,
                         ..Default::default()
                     },
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-
-                    updated_at: OffsetDateTime::now_utc(),
-                },
+                ),
             )
             .await
             .unwrap();
@@ -1693,7 +1670,7 @@ mod tests {
         assert_eq!(terminal_at, 1_700_000_000);
         assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
         assert_eq!(
-            store.flow_position(&task.id).await.unwrap(),
+            store.task_flow(&task.id).await.unwrap(),
             Some(position.clone())
         );
         let owner = TaskWorkerOwner {
@@ -2223,42 +2200,6 @@ mod tests {
             )
             .await
             .unwrap();
-        let observations = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(observations.len(), 1);
-        store
-            .append_task_event(
-                &sibling.id,
-                &TaskEventKind::Failed {
-                    error: "arrived during the Wave pass".to_string(),
-                    resumable: true,
-                },
-            )
-            .await
-            .unwrap();
-        for observation in observations {
-            store
-                .mark_observation_delivered(observation.id)
-                .await
-                .unwrap();
-        }
-        let pending = store
-            .pending_observations(&crate::child::ObservationRecipient::Wave {
-                wave_id: wave.id().clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert!(matches!(
-            &pending[0].payload,
-            crate::work::project::ChildEventPayload::Task {
-                event: TaskEventKind::Failed { error, resumable: true }
-            } if error == "arrived during the Wave pass"
-        ));
 
         assert_eq!(
             store.work_status(&target_work).await.unwrap(),
@@ -2280,34 +2221,24 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut task = make_task(&wave, &project);
+        let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
 
         let initial = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "code", 3, "review", None, false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: crate::engine::ExecutionCursor {
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 3, "review", None, false),
+                    crate::engine::ExecutionCursor {
                         index: 2,
                         iteration: 4,
                         ..Default::default()
                     },
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-
-                    updated_at: OffsetDateTime::now_utc(),
-                },
+                ),
             )
             .await
             .unwrap();
@@ -2331,43 +2262,56 @@ mod tests {
             TaskWorkerClaimOutcome::Claimed(claim) => claim,
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
-        let claim = store
-            .bind_task_worker_run(&task.id, &claim, &RunId::new(), &owner)
-            .await
-            .unwrap();
-        let mut next = initial.clone();
-        next.cursor.index = 3;
-        next.cursor.iteration = 5;
-        next.version = claim.position_version;
+        let mut next = initial.cursor.clone();
+        next.index = 3;
+        next.iteration = 5;
         let mut refreshed = task.clone();
         refreshed.plan.title = "Updated while the worker ran".to_string();
         store.update_task(&refreshed).await.unwrap();
         let saved_task = store.get_task(&task.id).await.unwrap().unwrap();
-        let saved_position = store.flow_position(&task.id).await.unwrap().unwrap();
-        task.updated_at = saved_task.updated_at + time::Duration::seconds(60);
+        let saved_position = store.task_flow(&task.id).await.unwrap().unwrap();
         let mut stale = claim.clone();
         stale.generation += 1;
         assert!(store
-            .settle_task_worker(&task, &stale, &next, Some("must roll back"))
+            .checkpoint_flow(
+                &initial.invocation.id,
+                initial.version,
+                &next,
+                Some(&stale),
+                Some("must roll back"),
+            )
             .await
             .is_err());
-        let unchanged = store.flow_position(&task.id).await.unwrap().unwrap();
+        let unchanged = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(unchanged, saved_position);
         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), saved_task);
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].kind, TaskEventKind::Started);
+        assert!(store
+            .task_events_after(&task.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
 
         store
-            .settle_task_worker(&task, &claim, &next, Some("advanced atomically"))
+            .checkpoint_flow(
+                &initial.invocation.id,
+                initial.version,
+                &next,
+                Some(&claim),
+                Some("advanced atomically"),
+            )
             .await
             .unwrap();
-        let settled = store.flow_position(&task.id).await.unwrap().unwrap();
+        let settled = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(settled.cursor.index, 3);
         assert_eq!(settled.invocation, initial.invocation);
+        assert_eq!(settled.claim.as_ref(), Some(&claim));
         let updated_task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(updated_task.updated_at, task.updated_at);
         assert_eq!(updated_task.plan.title, refreshed.plan.title);
+        let events = store.task_events_after(&task.id, 0).await.unwrap();
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Progress { summary } if summary == "advanced atomically"
+        ));
     }
 
     #[tokio::test]
@@ -2388,31 +2332,17 @@ mod tests {
             .await
             .unwrap();
         let first = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "task-design",
-                        0,
-                        "design",
-                        None,
-                        false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: crate::engine::ExecutionCursor {
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("task-design", 0, "design", None, false),
+                    crate::engine::ExecutionCursor {
                         index: 0,
                         iteration: 0,
                         ..Default::default()
                     },
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-
-                    updated_at: OffsetDateTime::now_utc(),
-                },
+                ),
             )
             .await
             .unwrap();
@@ -2438,7 +2368,11 @@ mod tests {
         };
 
         let stopped = store
-            .release_task_worker(&task.id, &old_claim)
+            .release_flow(
+                &old_claim.invocation_id,
+                old_claim.position_version,
+                Some(&old_claim),
+            )
             .await
             .unwrap();
         store
@@ -2446,31 +2380,17 @@ mod tests {
             .await
             .unwrap();
         let replacement = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "task-design",
-                        0,
-                        "design",
-                        None,
-                        false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: crate::engine::ExecutionCursor {
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("task-design", 0, "design", None, false),
+                    crate::engine::ExecutionCursor {
                         index: 0,
                         iteration: 0,
                         ..Default::default()
                     },
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-
-                    updated_at: OffsetDateTime::now_utc(),
-                },
+                ),
             )
             .await
             .unwrap();
@@ -2495,7 +2415,7 @@ mod tests {
             TaskWorkerClaimOutcome::Stale { .. }
         ));
         assert_eq!(
-            store.flow_position(&task.id).await.unwrap(),
+            store.task_flow(&task.id).await.unwrap(),
             Some(replacement.clone())
         );
         let new_claim = match store
@@ -2512,22 +2432,32 @@ mod tests {
             TaskWorkerClaimOutcome::Claimed(claim) => claim,
             outcome => panic!("unexpected claim outcome: {outcome:?}"),
         };
-        let new_claim = store
-            .bind_task_worker_run(&task.id, &new_claim, &RunId::new(), &new_owner)
-            .await
-            .unwrap();
         let failure = TaskFlowBlocker {
-            run_id: None,
+            captured: None,
             reason: "late old failure".to_string(),
             restart_required: false,
             observed_at: OffsetDateTime::now_utc(),
         };
 
         assert!(store
-            .block_task_flow(&task.id, &old_claim, &failure)
+            .fail_flow(
+                &first.invocation.id,
+                first.version,
+                Some(&old_claim),
+                &failure
+            )
             .await
             .is_err());
-        let current = store.flow_position(&task.id).await.unwrap().unwrap();
+        assert!(store
+            .fail_flow(
+                &replacement.invocation.id,
+                replacement.version,
+                Some(&old_claim),
+                &failure
+            )
+            .await
+            .is_err());
+        let current = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(current.claim.as_ref(), Some(&new_claim));
         assert!(current.failure.is_none());
     }
@@ -2636,6 +2566,8 @@ mod tests {
             .unwrap();
 
         project.plan.prompt_context = "Definition:\nCurrent proof".to_string();
+        project.plan.flow = "incident".into();
+        project.plan.status = crate::pm::ProjectStatus::Completed;
         project.plan.pm_snapshot_synced_at += 1;
         project.iteration = 9;
         store.update_project(&project).await.unwrap();
@@ -3229,27 +3161,6 @@ mod tests {
         assert_eq!(root.parent_wave_id(), None);
     }
 
-    /// A run_events row with no usage attached.
-    fn event_row(run_id: &str, seq: i64, node: &str, event: &str) -> RunEventRow {
-        RunEventRow {
-            run_id: run_id.to_string(),
-            process_id: run_id.to_string(),
-            parent_process_id: None,
-            seq,
-            ts: seq,
-            repo: Some("/repo".to_string()),
-            worktree: None,
-            wave: None,
-            node: node.to_string(),
-            event: event.to_string(),
-            command: None,
-            flow: None,
-            skill: None,
-            step_index: None,
-            error: None,
-        }
-    }
-
     #[tokio::test]
     async fn pm_snapshot_replacement_is_atomic_per_wave() {
         let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
@@ -3281,17 +3192,6 @@ mod tests {
             Some(snapshot)
         );
         let _ = std::fs::remove_file(db_path);
-    }
-
-    #[test]
-    fn a_closed_vocabulary_rejects_an_unknown_node() {
-        let db_path = env::temp_dir().join(format!("loopflow-test-{}.db", WaveId::new()));
-        let store = SqliteStore::new(&db_path).expect("store should open");
-        let row = event_row("bad-node", 0, "task", "started");
-        let error = store
-            .insert_run_event(&row)
-            .expect_err("unknown node must violate the ledger contract");
-        assert!(error.to_string().contains("CHECK constraint failed"));
     }
 
     #[tokio::test]
@@ -3594,26 +3494,13 @@ mod tests {
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
         let position = store
-            .set_flow_position(
+            .start_task_flow(
                 &task.id,
-                FlowPosition {
-                    task_id: task.id.clone(),
-                    invocation: crate::durable::test_flow_invocation(
-                        "code",
-                        0,
-                        "implement",
-                        None,
-                        false,
-                    ),
-                    session_run_id: None,
-                    ready_summary: None,
-                    cursor: Default::default(),
-                    version: 0,
-                    worker_generation: 0,
-                    claim: None,
-                    failure: None,
-                    updated_at: time::OffsetDateTime::now_utc(),
-                },
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 0, "implement", None, false),
+                    Default::default(),
+                ),
             )
             .await
             .unwrap();
@@ -3640,10 +3527,14 @@ mod tests {
         assert!(store.begin_task_abandon(&task.id).await.is_err());
         assert!(store.abandon(&work, "canceled").await.is_err());
         assert_eq!(
-            store.flow_position(&task.id).await.unwrap().unwrap().claim,
+            store.task_flow(&task.id).await.unwrap().unwrap().claim,
             Some(claim.clone())
         );
-        store.release_task_worker(&task.id, &claim).await.unwrap();
+        let held = store.task_flow(&task.id).await.unwrap().unwrap();
+        let position = store
+            .release_flow(held.id(), held.version, Some(&claim))
+            .await
+            .unwrap();
         store.begin_task_abandon(&task.id).await.unwrap();
         assert!(store
             .claim_task_worker(
@@ -3657,7 +3548,7 @@ mod tests {
             .is_err());
 
         store.abandon(&work, "canceled").await.unwrap();
-        assert!(store.flow_position(&task.id).await.unwrap().is_none());
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert!(store
             .get_task_by_issue(&task.plan.identifier)

@@ -144,7 +144,7 @@ existing receipt filename stays stable so older executables share the same lock.
 | unowned or stopped merge + agent launch | allowed; continuation adopts the existing merge |
 
 The sync owner authorizes only its exact sequencer and recovery child. It does
-not make a provider the worktree owner or serialize ordinary edits, Run
+not make a provider the worktree owner or serialize ordinary edits, conversation
 recording, tests, or planning writes.
 
 A supervisor-started merge can be handed to an agent in the same checkout.
@@ -241,7 +241,7 @@ serial chain to a new branch from fetched main.
 
 ## Failure and recovery
 
-- An interrupted provider Run does not discard the worktree or PR chain.
+- An interrupted provider turn does not discard the worktree or PR chain.
 - A failed check is GitHub evidence, not a completed local transition.
 - A crashed sync keeps Git's sequencer state; explicit recovery adopts it
   with fresh operation identity.
@@ -259,7 +259,7 @@ serial chain to a new branch from fetched main.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.
-- Run identity does not grant Git or PR mutation authority.
+- Conversation identity does not grant Git or PR mutation authority.
 - Repair and merge decisions are fenced by exact PR head evidence.
 
 ## Next

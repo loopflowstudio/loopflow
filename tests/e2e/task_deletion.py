@@ -70,6 +70,9 @@ class Handler(BaseHTTPRequestHandler):
             }
         elif "mutation UpdateInitiative" in query:
             data = {"initiativeUpdate": {"initiative": {"id": variables["id"]}}}
+        elif "mutation RenameProject" in query:
+            project["name"] = variables["name"]
+            data = {"projectUpdate": {"success": True}}
         elif "mutation UpdateProject" in query:
             project.update({key: variables[key] for key in ["name", "description", "content"]})
             data = {"projectUpdate": {"project": {"id": variables["id"]}}}
@@ -183,7 +186,8 @@ def main() -> None:
         "id": fixture["project"],
         "name": "Task PR Tests",
         "description": "",
-        "content": "",
+        "content": "flow: feature",
+        "status": {"type": "started"},
         "initiatives": {"nodes": [{"id": "initiative-task-pr-tests"}]},
         "teams": {"nodes": [{"id": "team-task-pr-tests"}]},
     }

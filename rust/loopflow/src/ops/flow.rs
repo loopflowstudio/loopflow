@@ -1,10 +1,12 @@
 use std::path::Path;
+use std::process::Stdio;
 
 use clap::Parser;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
 use crate::engine::flow::Command as FlowCommand;
+use crate::engine::process::ProcessGroupGuard;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -93,8 +95,15 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
     // Earlier and unfinished Runs can contain the first attempt on a PR merged
     // inside the window. Python windows Run statistics and PR intervals separately.
-    let runs = crate::run_record::scan_runs_since(&crate::store::observability_home_dir(), 0)
-        .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
+    let runs = crate::lf::commands::runs::collect_runs_started_since(
+        crate::lf::commands::WorkFilter {
+            wave: None,
+            project: None,
+            task: None,
+        },
+        0,
+    )
+    .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
     let mut run_input = tempfile::NamedTempFile::new()
         .map_err(|error| OpsError::Message(format!("create telemetry input: {error}")))?;
     serde_json::to_writer(run_input.as_file_mut(), &runs)
@@ -109,9 +118,23 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg("--runs")
         .arg(run_input.path())
         .arg("--envelope");
-    let output = command
-        .output()
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let child = command
+        .spawn()
         .map_err(|error| OpsError::Message(format!("launch telemetry scorecard: {error}")))?;
+    let process_group = ProcessGroupGuard::new(child.id());
+    let output = child
+        .wait_with_output()
+        .map_err(|error| OpsError::Message(format!("wait for telemetry scorecard: {error}")))?;
+    process_group.disarm();
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(OpsError::Message(format!(
@@ -376,13 +399,13 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{execute_flow_command, TelemetryScorecardEnvelope};
-    use crate::controller::wave::metrics::MetricEvidenceDto;
     use crate::engine::flow::Command as FlowCommand;
     use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
-    use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::{open_store, storage_config_from_env};
+    use crate::work::wave::metrics::MetricEvidenceDto;
     use crate::work::wave::Wave;
 
     #[test]
@@ -403,7 +426,7 @@ mod tests {
         let repo = tempfile::tempdir().expect("temp repo");
         let capture = CaptureHandle::begin_at(
             ledger.home(),
-            RunSpec {
+            SessionCaptureSpec {
                 harness: "codex".to_string(),
                 model: None,
                 surface: "headless".to_string(),
@@ -412,7 +435,8 @@ mod tests {
                 worktree: Some(repo.path().to_path_buf()),
                 skill: Some("implement".to_string()),
                 subjects: Vec::new(),
-                flow: RunFlowMembership::Independent,
+                work: None,
+                flow: SessionFlowMembership::Independent,
             },
         )
         .unwrap();
@@ -422,6 +446,12 @@ mod tests {
             cache_read_tokens: None,
         });
         capture.finish("completed").unwrap();
+        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
+            &ledger.home().join("loopflow.db"),
+        )
+        .unwrap();
+        store.assert_no_historical_runs();
+        std::fs::remove_dir_all(capture.artifact_dir()).unwrap();
         let scripts = repo.path().join("scripts");
         std::fs::create_dir(&scripts).expect("create scripts directory");
         std::fs::write(
@@ -444,7 +474,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
 
         execute_flow_command(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
-        let runs: Vec<crate::run_record::RunSnapshot> = serde_json::from_str(
+        let runs: Vec<crate::session_record::SessionHistory> = serde_json::from_str(
             &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
         )
         .unwrap();
@@ -452,7 +482,7 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
         assert_eq!(runs[0].usage.input_tokens, Some(12));
         assert_eq!(runs[0].usage.cost_usd, None);
         assert_eq!(runs[0].usage.final_streams, 0);
-        assert_eq!(runs[0].outcome.as_deref(), Some("completed"));
+        assert_eq!(runs[0].recorded_outcome.as_deref(), Some("completed"));
     }
 
     #[test]
@@ -559,9 +589,14 @@ print(json.dumps({
         assert!(portfolio.metrics[0].instrumented);
         assert!(matches!(
             portfolio.metrics[0].evidence,
-            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+            MetricEvidenceDto::Unknown {
+                cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
+            }
         ));
         let prompt = crate::ops::metrics::metric_prompt_section("wave-metrics", Ok(portfolio));
-        assert!(prompt.contains("\"kind\":\"untargeted\",\"value\":1.0"));
+        assert!(prompt.contains("\"kind\":\"target_unavailable\",\"value\":1.0"));
     }
 }

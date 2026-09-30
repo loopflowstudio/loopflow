@@ -100,7 +100,10 @@ class LinearHandler(BaseHTTPRequestHandler):
                                             "id": "project-1",
                                             "name": "Product — Reliability",
                                             "description": "",
-                                            "content": "## KRs\n\n- [ ] Fresh proof",
+                                            "content": (
+                                                "flow: feature\n\n## KRs\n\n- [ ] Fresh proof"
+                                            ),
+                                            "status": {"type": "started"},
                                             "initiatives": {"nodes": [{"id": "initiative-1"}]},
                                             "teams": {"nodes": [{"id": "team-1"}]},
                                         }

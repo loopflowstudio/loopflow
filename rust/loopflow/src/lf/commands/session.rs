@@ -1,11 +1,10 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionRecord, SessionState};
-use crate::run_record::SessionTitleSource;
+use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
+use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
@@ -29,9 +28,64 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::List { json, all } => {
+        SessionCommand::History {
+            id,
+            json,
+            after,
+            limit,
+        } => {
             let store = open_shared_store().await?;
-            list(&store, *json, *all).await
+            if store.session(id).await?.is_none() {
+                bail!("Session {id} was not found");
+            }
+            let events = store.sqlite.session_history(id, *after, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string(&events)?);
+            } else {
+                for event in events {
+                    println!(
+                        "{} {} {} {}",
+                        event.seq,
+                        event.provider_turn.as_deref().unwrap_or("unknown-turn"),
+                        event.kind.as_str(),
+                        event.payload
+                    );
+                }
+            }
+            Ok(())
+        }
+        SessionCommand::List {
+            json,
+            all,
+            interactive,
+            history,
+            limit,
+            offset,
+            page,
+            after,
+            task,
+            search,
+        } => {
+            let store = open_shared_store().await?;
+            list(
+                &store,
+                *json,
+                &crate::session::SessionFilter {
+                    repo: if *all {
+                        None
+                    } else {
+                        crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+                    },
+                    task: task.clone(),
+                    search: search.clone(),
+                    interactive: interactive.interactive(),
+                    history: *history,
+                    limit: *limit,
+                    offset: *offset,
+                    after: page.then(|| after.clone().unwrap_or_default()),
+                },
+            )
+            .await
         }
         SessionCommand::Open {
             id,
@@ -55,6 +109,37 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Bind {
+            id,
+            task,
+            dry_run,
+            json,
+        } => {
+            let store = open_shared_store().await?;
+            if *dry_run {
+                let preview = crate::ops::human_session::preview_binding(&store, id, task).await?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!(
+                        "{} → {} ({}) [{}]. Not assigned.",
+                        preview.session_id, preview.identifier, preview.title, preview.task_id
+                    );
+                }
+                return Ok(());
+            }
+            let session = crate::ops::human_session::bind(&store, id, task).await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&session)?);
+            } else {
+                println!(
+                    "Session {} belongs to {}.",
+                    session.id,
+                    session.work_path.as_deref().unwrap_or(task)
+                );
+            }
+            Ok(())
+        }
         SessionCommand::Ready { summary } => {
             let text = required_text(summary, "ready summary")?;
             let store = open_shared_store().await?;
@@ -82,14 +167,48 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::ServeAsk { id } => crate::ops::human_session::serve_ask(id).await,
-        SessionCommand::StopRun { run_id } => crate::ops::human_session::stop_run(run_id),
+        SessionCommand::ServeAsk { run_id } => {
+            let store = open_shared_store().await?;
+            crate::ops::human_session::serve_ask(&store, run_id).await
+        }
+        SessionCommand::StopRun { run_id } => {
+            crate::ops::human_session::stop_session_client(run_id)
+        }
     }
 }
 
-async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
-    let mut sessions = crate::ops::human_session::list(store).await?;
-    sessions = scope_to_repo(sessions, all)?;
+async fn list(
+    store: &Arc<Store>,
+    json: bool,
+    filter: &crate::session::SessionFilter,
+) -> anyhow::Result<()> {
+    if filter.after.is_some() {
+        anyhow::ensure!(
+            filter.limit > 0,
+            "paged Session inventory requires a positive limit"
+        );
+        let mut selection = filter.clone();
+        selection.limit = filter
+            .limit
+            .checked_add(1)
+            .context("Session page limit is too large")?;
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
+        let next = if entries.len() > filter.limit {
+            entries.pop();
+            entries.last().map(|session| session.id.clone())
+        } else {
+            None
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&crate::ops::human_session::SessionPage {
+                entries,
+                next
+            })?
+        );
+        return Ok(());
+    }
+    let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -100,6 +219,7 @@ async fn list(store: &Arc<Store>, json: bool, all: bool) -> anyhow::Result<()> {
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
+                    SessionState::Unknown => "unknown",
                     SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
                     SessionState::Ready => "ready",
@@ -133,7 +253,7 @@ async fn complete(id: &str) -> anyhow::Result<()> {
     let store = open_shared_store().await?;
     let session = crate::ops::human_session::complete(&store, id).await?;
     match session.kind {
-        SessionKind::Interactive => println!(
+        SessionKind::Conversation => println!(
             "Session {} completed; its provider history remains resumable.",
             session.id
         ),
@@ -170,19 +290,6 @@ async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow:
     Ok(())
 }
 
-fn scope_to_repo(sessions: Vec<SessionRecord>, all: bool) -> anyhow::Result<Vec<SessionRecord>> {
-    if all {
-        return Ok(sessions);
-    }
-    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
-        return Ok(sessions);
-    };
-    Ok(sessions
-        .into_iter()
-        .filter(|session| scope.contains(Path::new(&session.cwd)))
-        .collect())
-}
-
 fn required_text(args: &[String], label: &str) -> anyhow::Result<String> {
     let text = args.join(" ").trim().to_string();
     if text.is_empty() {
@@ -198,14 +305,4 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
             .await
             .context("open the shared Loopflow store")?,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::scope_to_repo;
-
-    #[test]
-    fn an_empty_session_list_stays_empty() {
-        assert!(scope_to_repo(Vec::new(), true).unwrap().is_empty());
-    }
 }

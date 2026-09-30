@@ -1,9 +1,6 @@
-use time::OffsetDateTime;
-
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, FlowPosition, Home, HomeId, Placement, RunId, Steer, SteerComment, TaskId,
-    TaskWorkerClaim, TaskWorkerClaimOutcome, TaskWorkerOwner, ToolResponseReceipt,
+    AbandonReceipt, Home, HomeId, Placement, Steer, SteerComment, TaskId, ToolResponseReceipt,
     ToolResponseWrite, WorkRef, WorkStatus,
 };
 
@@ -18,35 +15,6 @@ impl Store {
         .await
     }
 
-    pub async fn record_flow_route(
-        &self,
-        task_id: &TaskId,
-        run_id: &RunId,
-        path: &str,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let run_id = run_id.clone();
-        let path = path.to_owned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_route(&task_id, &run_id, &path)
-        })
-        .await
-    }
-
-    pub async fn record_flow_verdict(
-        &self,
-        task_id: &TaskId,
-        run_id: &crate::durable::RunId,
-        verdict: &crate::engine::transitions::FlowVerdict,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let run_id = run_id.clone();
-        let verdict = verdict.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_flow_verdict(&task_id, &run_id, &verdict)
-        })
-        .await
-    }
     pub(crate) async fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -89,83 +57,6 @@ impl Store {
         let work = work.clone();
         let home_id = home_id.clone();
         run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
-    }
-
-    pub async fn set_flow_position(
-        &self,
-        task_id: &TaskId,
-        position: FlowPosition,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.set_flow_position(&task_id, &position)
-        })
-        .await
-    }
-
-    pub async fn flow_position(&self, task_id: &TaskId) -> StoreResult<Option<FlowPosition>> {
-        let task_id = task_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.flow_position(&task_id)).await
-    }
-
-    pub async fn claim_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected_invocation: &str,
-        expected_version: u64,
-        owner: &TaskWorkerOwner,
-        claimed_at: OffsetDateTime,
-    ) -> StoreResult<TaskWorkerClaimOutcome> {
-        let task_id = task_id.clone();
-        let expected_invocation = expected_invocation.to_string();
-        let owner = owner.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.claim_task_worker(
-                &task_id,
-                &expected_invocation,
-                expected_version,
-                &owner,
-                claimed_at,
-            )
-        })
-        .await
-    }
-
-    pub async fn reclaim_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        owner: &TaskWorkerOwner,
-        claimed_at: OffsetDateTime,
-    ) -> StoreResult<TaskWorkerClaim> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let owner = owner.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reclaim_task_worker(&task_id, &expected, &owner, claimed_at)
-        })
-        .await
-    }
-
-    pub async fn bind_task_worker_run(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        worker_run_id: &RunId,
-        owner: &TaskWorkerOwner,
-    ) -> StoreResult<TaskWorkerClaim> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let worker_run_id = worker_run_id.clone();
-        let owner = owner.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.bind_task_worker_run(&task_id, &expected, &worker_run_id, &owner)
-        })
-        .await
-    }
-
-    pub async fn human_task_flow_positions(&self) -> StoreResult<Vec<FlowPosition>> {
-        run_sqlite(&self.sqlite, |store| store.human_task_flow_positions()).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {

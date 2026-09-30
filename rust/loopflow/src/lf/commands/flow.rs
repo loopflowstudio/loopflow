@@ -1,15 +1,18 @@
-use crate::engine::transitions::{FlowDecision, FlowVerdict};
+use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
+use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{
-    expand_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
-    Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
+    compile_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
+    ExecutionCursor, Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::{Cli, FlowCommand};
-use crate::ops::{commit_workflow, flow_run, CommitOptions, NullProgress, WorkBinding};
+use crate::ops::{flow_run, NullProgress, WorkBinding};
+use crate::store::SharedStore;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Mutex;
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
 pub fn run(
@@ -19,22 +22,30 @@ pub fn run(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let items = expand_flow(flow, repo)?;
+    let checkout = if binding.is_none() {
+        crate::lf::commands::run::implicit_binding(cli)?
+    } else {
+        None
+    };
+    let binding = binding.or(checkout.as_ref());
+    let items = compile_flow(flow, repo)?;
     print_pipeline_header(&flow.name, &items);
-    let bound_message =
-        binding.map(|binding| crate::lf::commands::run::bound_message(binding, message));
+    let bound_message = binding
+        .filter(|binding| !matches!(binding.work, WorkRef::Task(_)))
+        .map(|binding| crate::lf::commands::run::bound_message(binding, message));
     execute(
         &flow.name,
         &items,
         bound_message.as_deref().or(message),
         cli,
         repo,
+        binding,
     )
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
     let flow = crate::engine::flow::load_authored_flow(name, repo)?;
-    let items = expand_flow(&flow, repo)?;
+    let items = compile_flow(&flow, repo)?;
     for line in render_pipeline_lines(&items) {
         println!("{line}");
     }
@@ -69,53 +80,65 @@ pub fn validate(name: &str, repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Execute expanded steps on a fresh runtime, bracketed by flow journal events.
+/// Store the invocation row and drive it, bracketed by flow journal events.
+/// A Flow whose row cannot be written does not start.
 fn execute(
     flow_name: &str,
     items: &[ConcreteStep],
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
+    binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let fields = |extra: LfEventFields| LfEventFields {
-        flow: Some(flow_name.to_string()),
-        ..extra
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let mut invocation = QueuedInvocation::new(flow_name, items.to_vec())?;
+    invocation.accounts = Some(Box::new(
+        crate::provider_account::lease::AccountSelection::from_flags_or_env(
+            &cli.account,
+            &cli.only_account,
+        )?,
+    ));
+    let flow = FlowSession {
+        invocation,
+        cursor: ExecutionCursor::default(),
+        version: 0,
+        task_id: binding.and_then(|binding| match &binding.work {
+            WorkRef::Task(id) => Some(id.clone()),
+            _ => None,
+        }),
+        wave_id: binding.map(|binding| binding.wave_id.clone()),
+        cwd: repo.to_path_buf(),
+        message: message.map(str::to_owned),
+        model: cli.model.clone(),
+        current_attempt: None,
+        pending_session_id: None,
+        ready_summary: None,
+        worker_generation: 0,
+        claim: None,
+        failure: None,
+        finished: false,
+        updated_at: time::OffsetDateTime::now_utc(),
     };
-    journal::emit(
-        repo,
-        LfNode::Flow,
-        LfEventType::Started,
-        fields(LfEventFields::default()),
-    );
-    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", flow_name);
-    let record = flow_run::create(flow_name, items, repo, message, cli)?;
+    let (store, flow) = runtime.block_on(async {
+        let store = open_flow_store().await?;
+        let flow = store.create_flow(flow).await?;
+        Ok::<_, anyhow::Error>((store, flow))
+    })?;
     eprintln!(
         "Flow invocation {} — resume with lf flow resume {}",
-        record.id, record.id
+        flow.id(),
+        flow.id()
     );
-    let result = drive_saved(&record.id, cli);
-    match &result {
-        Ok(outcome) => journal::emit(
-            repo,
-            LfNode::Flow,
-            if *outcome == FlowOutcome::Completed {
-                LfEventType::Completed
-            } else {
-                LfEventType::Escalated
-            },
-            fields(LfEventFields::default()),
-        ),
-        Err(err) => journal::emit(
-            repo,
-            LfNode::Flow,
-            LfEventType::Errored,
-            fields(LfEventFields {
-                error: Some(err.to_string()),
-                ..LfEventFields::default()
-            }),
-        ),
-    }
-    report_outcome(result?)
+    report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
+}
+
+async fn open_flow_store() -> Result<SharedStore> {
+    let config = crate::store::storage_config_from_env()?;
+    Ok(std::sync::Arc::new(
+        crate::store::open_store(&config).await?,
+    ))
 }
 
 fn report_outcome(outcome: FlowOutcome) -> Result<()> {
@@ -128,155 +151,408 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     }
 }
 
-pub fn control(command: &FlowCommand, cli: &Cli, repo: &Path) -> Result<()> {
+pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
     match command {
-        FlowCommand::Decide { decision, summary } => {
-            let decision = match decision.as_str() {
-                "advance" => FlowDecision::Advance,
-                "iterate" => FlowDecision::Iterate,
-                _ => anyhow::bail!("unknown decision {decision}"),
-            };
-            let summary = summary.join(" ");
-            anyhow::ensure!(
-                !summary.trim().is_empty(),
-                "decision requires evidence or direction"
-            );
-            if let Some(token) = flow_run::token()? {
-                let run = active_run_id()?;
-                flow_run::record_decision(&token, &run, &FlowVerdict { decision, summary })?;
-            } else {
-                crate::ops::task::task_verdict(repo, decision, &summary)?;
-            }
-            println!("Decision recorded; it takes effect when this Run finishes successfully.");
-            Ok(())
-        }
-        FlowCommand::Route { path } => {
-            let run = active_run_id()?;
-            if let Some(token) = flow_run::token()? {
-                flow_run::record_route(&token, &run, path)?;
-            } else {
-                let runtime = tokio::runtime::Runtime::new()?;
-                runtime.block_on(async {
-                    let store = std::sync::Arc::new(
-                        crate::store::open_existing_store()
-                            .await
-                            .ok_or_else(|| anyhow!("no Loopflow registry"))?,
-                    );
-                    let task = crate::ops::task::task_for_checkout(&store, repo)
-                        .await?
-                        .ok_or_else(|| anyhow!("no Task in this checkout"))?;
-                    store.record_flow_route(&task.id, &run, path).await?;
-                    Ok::<_, anyhow::Error>(())
-                })?;
-            }
-            println!("Route recorded; it takes effect when this Run finishes successfully.");
-            Ok(())
-        }
-        FlowCommand::Blocked { reason } => {
-            let reason = reason.join(" ");
-            anyhow::ensure!(!reason.trim().is_empty(), "usage: lf flow blocked REASON");
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async {
-                let store = std::sync::Arc::new(crate::store::open_existing_store().await
-                    .ok_or_else(|| anyhow!("no Loopflow registry on this Home"))?);
-                let run_id = active_run_id()?;
-                let key = if let Some(token) = flow_run::token()? {
-                    flow_run::require_active(&token, &run_id)?
-                } else {
-                    let task = crate::ops::task::task_for_checkout(&store, repo).await?
-                        .ok_or_else(|| anyhow!("no current Flow decision"))?;
-                    let position = store.flow_position(&task.id).await?
-                        .ok_or_else(|| anyhow!("Task has no current Flow"))?;
-                    anyhow::ensure!(position.claim.as_ref().and_then(|c| c.worker_run_id.as_ref()) == Some(&run_id)
-                        && !position.is_human(), "this Run does not own the Task decision");
-                    anyhow::ensure!(matches!(position.current_plan(), ConcreteStep::Skill(s) if s.repeat.is_some()),
-                        "this step does not own a loop decision");
-                    crate::ops::human_session::task_unblock_key(&position)
-                };
-                let summary = crate::ops::human_session::ask_once(&store, &key, &reason, Some("unblock")).await?;
-                println!("Session complete: {summary}\nReassess the current evidence before choosing Advance or Iterate. This returned feedback, not a navigation decision.");
-                Ok(())
-            })
-        }
         FlowCommand::Resume { invocation, retry } => {
-            let record = flow_run::read(invocation)?;
-            if *retry {
-                let _driver = flow_run::driver_lock(&record.id)?;
-                flow_run::retry(&record.id)?;
+            let id = invocation.as_str();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let store = runtime.block_on(open_flow_store())?;
+            let flow = runtime
+                .block_on(store.flow(id))?
+                .ok_or_else(|| anyhow!("Flow {id} has no invocation row"))?;
+            if let Some(task_id) = &flow.task_id {
+                if runtime
+                    .block_on(store.task_flow(task_id))?
+                    .is_some_and(|managed| managed.id() == id)
+                {
+                    // A managed Flow resumes through its Task's worker claim.
+                    // The worker enters the same shared driver.
+                    let task = runtime
+                        .block_on(store.get_task(task_id))?
+                        .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;
+                    crate::ops::task::task_run(
+                        &task.worktree,
+                        &task.plan.identifier,
+                        crate::ops::task::TaskExecOptions {
+                            retry: *retry,
+                            agent: cli.model.clone(),
+                            ..Default::default()
+                        },
+                    )?;
+                    return Ok(());
+                }
             }
+            let flow = if *retry {
+                runtime.block_on(prepare_native_retry(&store, flow))?
+            } else {
+                flow
+            };
+            let flow = if *retry && flow.failure.is_some() {
+                let _driver = flow_run::driver_lock(id)?;
+                runtime.block_on(store.retry_flow(id, None))?
+            } else {
+                flow
+            };
             let argv = std::env::args().collect::<Vec<_>>();
-            journal::with_runtime(&record.cwd, &argv, || {
-                report_outcome(drive_saved(&record.id, cli)?)
+            let cwd = flow.cwd.clone();
+            journal::with_runtime(&cwd, &argv, || {
+                report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
             })
         }
         _ => anyhow::bail!("not a Flow control: {command:?}"),
     }
 }
 
-fn active_run_id() -> Result<crate::durable::RunId> {
-    crate::durable::RunId::parse(
-        &std::env::var(crate::durable::RUN_ID_ENV)
-            .context("this operation requires the active decision Run")?,
-    )
-    .map_err(Into::into)
+fn block_on_store<F, Fut>(operation: F) -> Result<()>
+where
+    F: FnOnce(SharedStore) -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let store = std::sync::Arc::new(
+            crate::store::open_existing_store()
+                .await
+                .ok_or_else(|| anyhow!("no Loopflow registry on this Home"))?,
+        );
+        operation(store).await
+    })
 }
 
-fn drive_saved(id: &str, cli: &Cli) -> Result<FlowOutcome> {
-    let _driver = flow_run::driver_lock(id)?;
-    flow_run::recover(id)?;
-    let mut record = flow_run::read(id)?;
-    if record.finished {
-        println!("Flow {} is already finished.", record.flow);
-        return Ok(FlowOutcome::Completed);
+/// An operator-requested stop releases the position without recording a failure.
+#[derive(Debug)]
+pub(crate) enum StepEnd {
+    Interrupted,
+    StoreChanged(String),
+}
+
+impl std::fmt::Display for StepEnd {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interrupted => formatter.write_str("step interrupted"),
+            Self::StoreChanged(reason) => write!(formatter, "Flow store changed: {reason}"),
+        }
     }
-    if let Some(reason) = &record.failure {
-        anyhow::bail!("Flow {} is blocked: {reason}", record.id);
+}
+
+impl std::error::Error for StepEnd {}
+
+/// Prepare uncertain native work for an explicit retry. Both Task launch and
+/// taskless resume use this before acquiring a replacement worker claim. Recorded
+/// failures remain with the caller's existing retry/unblock policy.
+pub(crate) async fn prepare_native_retry(
+    store: &SharedStore,
+    flow: FlowSession,
+) -> Result<FlowSession> {
+    wait_for_step(store, &flow).await?;
+    let _driver = flow_run::driver_lock(flow.id())?;
+    let saved = store
+        .flow(flow.id())
+        .await?
+        .ok_or_else(|| anyhow!("Flow disappeared"))?;
+    anyhow::ensure!(
+        saved.version == flow.version && saved.claim == flow.claim,
+        "Flow changed before native retry"
+    );
+    recover_native_flow(store, flow.id(), flow.claim.as_ref(), true).await
+}
+
+/// Preserve a surviving step's write authority until its own result is recorded.
+pub(crate) async fn wait_for_step(store: &SharedStore, flow: &FlowSession) -> Result<()> {
+    loop {
+        let current = store.flow(flow.id()).await?.context("Flow disappeared")?;
+        anyhow::ensure!(
+            current.version == flow.version && current.claim == flow.claim,
+            "Flow changed while observing its step"
+        );
+        let Some(exec) = store.sqlite.pending_flow_step_exec(flow.id())? else {
+            return Ok(());
+        };
+        // In-process historical captures and managed Task steps still name their
+        // driver. Waiting for ourselves would prevent that driver from settling.
+        if journal::current_exec_id().as_ref() == Some(&exec) {
+            return Ok(());
+        }
+        match journal::exec_process_evidence(&store.sqlite, &exec) {
+            journal::ProcessIdentityEvidence::Live => {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            journal::ProcessIdentityEvidence::Dead => return Ok(()),
+            journal::ProcessIdentityEvidence::Unknown => {
+                anyhow::bail!("Flow {} step Exec {exec} has unknown process identity; retain its pending effect", flow.id());
+            }
+        }
     }
-    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &record.flow);
-    let _accounts = record.accounts.clone().unwrap_or_default().activate()?;
-    let mut launch = cli.launch_options();
-    launch.wave = record.wave.clone();
-    launch.task = record.task.clone();
-    launch.as_work = record.as_work.clone();
-    if launch.model.is_none() {
-        launch.model = record.model.clone();
+}
+
+/// Read the selected provider turn before judging the Flow. A surviving engine
+/// can finish after its driver exits; observing that result does not repair the
+/// driver's unknown command outcome or grant a new conversation driver claim.
+async fn recover_native_flow(
+    store: &SharedStore,
+    id: &str,
+    claim: Option<&TaskWorkerClaim>,
+    retry: bool,
+) -> Result<FlowSession> {
+    loop {
+        let flow = store
+            .flow(id)
+            .await?
+            .ok_or_else(|| anyhow!("Flow {id} disappeared"))?;
+        anyhow::ensure!(
+            flow.claim.as_ref() == claim,
+            "Flow {id} changed under its driver"
+        );
+        wait_for_step(store, &flow).await?;
+        if flow
+            .current_attempt
+            .as_ref()
+            .is_some_and(|attempt| !attempt.published)
+        {
+            if let Some(exec) = store.sqlite.pending_flow_step_exec(id)? {
+                if journal::exec_process_evidence(&store.sqlite, &exec)
+                    == journal::ProcessIdentityEvidence::Dead
+                {
+                    // No provider may start before publication. Retain this capture
+                    // in history and let the next command capture its own input.
+                    return Ok(store.reset_flow_input(id, flow.version, claim).await?);
+                }
+            }
+        }
+        let Some(session_id) = store.sqlite.pending_flow_conversation(id)? else {
+            break;
+        };
+        if retry && crate::session_record::conversation_engine_exited(&store.sqlite, &session_id)? {
+            // Missing native completion remains unknown. Explicit retry releases
+            // only the fenced boundary after exact engine exit evidence.
+            return Ok(store.reset_flow_input(id, flow.version, claim).await?);
+        }
+        let (endpoint, thread_id) =
+            store
+                .sqlite
+                .session_connection(&session_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Selected conversation {session_id} has no native connection for recovery"
+                    )
+                })?;
+        let session = store
+            .sqlite
+            .session(&session_id)?
+            .context("Selected Session is missing")?;
+        match session.provider.as_deref() {
+            Some("opencode") => {
+                crate::harness::opencode_history::recover(
+                    &store.sqlite,
+                    &session_id,
+                    &endpoint,
+                    &thread_id,
+                )
+                .await?
+            }
+            Some("codex") => {
+                let connection = crate::harness::codex_connection::CodexConnection {
+                    store: store.sqlite.clone(),
+                    session_id,
+                    thread_id,
+                    driver: None,
+                };
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    connection.recover_history(Path::new(&endpoint)),
+                )
+                .await
+                .context("Selected native turn history did not respond")??;
+            }
+            provider => {
+                anyhow::bail!("Selected Session provider {provider:?} has no native history reader")
+            }
+        }
+        if store.sqlite.pending_flow_conversation(id)?.is_some() {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     }
-    launch.bound_cwd = Some(record.cwd.clone());
-    let executor = CliFlowExecutor {
-        cli: &launch,
-        message: record.message.as_deref(),
-        repo: record.cwd.clone(),
-        invocation: id.to_owned(),
+    Ok(store.recover_flow(id, claim).await?)
+}
+
+/// Drive one invocation from its row until it completes, waits or blocks.
+/// `claim` is the Task worker's, held until the driver stops; every write is
+/// fenced by it. The engine owns traversal; child commands read their work,
+/// model fallback and captured definition from the selected Flow row.
+pub(crate) async fn drive(
+    store: SharedStore,
+    flow: FlowSession,
+    claim: Option<TaskWorkerClaim>,
+    launcher: &Cli,
+) -> Result<FlowOutcome> {
+    let fields = |extra: LfEventFields| LfEventFields {
+        flow: Some(flow.invocation.flow.clone()),
+        ..extra
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let outcome = runtime
-        .block_on(FlowEngine::new(executor).run_with_cursor(&record.steps, &mut record.cursor));
-    match outcome {
-        Ok(FlowOutcome::Completed) => {
-            flow_run::update(id, |run| {
-                run.finished = true;
-                run.active = None;
-                Ok(())
-            })?;
-            Ok(FlowOutcome::Completed)
+    journal::emit(
+        &flow.cwd,
+        LfNode::Flow,
+        LfEventType::Started,
+        fields(LfEventFields::default()),
+    );
+    let result = drive_loop(store, &flow, claim, launcher).await;
+    let (event, error) = match &result {
+        Ok(FlowOutcome::Completed) => (LfEventType::Completed, None),
+        Ok(_) => (LfEventType::Escalated, None),
+        Err(error) => (LfEventType::Errored, Some(error.to_string())),
+    };
+    journal::emit(
+        &flow.cwd,
+        LfNode::Flow,
+        event,
+        fields(LfEventFields {
+            error,
+            ..Default::default()
+        }),
+    );
+    result
+}
+
+async fn drive_loop(
+    store: SharedStore,
+    flow: &FlowSession,
+    claim: Option<TaskWorkerClaim>,
+    launcher: &Cli,
+) -> Result<FlowOutcome> {
+    let id = flow.id().to_owned();
+    let _driver = flow_run::driver_lock(&id)?;
+    let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.invocation.flow);
+    let _accounts = flow
+        .invocation
+        .accounts
+        .clone()
+        .unwrap_or_default()
+        .activate()?;
+    let mut owned_claim = claim;
+    loop {
+        let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;
+        if flow.finished {
+            return Ok(FlowOutcome::Completed);
         }
-        Ok(FlowOutcome::Waiting) => Ok(FlowOutcome::Waiting),
-        Ok(FlowOutcome::Blocked(reason)) => {
-            flow_run::update(id, |run| {
-                run.failure = Some(reason.clone());
-                Ok(())
-            })?;
-            anyhow::bail!("Flow {id} blocked: {reason}")
+        if let Some(task_id) = &flow.task_id {
+            if store
+                .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
+                .await?
+                == crate::durable::WorkStatus::Done
+                && store
+                    .task_flow(task_id)
+                    .await?
+                    .is_some_and(|managed| managed.id() == id)
+            {
+                store
+                    .end_flow(&id, flow.version, owned_claim.as_ref(), "Task completed")
+                    .await?;
+                let task = store
+                    .get_task(task_id)
+                    .await?
+                    .context("completed Task disappeared")?;
+                crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                return Ok(FlowOutcome::Completed);
+            }
         }
-        Err(error) => {
-            flow_run::update(id, |run| {
-                run.failure = Some(error.to_string());
-                Ok(())
-            })?;
-            Err(error)
+        if let Some(failure) = &flow.failure {
+            anyhow::bail!(
+                "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
+                failure.reason
+            );
         }
+        let executor = CliFlowExecutor {
+            store: store.clone(),
+            id: id.clone(),
+            version: Mutex::new(flow.version),
+            claim: Mutex::new(owned_claim.clone()),
+            progress: Mutex::new(None),
+            launcher,
+        };
+        let steps = &flow.invocation.steps;
+        let outcome = if flow.cursor.index == steps.len() {
+            Ok(Some(FlowOutcome::Completed))
+        } else {
+            match FlowEngine::new(&executor)
+                .tick(steps, &mut flow.cursor)
+                .await
+            {
+                Ok(outcome) => (&executor).checkpoint(&flow.cursor).await.map(|()| outcome),
+                Err(error) => Err(error),
+            }
+        };
+        let version = executor.version();
+        let claim = executor.claim();
+        let progress = executor
+            .progress
+            .lock()
+            .expect("Flow progress mutex poisoned")
+            .take();
+        return match outcome {
+            Ok(None) => {
+                owned_claim = claim;
+                continue;
+            }
+            Ok(Some(FlowOutcome::Completed)) => {
+                store
+                    .end_flow(
+                        &id,
+                        version,
+                        claim.as_ref(),
+                        progress.as_deref().unwrap_or_default(),
+                    )
+                    .await?;
+                if let Some(task_id) = flow.task_id.as_ref().filter(|_| claim.is_some()) {
+                    let task = store
+                        .get_task(task_id)
+                        .await?
+                        .context("Flow Task disappeared")?;
+                    crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                }
+                Ok(FlowOutcome::Completed)
+            }
+            Ok(Some(FlowOutcome::Waiting)) => Ok(FlowOutcome::Waiting),
+            Ok(Some(FlowOutcome::Blocked(reason))) => {
+                store
+                    .fail_flow(&id, version, claim.as_ref(), &TaskFlowBlocker::now(&reason))
+                    .await?;
+                anyhow::bail!(
+                    "Flow {id} blocked: {reason}; resume with `lf flow resume {id} --retry`"
+                )
+            }
+            // A step's failure is what the caller hears; a write the row no longer
+            // accepts (the Flow was replaced or ended meanwhile) is logged.
+            Err(error) => match error.downcast_ref::<StepEnd>() {
+                Some(StepEnd::StoreChanged(_)) => Err(error),
+                Some(StepEnd::Interrupted) => {
+                    record(store.release_flow(&id, version, claim.as_ref()).await);
+                    Ok(FlowOutcome::Waiting)
+                }
+                None => {
+                    record(
+                        store
+                            .fail_flow(
+                                &id,
+                                version,
+                                claim.as_ref(),
+                                &TaskFlowBlocker::now(format!("{error:#}")),
+                            )
+                            .await,
+                    );
+                    anyhow::bail!(
+                        "Flow {id} blocked: {error:#}; resume with `lf flow resume {id} --retry`"
+                    )
+                }
+            },
+        };
+    }
+}
+
+fn record<T>(written: crate::store::StoreResult<T>) {
+    if let Err(error) = written {
+        tracing::warn!(%error, "Flow failure was not recorded on its row");
     }
 }
 
@@ -356,13 +632,13 @@ fn tree_prefix(index: usize, total: usize) -> &'static str {
     }
 }
 
-struct EnvVarGuard {
+pub(crate) struct EnvVarGuard {
     key: &'static str,
     previous: Option<std::ffi::OsString>,
 }
 
 impl EnvVarGuard {
-    fn set(key: &'static str, value: &str) -> Self {
+    pub(crate) fn set(key: &'static str, value: &str) -> Self {
         let previous = std::env::var_os(key);
         std::env::set_var(key, value);
         Self { key, previous }
@@ -379,113 +655,297 @@ impl Drop for EnvVarGuard {
     }
 }
 
+/// The one Flow executor: every step reads and writes the invocation row.
 struct CliFlowExecutor<'a> {
-    cli: &'a Cli,
-    message: Option<&'a str>,
-    repo: PathBuf,
-    invocation: String,
+    store: SharedStore,
+    id: String,
+    version: Mutex<u64>,
+    /// The Task worker's claim while the driver holds the position.
+    claim: Mutex<Option<TaskWorkerClaim>>,
+    /// The finished step's summary, reported with the next checkpoint.
+    progress: Mutex<Option<String>>,
+    launcher: &'a Cli,
+}
+
+impl CliFlowExecutor<'_> {
+    fn version(&self) -> u64 {
+        *self.version.lock().expect("Flow version mutex poisoned")
+    }
+
+    fn claim(&self) -> Option<TaskWorkerClaim> {
+        self.claim
+            .lock()
+            .expect("Flow claim mutex poisoned")
+            .clone()
+    }
+
+    fn observe(&self, flow: &FlowSession) {
+        *self.version.lock().expect("Flow version mutex poisoned") = flow.version;
+        if flow.claim.is_none() {
+            *self.claim.lock().expect("Flow claim mutex poisoned") = None;
+        }
+    }
+
+    /// The row at the step about to run, with any earlier attempt settled.
+    async fn begin(&self) -> Result<FlowSession> {
+        let flow = recover_native_flow(&self.store, &self.id, self.claim().as_ref(), false).await?;
+        anyhow::ensure!(
+            !flow.finished && flow.failure.is_none(),
+            "Flow is not ready to execute"
+        );
+        self.observe(&flow);
+        Ok(flow)
+    }
 }
 
 #[async_trait]
-impl SkillExecutor for CliFlowExecutor<'_> {
+impl SkillExecutor for &CliFlowExecutor<'_> {
     async fn run_skill(
         &self,
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        let flow = self.begin().await?;
         if skill.human {
-            let id = &self.invocation;
-            let (token, completed) = flow_run::begin_boundary(id)?;
-            if completed {
-                return flow_run::finish_boundary(&token, None);
-            }
-            eprintln!(
-                "Flow {id} is waiting at {}. Open its Flow Session with lf session.",
-                skill.skill.name
-            );
-            return Ok(SkillOutcome::Waiting);
+            // Reaching review releases the claim. The Task's selected Flow
+            // still owns review preparation.
+            let managed_task = match &flow.task_id {
+                Some(task_id)
+                    if self
+                        .store
+                        .task_flow(task_id)
+                        .await?
+                        .is_some_and(|managed| managed.id() == flow.id()) =>
+                {
+                    Some(task_id)
+                }
+                _ => None,
+            };
+            let feedback = if let Some(task_id) = managed_task {
+                let task = self
+                    .store
+                    .get_task(task_id)
+                    .await?
+                    .context("Task disappeared")?;
+                crate::controller::task::park_at_review(&self.store, &task, &flow).await?;
+                None
+            } else {
+                crate::ops::flow_session::reserve(&self.store, &flow).await?
+            };
+            return Ok(match feedback {
+                Some(feedback) => SkillOutcome::Completed {
+                    feedback: Some(feedback),
+                },
+                None => SkillOutcome::Waiting,
+            });
         }
+        let mut flow = flow;
         if let Some(progress) = ctx.progress {
             print_skill_progress(progress, &skill.skill.name);
         } else {
             print_nested_skill_progress(&skill.skill.name);
         }
-
-        let (token, completed) = flow_run::begin_boundary(&self.invocation)?;
-        if completed {
-            return flow_run::finish_boundary(&token, None);
-        }
-        let encoded = serde_json::to_string(&token)?;
-        let _token = EnvVarGuard::set(flow_run::FLOW_STEP_ENV, &encoded);
-        let mut message = self.message.unwrap_or_default().to_string();
-        if let Some(direction) = &ctx.direction {
-            message.push_str(&format!(
-                "\n\nPrevious step feedback or iteration direction:\n{direction}"
-            ));
-        }
-        if skill.repeat.is_some() {
-            message.push_str("\n\nRecord this occurrence's decision with `lf flow decide advance \"evidence\"` or `lf flow decide iterate \"next action and proof\"`. If progress is stalled, use `lf flow blocked \"reason, attempted direction, evidence, and question\"`; it opens one Ask running unblock and returns the human's summary. Reassess afterward. Invalid commands return correction feedback; correct the decision here without replaying implementation. A recorded decision is accepted only after this Run succeeds.");
-        }
-        let mut launch = self.cli.launch_options();
-        launch.batch = true;
-        launch.interactive = false;
-        launch.tui = false;
-        launch.ide = false;
-        let result = run_skill_with_journal(
-            &self.repo,
-            &skill.skill.name,
-            ctx.progress.map(|p| p.index),
-            || {
-                crate::lf::commands::run::run_saved(
-                    &skill.skill,
-                    Some(&message),
-                    &launch,
-                    &self.repo,
-                )?;
-                if self.cli.task.is_none() && self.cli.wave.is_none() && self.cli.as_work.is_none()
+        loop {
+            if !flow
+                .current_attempt
+                .as_ref()
+                .is_some_and(crate::durable::FlowAttempt::completed)
+            {
+                execute_child(&self.store, &flow, self.launcher).await?;
+                flow = self
+                    .store
+                    .flow(&self.id)
+                    .await?
+                    .context("Flow disappeared")?;
+                self.observe(&flow);
+            }
+            match self.store.sqlite.flow_output(&self.id)? {
+                Ok(SkillOutcome::Decided(verdict))
+                    if verdict.decision == crate::engine::transitions::FlowDecision::Blocked =>
                 {
-                    commit_skill_work(&self.repo, &skill.skill.name)?;
+                    let ask = crate::ops::human_session::flow_unblock(
+                        &self.store,
+                        &flow,
+                        &verdict.summary,
+                    )
+                    .await?;
+                    flow = self.store.sqlite.answer_flow_blocker(
+                        &self.id,
+                        self.version(),
+                        self.claim().as_ref(),
+                        &ask,
+                    )?;
+                    self.observe(&flow);
                 }
-                Ok(())
-            },
-        );
-        let verdict = flow_run::finish_boundary(
-            &token,
-            result.as_ref().err().map(ToString::to_string).as_deref(),
-        )?;
-        result?;
-        Ok(verdict)
+                Ok(outcome) => {
+                    if let Some(attempt) = &flow.current_attempt {
+                        *self.progress.lock().expect("Flow progress mutex poisoned") = self
+                            .store
+                            .sqlite
+                            .input_final_answer(&attempt.run_id)?
+                            .map(|answer| answer.text.trim().chars().take(2_000).collect());
+                    }
+                    return Ok(outcome);
+                }
+                Err(_) => {
+                    flow = self.store.sqlite.correct_flow_output(
+                        &self.id,
+                        self.version(),
+                        self.claim().as_ref(),
+                    )?;
+                    self.observe(&flow);
+                }
+            }
+        }
     }
 
-    async fn checkpoint(&self, cursor: &crate::engine::ExecutionCursor) -> Result<()> {
-        flow_run::checkpoint(&self.invocation, cursor)
+    async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
+        let progress = self
+            .progress
+            .lock()
+            .expect("Flow progress mutex poisoned")
+            .take();
+        let flow = self
+            .store
+            .checkpoint_flow(
+                &self.id,
+                self.version(),
+                cursor,
+                self.claim().as_ref(),
+                progress.as_deref(),
+            )
+            .await?;
+        self.observe(&flow);
+        Ok(())
     }
 
+    /// The child owns the effect; the driver consumes its Flow history.
     async fn run_command(
         &self,
         ops: &crate::engine::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<()> {
-        let name = format!("cmd: {}", ops.item.display_name());
-        let (token, completed) = flow_run::begin_boundary(&self.invocation)?;
-        if completed {
+        let flow = self.begin().await?;
+        if self.store.sqlite.flow_operation_completed(flow.id())? {
             return Ok(());
         }
-        eprintln!("{name}");
-        let repo = self.repo.clone();
-        let item = ops.item.clone();
-        // Operations own blocking subprocesses and may enter their own async
-        // controllers (for example the release's watched PR landing).
-        let result = tokio::task::spawn_blocking(move || {
-            crate::ops::execute_flow_command(&repo, &item, &NullProgress)
-        })
-        .await?;
-        flow_run::finish_boundary(
-            &token,
-            result.as_ref().err().map(ToString::to_string).as_deref(),
-        )?;
-        result.map_err(Into::into)
+        eprintln!("op: {}", ops.item.display_name());
+        execute_child(&self.store, &flow, self.launcher).await
     }
+}
+
+/// Execute only the captured boundary named by the driver. No definition lookup
+/// or driver lock: the parent owns traversal while this process owns the effect.
+pub fn execute_step(id: &str, version: u64) -> Result<()> {
+    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .ok()
+        .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
+        .transpose()?;
+    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
+    block_on_store(|store| async move {
+        let flow = store
+            .flow(id)
+            .await?
+            .context("Flow disappeared before step execution")?;
+        anyhow::ensure!(
+            flow.version == version && flow.claim == claim && !flow.finished,
+            "Flow changed before step execution"
+        );
+        let exec = journal::current_exec_id().context("Flow step requires a registered Exec")?;
+        let Some(ConcreteStep::Command(op)) = flow.current_step() else {
+            anyhow::bail!("agent steps execute through lf skill");
+        };
+        let Some(start) =
+            store
+                .sqlite
+                .begin_flow_operation(id, version, claim.as_ref(), Some(&exec))?
+        else {
+            return Ok(());
+        };
+        let cwd = flow.cwd.clone();
+        let item = op.item.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::ops::execute_flow_command(&cwd, &item, &NullProgress)
+        })
+        .await
+        .context("Flow operation worker failed")?;
+        // Interrupt cleanup can kill the operation and wake this waiter. Its
+        // exit is not evidence that the external effect failed or completed.
+        crate::engine::agent::wait_for_interrupt_cleanup();
+        store.sqlite.finish_flow_operation(
+            id,
+            version,
+            claim.as_ref(),
+            start,
+            Some(&exec),
+            result.is_ok(),
+        )?;
+        result.map_err(anyhow::Error::from)
+    })
+}
+
+async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Result<()> {
+    // The absolute selected path becomes argv[0] in the child's Exec record.
+    let mut command =
+        tokio::process::Command::new(crate::engine::process::resolve_step_lf_binary(&flow.cwd)?);
+    command
+        .current_dir(&flow.cwd)
+        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
+    if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
+        command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
+    } else {
+        let mut step_cli = cli.exec_options();
+        step_cli.account.clear();
+        step_cli.only_account.clear();
+        command.args(step_cli.step_args());
+        command.args([
+            "--__flow-step",
+            &flow_run::ActiveStep::of(flow).env_value()?,
+            "skill",
+            &flow.current().step,
+        ]);
+    }
+    if let Some(claim) = &flow.claim {
+        command.env(
+            crate::durable::TASK_WORKER_CLAIM_ENV,
+            serde_json::to_string(claim)?,
+        );
+    }
+    let status = command.status().await;
+    // PATH can select a newer child. Never settle its result through an older
+    // schema, including recording a failure which would discard that selection.
+    store.sqlite.validate_current_schema().map_err(|error| {
+        StepEnd::StoreChanged(format!(
+            "{error}; this driver cannot settle Flow {}. Resume with a compatible lf using `lf flow resume {}`; the selected step result is retained",
+            flow.id(), flow.id()
+        ))
+    })?;
+    let status = status.context("could not execute captured Flow step")?;
+    if status.code() == Some(130) {
+        return Err(StepEnd::Interrupted.into());
+    }
+    if !status.success() {
+        let selected = store.flow(flow.id()).await?.context("Flow disappeared")?;
+        if let Some(attempt) = selected.current_attempt {
+            let events = store.sqlite.input_events(&attempt.run_id)?;
+            for envelope in events.iter().rev() {
+                let event = &envelope["event"];
+                if event["type"] == "turn_completed" && event["status"] == "interrupted" {
+                    return Err(StepEnd::Interrupted.into());
+                }
+                if event["type"] == "error" {
+                    anyhow::bail!(
+                        "{}: {}: {}",
+                        flow.current().step,
+                        event["code"].as_str().unwrap_or("provider error"),
+                        event["message"].as_str().unwrap_or("provider turn failed")
+                    );
+                }
+            }
+        }
+        anyhow::bail!("{} process exited with {status}", flow.current().step);
+    }
+    Ok(())
 }
 
 fn print_skill_progress(progress: StepProgress, skill_name: &str) {
@@ -512,63 +972,10 @@ fn print_nested_skill_progress(skill_name: &str) {
     );
 }
 
-fn run_skill_with_journal(
-    repo: &Path,
-    skill_name: &str,
-    index: Option<usize>,
-    run: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    journal::emit(
-        repo,
-        LfNode::Skill,
-        LfEventType::Started,
-        LfEventFields {
-            skill: Some(skill_name.to_string()),
-            index: index.map(|value| value as u32),
-            ..LfEventFields::default()
-        },
-    );
-    let result = run();
-    match &result {
-        Ok(_) => journal::emit(
-            repo,
-            LfNode::Skill,
-            LfEventType::Completed,
-            LfEventFields {
-                skill: Some(skill_name.to_string()),
-                index: index.map(|value| value as u32),
-                ..LfEventFields::default()
-            },
-        ),
-        Err(err) => journal::emit(
-            repo,
-            LfNode::Skill,
-            LfEventType::Errored,
-            LfEventFields {
-                skill: Some(skill_name.to_string()),
-                index: index.map(|value| value as u32),
-                error: Some(err.to_string()),
-                ..LfEventFields::default()
-            },
-        ),
-    }
-    result
-}
-
-/// Commit any uncommitted changes left by the previous skill.
-pub(crate) fn commit_skill_work(repo: &Path, skill_name: &str) -> Result<bool> {
-    let options = CommitOptions {
-        add: true,
-        message: Some(format!("lf commit: {skill_name}")),
-        ..CommitOptions::for_task(skill_name)
-    };
-    commit_workflow(repo, &options, &NullProgress).map_err(Into::into)
-}
 #[cfg(test)]
 mod tests {
     use super::render_pipeline_lines;
-    use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
-    use crate::lf::Cli;
+    use crate::engine::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
 
@@ -594,7 +1001,7 @@ mod tests {
         ).unwrap();
         let flow = crate::engine::load_flow("tend", temp.path()).unwrap();
 
-        let items = crate::engine::expand_flow(&flow, temp.path()).unwrap();
+        let items = crate::engine::compile_flow(&flow, temp.path()).unwrap();
         let lines = render_pipeline_lines(&items);
 
         assert_eq!(
@@ -614,7 +1021,7 @@ mod tests {
     fn rendered_pipeline_lists_human_node_identity() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let flow = crate::engine::load_flow("task-design", &repo).unwrap();
-        let items = crate::engine::expand_flow(&flow, &repo).unwrap();
+        let items = crate::engine::compile_flow(&flow, &repo).unwrap();
 
         let lines = render_pipeline_lines(&items);
         assert_eq!(
@@ -639,91 +1046,9 @@ mod tests {
         let flow = crate::engine::load_flow("choice", repo.path()).unwrap();
         let human = crate::engine::human_occurrence_ids(&flow, repo.path()).unwrap();
         assert_eq!(human, vec!["review_choice"]);
-        let items = crate::engine::expand_flow(&flow, repo.path()).unwrap();
+        let items = crate::engine::compile_flow(&flow, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
-    }
-
-    #[test]
-    fn ordinary_flow_parks_at_the_same_durable_review_after_recovery() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let home = tempdir().unwrap();
-        let _home = super::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
-        let _binary =
-            super::EnvVarGuard::set("LF_BIN", std::env::current_exe().unwrap().to_str().unwrap());
-        let cli = Cli {
-            batch: true,
-            ..Cli::default()
-        };
-        let steps = vec![ConcreteStep::Skill(ConcreteSkill {
-            skill: Skill::named("concept-review"),
-            id: Some("review".into()),
-            human: true,
-            repeat: None,
-            flow_parents: vec![],
-        })];
-        let run = crate::ops::flow_run::create("proof", &steps, home.path(), None, &cli).unwrap();
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        let before = crate::ops::flow_run::read(&run.id).unwrap();
-        let token = before.active.as_ref().unwrap().id.clone();
-        assert!(before.failure.is_none());
-        assert_eq!(crate::ops::flow_session::list().unwrap().len(), 1);
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        let after = crate::ops::flow_run::read(&run.id).unwrap();
-        assert_eq!(after.active.unwrap().id, token);
-        assert_eq!(after.cursor, before.cursor);
-        assert!(!after.finished);
-
-        let boundary = crate::ops::flow_run::StepToken {
-            invocation: run.id.clone(),
-            boundary: token,
-        };
-        let review = crate::durable::RunId::new();
-        crate::ops::flow_run::update(&run.id, |saved| {
-            saved.active.as_mut().unwrap().run_id = Some(review.clone());
-            Ok(())
-        })
-        .unwrap();
-        crate::ops::flow_session::mark_ready(
-            &boundary,
-            &review,
-            "Design clarified; review finished",
-        )
-        .unwrap();
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Waiting
-        );
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(crate::ops::flow_session::complete(&boundary))
-            .unwrap();
-        let completed = crate::ops::flow_run::read(&run.id).unwrap();
-        assert_eq!(completed.cursor, before.cursor);
-        assert!(completed.cursor.progress.verdict.is_none());
-        assert!(completed.active.unwrap().completed);
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Completed
-        );
-        let finished = crate::ops::flow_run::read(&run.id).unwrap();
-        assert!(finished.finished);
-        assert_eq!(
-            finished.cursor.progress.direction.as_deref(),
-            Some("Design clarified; review finished")
-        );
-        assert!(finished.active.is_none());
-        assert_eq!(
-            super::drive_saved(&run.id, &cli).unwrap(),
-            crate::engine::FlowOutcome::Completed
-        );
     }
 }

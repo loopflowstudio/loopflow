@@ -2,6 +2,12 @@ use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (name, _) in std::env::vars_os() {
+        let key = name.to_string_lossy();
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+            command.env_remove(name);
+        }
+    }
     command
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -37,9 +43,14 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
     assert!(help.contains("complete"));
+    assert!(help.contains("connect"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
+
+    let removed = run(home.path(), &["runs", "historical-input", "--resume"]);
+    assert!(!removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
         &["session", "ready"][..],
@@ -52,7 +63,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
 
     for args in [
-        &["session", "open", "missing-session", "--json"][..],
+        &["session", "connect", "missing-session", "--json"][..],
         &["session", "complete", "missing-session"],
     ] {
         let output = run(home.path(), args);
@@ -83,18 +94,12 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         &std::env::var_os("PATH").unwrap_or_default(),
     ));
     let path = std::env::join_paths(paths).unwrap();
-    let id = format!("ask_{}", uuid::Uuid::new_v4().simple());
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    let record = serde_json::json!({
-        "id": id, "parent_run_id": loopflow::durable::RunId::new(),
-        "parent_run_dir": home.path(), "work": null, "work_selector": null,
-        "title": "Keep this development review", "detail": "loop-decide",
-        "prompt": "Choose the next proof", "skill": "unblock",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex", "session_run_id": null,
-        "ready_summary": null, "status": "waiting", "retain_completed": true
-    });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
+    let (id, ..) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Keep this development review",
+    );
     let command = |binary: &str| {
         let mut command = Command::new(binary);
         command
@@ -160,59 +165,40 @@ fn development_session_handoff_keeps_its_binary_and_home() {
 }
 
 #[test]
-fn unopened_session_has_a_run_before_any_provider_is_started() {
+fn asked_session_keeps_captured_input_without_a_run_before_provider_start() {
     let home = tempfile::tempdir().unwrap();
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    // A stored Ask from before required Run references. Read-only discovery
-    // must not invent a Run; explicit opening prepares it without spawning.
-    let id = "ask_prepared-proof";
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.path().join("parent"),
-        "work": null, "work_selector": null,
-        "title": "A question", "detail": "proof", "prompt": "Do not launch",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
-    });
-    std::fs::write(
-        sessions.join(format!("{id}.json")),
-        serde_json::to_vec(&record).unwrap(),
-    )
-    .unwrap();
-    let before = run(home.path(), &["session", "list", "--all", "--json"]);
-    assert!(!before.status.success());
-    assert!(String::from_utf8_lossy(&before.stderr).contains("predates prepared Runs"));
-    assert!(!home.path().join("runs").exists());
-    let opened = run(home.path(), &["session", "open", id, "--json"]);
+    let (id, run_id, dir) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Do not launch",
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["artifact_key"], run_id.as_str());
+    assert_eq!(manifest["caller_artifact_key"], CALLER);
+    let opened = run(home.path(), &["session", "open", &id, "--json"]);
     assert!(
         opened.status.success(),
         "{}",
         String::from_utf8_lossy(&opened.stderr)
     );
     let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    let run_id = opened["run_id"].as_str().unwrap();
+    assert!(opened.get("run_id").is_none());
     assert_eq!(opened["state"], "waiting");
-    assert_ne!(run_id, record["parent_run_id"].as_str().unwrap());
-    let dir = home.path().join("runs").join(&run_id[4..6]).join(run_id);
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["run_id"], run_id);
-    assert_eq!(manifest["parent_run_id"], record["parent_run_id"]);
     assert!(dir.join("prepared").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("terminal.json").exists());
-    let inspected = run(home.path(), &["runs", run_id, "--json"]);
+    let inspected = run(home.path(), &["runs", &run_id, "--json"]);
     assert!(
         inspected.status.success(),
         "{}",
         String::from_utf8_lossy(&inspected.stderr)
     );
     let inspected: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
-    assert_eq!(inspected["id"], run_id);
-    assert_eq!(inspected["parent_run_id"], record["parent_run_id"]);
-    assert!(inspected["outcome"].is_null());
+    assert_eq!(inspected["artifact_key"], run_id.as_str());
+    assert_eq!(inspected["caller_artifact_key"], CALLER);
+    assert!(inspected["recorded_outcome"].is_null());
     let listed = run(home.path(), &["session", "list", "--all", "--json"]);
     assert!(
         listed.status.success(),
@@ -220,12 +206,27 @@ fn unopened_session_has_a_run_before_any_provider_is_started() {
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
-    assert_eq!(listed[0]["run_id"], run_id);
-    let reopened = run(home.path(), &["session", "open", id, "--json"]);
-    assert!(reopened.status.success());
-    let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
-    assert_eq!(reopened["run_id"], run_id);
+    assert!(listed[0].get("run_id").is_none());
     assert!(!dir.join("events.jsonl").exists());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND session_id=?1",
+            [&id],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[cfg(unix)]
@@ -238,24 +239,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
     for resume in [true, false] {
         let home = tempfile::tempdir().unwrap();
-        let sessions = home.path().join("human-sessions");
-        std::fs::create_dir(&sessions).unwrap();
-        let id = "ask_resume-proof";
-        let record = serde_json::json!({
-            "id": id,
-            "parent_run_id": "run_00000000000000000000000000000002",
-            "parent_run_dir": home.path().join("parent"),
-            "work": null, "work_selector": null,
-            "title": "Resume", "detail": "proof", "prompt": "Local proof",
-            "cwd": home.path(), "model": "opencode",
-            "session_run_id": null, "ready_summary": null, "status": "waiting"
-        });
-        std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-        let prepared = run(home.path(), &["session", "open", id, "--json"]);
-        assert!(prepared.status.success(), "{:?}", prepared);
-        let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-        let run_id = prepared["run_id"].as_str().unwrap();
-        let dir = home.path().join("runs").join(&run_id[4..6]).join(run_id);
+        let (id, run_id, dir) = prepare_ask(home.path(), home.path(), "opencode", "Local proof");
+        let (id, run_id) = (id.as_str(), run_id.as_str());
         // Old live Runs must survive the history reader's seven-day window.
         let mut manifest: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
@@ -265,15 +250,16 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         // The native history belongs to this isolated fixture. The executable below
         // stands in for the provider; both opens exercise the real CLI and locks.
         if resume {
-            std::fs::write(
-                dir.join("provider-session.json"),
-                serde_json::json!({
-                    "schema_version": 1, "provider_session_id": "ses_resume-proof",
-                    "account_id": null
-                })
-                .to_string(),
+            let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+            db.execute(
+                "UPDATE agent_sessions SET provider_thread='ses_resume-proof' WHERE id=?1",
+                [id],
             )
             .unwrap();
+            db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                SELECT id,'observed','fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
+            std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -323,7 +309,8 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // An upper bound: a debug `lf` on a busy machine launches slowly.
+        let deadline = Instant::now() + Duration::from_secs(180);
         while !evidence.exists() && Instant::now() < deadline && first.try_wait().unwrap().is_none()
         {
             std::thread::sleep(Duration::from_millis(20));
@@ -336,12 +323,14 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let mut second = command(home.path(), &["session", "open", id, "--json"])
+        let selector = id;
+        let mut second = command(home.path(), &["session", "open", selector, "--json"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // The provider waits on stdin indefinitely, so a slow machine cannot pass by accident.
+        let deadline = Instant::now() + Duration::from_secs(60);
         while second.try_wait().unwrap().is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -361,28 +350,30 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         );
         assert!(reopened.status.success(), "{:?}", reopened);
         let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
-        assert_eq!(reopened["run_id"], run_id);
-        assert_eq!(std::fs::read_to_string(evidence).unwrap(), run_id);
+        assert!(reopened.get("run_id").is_none());
+        let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
+            .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
+        assert_eq!(std::fs::read_to_string(evidence).unwrap(), selected);
         assert_eq!(reopened["state"], "active");
         assert!(active.status.success(), "{:?}", active);
         let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
         assert_eq!(active["gaps"], serde_json::json!([]), "{active}");
-        assert_eq!(active["runs"].as_array().unwrap().len(), 1, "{active}");
-        assert_eq!(active["runs"][0]["id"], run_id);
-        assert_eq!(active["runs"][0]["processes"][0]["state"], "waiting");
+        assert_eq!(active["sessions"].as_array().unwrap().len(), 1, "{active}");
+        assert_eq!(active["sessions"][0]["id"], id);
+        assert_eq!(active["sessions"][0]["processes"][0]["state"], "waiting");
         let ended = run(home.path(), &["runs", "--active", "--json"]);
         let ended: serde_json::Value = serde_json::from_slice(&ended.stdout).unwrap();
-        assert_eq!(ended["runs"], serde_json::json!([]));
+        assert_eq!(ended["sessions"], serde_json::json!([]));
         if !resume {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-            assert_eq!(manifest["run_id"], run_id);
+            assert_eq!(manifest["artifact_key"], run_id);
             assert!(manifest["context"].is_object());
             assert!(!dir.join("prepared").exists());
             let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
             let failure: String = database
                 .query_row(
-                    "SELECT error FROM run_events WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
+                    "SELECT error FROM execs WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
                     [],
                     |row| row.get(0),
                 )
@@ -391,35 +382,113 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(failure.contains("sha256"), "{failure}");
             assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
             assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
-            let saved: serde_json::Value = serde_json::from_slice(
-                &std::fs::read(sessions.join(format!("{id}.json"))).unwrap(),
-            )
-            .unwrap();
-            assert_eq!(saved["status"], "waiting");
-            assert!(saved["ready_summary"].is_null());
+            let (completed_at, ready_summary): (Option<i64>, Option<String>) = database
+                .query_row(
+                    "SELECT completed_at, ready_summary FROM agent_sessions WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(completed_at.is_none());
+            assert!(ready_summary.is_none());
         }
     }
 }
 
-fn prepare_ask(home: &std::path::Path, id: &str, title: &str) -> (String, std::path::PathBuf) {
-    let sessions = home.join("human-sessions");
-    std::fs::create_dir_all(&sessions).unwrap();
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.join("parent"),
-        "work": null, "work_selector": null,
-        "title": title, "detail": "proof", "prompt": "Do not launch",
-        "cwd": env!("CARGO_MANIFEST_DIR"), "model": "codex",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
+const CALLER: &str = "run_00000000000000000000000000000002";
+
+/// Ask through the real CLI from a stand-in caller Run, then stop the caller.
+/// The Session keeps waiting: (Session id, Run id, Run directory).
+fn prepare_ask(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    harness: &str,
+    question: &str,
+) -> (String, String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    let caller = home.join("runs").join(&CALLER[4..6]).join(CALLER);
+    std::fs::create_dir_all(&caller).unwrap();
+    let manifest = serde_json::json!({
+        "schema_version": 1, "artifact_key": CALLER, "caller_artifact_key": null,
+        "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
+        "surface": "headless", "cwd": cwd, "repo": null, "worktree": null,
+        "skill": "proof", "subjects": [], "flow": null, "exec": null, "context": null,
+        "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
     });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-    let opened = run(home, &["session", "open", id, "--json"]);
-    assert!(opened.status.success(), "{opened:?}");
-    let opened: serde_json::Value = serde_json::from_slice(&opened.stdout).unwrap();
-    let run_id = opened["run_id"].as_str().unwrap().to_string();
-    let dir = home.join("runs").join(&run_id[4..6]).join(&run_id);
-    (run_id, dir)
+    std::fs::write(caller.join("manifest.json"), manifest.to_string()).unwrap();
+    // The background launcher only acknowledges; each test opens the Session itself.
+    let launcher = home.join("launcher");
+    std::fs::create_dir_all(&launcher).unwrap();
+    let tmux = launcher.join("tmux");
+    std::fs::write(
+        &tmux,
+        "#!/bin/sh\nif [ \"$1\" = has-session ]; then exit 1; fi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut asking = command(home, &["ask", question])
+        .current_dir(cwd)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                launcher.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("LF_RUN_ID", CALLER)
+        .env("LF_RUN_DIR", &caller)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let stored = loop {
+        let stored = rusqlite::Connection::open_with_flags(
+            home.join("loopflow.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .and_then(|db| {
+            let ready: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_sessions')", [], |row| row.get(0))?;
+            if !ready { return Err(rusqlite::Error::QueryReturnedNoRows); }
+            db.query_row(
+                "SELECT id, (SELECT receipt_key FROM session_events WHERE seq=agent_sessions.current_capture) FROM agent_sessions WHERE kind='ask' AND input_published=1 AND request=?1",
+                [question],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+        });
+        match stored {
+            Ok(stored) => break stored,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if matches!(
+                    error.code,
+                    rusqlite::ErrorCode::CannotOpen
+                        | rusqlite::ErrorCode::DatabaseBusy
+                        | rusqlite::ErrorCode::DatabaseLocked
+                ) => {}
+            Err(error) => {
+                let _ = asking.kill();
+                let output = asking.wait_with_output();
+                panic!("cannot inspect stored Ask: {error}; caller: {output:?}");
+            }
+        }
+        if asking.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+            let _ = asking.kill();
+            panic!("lf ask stored no Session: {:?}", asking.wait_with_output());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    asking.kill().unwrap();
+    asking.wait().unwrap();
+    let dir = home
+        .join("runs")
+        .join(&stored.1.strip_prefix("run_").unwrap_or(&stored.1)[..2])
+        .join(&stored.1);
+    (stored.0, stored.1, dir)
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
@@ -444,8 +513,13 @@ fn rename(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
 #[test]
 fn session_names_are_shared_and_human_names_win() {
     let home = tempfile::tempdir().unwrap();
-    let id = "ask_naming-proof";
-    let (run_id, dir) = prepare_ask(home.path(), id, "Which release target?");
+    let (id, _run_id, dir) = prepare_ask(
+        home.path(),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "codex",
+        "Which release target?",
+    );
+    let id = id.as_str();
     let seeded = listed(home.path(), id);
     assert_eq!(seeded["title"], "Which release target?");
     assert_eq!(seeded["title_source"], "generated");
@@ -456,7 +530,7 @@ fn session_names_are_shared_and_human_names_win() {
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title"], "Launch notes");
     assert_eq!(named["title_source"], "human");
-    assert_eq!(named["run_id"], run_id.as_str());
+    assert!(named.get("run_id").is_none());
 
     let later = run(
         home.path(),
@@ -478,44 +552,11 @@ fn session_names_are_shared_and_human_names_win() {
     let reopened = run(home.path(), &["session", "open", id, "--json"]);
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
-    // Naming touches only the Run's name record, never provider state.
+    // Naming touches only the Session row, never the Run or provider state.
+    assert!(!dir.join("session-name.json").exists());
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("events.jsonl").exists());
     assert!(dir.join("prepared").exists());
-}
-
-#[test]
-fn raw_sessions_are_named_by_a_stable_word_pair() {
-    let home = tempfile::tempdir().unwrap();
-    // A prepared Run with no skill, detached from its Ask and given native
-    // history, lists as a raw interactive Session.
-    let (run_id, dir) = prepare_ask(home.path(), "ask_raw-proof", "Unused seed");
-    std::fs::remove_file(home.path().join("human-sessions/ask_raw-proof.json")).unwrap();
-    std::fs::write(
-        dir.join("provider-session.json"),
-        serde_json::json!({
-            "schema_version": 1, "provider_session_id": "ses_raw-proof", "account_id": null
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let first = listed(home.path(), &run_id);
-    assert_eq!(first["kind"], "interactive");
-    // The provider is the harness recorded on this Run's own manifest.
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap()).unwrap();
-    assert!(manifest["harness"].is_string());
-    assert_eq!(first["provider"], manifest["harness"]);
-    assert_eq!(first["title_source"], "generated");
-    let title = first["title"].as_str().unwrap();
-    let (magical, musical) = title.split_once('-').expect("magical-musical pair");
-    assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
-    assert_eq!(listed(home.path(), &run_id)["title"], title);
-    assert!(!dir.join("session-name.json").exists());
-
-    let named = rename(home.path(), &[&run_id, "Morning", "triage"]);
-    assert_eq!(named["title"], "Morning triage");
-    assert_eq!(listed(home.path(), &run_id)["title_source"], "human");
 }
 
 #[cfg(unix)]
@@ -527,28 +568,13 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     use std::time::{Duration, Instant};
 
     let home = tempfile::tempdir().unwrap();
-    let sessions = home.path().join("human-sessions");
-    std::fs::create_dir(&sessions).unwrap();
-    let id = "ask_rename-replacement";
-    let record = serde_json::json!({
-        "id": id,
-        "parent_run_id": "run_00000000000000000000000000000002",
-        "parent_run_dir": home.path().join("parent"),
-        "work": null, "work_selector": null,
-        "title": "Which release target?", "detail": "proof", "prompt": "Local proof",
-        "cwd": home.path(), "model": "opencode",
-        "session_run_id": null, "ready_summary": null, "status": "waiting"
-    });
-    std::fs::write(sessions.join(format!("{id}.json")), record.to_string()).unwrap();
-    let prepared = run(home.path(), &["session", "open", id, "--json"]);
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let first_run = prepared["run_id"].as_str().unwrap().to_string();
-    let first_dir = home
-        .path()
-        .join("runs")
-        .join(&first_run[4..6])
-        .join(&first_run);
+    let (id, first_run, first_dir) = prepare_ask(
+        home.path(),
+        home.path(),
+        "opencode",
+        "Which release target?",
+    );
+    let id = id.as_str();
 
     // The operating instruction passes the Session's own `$LF_RUN_ID`, which
     // names the boundary's Run rather than the boundary. It must reach the
@@ -588,13 +614,17 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !evidence.exists() && Instant::now() < deadline && opened.try_wait().unwrap().is_none() {
+    // An upper bound: a debug `lf` on a busy machine launches slowly.
+    // The shell creates the file before writing the id, so wait for the id.
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let written = || std::fs::read_to_string(&evidence).unwrap_or_default();
+    while written().is_empty() && Instant::now() < deadline && opened.try_wait().unwrap().is_none()
+    {
         std::thread::sleep(Duration::from_millis(20));
     }
     let started = evidence.exists();
     // Leave the provider waiting while the agent-facing rename runs inside it.
-    let replacement = std::fs::read_to_string(&evidence).unwrap_or_default();
+    let replacement = written();
     let inside = command(
         home.path(),
         &[
@@ -622,12 +652,12 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
     assert_eq!(inside["kind"], "ask");
-    assert_eq!(inside["run_id"], replacement.as_str());
+    assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");
 
     let readback = listed(home.path(), id);
-    assert_eq!(readback["run_id"], replacement.as_str());
+    assert!(readback.get("run_id").is_none());
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
     // The boundary's Run never appears as a second, interactive Session.
@@ -648,16 +678,56 @@ fn boundary_names_follow_run_ids_and_replacement_runs() {
         listed(home.path(), id)["ready_summary"],
         serde_json::Value::Null
     );
-    let path = sessions.join(format!("{id}.json"));
-    let mut saved: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    saved["ready_summary"] = serde_json::json!("Ship to staging");
-    std::fs::write(&path, saved.to_string()).unwrap();
+    let ready = command(home.path(), &["session", "ready", "Ship to staging"])
+        .env("LF_RUN_ID", &replacement)
+        .env(
+            "LF_HUMAN_SESSION",
+            serde_json::json!({"kind": "ask", "id": id}).to_string(),
+        )
+        .output()
+        .unwrap();
+    assert!(ready.status.success(), "{ready:?}");
     let completed = run(home.path(), &["session", "complete", &replacement]);
     assert!(completed.status.success(), "{completed:?}");
-    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        saved["status"],
-        serde_json::json!({"completed": {"summary": "Ship to staging"}})
+    assert!(String::from_utf8_lossy(&completed.stdout).contains("Ship to staging"));
+    let again = run(home.path(), &["session", "complete", id]);
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("already complete"),
+        "{again:?}"
     );
+    assert!(!home
+        .path()
+        .join("human-sessions")
+        .join(format!("{id}.json"))
+        .exists());
+}
+
+#[test]
+fn session_inventory_pages_are_explicit_bounded_and_complete() {
+    let home = tempfile::tempdir().unwrap();
+    let output = run(
+        home.path(),
+        &[
+            "session", "list", "--page", "--json", "--all", "--limit", "1",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let page: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["entries"], serde_json::json!([]));
+    assert!(page["next"].is_null());
+    for args in [
+        &["session", "list", "--page"][..],
+        &["session", "list", "--page", "--json", "--limit", "0"],
+        &["session", "list", "--page", "--json", "--offset", "1"],
+        &["session", "list", "--json", "--after", "old"],
+    ] {
+        assert!(
+            !run(home.path(), args).status.success(),
+            "accepted {args:?}"
+        );
+    }
 }

@@ -58,52 +58,10 @@ pub fn isolate_branch_data() -> io::Result<()> {
     {
         return Ok(());
     }
-    let ordinary_home = std::env::var_os("LF_HOME").filter(|value| !value.is_empty());
-    let home = ordinary_home
-        .clone()
-        .or_else(|| std::env::var_os(super::CONTROL_HOME_ENV).filter(|value| !value.is_empty()))
-        .map(PathBuf::from)
-        .unwrap_or_else(super::default_lf_home_dir);
-    let home = canonicalize_with_missing_tail(&home)?;
-    let database = std::env::var_os("LF_DB_PATH")
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            ordinary_home
-                .is_none()
-                .then(|| {
-                    std::env::var_os(super::CONTROL_DB_PATH_ENV).filter(|value| !value.is_empty())
-                })
-                .flatten()
-        })
-        .map(PathBuf::from)
-        .map(|path| {
-            if path.is_absolute() {
-                path
-            } else {
-                home.join(path)
-            }
-        })
-        .unwrap_or_else(|| home.join("loopflow.db"));
-    let stores = owned_stores()?;
-    let source = inherited_store(&home, &database, &stores)?;
-    let (destination, database) = if let Some(source) = &source {
-        let destination = super::default_lf_home_dir_for(
-            &super::machine_home_dir(),
-            crate::build_info::BuildProvenance::Development,
-            &crate::build_info::source_identity(),
-        );
-        let database = destination.join("loopflow.db");
-        if is_owned_store(&database, &stores)? {
-            return Err(io::Error::other(format!(
-                "branch data directory {} aliases an installed store; remove that alias before using this source build",
-                destination.display()
-            )));
-        }
+    let (destination, database, source) = private_data_paths()?;
+    if let Some(source) = &source {
         seed_store(source, &database)?;
-        (destination, database)
-    } else {
-        (home, database)
-    };
+    }
     let context_changed = source.is_some()
         || !canonicalize_with_missing_tail(&super::authority_home_dir())
             .is_ok_and(|home| home == destination)
@@ -133,15 +91,83 @@ pub fn isolate_branch_data() -> io::Result<()> {
     Ok(())
 }
 
+/// Select the same private destination without creating, copying or migrating it.
+pub(crate) fn observation_database_path() -> io::Result<PathBuf> {
+    let selection =
+        crate::machine_install::selection_for_current_executable().map_err(io::Error::other)?;
+    let path = if crate::build_info::provenance().is_release() || selection.is_some() {
+        super::database_path_from_env()?
+    } else {
+        private_data_paths()?.1
+    };
+    if is_owned_store(&path, &owned_stores()?)?
+        && !selection
+            .as_ref()
+            .is_some_and(|selection| same_database_file(&path, &selection.store).unwrap_or(false))
+    {
+        return Err(io::Error::other(
+            "process ledger belongs to another installation",
+        ));
+    }
+    Ok(path)
+}
+
+fn private_data_paths() -> io::Result<(PathBuf, PathBuf, Option<PathBuf>)> {
+    let ordinary_home = std::env::var_os("LF_HOME").filter(|value| !value.is_empty());
+    let home = ordinary_home
+        .clone()
+        .or_else(|| std::env::var_os(super::CONTROL_HOME_ENV).filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(super::default_lf_home_dir);
+    let home = canonicalize_with_missing_tail(&home)?;
+    let database = std::env::var_os("LF_DB_PATH")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            ordinary_home
+                .is_none()
+                .then(|| {
+                    std::env::var_os(super::CONTROL_DB_PATH_ENV).filter(|value| !value.is_empty())
+                })
+                .flatten()
+        })
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                home.join(path)
+            }
+        })
+        .unwrap_or_else(|| home.join("loopflow.db"));
+    let stores = owned_stores()?;
+    let source = inherited_store(&home, &database, &stores)?;
+    let (destination, database) = if source.is_some() {
+        let destination = super::default_lf_home_dir_for(
+            &super::machine_home_dir(),
+            crate::build_info::BuildProvenance::Development,
+            &crate::build_info::source_identity(),
+        );
+        let database = destination.join("loopflow.db");
+        if is_owned_store(&database, &stores)? {
+            return Err(io::Error::other(format!(
+                "branch data directory {} aliases an installed store; remove that alias before using this source build",
+                destination.display()
+            )));
+        }
+        (destination, database)
+    } else {
+        (home, database)
+    };
+    Ok((destination, database, source))
+}
+
 fn clear_inherited_execution() {
-    crate::run_record::preserve_task_origin();
     // The snapshot does not inherit the launching Session's execution authority
     // or permission to append to its Run bundle. Clear executable pins too:
     // discovery selects this CLI or the daemon's sibling CLI, never lfd itself.
     for name in [
         "LF_BIN",
         "LF_RUN_ID",
-        "LF_PARENT_RUN_ID",
         "LF_RUN_DIR",
         "LF_RUN_CONTEXT",
         "LF_WORK_ADVANCE_CLAIM",
@@ -152,6 +178,7 @@ fn clear_inherited_execution() {
         "LF_HUMAN_SESSION",
         "LF_HUMAN_SESSION_RUN_BIND",
         "LF_ACCOUNT_LEASE",
+        "LF_AGENT_CALLER",
         super::CONTROL_BIN_ENV,
     ] {
         std::env::remove_var(name);
@@ -187,6 +214,34 @@ fn seed_store(source: &Path, destination: &Path) -> io::Result<()> {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
+        drop(backup);
+        // Copy history, never a socket or a live driver's write capability.
+        // Installed schemas may predate these columns; the snapshot is not a migration.
+        for table in ["agent_sessions", "sessions"] {
+            let columns = target
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .map_err(io::Error::other)?
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(io::Error::other)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(io::Error::other)?;
+            let assignments = [
+                ("driver_exec_id", "driver_exec_id=NULL"),
+                ("driver_generation", "driver_generation=driver_generation+1"),
+                ("provider_endpoint", "provider_endpoint=NULL"),
+                ("provider_pid", "provider_pid=NULL"),
+                ("provider_started_at", "provider_started_at=NULL"),
+            ]
+            .into_iter()
+            .filter(|(column, _)| columns.iter().any(|name| name == column))
+            .map(|(_, assignment)| assignment)
+            .collect::<Vec<_>>();
+            if !assignments.is_empty() {
+                target
+                    .execute(&format!("UPDATE {table} SET {}", assignments.join(",")), [])
+                    .map_err(io::Error::other)?;
+            }
+        }
     }
     temporary.as_file().sync_all()?;
     match temporary.persist_noclobber(destination) {
@@ -208,7 +263,7 @@ mod tests {
     use super::{inherited_store, is_owned_store, isolate_branch_data, seed_store};
     use crate::engine::process::{current_home_execution_context, pinned_execution_context};
     use crate::id::WaveId;
-    use crate::run_record::{CaptureHandle, RunFlowMembership, RunSpec};
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
     use crate::store::migrations::{
         apply_installed_development_sqlite, development_store_diagnostic,
     };
@@ -235,13 +290,12 @@ mod tests {
             assert!(std::env::var_os("LF_RUN_ID").is_none());
             assert!(std::env::var_os("LF_RUN_DIR").is_none());
             assert!(std::env::var_os("LF_WORK_ADVANCE_CLAIM").is_none());
-            assert!(crate::run_record::task_origin());
-            assert!(crate::lf::commands::install::guard_task_origin().is_err());
+            assert!(std::env::var_os("LF_AGENT_CALLER").is_none());
 
             let store = SqliteStore::new(&expected_db).unwrap();
             let wave = Wave::new(WaveId::new(), "private-proof".into(), "/repo".into());
             store.create_wave(&wave).unwrap();
-            let observer = SqliteStore::open_run_ledger_read_only(
+            let observer = SqliteStore::open_execs_read_only(
                 &crate::store::observability_database_path().unwrap(),
             )
             .unwrap();
@@ -252,7 +306,7 @@ mod tests {
                 .any(|row| row.subject == "private-proof"));
 
             let capture = CaptureHandle::begin_with_context(
-                RunSpec {
+                SessionCaptureSpec {
                     harness: "proof".into(),
                     model: None,
                     surface: "headless".into(),
@@ -261,9 +315,11 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: Vec::new(),
-                    flow: RunFlowMembership::Independent,
+                    flow: SessionFlowMembership::Independent,
+                    work: None,
                 },
                 &PreparedTurnContext::from_prompts("", "private data proof"),
+                None,
             )
             .unwrap();
             capture.record_raw("stdout", "branch output");
@@ -280,13 +336,13 @@ mod tests {
                 assert_eq!(context.lf_bin, std::env::current_exe().unwrap());
             }
             // Re-entering the same private data directory keeps its own Run and lease.
-            std::env::set_var("LF_RUN_ID", capture.run_id().as_str());
+            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
             std::env::set_var("LF_ACCOUNT_LEASE", "private-lease");
             isolate_branch_data().unwrap();
             assert_eq!(
                 std::env::var("LF_RUN_ID").unwrap(),
-                capture.run_id().as_str()
+                capture.artifact_key().as_str()
             );
             assert_eq!(std::env::var("LF_ACCOUNT_LEASE").unwrap(), "private-lease");
             return;
@@ -319,6 +375,7 @@ mod tests {
                 .env("LF_BIN", installed.join("lf"))
                 .env("LF_CONTROL_BIN", installed.join("lf"))
                 .env("CARGO_BIN_EXE_lf", std::env::current_exe().unwrap())
+                .env("LF_AGENT_CALLER", "inherited conversation caller")
                 .env("LF_RUN_ID", "run_inherited")
                 .env("LF_RUN_DIR", installed.join("runs/parent"))
                 .env_remove("LF_TASK_ORIGIN")
@@ -351,6 +408,91 @@ mod tests {
             );
             assert_eq!(std::fs::read_dir(&installed).unwrap().count(), 1);
         }
+    }
+
+    #[test]
+    fn copied_conversation_keeps_history_without_live_connection_or_driver_authority() {
+        let root = tempdir().unwrap();
+        let source_path = root.path().join("source.db");
+        let target_path = root.path().join("private/copy.db");
+        let source = SqliteStore::open_ephemeral(&source_path).unwrap();
+        let exec = crate::id::ExecId::new();
+        source.test_session("conversation", "run_00000000000000000000000000000001");
+        {
+            let conn = Connection::open(&source_path).unwrap();
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
+                [exec.as_str()],
+            )
+            .unwrap();
+        }
+        let driver = source
+            .claim_session_driver("conversation", None, &exec, true)
+            .unwrap();
+        source
+            .record_session_connection("conversation", &driver, "/private/original.sock", "thread")
+            .unwrap();
+        source
+            .record_session_provider_process("conversation", &driver, 12345, 12)
+            .unwrap();
+        source
+            .record_session_turn_origin(
+                "conversation",
+                "thread",
+                "turn",
+                driver.provider_generation,
+                &exec,
+            )
+            .unwrap();
+        source
+            .record_session_event(
+                "conversation",
+                "thread",
+                "turn",
+                crate::session::SessionEventKind::Completed,
+                &serde_json::json!({"status":"completed"}),
+            )
+            .unwrap();
+        let history = source.session_history("conversation", 0, 0).unwrap();
+        seed_store(&source_path, &target_path).unwrap();
+        let target = SqliteStore::open_read_only(&target_path).unwrap();
+        assert_eq!(
+            target.session_history("conversation", 0, 0).unwrap(),
+            history
+        );
+        assert!(target.session_connection("conversation").unwrap().is_none());
+        assert!(target
+            .session_provider_process("conversation")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            target.session_thread("conversation").unwrap().as_deref(),
+            Some("thread")
+        );
+        assert_eq!(
+            source.session_provider_process("conversation").unwrap(),
+            Some((12345, 12))
+        );
+        let detached = target.session_driver("conversation").unwrap().unwrap();
+        assert!(detached.exec_id.is_none());
+        assert_ne!(detached.generation, driver.generation);
+        assert_eq!(detached.provider_generation, driver.provider_generation);
+        assert_eq!(detached.provider_exec_id, exec);
+        let writable = SqliteStore::open_ephemeral(&target_path).unwrap();
+        assert!(writable
+            .with_session_driver::<()>("conversation", &driver, || panic!(
+                "copied driver gained authority"
+            ))
+            .is_err());
+        assert_eq!(source.session_driver("conversation").unwrap(), Some(driver));
+        assert_eq!(
+            source.session_connection("conversation").unwrap(),
+            Some(("/private/original.sock".into(), "thread".into()))
+        );
+        assert_eq!(
+            source.session_history("conversation", 0, 0).unwrap(),
+            history
+        );
     }
 
     #[test]

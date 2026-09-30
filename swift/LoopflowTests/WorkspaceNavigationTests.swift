@@ -140,12 +140,15 @@ struct WorkspaceNavigationTests {
         let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
         for presentation in WorkspacePresentation.allCases {
             let rows = projection.outline(presentation: presentation, collapsed: [], search: "", planningReadable: true)
-            #expect(!rows.contains { $0.session?.id == "demo" || $0.session?.id == "stray" })
+            #expect(!rows.contains { $0.session?.id == "demo" })
+            #expect(rows.contains { $0.session?.id == "stray" })
             #expect(!rows.contains { $0.inlineSessions.contains { $0.id == "demo" } })
             #expect(rows.allSatisfy { $0.session == nil || !$0.ancestors.isEmpty })
         }
-        #expect(projection.orphanSessions(search: "").map(\.id) == ["demo", "stray"])
+        #expect(projection.orphanSessions(search: "").map(\.id) == ["demo"])
         #expect(projection.orphanSessions(search: "DEMO").map(\.id) == ["demo"])
+        #expect(projection.subject(for: "stray") == .task(id: "absent"))
+        #expect(projection.breadcrumb(selection: nil, sessionId: "stray")?.waveWork == nil)
 
         let source = try ReadingSource(
             roadmap: roadmapJSON(),
@@ -435,7 +438,7 @@ struct WorkspaceNavigationTests {
         model.select(.wave(id: task.wave.wave.id))
         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
         #expect(throws: Never.self) { try view.inspect().find(text: "Current KRs") }
-        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.chapter!.krs[0].text) }
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.currentProject!.krs[0].text) }
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-issue-available") }
     }
 
@@ -538,7 +541,7 @@ struct WorkspaceNavigationTests {
             switch args.first {
             case "roadmap": return planning
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "ps": return #"{"schema_version":1,"observed_at":1,"nodes":[],"provider_processes":[]}"#
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             }
@@ -567,7 +570,7 @@ struct WorkspaceNavigationTests {
         let model = PodiumModel(query: RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": await gate.wait(); return snapshot
-            case "session": return records
+            case "session": return #"{"entries":\#(records),"next":null}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             }
@@ -581,6 +584,95 @@ struct WorkspaceNavigationTests {
         await refresh.value
         #expect(model.workspace.subject(for: "human") == .task(id: "issue-review"))
         #expect(model.workspace.unmatchedSessions.isEmpty)
+    }
+
+    @Test("Bound Sessions retain ancestry and panes across planning loss and return",
+          arguments: ["absent-task", "unavailable", "no-current-project", "no-waves"])
+    func boundSessionRetainsAncestry(planning: String) async throws {
+        let work = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let records = try [session("first", work: work, waveId: "wave-1"),
+                           session("second", work: work, waveId: "wave-1")]
+        let original = try roadmapJSON()
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        waves[0]["tasks"] = planning == "unavailable"
+            ? ["state": "unavailable", "reason": "planning offline"]
+            : ["state": "ok", "items": [], "truncated": false]
+        waves[0]["unavailable_tasks"] = []
+        if planning == "no-current-project" {
+            waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
+        }
+        snapshot["waves"] = planning == "no-waves" ? [] : waves
+        let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let source = ReadingSource(roadmap: original, sessions: String(decoding: try JSONEncoder().encode(records), as: UTF8.self))
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(model.workspace.subject(for: "first"))
+        model.navigation.selectedSessionId = "first"
+        model.navigation.content = .terminals
+        model.beginSessionRename(records[0])
+        model.navigation.renaming?.text = "Retained draft"
+        let selection = model.selection
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: "/src/loopflow")
+        workspace.multiplexer.load(sessionId: "first")
+        let pane = workspace.multiplexer.focusedPaneId
+        _ = workspace.multiplexer.split(pane, axis: .vertical)
+        workspace.multiplexer.load(sessionId: "second")
+        workspace.multiplexer.load(sessionId: "first")
+        let layout = workspace.multiplexer.layout
+
+        await source.replaceRoadmap(missing)
+        await model.refresh()
+        let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+        #expect(crumb.task == nil)
+        #expect(crumb.taskWork == work)
+        #expect(crumb.waveWork == .wave(id: "wave-1"))
+        #expect(crumb.siblings.map(\.id) == ["first", "second"])
+        #expect(model.workspace.subject(for: "first") == work)
+        #expect(model.workspace.orphanSessions(search: "").isEmpty)
+        let bar = WorkspaceBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in }, onMonitor: { _ in })
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
+        for presentation in WorkspacePresentation.allCases {
+            let rows = model.workspace.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
+            #expect(Set(rows.compactMap { $0.session?.id }) == ["first", "second"])
+            #expect(rows.filter { $0.session != nil }.allSatisfy { $0.ancestors.last?.key.work == work })
+        }
+
+        // Fresh discovery cannot depend on cached planning names or selection.
+        let cold = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await cold.refresh()
+        cold.select(cold.workspace.subject(for: "first"))
+        cold.navigation.selectedSessionId = "first"
+        #expect(cold.selection == work)
+        await source.replaceRoadmap(original)
+        await model.refresh()
+        await cold.refresh()
+        #expect(cold.selection == work)
+        #expect(cold.task(id: work.id)?.task.id == "issue-review")
+        #expect(model.selection == selection)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(model.navigation.content == .terminals)
+        #expect(model.navigation.renaming?.text == "Retained draft")
+        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.task?.task.id == "issue-review")
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(workspace.multiplexer.focusedPaneId == pane)
+    }
+
+    @Test("Unbound Sessions do not acquire ancestry from display text or checkout")
+    func unboundSessionHasNoAncestry() throws {
+        let record = try session("unbound", work: nil)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        json["work_path"] = "wave-1/issue-review"
+        json["title"] = "Task ts_review00000000000000000000000000"
+        let unbound = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: [unbound])
+        let crumb = try #require(projection.breadcrumb(selection: nil, sessionId: unbound.id))
+        #expect(projection.subject(for: unbound.id) == nil)
+        #expect(crumb.waveWork == nil)
+        #expect(crumb.taskWork == nil)
+        #expect(crumb.siblings == [unbound])
+        #expect(projection.orphanSessions(search: "") == [unbound])
     }
 
     @Test("New conversation follows the visible subject and repository scope")
@@ -617,13 +709,14 @@ struct WorkspaceNavigationTests {
         let records = [try session("human", work: .task(id: "ts_review00000000000000000000000000"))]
         return String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
     }
-    private func session(_ id: String, work: WorkReference?, state: SessionState = .active) throws -> SessionRecord {
+    private func session(_ id: String, work: WorkReference?, state: SessionState = .active, waveId: String? = nil) throws -> SessionRecord {
         let workData = try JSONEncoder().encode(work)
         let workJSON = String(decoding: workData, as: UTF8.self)
+        let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-        {"id":"\(id)", "run_id": "\(id)","kind":"interactive","work":\(workJSON),"title":"\(id)",
+        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
-         "wave_id":\(id == "project" ? "\"wave-1\"" : "null"),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: state.rawValue)),
+         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
          "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
         """.utf8))
     }
@@ -657,7 +750,7 @@ private actor ReadingSource {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
         case "roadmap": return roadmap
-        case "session": return sessions
+        case "session": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")

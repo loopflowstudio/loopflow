@@ -14,8 +14,8 @@ use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, RunEventRow, StoreError,
-    StoreResult, WaveLocatorUpdate,
+    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, StoreError, StoreResult,
+    WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
 
@@ -23,13 +23,35 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
+mod execs;
+mod flow_inventory;
+mod flows;
 mod metrics;
 mod pr_landings;
+mod session_events;
+pub(crate) mod sessions;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The first rollback-to-WAL transition can return BUSY immediately even with
+/// a busy handler: two readers cannot both upgrade their journal lock. Reuse
+/// migration exclusion only for that transition; ordinary WAL opens stay reads.
+fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()> {
+    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if mode != "wal" {
+        let _lock = super::migrations::migration_lock(path)?;
+        let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+        if mode != "wal" {
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+        }
+    }
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -343,6 +365,22 @@ fn development_open_error(conn: &Connection, error: StoreError) -> StoreError {
 }
 
 impl SqliteStore {
+    #[cfg(test)]
+    pub(crate) fn assert_no_historical_runs(&self) {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "current execution must not recreate the retired Run table"
+        );
+    }
+
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
     /// the migration frontier where the installed `lf` left it. Advancing the
@@ -350,6 +388,15 @@ impl SqliteStore {
     /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
         Self::open(path, super::FrontierAdvance::Forbidden)
+    }
+
+    /// Revalidate a connection after a child executable may have upgraded it.
+    pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        super::migrations::validate_installed_development_sqlite(
+            &conn,
+            crate::build_info::migration_draft_manifest(),
+        )
     }
 
     /// Open the shared store as `lf install promote` — the single authorized
@@ -374,13 +421,11 @@ impl SqliteStore {
             })?;
         }
         let conn = Connection::open(path)?;
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
         super::migrations::apply_installed_development_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )?;
-        validate_run_events_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -400,13 +445,11 @@ impl SqliteStore {
             })?;
         }
         let conn = Connection::open(path)?;
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
         super::migrations::apply_installed_development_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )?;
-        validate_run_events_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -497,8 +540,7 @@ impl SqliteStore {
         let mut conn = Connection::open(path)?;
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_write_connection(&conn, path)?;
 
         if installed_development {
             super::migrations::validate_installed_development_sqlite(
@@ -532,7 +574,6 @@ impl SqliteStore {
         } else {
             super::migrations::apply_sqlite(&conn)?;
         }
-        validate_run_events_schema(&conn)?;
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn)?;
         }
@@ -542,16 +583,34 @@ impl SqliteStore {
         })
     }
 
-    /// Open only the stable run ledger surface without schema or token writes.
+    /// Open only the Exec rows without schema or token writes.
     /// Observability commands use this when a source build may be older than
     /// the machine's release-owned database.
-    pub(crate) fn open_run_ledger_read_only(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_execs_read_only(path: &Path) -> StoreResult<Self> {
         let store = Self::open_read_only(path)?;
         {
             let conn = store.conn.lock().expect("store mutex poisoned");
-            validate_run_events_schema(&conn)?;
+            validate_exec_schema(&conn)?;
         }
         Ok(store)
+    }
+
+    /// Append process evidence to an existing compatible store, never initialize it.
+    pub(crate) fn open_existing_execs(path: &Path) -> StoreResult<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
+        validate_exec_schema(&conn)?;
+        // An older ledger without the current process owner is not a writable
+        // observation destination. Leave upgrade decisions to ordinary admission.
+        conn.prepare(
+            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code FROM execs LIMIT 0",
+        )?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     pub(crate) fn open_read_only(path: &Path) -> StoreResult<Self> {
@@ -846,11 +905,9 @@ impl SqliteStore {
     }
 }
 
-fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
+fn validate_exec_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
-        "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
-                wave, node, event, command, flow, skill, step_index, error
-         FROM run_events LIMIT 0",
+        "SELECT id,trace_id,parent_exec_id,started_at,completed_at,outcome FROM execs LIMIT 0",
     )?;
     Ok(())
 }
@@ -2025,9 +2082,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    // Exec ledger (`run_events`): the machine-grain, append-only record of
-    // every process written directly by `lf`.
-
     /// Cached line/token counts for a git blob. Content-addressed, so a hit is
     /// always correct and a miss only costs one tokenization.
     pub fn blob_tokens(&self, sha: &str) -> StoreResult<Option<(i64, i64, i64)>> {
@@ -2058,118 +2112,29 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_run_event(&self, row: &RunEventRow) -> StoreResult<()> {
+    pub fn record_exec(&self, exec: &crate::exec::Exec) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO run_events (
-                run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, skill, step_index, error
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            params![
-                row.run_id,
-                row.process_id,
-                row.parent_process_id,
-                row.seq,
-                row.ts,
-                row.repo,
-                row.worktree,
-                row.wave,
-                row.node,
-                row.event,
-                row.command,
-                row.flow,
-                row.skill,
-                row.step_index,
-                row.error,
-            ],
+            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+                outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+             WHERE execs.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+            params![exec.id,exec.trace_id,exec.parent_exec_id,exec.command,exec.repo,exec.cwd,
+                exec.started_at,exec.via_agent,exec.caller_session_id,exec.caller_provider_generation,
+                exec.completed_at,exec.outcome,exec.exit_code,exec.signal,exec.error],
         )?;
         Ok(())
     }
 
-    pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
-        self.query_run_events(
-            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error
-             FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
-            params![since_unix],
-        )
-    }
-
-    /// Whether this ledger holds any row for `process_id`. A run start asks
-    /// before honoring an inherited parent: a parent this ledger never
-    /// recorded cannot be pointed at, only inherited from.
     pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare("SELECT 1 FROM run_events WHERE process_id = ?1 LIMIT 1")?;
-        Ok(stmt.exists(params![process_id])?)
-    }
-
-    /// Events for one trace; the persisted `run_id` may be a unique prefix.
-    pub fn run_events_matching(&self, run_id: &str) -> StoreResult<Vec<RunEventRow>> {
-        let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
-        self.query_run_events(
-            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error
-             FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
-            params![prefix],
-        )
-    }
-
-    /// Events identifying one exec by process-id prefix. The caller resolves
-    /// its trace, then reads that trace whole.
-    pub fn run_events_matching_exec(&self, exec_id: &str) -> StoreResult<Vec<RunEventRow>> {
-        let (operator, value) = exact_or_prefix(exec_id);
-        self.query_run_events(
-            &format!(
-                "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error
-             FROM run_events WHERE process_id {operator} ?1 ORDER BY ts, seq"
-            ),
-            params![value],
-        )
-    }
-
-    fn query_run_events(
-        &self,
-        sql: &str,
-        params: impl rusqlite::Params,
-    ) -> StoreResult<Vec<RunEventRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt.query_map(params, |row| {
-            Ok(RunEventRow {
-                run_id: row.get(0)?,
-                process_id: row.get(1)?,
-                parent_process_id: row.get(2)?,
-                seq: row.get(3)?,
-                ts: row.get(4)?,
-                repo: row.get(5)?,
-                worktree: row.get(6)?,
-                wave: row.get(7)?,
-                node: row.get(8)?,
-                event: row.get(9)?,
-                command: row.get(10)?,
-                flow: row.get(11)?,
-                skill: row.get(12)?,
-                step_index: row.get(13)?,
-                error: row.get(14)?,
-            })
-        })?;
-        let mut events = Vec::new();
-        for row in rows {
-            events.push(row?);
-        }
-        Ok(events)
+        let mut query = conn.prepare("SELECT 1 FROM execs WHERE id=?1")?;
+        Ok(query.exists([process_id])?)
     }
 }
 
-fn exact_or_prefix(value: &str) -> (&'static str, String) {
-    if uuid::Uuid::parse_str(value).is_ok() {
-        ("=", value.to_string())
-    } else {
-        ("LIKE", format!("{}%", value.replace(['%', '_'], "")))
-    }
-}
 #[cfg(test)]
 mod frontier_tests {
     use super::SqliteStore;
@@ -2248,26 +2213,21 @@ mod frontier_tests {
         apply_all_but_head(&conn).unwrap();
     }
 
-    fn seed_completed_trace(path: &Path) {
-        let conn = rusqlite::Connection::open(path).unwrap();
-        conn.execute_batch(
-            "INSERT INTO run_events
-                (run_id, process_id, seq, ts, node, event)
-             VALUES
-                ('trace-before-promotion', 'process-before-promotion', 0, 100, 'run', 'started'),
-                ('trace-before-promotion', 'process-before-promotion', 1, 101, 'run', 'completed')",
-        )
-        .unwrap();
+    fn seed_current_wave(path: &Path) {
+        rusqlite::Connection::open(path).unwrap().execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('current-wave','Current','/repo',100)", [],
+        ).unwrap();
     }
 
-    fn trace_events(path: &Path) -> Vec<String> {
-        SqliteStore::open_run_ledger_read_only(path)
+    fn current_wave(path: &Path) -> String {
+        rusqlite::Connection::open(path)
             .unwrap()
-            .list_run_events_since(0)
+            .query_row(
+                "SELECT name FROM waves WHERE id='current-wave'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap()
-            .into_iter()
-            .map(|event| event.event)
-            .collect()
     }
 
     #[test]
@@ -2395,20 +2355,19 @@ mod frontier_tests {
     /// The 2026-07-17 incident shape, exercised as two binary generations: a
     /// branch candidate knows one migration the installed release does not.
     /// Ordinary candidate use must leave both the shared frontier and existing
-    /// trace status untouched; explicit promotion advances once, after which
-    /// both current opens and the stable ledger reader retain the trace.
+    /// Wave untouched; explicit promotion advances once and retains the Wave.
     #[test]
-    fn branch_candidate_cannot_advance_shared_store_or_damage_trace_status_outside_promotion() {
+    fn branch_candidate_cannot_advance_shared_store_or_damage_current_state_outside_promotion() {
         let shared = SharedHome::new();
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
-        seed_completed_trace(&path);
+        seed_current_wave(&path);
         let installed_frontier = prior_known_version();
         assert_eq!(
             frontier(&path).as_deref(),
             Some(installed_frontier.as_str())
         );
-        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        assert_eq!(current_wave(&path), "Current");
 
         open(&path, Published, &shared.home, Forbidden)
             .expect_err("ordinary branch candidate must not promote its draft migration");
@@ -2416,7 +2375,7 @@ mod frontier_tests {
             frontier(&path).as_deref(),
             Some(installed_frontier.as_str())
         );
-        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        assert_eq!(current_wave(&path), "Current");
         let installed = rusqlite::Connection::open(&path).unwrap();
         assert!(
             crate::store::migrations::old_reader_recognizes(&installed),
@@ -2428,12 +2387,12 @@ mod frontier_tests {
             .expect("explicit promotion advances the shared frontier");
         let promoted_frontier = latest_known_version();
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
-        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        assert_eq!(current_wave(&path), "Current");
 
         open(&path, Published, &shared.home, Authorized)
             .expect("repeating promotion at the same frontier is a no-op");
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
-        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        assert_eq!(current_wave(&path), "Current");
         open(&path, Published, &shared.home, Forbidden)
             .expect("ordinary current binary opens after promotion");
     }

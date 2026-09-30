@@ -42,7 +42,7 @@ struct WorkSurfaceView: View {
         }
         .background(palette.background)
         .sheet(item: $model.historyWave) { wave in
-            ChapterHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
+            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
         .sheet(item: $editingTask) { selection in
             TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
@@ -126,7 +126,7 @@ struct WorkSurfaceView: View {
 
                 section {
                     WorkspaceSectionHeading(title: "Current KRs") {
-                        Button("Chapter history") {
+                        Button("Project history") {
                             model.historyReference = nil
                             model.historyWave = roadmap.wave
                         }
@@ -135,7 +135,7 @@ struct WorkSurfaceView: View {
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("wave-chapter-history")
                     }
-                    if let chapter = roadmap.chapter {
+                    if let chapter = roadmap.currentProject {
                         WaveChapterView(chapter: chapter)
                     } else {
                         Text("No current chapter plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
@@ -191,7 +191,7 @@ struct WorkSurfaceView: View {
     private var taskDetail: some View {
         if let selection = model.selection, let found = model.task(id: selection.id) {
             let task = found.task
-            let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+            let sessions = model.visibleWorkspace.waves.lazy.flatMap(\.tasks)
                 .first { $0.id.work == selection }?.sessions
             scrollingDetail(identifier: "podium-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -349,6 +349,7 @@ struct WorkSurfaceView: View {
 
     private func sessionTone(_ state: SessionState) -> WorkspaceTone {
         switch state {
+        case .unknown: .neutral
         case .active: .running
         case .waiting, .ready: .human
         case .closed: .stopped
@@ -468,10 +469,6 @@ struct WorkSurfaceView: View {
         }
     }
 
-    private func pausedChip(_ waveId: String) -> some View {
-        WorkspaceChip(text: "paused", tone: .neutral)
-            .accessibilityIdentifier("wave-paused-\(waveId)")
-    }
 
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {

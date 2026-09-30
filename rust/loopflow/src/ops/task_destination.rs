@@ -14,7 +14,7 @@ use crate::child::ChildExecutionContext;
 use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
 use crate::machine_install::{self, ArtifactRole};
-use crate::ops::task::TaskLaunchOptions;
+use crate::ops::task::TaskExecOptions;
 
 pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
     // Unit tests own ephemeral stores, never the account's real installation.
@@ -60,19 +60,21 @@ pub(crate) fn require_worker_destination() -> Result<()> {
 /// branch-only Task (including a locally recovered successor) is not a transfer.
 pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result<()> {
     let ids = |path: &Path| -> Result<BTreeSet<String>> {
-        Ok(WorkCatalog::load_at(path)?
-            .owners
-            .values()
-            .filter(|owner| {
-                owner.work.kind() == "task"
-                    && owner.matches(WorkFilter {
-                        task: Some(issue),
-                        wave: None,
-                        project: None,
-                    })
-            })
-            .map(|owner| owner.work.id().to_string())
-            .collect())
+        Ok(WorkCatalog::new(
+            crate::store::sqlite::SqliteStore::open_read_only(path)?.work_identities()?,
+        )?
+        .owners
+        .values()
+        .filter(|owner| {
+            owner.work.kind() == "task"
+                && owner.matches(WorkFilter {
+                    task: Some(issue),
+                    wave: None,
+                    project: None,
+                })
+        })
+        .map(|owner| owner.work.id().to_string())
+        .collect())
     };
     let local = ids(&crate::store::observability_database_path()?)?;
     if !local.is_empty() && local != ids(&context.db_path)? {
@@ -81,7 +83,7 @@ pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result
     Ok(())
 }
 
-pub(super) fn launch_args(operation: &str, options: &TaskLaunchOptions) -> Vec<String> {
+pub(super) fn exec_args(operation: &str, options: &TaskExecOptions) -> Vec<String> {
     let mut args = vec!["task".into(), operation.into()];
     for (flag, value) in [
         ("--model", &options.agent),
@@ -94,6 +96,9 @@ pub(super) fn launch_args(operation: &str, options: &TaskLaunchOptions) -> Vec<S
         if let Some(value) = value {
             args.extend([flag.into(), value.clone()]);
         }
+    }
+    if options.retry {
+        args.push("--retry".into());
     }
     args
 }
@@ -118,13 +123,11 @@ pub(super) fn execute(
     let mut command = Command::new(&context.lf_bin);
     command.current_dir(cwd).args(args).stderr(Stdio::inherit());
     // A different data copy cannot inherit Run, worker, account or switch authority.
-    // Task origin is only a restriction and must survive the move.
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LF_") {
             command.env_remove(name);
         }
     }
-    // Login selectors are launch intent, resolved again by the destination's catalog.
     if let Some(selection) = std::env::var_os(crate::provider_account::lease::ACCOUNT_SELECTION_ENV)
     {
         command.env(
@@ -132,8 +135,8 @@ pub(super) fn execute(
             selection,
         );
     }
-    if crate::run_record::task_origin() {
-        command.env("LF_TASK_ORIGIN", "1");
+    if let Some(declaration) = std::env::var_os(crate::lf::WORK_DECLARATION_ENV) {
+        command.env(crate::lf::WORK_DECLARATION_ENV, declaration);
     }
     for name in ["LF_HOME", "LF_CONTROL_HOME"] {
         command.env(name, &context.lf_home);
@@ -195,7 +198,7 @@ mod tests {
         ArtifactSet, InstallSelection, InstallSource,
     };
     use crate::ops::task::{
-        task_create, task_restart, task_run, TaskCreateResult, TaskLaunchOptions,
+        task_create, task_restart, task_run, TaskCreateResult, TaskExecOptions,
     };
 
     const TEST: &str =
@@ -206,7 +209,6 @@ mod tests {
         conn.execute_batch("CREATE TABLE waves(id TEXT, name TEXT, created_at INTEGER);
             CREATE TABLE projects(id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
             CREATE TABLE tasks(id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
-            CREATE TABLE run_events(run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command, flow, skill, step_index, error);
             CREATE TABLE operations(name TEXT, executable TEXT, home TEXT);").unwrap();
         conn
     }
@@ -229,7 +231,6 @@ mod tests {
                 assert!(std::env::var_os("LF_WORK_ADVANCE_CLAIM").is_none());
                 assert!(std::env::var_os("LF_RUN_ID").is_none());
                 assert!(std::env::var_os("LF_ACCOUNT_LEASE").is_none());
-                assert!(crate::run_record::task_origin());
                 let conn = Connection::open(db).unwrap();
                 let drafts: i64 = conn
                     .query_row(
@@ -295,7 +296,7 @@ mod tests {
                 state: crate::ops::task_execution::TaskExecutionState::Idle,
                 reason: "simulated installed operation".into(),
                 step: None,
-                run_id: None,
+                captured: None,
             },
             runs: vec![],
             runs_truncated: false,
@@ -361,7 +362,7 @@ mod tests {
         // No Git checkout, PM account or usable execution schema exists here.
         // Every operation must reach installation before needing any of them.
         assert_eq!(
-            task_run(&root, "LOO-1", TaskLaunchOptions::default()).unwrap(),
+            task_run(&root, "LOO-1", TaskExecOptions::default()).unwrap(),
             snapshot
         );
         let TaskCreateResult::Started(created) = task_create(
@@ -369,7 +370,7 @@ mod tests {
             None,
             Some("Title".into()),
             Some("Report".into()),
-            Some(TaskLaunchOptions::default()),
+            Some(TaskExecOptions::default()),
         )
         .unwrap() else {
             panic!("create --run must return the installed snapshot")
@@ -400,7 +401,7 @@ mod tests {
         local.execute_batch("INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'local', 1);
             INSERT INTO projects VALUES ('project_local', '00000000-0000-0000-0000-000000000001', 'local', 'project-external', 1);
             INSERT INTO tasks VALUES ('task_local', 'project_local', 'LOO-2', 'issue-local', 1);").unwrap();
-        assert!(task_run(&root, "LOO-2", TaskLaunchOptions::default())
+        assert!(task_run(&root, "LOO-2", TaskExecOptions::default())
             .unwrap_err()
             .to_string()
             .contains("no Task was transferred"));

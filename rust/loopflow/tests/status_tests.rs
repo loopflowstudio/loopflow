@@ -2,17 +2,11 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
-#[path = "support/chapter.rs"]
-mod chapter;
-
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
 use loopflow::child::ChildRef;
-use loopflow::controller::wave::metrics::{
-    load_metric_contract, MetricObservation, ObservationAcceptance,
-};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
@@ -20,6 +14,9 @@ use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::work::task::{
     Observation, PmWritebackState, PrMergeMode, Task, TaskId, TaskPr, TaskPrId,
+};
+use loopflow::work::wave::metrics::{
+    load_metric_contract, MetricObservation, ObservationAcceptance,
 };
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
@@ -47,6 +44,8 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
@@ -61,13 +60,15 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn bind_chapter(store: &SqliteStore, wave: &Wave, project_id: &str) {
-    store
-        .save_chapter(
-            &chapter::current_chapter(wave.id(), wave.name(), project_id),
-            true,
-        )
-        .unwrap();
+fn select_project(store: &SqliteStore, wave: &Wave, project_id: &str) {
+    for mut project in store.list_projects(Some(wave.id())).unwrap() {
+        project.plan.status = if project.plan.id.as_str() == project_id {
+            loopflow::pm::ProjectStatus::Started
+        } else {
+            loopflow::pm::ProjectStatus::Completed
+        };
+        store.update_project(&project).unwrap();
+    }
 }
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
@@ -78,7 +79,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "name": project.plan.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
@@ -86,7 +87,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    bind_chapter(&store, wave, project.plan.id.as_str());
+    select_project(&store, wave, project.plan.id.as_str());
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -214,6 +215,8 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
             slug: "technical-architecture".to_string(),
             name: "Technical Architecture".to_string(),
@@ -284,6 +287,8 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let current = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),
             slug: "auditability".to_string(),
@@ -300,7 +305,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-    bind_chapter(&store, &wave, current.plan.id.as_str());
+    select_project(&store, &wave, current.plan.id.as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -317,7 +322,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "metric_targets": [],
-                "flows": {"recommended": null},
+                "flow": "feature", "status": "started",
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -415,7 +420,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    bind_chapter(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    select_project(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -438,12 +443,29 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     let home = tempfile::tempdir().expect("tempdir");
     let project = seed_credential_history(home.path());
     let status = status_json(home.path(), &["infrastructure"], None);
-    assert!(status.get("projects").is_none());
-    assert_eq!(
-        status["chapter"]["source_project_id"],
-        project.plan.id.as_str()
-    );
-    assert_eq!(status["tasks"]["items"], serde_json::json!([]));
+    let roadmap = roadmap_json(home.path(), "infrastructure");
+    let expected_projects = serde_json::json!({
+        "state": "ok",
+        "items": [{
+            "id": project.plan.id.as_str(),
+            "work_id": project.id.as_str(),
+            "slug": project.plan.slug,
+            "name": project.plan.name,
+            "flow": "feature",
+            "status": "started",
+            "metric_targets": [],
+            "krs": [{"text": "Current state and history stay distinct", "holds": false}]
+        }],
+        "truncated": false
+    });
+    for view in [&status, &roadmap["waves"][0]] {
+        assert_eq!(view["projects"], expected_projects);
+        assert_eq!(view["wave"]["status"], "ready");
+        assert_eq!(view["tasks"]["state"], "ok");
+        assert_eq!(view["tasks"]["items"], serde_json::json!([]));
+        assert_eq!(view["unavailable_tasks"], serde_json::json!([]));
+        assert!(!view.to_string().contains("credential"));
+    }
     let human = status_human(home.path(), "infrastructure");
     assert!(!human.contains("credential"));
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -602,7 +624,7 @@ Count dispatched Task loops that settle without rescue.
             "name": "Loopflow API",
             "summary": "One product contract.",
             "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -620,7 +642,7 @@ Count dispatched Task loops that settle without rescue.
             payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
         })
         .expect("seed PM snapshot");
-    bind_chapter(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
+    select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
@@ -675,13 +697,27 @@ Count dispatched Task loops that settle without rescue.
     assert_eq!(status_metric["freshness"]["kind"], "fresh");
     assert_eq!(status_metric["evidence"]["kind"], "met");
     assert_eq!(status_metric["evidence"]["value"], 1.0);
-    assert_eq!(status["chapter"]["krs"][0]["holds"], false);
+    assert_eq!(status["projects"]["state"], "ok");
+    let projects = status["projects"]["items"].as_array().unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["id"], project_payload["projects"][0]["id"]);
+    assert_eq!(projects[0]["status"], "started");
+    assert_eq!(projects[0]["krs"], project_payload["projects"][0]["krs"]);
+    assert_eq!(
+        projects[0]["metric_targets"],
+        project_payload["projects"][0]["metric_targets"]
+    );
+    assert_eq!(roadmap["waves"][0]["projects"], status["projects"]);
     assert_eq!(
         roadmap["waves"][0]["metric_portfolio"],
         status["metric_portfolio"]
     );
 
     let human = status_human(home.path(), "product");
+    assert!(
+        human.contains("[ ] Task loops earn trust for one week"),
+        "{human}"
+    );
     assert!(human.contains("Task loops earn trust  [met]"), "{human}");
     assert!(
         human.contains("Value 100.00% · Target >= 100.00% over 7d"),
@@ -722,8 +758,14 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         let roadmap = roadmap_json(home.path(), "product");
         let wave = &roadmap["waves"][0];
         for view in [&status, wave] {
-            assert!(view.get("projects").is_none());
-            assert_eq!(view["chapter"]["source_project_slug"], "auditability");
+            assert_eq!(view["projects"]["state"], "ok");
+            assert_eq!(view["projects"]["truncated"], false);
+            let projects = view["projects"]["items"].as_array().unwrap();
+            assert_eq!(projects.len(), 1);
+            assert_eq!(projects[0]["id"], "95159066-9098-4d0b-8903-01459dc7ec14");
+            assert_eq!(projects[0]["slug"], "auditability");
+            assert_eq!(projects[0]["status"], "started");
+            assert_eq!(projects[0]["flow"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
             assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
             assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");
@@ -738,6 +780,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
                 .unwrap()
                 .contains(PERSISTED_TASK_ID));
         }
+        assert_eq!(wave["projects"], status["projects"]);
         assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
     }
 }
@@ -763,6 +806,43 @@ fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
             assert_eq!(view["unavailable_tasks"][0]["work_id"], PERSISTED_TASK_ID);
         }
     }
+}
+
+#[test]
+fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
+    let home = tempfile::tempdir().unwrap();
+    seed_persisted_merge_request_without_copy(home.path());
+    let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    connection
+        .execute("DELETE FROM task_prs WHERE task_id=?1", [PERSISTED_TASK_ID])
+        .unwrap();
+
+    for assigned in [false, true] {
+        if assigned {
+            connection
+                .execute(
+                    "INSERT INTO agent_sessions(id,title,title_source,task_id,wave_id,created_at,cwd,input_published)
+                     SELECT ?1,'Reserved work','generated',t.id,p.wave_id,1,t.worktree,0
+                     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?2",
+                    rusqlite::params![uuid::Uuid::new_v4().simple().to_string().as_str(), PERSISTED_TASK_ID],
+                )
+                .unwrap();
+        }
+        let status = status_json(home.path(), &["product"], None);
+        let roadmap = roadmap_json(home.path(), "product");
+        for task in [
+            &status["tasks"]["items"][0],
+            &roadmap["waves"][0]["tasks"]["items"][0],
+        ] {
+            assert_eq!(task["task"]["identifier"], "PRD-52");
+            assert_eq!(task["runtime"]["started"], assigned);
+        }
+    }
+    assert!(
+        !home.path().join("runs").exists(),
+        "no provider was launched"
+    );
 }
 
 #[test]

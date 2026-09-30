@@ -13,7 +13,7 @@ struct WaveDetailReading {
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
-        return WavePlan(objective: snapshot.workMap.objective, chapter: snapshot.workMap.chapter)
+        return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
     }
 
     mutating func update(_ snapshot: WaveDetailSnapshot) {
@@ -48,7 +48,7 @@ struct WaveDetailPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Button("Chapter history") { showHistory = true }.padding(.bottom, 8)
+            Button("Project history") { showHistory = true }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -66,7 +66,7 @@ struct WaveDetailPane: View {
             }
         }
         .sheet(isPresented: $showHistory) {
-            ChapterHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
+            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
         }
     }
 
@@ -202,7 +202,7 @@ private struct WavePlanView: View {
 
     private var chapterAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let chapter = displayedPlan.chapter { WaveChapterView(chapter: chapter) }
+            if let chapter = displayedPlan.currentProject { WaveChapterView(chapter: chapter) }
             Text("Tasks").font(Typography.sectionTitle(17))
             if isAwaitingDetail {
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -334,10 +334,10 @@ struct WaveMetricPortfolioView: View {
                     VStack(spacing: 0) {
                         WaveMetricTableHeader()
                         ForEach(official) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: false)
+                            WaveMetricTableRow(metric: metric, candidate: false, targetUnavailable: presentation.targetUnavailable(for: metric))
                         }
                         ForEach(candidates) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: true)
+                            WaveMetricTableRow(metric: metric, candidate: true, targetUnavailable: presentation.targetUnavailable(for: metric))
                         }
                     }
                     .workspacePanel()
@@ -416,11 +416,12 @@ private struct WaveMetricTableHeader: View {
 private struct WaveMetricTableRow: View {
     let metric: MetricReading
     let candidate: Bool
+    let targetUnavailable: Bool
 
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave")
+        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: targetUnavailable)
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -484,7 +485,13 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let targetedCount: Int
     let requiresWorkCount: Int
     let contractIssueCount: Int
-    let chapterUnavailable: Bool
+    private let unavailableWaves: Set<String>
+
+    var chapterUnavailable: Bool { !unavailableWaves.isEmpty }
+
+    func targetUnavailable(for metric: MetricReading) -> Bool {
+        unavailableWaves.contains(metric.identity.waveId)
+    }
 
     init(portfolio: MetricPortfolio) {
         let official = portfolio.metrics.filter { $0.stage == .graduated }
@@ -494,10 +501,10 @@ struct WaveMetricPortfolioPresentation: Equatable {
         holdingCount = official.count { $0.target != nil && $0.evidence.isHealthy }
         requiresWorkCount = targetedCount - holdingCount
         contractIssueCount = portfolio.contractIssues.count
-        chapterUnavailable = portfolio.metrics.isEmpty && portfolio.contractIssues.contains {
-            if case .chapterUnavailable = $0 { return true }
-            return false
-        }
+        unavailableWaves = Set(portfolio.contractIssues.compactMap {
+            if case let .chapterUnavailable(waveId, _) = $0 { return waveId }
+            return nil
+        })
     }
 
     var headline: String {
@@ -528,14 +535,15 @@ struct WaveMetricRowPresentation: Equatable {
     let freshness: String
     let reason: String?
 
-    init(metric: MetricReading, owner: String) {
+    init(metric: MetricReading, owner: String, targetUnavailable: Bool) {
         name = metric.name
         description = metric.description
         state = metric.evidence.label
         self.owner = owner
         instrumentState = metric.instrumented ? "Instrumented" : "Awaiting instrument"
         value = metric.evidence.value.map { metric.format($0) } ?? "—"
-        target = metric.target?.display(unit: metric.unit) ?? "unset for this chapter"
+        target = targetUnavailable ? "unavailable for this chapter"
+            : metric.target?.display(unit: metric.unit) ?? "unset for this chapter"
         window = metric.window
         freshness = metric.freshness.summary
         reason = metric.evidence.reason
@@ -639,7 +647,8 @@ private extension MetricEvidence {
 private extension MetricUnknownCause {
     var value: Double? {
         switch self {
-        case let .incomplete(value, _, _),
+        case let .targetUnavailable(value, _, _),
+             let .incomplete(value, _, _),
              let .windowMismatch(value, _, _),
              let .staleObservation(value, _, _): return value
         case .never, .revisionMismatch, .staleUnavailable: return nil
@@ -649,6 +658,7 @@ private extension MetricUnknownCause {
     var summary: String {
         switch self {
         case .never: return "No observation has arrived."
+        case .targetUnavailable: return "Chapter target planning is unavailable."
         case let .revisionMismatch(expected, observed, sourceTime):
             return "Evidence at \(sourceTime) measured revision \(observed), not \(expected)."
         case .incomplete: return "The latest source window is incomplete."
@@ -853,7 +863,7 @@ private struct PrLink: View {
 }
 
 struct WaveChapterView: View {
-    let chapter: ChapterSummary
+    let chapter: ProjectPlanningSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -874,10 +884,7 @@ struct WaveChapterView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-            if chapter.phase != "complete" {
-                Text("Chapter transition in progress").foregroundStyle(Color.statusWarning)
-            }
-            if let error = chapter.error { Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled) }
+
         }.accessibilityIdentifier("wave-chapter")
     }
 }

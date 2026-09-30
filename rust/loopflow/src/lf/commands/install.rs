@@ -42,11 +42,12 @@ mod recovery;
 pub use published::{latest, schedule};
 pub(crate) use recovery::development_store_recovery;
 
-pub(crate) fn guard_task_origin() -> Result<()> {
-    if crate::run_record::task_origin() {
-        return Err(anyhow!(
-            "Task execution cannot change the machine installation. Keep this build on its branch data copy; run installation separately outside the Task. An unverified inherited Run is also restricted."
-        ));
+pub(crate) fn guard_task_checkout() -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_some()
+        || crate::repo::discover_repo_root(&cwd)?.is_some()
+    {
+        crate::ops::task::require_unmanaged_checkout(&cwd)?;
     }
     Ok(())
 }
@@ -545,7 +546,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
         let result = crate::engine::load_flow(flow, catalog_path)
             .map_err(anyhow::Error::from)
             .and_then(|loaded| {
-                crate::engine::expand_flow(&loaded, catalog_path)
+                crate::engine::compile_flow(&loaded, catalog_path)
                     .map_err(anyhow::Error::from)
                     .and_then(|steps| _validate_executable_steps(&steps))
             });
@@ -2576,7 +2577,7 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
 }
 
 pub fn advance_switch(switch_id: &str) -> Result<()> {
-    guard_task_origin()?;
+    guard_task_checkout()?;
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
     let root = crate::machine_install::root()?;
@@ -2769,7 +2770,7 @@ fn settle_switch(
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
-    guard_task_origin()?;
+    guard_task_checkout()?;
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::machine_install::root()?;
@@ -3084,7 +3085,7 @@ pub fn promote(
             "--fresh and --reuse-home require --from-build during local promotion"
         ));
     }
-    guard_task_origin()?;
+    guard_task_checkout()?;
     guard_promote_hop()?;
     let root = crate::machine_install::root()?;
     let state = crate::machine_install::read_state(&root)?;
@@ -3237,7 +3238,7 @@ pub fn promote(
 /// recognizes the current store exactly. The exclusive lock keeps artifact and
 /// store selection serialized through the symlink commit.
 pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
-    guard_task_origin()?;
+    guard_task_checkout()?;
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
     match crate::machine_install::read_state(&crate::machine_install::root()?)? {

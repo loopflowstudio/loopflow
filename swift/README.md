@@ -129,7 +129,7 @@ dim slightly; nothing draws a focus border.
 
 **Monitor** opens beside retained Sessions and shells in the same multiplexer.
 Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
-selected Task's active Runs and updates automatically. **Refresh** requests an
+selected Task's active Sessions and updates automatically. **Refresh** requests an
 observation from the same reader. Recovery and read failures retain the last
 observation with a visible reason; **Retry** restarts a failed reader. Incomplete
 ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
@@ -359,9 +359,11 @@ xcodebuild -quiet \
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
-Task Monitor's shared reader is `RegistryQuery.watchActiveRuns()`, backed by
-`lf runs --active --watch --json`. Its typed Work references and verified live processes
-are separate from Session rows and historical Run outcomes. Confirm emptiness
+Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
+`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+Verified Exec/process and native-client receipts establish activity independently
+of command outcomes. Input replacement keeps the same row; unresolved engine
+ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness
 only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
 and incomplete evidence visible. Podium starts one reader on first demand and
 retains it across pane and repository navigation until window teardown. Wake

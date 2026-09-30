@@ -50,18 +50,18 @@ struct SessionChromeProofTests {
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
-                                    "step": "realign", "occurrence": "current", "node": "5", "iterations": [[2, 1]]]
+                                    "step": "realign", "occurrence": "current", "node": 5, "iterations": [[2, 1]]]
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
             case ("roadmap", _): return roadmap
             case ("wave", "list"): return "[]"
             case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return sessions
+            case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
         }
@@ -92,7 +92,21 @@ struct SessionChromeProofTests {
                 .labelView().text().string()
             #expect(label.contains("feature / realign"))
         }
-        #expect(throws: Never.self, "Task worktree location") {
+        #expect(throws: Never.self, "Session worktree location") {
+            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+                .menu().labelView().find(text: "loopflow")
+            #expect(try location.string() == "loopflow")
+        }
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+        }
+        #expect(throws: Never.self, "complete") {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
+        }
+
+        model.navigation.selectedSessionId = nil
+        try await settle(window)
+        #expect(throws: Never.self, "Task-only worktree location") {
             let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
                 .text().string()
             #expect(location == "loopflow")
@@ -100,9 +114,8 @@ struct SessionChromeProofTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
         }
-        #expect(throws: Never.self, "complete") {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
-        }
+        model.navigation.selectedSessionId = "release"
+        try await settle(window)
 
         // Two panes: a strip each, no trio at rest, none on the unfocused pane's hover.
         for pane in panes {
@@ -163,7 +176,7 @@ struct SessionChromeProofTests {
             switch args.first {
             case "roadmap": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }

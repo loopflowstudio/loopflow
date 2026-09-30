@@ -1,46 +1,39 @@
 # Loopflow
 
-A software instrument. It doesn't make the software for you. You make the
-software through it.
-
 ```bash
 curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh
 lf init
+lf debug -c
 ```
 
-AI can build a lot of software fast. It can also spend all day going in
-circles, and it's hard to tell which is happening. Loopflow keeps track, so
-you can see what got done and what still needs you.
+A software instrument. Give an agent a task, keep its conversation, and resume
+captured work when a command stops. Loopflow keeps the command's result, the
+agent's history and the Flow's progress separate, so each answers one question.
 
 Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 or [Codex](https://github.com/openai/codex), which have their own cost.
 
 ## The pieces
 
-Loopflow is built from a few pieces. Each one is small, and most are plain
-text files you can open and change.
-
-| Piece | What it is | Where it lives |
-|---|---|---|
-| **Skill** | One step: instructions for the AI, written as a text file | `.lf/skills/*.md` |
-| **Flow** | Steps in order. One that can go back and try again is a loopflow | `.lf/flows/*.yaml` |
-| **Task** | One piece of work with a finish line, done in its own copy of your project | Linear, Git, and GitHub |
-| **Wave** | A goal Loopflow keeps working on, with its own memory and schedule | `wave/<name>/` |
-| **Project** | The current plan for a Wave, with results you can check | Linear |
-| **Run** | A record of one time the AI coding tool was started | `$LF_HOME/runs/` on the computer that ran it |
-
-Each piece keeps one kind of fact, so you always know where to look. New
-terms are in the [Glossary](glossary.md).
-
-The Mac app shows all of this in one window: your goals, their tasks, and
-the conversations that need you. It reads the same information the commands
-below print, so anything you see in the app you can also ask for in a
-terminal.
-
 ```bash
-lf --wave engbot wave/operate "ship the parser fix first"
-lf wave status engbot                                  # where it stands
+lf -b implement
+lf session list --interactive false --json
+lf session connect SESSION
+lf task run INF-123
 ```
+
+A Skill supplies instructions; a Flow composes skills, mechanical operations and
+reviews. A Task owns one change, its checkout and PRs. A Wave keeps the objective
+and memory; its current Linear Project holds the plan and default Flow.
+
+Exec records an actual lf command process. AgentSession keeps the conversation,
+including headless work. FlowSession preserves a captured Flow and consumes its
+exact boundary results. A conversation can outlive its command, and a completed
+command can leave a Flow waiting for review.
+
+Read the [contract and cutover status](architecture-reference.md#cutover-status)
+for the accepted model and remaining implementation, or the [Glossary](glossary.md)
+for a term. The Mac app and CLI read the same owners.
 
 ## Read by area
 
@@ -54,7 +47,7 @@ lf wave status engbot                                  # where it stands
 | Look up a word | [Glossary](glossary.md) |
 | Look up a command | [`lf` reference](lf.md) |
 
-## Shape one run
+## Shape one conversation
 
 A skill is a markdown file that tells the coding agent what to do:
 
@@ -117,7 +110,7 @@ Do not take the first N commits and call that the history.
 scratch/                  # PR scratchpad (cleared on merge)
 wave/                     # Wave goals and memory (persists)
 ~/.lf/                    # Global config, skills, and the local store
-  runs/                   # Home-local append-only launch evidence
+  loopflow.db             # Local identity and execution history
 ```
 
 `scratch/` dies with the PR; `wave/` lives forever. Design docs go in
@@ -129,7 +122,7 @@ Every documentation URL serves HTML. The reviewed Markdown source remains
 available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is
-[/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched Run you already
+[/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched conversation you already
 carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Next

@@ -182,6 +182,16 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
+    if matches!(command,
+        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.sessions
+    ) || matches!(
+        command,
+        Commands::Flow {
+            cmd: FlowCommand::Show { sessions: true, .. }
+        }
+    ) {
+        return None;
+    }
     if !matches!(
         command,
         Commands::Help { .. }
@@ -217,11 +227,20 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 definition_help(&command_tree(), &repo, name, Some(DefinitionKind::Skill))?
             ),
             Commands::Flow {
-                cmd: FlowCommand::List { json },
-            } => crate::lf::commands::flow::list(&repo, *json)?,
+                cmd: FlowCommand::List { json, inventory },
+            } => {
+                anyhow::ensure!(
+                    inventory.is_empty(),
+                    "saved FlowSession filters require --sessions"
+                );
+                crate::lf::commands::flow::list(&repo, *json)?;
+            }
             Commands::Flow {
-                cmd: FlowCommand::Show { name },
-            } => crate::lf::commands::flow::show(name, &repo)?,
+                cmd: FlowCommand::Show { name, json, .. },
+            } => {
+                anyhow::ensure!(!json, "--json requires --sessions for flow show");
+                crate::lf::commands::flow::show(name, &repo)?;
+            }
             Commands::Flow {
                 cmd: FlowCommand::Validate { name },
             } => crate::lf::commands::flow::validate(name, &repo)?,

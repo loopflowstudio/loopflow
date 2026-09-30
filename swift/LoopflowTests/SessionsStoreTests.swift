@@ -51,11 +51,11 @@ struct SessionsStoreTests {
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args == ["session", "open", "native", "--json", "--replace"])
-                return session(id: "native", state: "closed", kind: "interactive")
+                return session(id: "native", state: "closed", kind: "conversation")
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "interactive"),
+            session(id: "native", state: "active", kind: "conversation"),
         ]))
 
         await store.select("native")
@@ -72,11 +72,11 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
-                session(id: "native", state: "closed", kind: "interactive", replacing: replacing)
+                session(id: "native", state: "closed", kind: "conversation", replacing: replacing)
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: replacing ? "active" : "closed", kind: "interactive"),
+            session(id: "native", state: replacing ? "active" : "closed", kind: "conversation"),
         ]))
 
         if replacing {
@@ -87,7 +87,7 @@ struct SessionsStoreTests {
         let prepared = try #require(item(store, "native")?.surface)
         #expect(prepared.openArgv.contains("--replace") == replacing)
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "interactive"),
+            session(id: "native", state: "active", kind: "conversation"),
         ]))
 
         #expect(item(store, "native")?.state == .prepared)
@@ -99,11 +99,11 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
-                session(id: "native", state: "active", kind: "interactive")
+                session(id: "native", state: "active", kind: "conversation")
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "interactive"),
+            session(id: "native", state: "active", kind: "conversation"),
         ]))
         await store.moveHere("native")
         store.recordPaneLive("native")
@@ -129,19 +129,19 @@ struct SessionsStoreTests {
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "closed", kind: "interactive"),
+            session(id: "native", state: "closed", kind: "conversation"),
         ]))
 
         await store.select("native")
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
-            session(id: "native", state: "closed", kind: "interactive"),
+            session(id: "native", state: "closed", kind: "conversation"),
         ]))
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "interactive"),
+            session(id: "native", state: "active", kind: "conversation"),
         ]))
         #expect(item(store, "native")?.state == .elsewhere)
     }
@@ -157,12 +157,12 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "native"] {
                     return "Session native completed"
                 }
-                #expect(args == ["session", "list", "--json"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "interactive"),
+            session(id: "native", state: "active", kind: "conversation"),
         ]))
 
         let completed = await store.complete("native")
@@ -185,7 +185,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "ask"] {
                     return "Ask session completed: Ready for review"
                 }
-                #expect(args == ["session", "list", "--json"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -223,7 +223,7 @@ struct SessionsStoreTests {
                 if args == ["session", "complete", "review"] {
                     return "Review feedback returned"
                 }
-                #expect(args == ["session", "list", "--json"])
+                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
                 return "[]"
             }
         )
@@ -280,7 +280,7 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
 private func session(id: String, state: String, kind: String = "flow", replacing: Bool = false) -> String {
     """
     {
-      "id": "\(id)", "run_id": "\(id)",
+      "id": "\(id)", "run_id": "\(id)", "interactive": true,
       "kind": "\(kind)",
       "work": { "kind": "task", "id": "task-\(id)" },
       "title": "Design the control surface",

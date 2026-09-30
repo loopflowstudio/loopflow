@@ -9,8 +9,6 @@ use serde_yaml_ng::Value;
 use crate::engine::error::LoadError;
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
 
-mod saved_skill;
-
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,18 +174,17 @@ pub struct GoalRenderContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(from = "saved_skill::SavedSkill", into = "saved_skill::SavedSkill")]
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
     pub human: bool,
     pub repeat: Option<RepeatPolicy>,
-    pub flow_parents: Vec<String>,
+    pub sources: Vec<String>,
 }
 
 impl ConcreteSkill {
     pub fn display_path(&self) -> String {
-        let mut parts = self.flow_parents.clone();
+        let mut parts = self.sources.clone();
         parts.push(self.skill.name.clone());
         parts.join(" ")
     }
@@ -197,7 +194,7 @@ impl ConcreteSkill {
 pub struct ConcreteXor {
     pub router: Skill,
     pub paths: HashMap<String, ConcretePath>,
-    pub flow_parents: Vec<String>,
+    pub sources: Vec<String>,
 }
 
 /// A captured branch body; unresolved authored paths cannot decode as this type.
@@ -211,14 +208,12 @@ pub struct ConcretePath {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteCommand {
     pub item: Command,
-    pub flow_parents: Vec<String>,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConcreteStep {
     Skill(ConcreteSkill),
-    // Persisted execution plans retain their existing operation tag.
-    #[serde(rename = "Op")]
     Command(ConcreteCommand),
     Xor(ConcreteXor),
 }
@@ -317,14 +312,14 @@ pub fn load_authored_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
 #[derive(Debug)]
 pub(super) struct DefinitionLoader<'a> {
     repo: &'a Path,
-    chain: Vec<String>,
+    sources: Vec<String>,
 }
 
 impl<'a> DefinitionLoader<'a> {
     pub(super) fn new(repo: &'a Path) -> Self {
         Self {
             repo,
-            chain: Vec::new(),
+            sources: Vec::new(),
         }
     }
 
@@ -372,10 +367,10 @@ impl<'a> DefinitionLoader<'a> {
         };
         let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
-        validate_flow_nesting(&self.chain, &resolved_name)?;
-        self.chain.push(resolved_name.clone());
+        validate_flow_nesting(&self.sources, &resolved_name)?;
+        self.sources.push(resolved_name.clone());
         let items = parse_flow_items(&value, self);
-        self.chain.pop();
+        self.sources.pop();
         // The outer definition exists. A missing child must not trigger
         // top-level fallback to a same-named local or cached skill.
         let items =
@@ -387,8 +382,8 @@ impl<'a> DefinitionLoader<'a> {
     }
 }
 
-pub fn expand_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
-    let items = expand_with_chain(flow, repo, &[])?;
+pub fn compile_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
+    let items = compile_with_sources(flow, repo, &[])?;
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
     validate_repeats(&items)?;
@@ -469,7 +464,7 @@ pub fn human_occurrence_ids(flow: &Flow, repo: &Path) -> Result<Vec<String>, Loa
         human
     }
 
-    Ok(collect(&expand_flow(flow, repo)?))
+    Ok(collect(&compile_flow(flow, repo)?))
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
@@ -957,17 +952,14 @@ pub fn build_xor_routing_suffix(xor_def: &ConcreteXor) -> String {
         let path = &xor_def.paths[*key];
         suffix.push_str(&format!("- **{key}**: {}\n", path.description));
     }
-    suffix.push_str(
-        "\nRecord your choice with `lf flow route PATH`, replacing PATH with one listed key.\n\
-         Explain your reasoning briefly. Your final prose alone does not select a path.\n",
-    );
+    suffix.push_str("\nReturn the declared JSON object with `path` set to one listed key.\n");
     suffix
 }
 
-fn expand_branch_def(
+fn compile_branch(
     branch_def: &XorDef,
     repo: &Path,
-    chain: &[String],
+    sources: &[String],
 ) -> Result<ConcreteXor, LoadError> {
     let router = match &branch_def.router {
         Some(name) => load_skill(name, repo)?,
@@ -978,7 +970,7 @@ fn expand_branch_def(
             action_style: None,
             content: Some(
                 "Read the preceding findings and choose the right path forward. \
-                 Record the choice with `lf flow route PATH` using a listed path key."
+                 Return the declared JSON object with `path` set to a listed path key."
                     .to_string(),
             ),
         },
@@ -991,7 +983,7 @@ fn expand_branch_def(
                 name.clone(),
                 ConcretePath {
                     description: path.description.clone(),
-                    steps: expand_steps(&path.steps, repo, chain)?,
+                    steps: compile_steps(&path.steps, repo, sources)?,
                 },
             ))
         })
@@ -999,7 +991,7 @@ fn expand_branch_def(
     Ok(ConcreteXor {
         router,
         paths,
-        flow_parents: chain.to_vec(),
+        sources: sources.to_vec(),
     })
 }
 
@@ -1066,14 +1058,14 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Result<Skill, LoadErro
     Ok(resolved)
 }
 
-fn validate_flow_nesting(chain: &[String], name: &str) -> Result<(), LoadError> {
-    if chain.iter().any(|parent| parent == name) {
+fn validate_flow_nesting(sources: &[String], name: &str) -> Result<(), LoadError> {
+    if sources.iter().any(|parent| parent == name) {
         return Err(LoadError::InvalidFlow(format!(
             "flow cycle detected: {} -> {name}",
-            chain.join(" ")
+            sources.join(" ")
         )));
     }
-    if chain.len() > 5 {
+    if sources.len() > 5 {
         return Err(LoadError::InvalidFlow(
             "flow nesting exceeds max depth 5".into(),
         ));
@@ -1081,21 +1073,21 @@ fn validate_flow_nesting(chain: &[String], name: &str) -> Result<(), LoadError> 
     Ok(())
 }
 
-fn expand_with_chain(
+fn compile_with_sources(
     flow: &Flow,
     repo: &Path,
-    parents: &[String],
+    sources: &[String],
 ) -> Result<Vec<ConcreteStep>, LoadError> {
-    validate_flow_nesting(parents, &flow.name)?;
-    let mut chain = parents.to_vec();
-    chain.push(flow.name.clone());
-    expand_steps(&flow.items, repo, &chain)
+    validate_flow_nesting(sources, &flow.name)?;
+    let mut sources = sources.to_vec();
+    sources.push(flow.name.clone());
+    compile_steps(&flow.items, repo, &sources)
 }
 
-fn expand_steps(
+fn compile_steps(
     steps: &[Step],
     repo: &Path,
-    chain: &[String],
+    sources: &[String],
 ) -> Result<Vec<ConcreteStep>, LoadError> {
     let mut items = Vec::new();
     for step in steps {
@@ -1109,20 +1101,20 @@ fn expand_steps(
         match &step.target {
             Target::Command(command) => items.push(ConcreteStep::Command(ConcreteCommand {
                 item: command.clone(),
-                flow_parents: chain.to_vec(),
+                sources: sources.to_vec(),
             })),
             Target::Flow(flow) => {
-                items.extend(expand_with_chain(flow, repo, chain)?);
+                items.extend(compile_with_sources(flow, repo, sources)?);
             }
             Target::Skill(skill) => items.push(ConcreteStep::Skill(ConcreteSkill {
                 skill: resolve_skill_reference(skill, repo)?,
                 id: step.id.clone(),
                 human: step.human,
                 repeat: step.repeat.clone(),
-                flow_parents: chain.to_vec(),
+                sources: sources.to_vec(),
             })),
             Target::Xor(branch) => {
-                items.push(ConcreteStep::Xor(expand_branch_def(branch, repo, chain)?))
+                items.push(ConcreteStep::Xor(compile_branch(branch, repo, sources)?))
             }
         }
     }
@@ -1142,10 +1134,9 @@ mod tests {
     use serde_yaml_ng::Value;
 
     use super::{
-        build_xor_routing_suffix, expand_branch_def, expand_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcretePath,
-        ConcreteStep, ConcreteXor, DefinitionLoader, Flow, Goal, GoalRenderContext, Skill, Step,
-        XorDef, XorPath,
+        build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
+        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcreteStep,
+        DefinitionLoader, Flow, Goal, GoalRenderContext, Skill, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1255,7 +1246,7 @@ mod tests {
                 "- step:\n    id: implement\n    name: implement\n- step:\n    id: review\n    name: loop-decide\n    repeat:\n      from: {from}\n",
             )).unwrap();
             let result = load_flow("repeat-proof", tmp.path())
-                .and_then(|flow| expand_flow(&flow, tmp.path()));
+                .and_then(|flow| compile_flow(&flow, tmp.path()));
             assert!(result.unwrap_err().to_string().contains("preceding node"));
         }
     }
@@ -1263,7 +1254,7 @@ mod tests {
     #[test]
     fn human_reviews_return_feedback_to_explicit_deciding_occurrences() {
         let tmp = TempDir::new().unwrap();
-        let steps = expand_flow(&load_flow("feature", tmp.path()).unwrap(), tmp.path()).unwrap();
+        let steps = compile_flow(&load_flow("feature", tmp.path()).unwrap(), tmp.path()).unwrap();
         let edges: Vec<_> = steps
             .iter()
             .filter_map(|step| match step {
@@ -1304,7 +1295,7 @@ mod tests {
         .unwrap();
 
         let flow = load_flow("fake-implementation", tmp.path()).expect("load flow");
-        let steps = expand_flow(&flow, tmp.path()).expect("expand flow");
+        let steps = compile_flow(&flow, tmp.path()).expect("compile flow");
 
         assert!(matches!(
             &steps[0],
@@ -1325,17 +1316,17 @@ mod tests {
         fs::write(flows.join("outer.yaml"), "- flow: inner\n").unwrap();
 
         let flow = load_flow("outer", tmp.path()).unwrap();
-        let items = expand_flow(&flow, tmp.path()).unwrap();
+        let items = compile_flow(&flow, tmp.path()).unwrap();
         let ConcreteStep::Skill(step) = &items[1] else {
-            panic!("nested review node must expand to a skill")
+            panic!("nested review node must compile to a skill")
         };
         assert_eq!(step.id.as_deref(), Some("review_kickoff"));
         assert!(step.human);
-        assert_eq!(step.flow_parents, vec!["outer", "inner"]);
+        assert_eq!(step.sources, vec!["outer", "inner"]);
     }
 
     #[test]
-    fn expanded_occurrence_ids_are_unique_and_skill_only() {
+    fn compiled_occurrence_ids_are_unique_and_skill_only() {
         let tmp = TempDir::new().unwrap();
         let flows = tmp.path().join(".lf/flows");
         fs::create_dir_all(&flows).unwrap();
@@ -1350,7 +1341,7 @@ mod tests {
         )
         .unwrap();
         let duplicate = load_flow("duplicate", tmp.path()).unwrap();
-        assert!(expand_flow(&duplicate, tmp.path())
+        assert!(compile_flow(&duplicate, tmp.path())
             .unwrap_err()
             .to_string()
             .contains("not unique after expansion"));
@@ -1601,7 +1592,7 @@ Design the feature.
     #[test]
     fn incident_repairs_investigates_and_plans_without_expanding_delivery() {
         let tmp = TempDir::new().unwrap();
-        let steps = expand_flow(&load_flow("incident", tmp.path()).unwrap(), tmp.path()).unwrap();
+        let steps = compile_flow(&load_flow("incident", tmp.path()).unwrap(), tmp.path()).unwrap();
         let names: Vec<_> = steps
             .iter()
             .map(|step| match step {
@@ -1616,14 +1607,14 @@ Design the feature.
     fn vsm_operation_captures_five_functions_without_a_loop() {
         let tmp = TempDir::new().unwrap();
         let steps =
-            expand_flow(&load_flow("vsm-operate", tmp.path()).unwrap(), tmp.path()).unwrap();
+            compile_flow(&load_flow("vsm-operate", tmp.path()).unwrap(), tmp.path()).unwrap();
         let names: Vec<_> = steps
             .iter()
             .map(|step| {
                 let ConcreteStep::Skill(step) = step else {
                     panic!("VSM should contain only its five skills");
                 };
-                assert_eq!(step.flow_parents, ["vsm-operate"]);
+                assert_eq!(step.sources, ["vsm-operate"]);
                 assert!(!step.human);
                 assert!(step.repeat.is_none());
                 let content = step.skill.content.as_ref().unwrap();
@@ -1636,7 +1627,7 @@ Design the feature.
     }
 
     #[test]
-    fn load_flow_expands_all_builtin_flows() {
+    fn load_flow_compiles_all_builtin_flows() {
         let tmp = TempDir::new().unwrap();
         for name in crate::engine::builtins::builtin_flow_names() {
             let flow = load_flow(name, tmp.path());
@@ -1647,14 +1638,14 @@ Design the feature.
                 flow.err()
             );
             let flow = flow.unwrap();
-            let expanded = expand_flow(&flow, tmp.path());
+            let compiled = compile_flow(&flow, tmp.path());
             assert!(
-                expanded.is_ok(),
-                "builtin flow '{}' should expand: {:?}",
+                compiled.is_ok(),
+                "builtin flow '{}' should compile: {:?}",
                 name,
-                expanded.err()
+                compiled.err()
             );
-            assert_captured(&expanded.unwrap());
+            assert_captured(&compiled.unwrap());
         }
 
         fn assert_captured(items: &[ConcreteStep]) {
@@ -1937,10 +1928,10 @@ Design the feature.
         fs::write(tmp.path().join(".lf/flows/outer.yaml"),
             "- xor:\n    paths:\n      proceed:\n        flow: inner\n        description: Review and deliver\n").unwrap();
         let mut outer = load_flow("outer", tmp.path()).unwrap();
-        let named = expand_flow(&outer, tmp.path()).unwrap();
+        let named = compile_flow(&outer, tmp.path()).unwrap();
         let inner = load_flow("inner", tmp.path()).unwrap();
         fs::remove_dir_all(tmp.path().join(".lf/flows")).unwrap();
-        assert_eq!(expand_flow(&outer, tmp.path()).unwrap(), named);
+        assert_eq!(compile_flow(&outer, tmp.path()).unwrap(), named);
         let Step {
             target: Target::Xor(branch),
             ..
@@ -1949,7 +1940,7 @@ Design the feature.
             panic!("YAML xor must compose a Target")
         };
         branch.paths.get_mut("proceed").unwrap().steps = vec![Step::new(Target::Flow(inner))];
-        assert_eq!(expand_flow(&outer, tmp.path()).unwrap(), named);
+        assert_eq!(compile_flow(&outer, tmp.path()).unwrap(), named);
         assert_eq!(
             human_occurrence_ids(&outer, tmp.path()).unwrap(),
             ["review"]
@@ -1961,7 +1952,7 @@ Design the feature.
             panic!("review")
         };
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
-        assert_eq!(review.flow_parents, ["outer", "inner"]);
+        assert_eq!(review.sources, ["outer", "inner"]);
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
             panic!("command")
         };
@@ -1969,7 +1960,7 @@ Design the feature.
     }
 
     #[test]
-    fn expand_xor_keeps_concrete_xor() {
+    fn compile_xor_keeps_concrete_xor() {
         let tmp = TempDir::new().unwrap();
         let flow = Flow {
             name: "test-or".to_string(),
@@ -1994,7 +1985,7 @@ Design the feature.
             ],
         };
 
-        let items = expand_flow(&flow, tmp.path()).unwrap();
+        let items = compile_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2);
         assert!(matches!(&items[0], ConcreteStep::Skill(_)));
         assert!(matches!(&items[1], ConcreteStep::Xor(_)));
@@ -2008,7 +1999,7 @@ Design the feature.
     #[test]
     fn build_xor_routing_suffix_sorts_paths() {
         let tmp = TempDir::new().unwrap();
-        let branch = expand_branch_def(
+        let branch = compile_branch(
             &XorDef {
                 router: None,
                 paths: HashMap::from([
@@ -2034,12 +2025,12 @@ Design the feature.
         .unwrap();
         let suffix = build_xor_routing_suffix(&branch);
         assert!(suffix.find("**alpha**").unwrap() < suffix.find("**zeta**").unwrap());
-        assert!(suffix.contains("lf flow route PATH"));
+        assert!(suffix.contains("declared JSON object"));
         assert!(branch
             .router
             .content
             .unwrap()
-            .contains("lf flow route PATH"));
+            .contains("declared JSON object"));
         assert!(branch.paths.values().all(|path| path.steps.is_empty()));
     }
 
@@ -2099,7 +2090,7 @@ Design the feature.
         )
         .unwrap();
         let flow = load_flow("pin-root", tmp.path()).unwrap();
-        let pinned = expand_flow(&flow, tmp.path()).unwrap();
+        let pinned = compile_flow(&flow, tmp.path()).unwrap();
         assert_eq!(
             human_occurrence_ids(&flow, tmp.path()).unwrap(),
             ["nested-human"]
@@ -2108,7 +2099,7 @@ Design the feature.
 
         fs::write(skills.join("pin-router.md"), "Changed router").unwrap();
         fs::write(skills.join("pin-other.md"), "Changed other").unwrap();
-        let changed = expand_flow(&flow, tmp.path()).unwrap();
+        let changed = compile_flow(&flow, tmp.path()).unwrap();
         assert_ne!(changed, pinned);
         fs::remove_dir_all(tmp.path().join(".lf")).unwrap();
         let restored: Vec<ConcreteStep> = serde_json::from_str(&saved).unwrap();
@@ -2132,7 +2123,7 @@ Design the feature.
         };
         assert_eq!(other.skill.content.as_deref(), Some("Original other"));
         assert_eq!(other.skill.agent.as_deref(), Some("claude"));
-        assert_eq!(other.flow_parents, ["pin-root", "pin-inner"]);
+        assert_eq!(other.sources, ["pin-root", "pin-inner"]);
         assert!(build_xor_routing_suffix(inner).contains("Nested description"));
     }
 
@@ -2153,13 +2144,13 @@ Design the feature.
         }
         fs::write(flows.join("deep-7.yaml"), "- implement\n").unwrap();
         let deepest = load_flow("deep-2", tmp.path()).unwrap();
-        expand_flow(&deepest, tmp.path()).unwrap();
+        compile_flow(&deepest, tmp.path()).unwrap();
         for (name, expected) in [("deep-1", "max depth"), ("deep-2", "cycle detected")] {
             let composed = Flow {
                 name: name.into(),
                 items: vec![Step::new(Target::Flow(deepest.clone()))],
             };
-            let error = expand_flow(&composed, tmp.path()).unwrap_err().to_string();
+            let error = compile_flow(&composed, tmp.path()).unwrap_err().to_string();
             assert!(error.contains(expected), "{error}");
         }
         let error = load_flow("deep-0", tmp.path()).unwrap_err().to_string();
@@ -2179,7 +2170,7 @@ Design the feature.
         ] {
             fs::write(flows.join("pin-invalid.yaml"), body).unwrap();
             let error = load_flow("pin-validation", tmp.path())
-                .and_then(|flow| expand_flow(&flow, tmp.path())).unwrap_err().to_string();
+                .and_then(|flow| compile_flow(&flow, tmp.path())).unwrap_err().to_string();
             assert!(error.contains(expected), "{error}");
         }
     }
@@ -2195,7 +2186,7 @@ Design the feature.
             let value: Value = serde_yaml_ng::from_str(&format!("- xor:\n    paths:\n      empty:\n        description: Empty\n      missing:\n        description: Missing\n        {target}\n")).unwrap();
             let result = super::parse_flow_items(&value, &mut DefinitionLoader::new(tmp.path()))
                 .and_then(|items| {
-                    expand_flow(
+                    compile_flow(
                         &Flow {
                             name: "pin-missing".into(),
                             items,
@@ -2208,35 +2199,18 @@ Design the feature.
     }
 
     #[test]
-    fn xor_legacy_unresolved_records_fail_without_loading_sources() {
-        for router in [serde_json::Value::Null, serde_json::json!("old-router")] {
-            let old = serde_json::json!({
-                "router": router,
-                "paths": {"branch": {"flow": "mutable-flow", "skill": null, "description": "Old"}},
-                "flow_parents": ["old-flow"]
-            });
-            assert!(serde_json::from_value::<ConcreteXor>(old).is_err());
-        }
-        let unresolved = serde_json::json!({"flow": "mutable-flow", "skill": null, "steps": [], "description": "Old"});
-        let error = serde_json::from_value::<ConcretePath>(unresolved)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("unknown field"), "{error}");
-    }
-
-    #[test]
-    fn code_flow_parses_and_expands() {
+    fn code_flow_parses_and_compiles() {
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("code", tmp.path()).unwrap();
-        let items = expand_flow(&flow, tmp.path()).unwrap();
+        let items = compile_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2); // implement, compress
     }
 
     #[test]
-    fn deploy_flow_parses_and_expands() {
+    fn deploy_flow_parses_and_compiles() {
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("deploy", tmp.path()).unwrap();
-        let items = expand_flow(&flow, tmp.path()).unwrap();
+        let items = compile_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 2); // gate, cmd: pr land
     }
 }

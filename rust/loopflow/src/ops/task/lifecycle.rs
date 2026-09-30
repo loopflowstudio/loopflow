@@ -2,7 +2,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::durable::{WorkRef, WorkStatus};
+use crate::durable::{FlowSession, WorkRef, WorkStatus};
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
@@ -18,30 +18,23 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
-    if let Some(position) = store.flow_position(&task.id).await.map_err(task_error)? {
-        if let Some(claim) = position.claim {
-            if crate::journal::task_worker_owner_evidence(&claim.owner)
-                != crate::journal::ProcessIdentityEvidence::Dead
-            {
-                eprintln!(
-                    "Task {} is complete; checkout cleanup waits for its worker to settle.",
-                    task.plan.identifier
-                );
-                return Ok(());
-            }
-            if claim.worker_run_id.is_some() {
-                store
-                    .finish_task_flow(task, &claim, None)
-                    .await
-                    .map_err(task_error)?;
-            } else {
-                store
-                    .release_task_worker(&task.id, &claim)
-                    .await
-                    .map_err(task_error)?;
-            }
+    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
+        if execution_unsettled(store, &position)? {
+            eprintln!(
+                "Task {} is complete; checkout cleanup waits for its execution to settle.",
+                task.plan.identifier
+            );
+            return Ok(());
         }
-        store.complete_task(task, None).await.map_err(task_error)?;
+        store
+            .end_flow(
+                position.id(),
+                position.version,
+                position.claim.as_ref(),
+                "Task completed",
+            )
+            .await
+            .map_err(task_error)?;
     }
     let result = async {
         let wave = owning_wave(store, task).await?;
@@ -119,18 +112,40 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     Ok(Some((store, task)))
 }
 
+fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
+    let step = store
+        .sqlite
+        .pending_flow_step_exec(flow.id())
+        .map_err(task_error)?;
+    let provider_pending = store
+        .sqlite
+        .pending_flow_conversation(flow.id())
+        .map_err(task_error)?
+        .is_some();
+    Ok(provider_pending
+        || step.as_ref().is_some_and(|exec| {
+            crate::journal::exec_process_evidence(&store.sqlite, exec)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        })
+        || flow.claim.as_ref().is_some_and(|claim| {
+            crate::journal::task_worker_owner_evidence(&claim.owner)
+                != crate::journal::ProcessIdentityEvidence::Dead
+        }))
+}
+
 async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
-    if let Some(position) = store.flow_position(&task.id).await.map_err(task_error)? {
-        if let Some(claim) = position.claim {
+    if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
+        if execution_unsettled(store, &position)? {
+            return Err(task_error(format!("{} has live or unresolved execution; interrupt it and wait for exit before abandoning", task.plan.identifier)));
+        }
+        if let Some(claim) = &position.claim {
             if !settle_dead {
                 return Err(task_error("worker claim requires explicit settlement"));
             }
-            match crate::journal::task_worker_owner_evidence(&claim.owner) {
-                crate::journal::ProcessIdentityEvidence::Dead => {
-                    store.release_task_worker(&task.id, &claim).await.map_err(task_error)?;
-                }
-                _ => return Err(task_error(format!("{} has live or unresolved execution; interrupt it and wait for exit before abandoning", task.plan.identifier))),
-            }
+            store
+                .release_flow(position.id(), position.version, Some(claim))
+                .await
+                .map_err(task_error)?;
         }
     }
     Ok(())

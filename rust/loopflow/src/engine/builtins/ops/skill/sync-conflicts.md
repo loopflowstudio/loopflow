@@ -56,7 +56,7 @@ lf sync --continue
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
 - **Ambiguous or high-risk conflicts:** Do not guess. Ask the user in
-  conversation. In a headless Run, record the ambiguity and run
+  conversation. In headless execution, record the ambiguity and run
   `lf ask "<exact request>"`; the session shares the checkout and blocks
   until explicit resolution.
 

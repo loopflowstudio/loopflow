@@ -1,10 +1,9 @@
 //! Display projection of one captured Flow definition.
 //!
 //! Surfaces draw the Flow from this shape instead of parsing YAML or inferring
-//! topology from skill names. Every node carries a structural key (`3`,
-//! `4/fix/1`) that is unique inside the definition and identical to the key a
-//! saved [`ExecutionCursor`] selects, so a repeated skill such as `loop-decide`
-//! keeps one identity per occurrence.
+//! topology from skill names. Node keys are captured preorder IDs, including
+//! every sorted XOR alternative. Authored names and runtime cursor paths remain
+//! separate; repeated skills keep distinct IDs within their captured Flow.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use std::path::Path;
 
-use crate::engine::execution::{node_key, ExecutionCursor, NestedCursor};
+use crate::engine::execution::{ExecutionCursor, NestedCursor};
 use crate::engine::flow::ConcreteStep;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,7 +22,7 @@ pub struct FlowGraph {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowNode {
-    pub key: String,
+    pub key: u32,
     /// Authored occurrence id, when the definition names one.
     pub id: Option<String>,
     /// Literal skill name, operation, or XOR router.
@@ -31,9 +30,9 @@ pub struct FlowNode {
     pub kind: FlowNodeKind,
     pub human: bool,
     /// Key of the earlier node this deciding occurrence can return to.
-    pub returns_to: Option<String>,
-    /// Composed Flows this occurrence was expanded from, outermost first.
-    pub parents: Vec<String>,
+    pub returns_to: Option<u32>,
+    /// Composed Flows this occurrence was compiled from, outermost first.
+    pub sources: Vec<String>,
     /// XOR alternatives, sorted by name; empty for other kinds.
     pub paths: Vec<FlowGraphPath>,
 }
@@ -58,7 +57,7 @@ pub struct FlowGraphPath {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowReturn {
     /// Key of the deciding occurrence that owns the edge.
-    pub decider: String,
+    pub decider: u32,
     pub traversals: u32,
 }
 
@@ -66,25 +65,25 @@ pub struct FlowReturn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
-    /// `None` when the definition cannot be loaded or expanded.
+    /// `None` when the definition cannot be loaded or compiled.
     pub graph: Option<FlowGraph>,
     /// Why the definition is unusable; set exactly when `graph` is `None`.
     pub unavailable: Option<String>,
 }
 
-/// Every Flow available in `repo`, each expanded through the shared loader.
+/// Every Flow available in `repo`, each compiled through the shared loader.
 pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
     crate::engine::available_flow_names(repo)
         .into_iter()
         .map(|name| {
-            let expanded = crate::engine::load_flow(&name, repo)
+            let compiled = crate::engine::load_flow(&name, repo)
                 .map_err(|error| error.to_string())
                 .and_then(|flow| {
-                    crate::engine::expand_flow(&flow, repo)
+                    crate::engine::compile_flow(&flow, repo)
                         .map(|steps| FlowGraph::new(&flow.name, &steps))
                         .map_err(|error| error.to_string())
                 });
-            match expanded {
+            match compiled {
                 Ok(graph) => FlowCatalogEntry {
                     name,
                     graph: Some(graph),
@@ -104,66 +103,82 @@ impl FlowGraph {
     pub fn new(name: impl Into<String>, steps: &[ConcreteStep]) -> Self {
         Self {
             name: name.into(),
-            steps: nodes(steps, ""),
+            steps: nodes(steps, &mut 0),
         }
+    }
+
+    /// Look up a captured node, including nodes inside unselected alternatives.
+    pub(crate) fn node_at(&self, id: u32) -> Option<&FlowNode> {
+        fn find(nodes: &[FlowNode], id: u32) -> Option<&FlowNode> {
+            nodes.iter().find_map(|node| {
+                if node.key == id {
+                    Some(node)
+                } else {
+                    node.paths.iter().find_map(|path| find(&path.steps, id))
+                }
+            })
+        }
+        find(&self.steps, id)
     }
 }
 
-fn nodes(steps: &[ConcreteStep], prefix: &str) -> Vec<FlowNode> {
-    steps
-        .iter()
-        .enumerate()
-        .map(|(index, step)| {
-            let key = node_key(prefix, index);
-            match step {
-                ConcreteStep::Skill(skill) => FlowNode {
-                    returns_to: return_target(steps, index).map(|target| node_key(prefix, target)),
-                    key,
-                    id: skill.id.clone(),
-                    label: skill.skill.name.clone(),
-                    kind: FlowNodeKind::Skill,
-                    human: skill.human,
-                    parents: skill.flow_parents.clone(),
-                    paths: Vec::new(),
-                },
-                ConcreteStep::Command(op) => FlowNode {
+fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
+    let mut result: Vec<FlowNode> = Vec::with_capacity(steps.len());
+    for (index, step) in steps.iter().enumerate() {
+        let key = *next;
+        *next = next
+            .checked_add(1)
+            .expect("captured Flow fits u32 node IDs");
+        let node = match step {
+            ConcreteStep::Skill(skill) => FlowNode {
+                returns_to: return_target(steps, index).map(|target| result[target].key),
+                key,
+                id: skill.id.clone(),
+                label: skill.skill.name.clone(),
+                kind: FlowNodeKind::Skill,
+                human: skill.human,
+                sources: skill.sources.clone(),
+                paths: Vec::new(),
+            },
+            ConcreteStep::Command(op) => FlowNode {
+                key,
+                id: None,
+                label: op.item.display_name(),
+                kind: FlowNodeKind::Op,
+                human: false,
+                returns_to: None,
+                sources: op.sources.clone(),
+                paths: Vec::new(),
+            },
+            ConcreteStep::Xor(branch) => {
+                let mut names: Vec<_> = branch.paths.keys().collect();
+                names.sort();
+                let paths = names
+                    .into_iter()
+                    .map(|name| {
+                        let path = &branch.paths[name];
+                        FlowGraphPath {
+                            name: name.clone(),
+                            description: path.description.clone(),
+                            steps: nodes(&path.steps, next),
+                        }
+                    })
+                    .collect();
+                FlowNode {
                     key,
                     id: None,
-                    label: op.item.display_name(),
-                    kind: FlowNodeKind::Op,
+                    label: branch.router.name.clone(),
+                    kind: FlowNodeKind::Xor,
                     human: false,
                     returns_to: None,
-                    parents: op.flow_parents.clone(),
-                    paths: Vec::new(),
-                },
-                ConcreteStep::Xor(branch) => {
-                    let mut names: Vec<_> = branch.paths.keys().collect();
-                    names.sort();
-                    let paths = names
-                        .into_iter()
-                        .map(|name| {
-                            let path = &branch.paths[name];
-                            FlowGraphPath {
-                                name: name.clone(),
-                                description: path.description.clone(),
-                                steps: nodes(&path.steps, &format!("{key}/{name}/")),
-                            }
-                        })
-                        .collect();
-                    FlowNode {
-                        key,
-                        id: None,
-                        label: branch.router.name.clone(),
-                        kind: FlowNodeKind::Xor,
-                        human: false,
-                        returns_to: None,
-                        parents: branch.flow_parents.clone(),
-                        paths,
-                    }
+                    sources: branch.sources.clone(),
+                    paths,
                 }
             }
-        })
-        .collect()
+        };
+        result.push(node);
+    }
+    result
 }
 
 /// Index of the earlier occurrence the deciding skill at `index` returns to.
@@ -213,23 +228,22 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CursorProjection {
     /// Key of the current occurrence; `None` when the cursor selects no node.
-    pub current: Option<String>,
+    pub current: Option<u32>,
     /// Occurrences already finished in the current pass, including the router of
     /// a selected XOR. Earlier passes' completions are not carried forward.
-    pub completed: Vec<String>,
+    pub completed: Vec<u32>,
     pub returns: Vec<FlowReturn>,
 }
 
-pub fn project_cursor(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> CursorProjection {
+pub fn project_cursor(graph: &FlowGraph, cursor: &ExecutionCursor) -> CursorProjection {
     let mut projection = CursorProjection {
         current: None,
         completed: Vec::new(),
         returns: Vec::new(),
     };
-    walk_cursor(steps, "", Some(cursor), &mut projection);
+    walk_cursor(&graph.steps, Some(cursor), &mut projection);
     collect_returns(
-        steps,
-        "",
+        &graph.steps,
         Some(cursor),
         &cursor.progress.repeats,
         &mut projection.returns,
@@ -238,89 +252,73 @@ pub fn project_cursor(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Curso
 }
 
 fn walk_cursor(
-    steps: &[ConcreteStep],
-    prefix: &str,
+    nodes: &[FlowNode],
     cursor: Option<&ExecutionCursor>,
     projection: &mut CursorProjection,
 ) {
     let Some(cursor) = cursor else { return };
-    let index = cursor.index.min(steps.len());
     projection
         .completed
-        .extend((0..index).map(|index| node_key(prefix, index)));
-    let key = node_key(prefix, cursor.index);
-    match (steps.get(cursor.index), cursor.child.as_deref()) {
-        (Some(ConcreteStep::Xor(branch)), Some(NestedCursor::Xor { selected, cursor })) => {
-            match branch.paths.get(selected) {
-                Some(path) if cursor.index < path.steps.len() => {
-                    projection.completed.push(key.clone());
-                    walk_cursor(
-                        &path.steps,
-                        &format!("{key}/{selected}/"),
-                        Some(cursor),
-                        projection,
-                    );
-                }
-                // A completed or unrecorded child still waits on its XOR.
-                _ => projection.current = Some(key),
+        .extend(nodes.iter().take(cursor.index).map(|node| node.key));
+    let Some(node) = nodes.get(cursor.index) else {
+        return;
+    };
+    if let Some(NestedCursor::Xor {
+        selected,
+        cursor: child,
+    }) = cursor.child.as_deref()
+    {
+        if let Some(path) = node.paths.iter().find(|path| &path.name == selected) {
+            if child.index < path.steps.len() {
+                projection.completed.push(node.key);
+                walk_cursor(&path.steps, Some(child), projection);
+                return;
             }
         }
-        (Some(_), _) => projection.current = Some(key),
-        (None, _) => {}
     }
+    // A completed or unrecorded child still waits on its XOR.
+    projection.current = Some(node.key);
 }
 
 fn collect_returns(
-    steps: &[ConcreteStep],
-    prefix: &str,
+    nodes: &[FlowNode],
     cursor: Option<&ExecutionCursor>,
     repeats: &BTreeMap<String, u32>,
     out: &mut Vec<FlowReturn>,
 ) {
-    for (index, step) in steps.iter().enumerate() {
-        let key = node_key(prefix, index);
-        match step {
-            ConcreteStep::Skill(skill) => {
-                let (Some(id), Some(_target)) = (&skill.id, return_target(steps, index)) else {
-                    continue;
-                };
-                out.push(FlowReturn {
-                    decider: key,
-                    traversals: repeats.get(id).copied().unwrap_or(0),
-                });
-            }
-            ConcreteStep::Xor(branch) => {
-                let mut names: Vec<_> = branch.paths.keys().collect();
-                names.sort();
-                for name in names {
-                    let child = cursor
-                        .filter(|cursor| cursor.index == index)
-                        .and_then(|cursor| match cursor.child.as_deref() {
-                            Some(NestedCursor::Xor { selected, cursor }) if selected == name => {
-                                Some(cursor)
-                            }
-                            _ => None,
-                        });
-                    // The active child keeps its own counts; settled visits are
-                    // folded into the parent under the path's prefix.
-                    let settled_prefix = format!("xor:{index}:{name}/");
-                    let settled: BTreeMap<String, u32> = repeats
-                        .iter()
-                        .filter_map(|(key, count)| {
-                            key.strip_prefix(&settled_prefix)
-                                .map(|key| (key.to_owned(), *count))
-                        })
-                        .collect();
-                    collect_returns(
-                        &branch.paths[name].steps,
-                        &format!("{key}/{name}/"),
-                        child,
-                        child.map_or(&settled, |child| &child.progress.repeats),
-                        out,
-                    );
-                }
-            }
-            ConcreteStep::Command(_) => {}
+    for (index, node) in nodes.iter().enumerate() {
+        if let (Some(id), Some(_)) = (&node.id, node.returns_to) {
+            out.push(FlowReturn {
+                decider: node.key,
+                traversals: repeats.get(id).copied().unwrap_or(0),
+            });
+        }
+        for path in &node.paths {
+            let child =
+                cursor
+                    .filter(|cursor| cursor.index == index)
+                    .and_then(|cursor| match cursor.child.as_deref() {
+                        Some(NestedCursor::Xor { selected, cursor }) if selected == &path.name => {
+                            Some(cursor)
+                        }
+                        _ => None,
+                    });
+            // Runtime repeat storage keeps its own path convention. Only the
+            // public node reference changes; active counts still win.
+            let settled_prefix = format!("xor:{index}:{}/", path.name);
+            let settled: BTreeMap<String, u32> = repeats
+                .iter()
+                .filter_map(|(key, count)| {
+                    key.strip_prefix(&settled_prefix)
+                        .map(|key| (key.to_owned(), *count))
+                })
+                .collect();
+            collect_returns(
+                &path.steps,
+                child,
+                child.map_or(&settled, |child| &child.progress.repeats),
+                out,
+            );
         }
     }
 }
@@ -334,7 +332,7 @@ mod tests {
         ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
     };
     use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowNodeKind};
-    use crate::engine::{expand_flow, load_flow};
+    use crate::engine::{compile_flow, load_flow};
 
     fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
@@ -344,7 +342,7 @@ mod tests {
             repeat: from.map(|from| RepeatPolicy {
                 from: from.to_string(),
             }),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
         })
     }
 
@@ -379,7 +377,7 @@ mod tests {
         ];
         for (name, labels, humans, returns) in cases {
             let flow = load_flow(name, repo.path()).unwrap();
-            let graph = FlowGraph::new(*name, &expand_flow(&flow, repo.path()).unwrap());
+            let graph = FlowGraph::new(*name, &compile_flow(&flow, repo.path()).unwrap());
             assert_eq!(
                 graph
                     .steps
@@ -415,7 +413,7 @@ mod tests {
     fn refresh_integrates_upstream_before_realigning() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("refresh", repo.path()).unwrap();
-        let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
         assert_eq!(labels, ["sync", "realign"]);
         assert_eq!(graph.steps[0].kind, FlowNodeKind::Op);
@@ -426,7 +424,7 @@ mod tests {
     fn feature_draws_both_returns_to_implement_with_forward_delivery() {
         let repo = tempfile::tempdir().unwrap();
         let flow = load_flow("feature", repo.path()).unwrap();
-        let graph = FlowGraph::new(&flow.name, &expand_flow(&flow, repo.path()).unwrap());
+        let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -448,7 +446,7 @@ mod tests {
                 "pr land -c"
             ]
         );
-        let implement = graph.steps[2].key.clone();
+        let implement = graph.steps[2].key;
         let returns: Vec<_> = graph
             .steps
             .iter()
@@ -463,7 +461,7 @@ mod tests {
         );
         assert!(graph.steps[1].human && graph.steps[8].human);
         assert_eq!(graph.steps[14].kind, FlowNodeKind::Op);
-        assert_eq!(graph.steps[5].parents, ["feature", "pursue", "refresh"]);
+        assert_eq!(graph.steps[5].sources, ["feature", "pursue", "refresh"]);
     }
 
     #[test]
@@ -490,16 +488,16 @@ mod tests {
             },
             ..Default::default()
         };
-        let projection = project_cursor(&steps, &cursor);
-        assert_eq!(projection.current.as_deref(), Some("1"));
+        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        assert_eq!(projection.current, Some(1));
         // Only the opening step is complete; earlier passes' decisions are not.
-        assert_eq!(projection.completed, ["0"]);
+        assert_eq!(projection.completed, [0]);
         let counts: Vec<_> = projection
             .returns
             .iter()
-            .map(|edge| (edge.decider.as_str(), edge.traversals))
+            .map(|edge| (edge.decider, edge.traversals))
             .collect();
-        assert_eq!(counts, [("2", 2), ("4", 1)]);
+        assert_eq!(counts, [(2, 2), (4, 1)]);
         assert_eq!(flow_iterations(&steps, &cursor), [vec![2, 1]]);
         // Moving beyond one span does not collapse its independent count.
         let later = ExecutionCursor {
@@ -511,7 +509,7 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_xor_path_is_drawn_honestly_with_nested_keys() {
+    fn a_selected_xor_path_is_drawn_honestly_with_captured_ids() {
         let branch = ConcreteXor {
             router: Skill::named("xor-route"),
             paths: HashMap::from([
@@ -533,7 +531,7 @@ mod tests {
                     },
                 ),
             ]),
-            flow_parents: Vec::new(),
+            sources: Vec::new(),
         };
         let steps = vec![
             skill("kickoff", None, false, None),
@@ -549,8 +547,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["fix", "skip"]
         );
-        assert_eq!(xor.paths[0].steps[1].key, "1/fix/1");
-        assert_eq!(xor.paths[0].steps[1].returns_to.as_deref(), Some("1/fix/0"));
+        assert_eq!(xor.paths[0].steps[1].key, 3);
+        assert_eq!(xor.paths[0].steps[1].returns_to, Some(2));
 
         let cursor = ExecutionCursor {
             index: 1,
@@ -572,11 +570,165 @@ mod tests {
             })),
             ..Default::default()
         };
-        let projection = project_cursor(&steps, &cursor);
-        assert_eq!(projection.current.as_deref(), Some("1/fix/1"));
-        assert_eq!(projection.completed, ["0", "1", "1/fix/0"]);
+        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        assert_eq!(projection.current, Some(3));
+        assert_eq!(projection.completed, [0, 1, 2]);
         // The active child's own count wins over an older settled visit.
         assert_eq!(projection.returns[0].traversals, 2);
         assert_eq!(flow_iterations(&steps, &cursor), [vec![], vec![2]]);
+    }
+
+    #[test]
+    fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
+        use crate::engine::invocation::QueuedInvocation;
+        use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
+
+        fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
+            ConcreteStep::Xor(ConcreteXor {
+                router: Skill::named("route"),
+                paths: paths
+                    .into_iter()
+                    .map(|(name, steps)| {
+                        (
+                            name.into(),
+                            ConcretePath {
+                                description: name.into(),
+                                steps,
+                            },
+                        )
+                    })
+                    .collect(),
+                sources: Vec::new(),
+            })
+        }
+        fn begin() -> ConcreteStep {
+            skill("patch", Some("begin"), false, None)
+        }
+        fn check() -> ConcreteStep {
+            skill("check", Some("check"), false, Some("begin"))
+        }
+        let steps = vec![
+            begin(),
+            branch(vec![
+                ("zeta", vec![begin(), check()]),
+                (
+                    "alpha",
+                    vec![
+                        begin(),
+                        branch(vec![("fix", vec![begin(), check()])]),
+                        check(),
+                    ],
+                ),
+            ]),
+            check(),
+        ];
+        let invocation = QueuedInvocation::new("nested", steps).unwrap();
+        let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/flow_numeric_nested.json"
+        ))
+        .unwrap();
+        let TaskFlowRecord::Pinned(pinned) = fixture.record else {
+            panic!("pinned fixture")
+        };
+        let graph = FlowGraph::new("nested", &invocation.steps);
+        assert_eq!(graph, pinned.graph);
+        // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.
+        // Compare every cursor with the existing storage identity algorithm.
+        fn cursors(steps: &[ConcreteStep]) -> Vec<ExecutionCursor> {
+            let mut result = Vec::new();
+            for (index, step) in steps.iter().enumerate() {
+                result.push(ExecutionCursor {
+                    index,
+                    ..Default::default()
+                });
+                if let ConcreteStep::Xor(branch) = step {
+                    for (selected, path) in &branch.paths {
+                        for child in cursors(&path.steps) {
+                            result.push(ExecutionCursor {
+                                index,
+                                child: Some(Box::new(NestedCursor::Xor {
+                                    selected: selected.clone(),
+                                    cursor: child,
+                                })),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
+            result
+        }
+        let mut ids = Vec::new();
+        for cursor in cursors(&invocation.steps) {
+            let id = invocation.node_id(&cursor).unwrap();
+            ids.push(id);
+            assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
+            assert_eq!(graph.node_at(id).unwrap().key, id);
+        }
+        ids.sort();
+        assert_eq!(ids, (0..10).collect::<Vec<_>>());
+        let cursor = ExecutionCursor {
+            index: 1,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([("check".into(), 3)]),
+                ..Default::default()
+            },
+            child: Some(Box::new(NestedCursor::Xor {
+                selected: "alpha".into(),
+                cursor: ExecutionCursor {
+                    index: 1,
+                    child: Some(Box::new(NestedCursor::Xor {
+                        selected: "fix".into(),
+                        cursor: ExecutionCursor {
+                            index: 1,
+                            progress: crate::engine::transitions::FlowProgress {
+                                repeats: BTreeMap::from([("check".into(), 2)]),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                    })),
+                    ..Default::default()
+                },
+            })),
+            ..Default::default()
+        };
+        let projection = project_cursor(&graph, &cursor);
+        assert_eq!(projection.current, pinned.current);
+        assert_eq!(projection.completed, pinned.completed);
+        assert_eq!(projection.returns, pinned.returns);
+        assert_eq!(
+            flow_iterations(&invocation.steps, &cursor),
+            pinned.iterations
+        );
+        // Settled nested counts retain their runtime keys, including inactive paths.
+        let settled = ExecutionCursor {
+            index: 2,
+            progress: crate::engine::transitions::FlowProgress {
+                repeats: BTreeMap::from([
+                    ("xor:1:alpha/xor:1:fix/check".into(), 7),
+                    ("xor:1:zeta/check".into(), 4),
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let projection = project_cursor(&graph, &settled);
+        assert_eq!(projection.current, Some(9));
+        assert_eq!(projection.completed, [0, 1]);
+        assert_eq!(
+            projection
+                .returns
+                .iter()
+                .map(|r| (r.decider, r.traversals))
+                .collect::<Vec<_>>(),
+            [(5, 7), (6, 0), (8, 4), (9, 0)]
+        );
+        let finished = ExecutionCursor {
+            index: 3,
+            ..Default::default()
+        };
+        assert_eq!(project_cursor(&graph, &finished).current, None);
+        assert_eq!(project_cursor(&graph, &finished).completed, [0, 1, 9]);
     }
 }

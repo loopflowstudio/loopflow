@@ -6,12 +6,12 @@ This is the governing document of the loopflow codebase. Contributors and agents
 
 **Wave planning:**
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
-- Each Wave has exactly one current chapter plan, stored in an internal Project
-- The Project owns Tasks, KRs, and metric targets; the Wave UI presents them
-- Chapters replace that Project and its content; completed history stays readable
-- Started unfinished Tasks move with identity, worktree, PR, and Flow intact
+- Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
+- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
+- FlowSessions may be taskless; a Task selects one managed FlowSession and uses its Project's Flow by default
+- Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
-- User and agent interfaces select Waves and Tasks; Project identity is internal
+- Current navigation is Wave → Task; chapter history retains each Wave's past plan
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
 **Python:**
@@ -150,7 +150,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct RunId(String)` not `type RunId = String`
+- Newtypes for domain concepts: `struct ExecId(String)` not `type ExecId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -191,25 +191,44 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 
 ## Wave Planning
 
-A Wave is a durable responsibility. Its objective, memory, cadence, budget, chat,
-and metric instruments survive chapter boundaries. Its current chapter plan
-contains proof-shaped KRs, metric targets, recommended Flow, and Tasks. Exactly
-one internal Project holds that plan; it is replaced every chapter. Do not
-create sibling current Projects, standing Projects, or a separate Project
-operator. Ordinary UI and CLI navigation is Wave → Task.
+A Wave's objective, memory, cadence, budget and instruments survive planning
+boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
+Project. Linear Project status owns current/planned/completed history; there is
+no Chapter table or plan packet. Project owns Tasks, KRs, targets and its `flow:`
+default, not another objective, memory or operator.
 
-Start a chapter through `lf wave new-chapter --wave <wave> --chapter <id>`.
-The deterministic operation owns previews, classification, transfer, retirement,
-and retry receipts. Started unfinished Tasks retain their identities and
-execution state. Untouched backlog is canceled, never marked successful.
-Completed Tasks remain historical. Missing evidence is unresolved. Skills judge
-outcomes and author new content; they never implement their own rotation.
+Tasks have zero or more attributed FlowSessions and select one managed FlowSession.
+The Project's Flow supplies the default; explicit Flow selection is allowed.
+Taskless execution uses the same captured graph, cursor, return counts and driver.
+Template composition expands the graph. One started Flow is one FlowSession;
+loop passes are node/iteration positions and lenses over its history, not child
+FlowSessions. Retry retains the pass; Iterate advances its return counters.
 
-The Wave objective names who benefits and what improves. KRs prove observable outcomes
-across a stated window; issue lists and implementation receipts belong in Tasks.
-Metric instruments belong to the Wave. Their chapter-specific targets and
-evaluations belong to the Project and remain readable in chapter history.
-Do not add a second objective to the Project or a Project tier to the UI.
+Repository rotation converges on an explicit target through fresh provider facts
+and stable Project identities. Partial status changes remain retryable; unrelated
+competing plans remain unresolved. Preserve active Task identity, worktree, PR
+and execution. Retire only proven untouched backlog; missing evidence is unknown.
+Current navigation stays Wave → Task and Linear retains past Projects.
+
+Exec is one actual lf process, including direct and agent-issued nested commands.
+AgentSession is one durable agent conversation, interactive or headless; identity,
+name, feedback and native history survive driver replacement. FlowSession owns
+captured progression and references exact successful agent completions. Agent
+outcomes and retries belong in Session history; mechanical results belong in
+Flow history. Do not replace Run with another generic attempt object.
+
+Main records have one SQLite owner. Task implies Wave; constructors fill omitted
+ancestors and reject mismatches. Bind assigns an unassigned conversation once,
+including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
+owns that single choice. Actual work
+reservation sets Started once; logging an inspection Exec does not. Every
+denormalization is removed or validated on writes. Causal ancestry grants neither
+process control nor Flow settlement. Current driver and provider generations
+are separate: an unchanged engine survives driver handoff while old clients lose
+write authority. Passive display acquires no claim.
+
+The full contract and current cutover status live in
+[Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
 
 # Development Environment
 

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child::prefixed_uuid_id;
-use crate::durable::HomeId;
 use crate::work::task::{AfterMerge, TaskId};
 
 pub(crate) const SUPERVISOR_STALE_AFTER: time::Duration = time::Duration::minutes(2);
@@ -75,21 +74,12 @@ impl FromStr for PrLandingState {
 #[serde(tag = "placement", rename_all = "snake_case")]
 pub enum LandingPlacement {
     Local,
-    Home { home_id: HomeId },
 }
 
 impl LandingPlacement {
     pub(crate) fn storage_str(&self) -> &'static str {
         match self {
             Self::Local => "local",
-            Self::Home { .. } => "home",
-        }
-    }
-
-    pub(crate) fn home_id(&self) -> Option<&HomeId> {
-        match self {
-            Self::Local => None,
-            Self::Home { home_id } => Some(home_id),
         }
     }
 }

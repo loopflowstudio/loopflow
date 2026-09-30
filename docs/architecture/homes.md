@@ -1,16 +1,8 @@
 # Homes and processes
 
-A Home is a durable Loopflow execution destination on a machine. It owns local
-processes, credentials, planning storage, Run records, service managers, and OS
-locks. Its SSH route may change without changing its identity. A Wave's Home
-expresses where work for that Wave belongs; placement does not require the Wave
-itself to have a resident process.
-
-A data directory holds local state. `LF_HOME` selects that directory; it does
-not select a remote execution destination. A branch data copy preserves the
-database's recorded Home identities and placements without registering another
-Home or acquiring process-control authority. Installed data and branch data can
-therefore describe the same Home while retaining independent writes.
+A Home is one machine's stable Loopflow authority. It owns local processes,
+credentials, planning storage, command and conversation records, and OS locks.
+Its SSH route may change without changing its identity.
 
 ```bash
 lf home id
@@ -31,7 +23,7 @@ lf ssh build-home --wave product wave/operate
 
 `lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
 its Home identity, resolves its own files and store, and returns the result.
-There is no implicit fan-out and no central Run database.
+There is no implicit fan-out and no central execution database.
 
 The Home and placement types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
@@ -47,26 +39,23 @@ not whether a process exists. `lf wave place` changes placement. It does not lau
 ```text
 shell / automation / Loopflow.app
                |
-               v
-              lf ---------------- Linear / GitHub / provider auth
+               lf ---- Linear / GitHub / provider auth
                |
-      local store + repository/Git
-
- Task or Project CLI
-          |
-          v
- Work Flow position -- exact claim --> boundary Run
-                                      |
-                                      `--> Home-local Run record
+        store + repository
+               |
+      FlowSession claim --> AgentSession <--> native engine
+                            |
+                       driving Exec
 ```
 
-The process that directly spawns a child owns that child handle and may cancel
-it. Project and Task execution authority comes from the exact Flow-position
-claim, not from a deterministic tmux name.
+Wave operations are finite attributed conversations. Tasks drive their selected Flow
+invocation through the common executor. Cron invokes commands on schedule;
+local PR supervision watches and repairs delivery in the invoking process.
 
-None of those local facts becomes generic cross-process Run control. A PID,
-tmux name, parent Run, Work identity, or telemetry row cannot prove that a
-later process may send a signal.
+The process that directly spawns a child owns its child handle. Cross-process
+recovery requires exact saved process identity and the applicable claim or
+lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
+no signal authority.
 
 ## Observe processes
 
@@ -84,10 +73,16 @@ the live view. This is observation, not a durable lifecycle model.
 OpenCode process groups whose ownership is known. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
-Run records intentionally contain no `owner.json`. Durable cross-process
-control would require the launcher to create a fresh process scope and publish
-PID plus kernel birth identity, boot/Home identity, and the exact process group
-or native scope. Every signal would need to revalidate that receipt.
+Cross-process control requires exact PID/start identity and the applicable
+conversation/provider generation. Revalidate native scope or exclusive process
+group before signaling. A driver may disappear while its engine survives;
+recorded endpoints alone do not prove liveness.
+
+## Independent bridges
+
+`lf discord serve <wave>` is a foreground bridge from a configured channel to
+bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
+do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
 
 ## Move a Wave without changing its identity
 
@@ -98,8 +93,7 @@ A bare slug may be ambiguous across repositories and is not mutation authority.
 lf wave relocate <wave-id> --repo <target> --name <slug>
 ```
 
-Relocation fences the Wave listener and locator, moves authored files and the
-journal, commits the new locator transactionally, and keeps PM, Work, and Home
+Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Home
 placement joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
@@ -122,7 +116,7 @@ Promotion changes the executable selected by future top-level processes:
 
 The promotion lock lives at the OS account's `$HOME/.lf/promotion.lock` and is held only for the
 switch transaction. Ordinary harnesses do not check or hold it. Promotion does
-not discover, drain, stop, or settle Runs.
+not discover, drain, stop, or settle conversations.
 
 An already-running old process continues with the executable and store path it
 selected. On the first published-to-development promotion, it may keep writing
@@ -146,7 +140,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Home.
 - Direct child handles are local capability; inferred process ownership is not.
-- Promotion owns artifact selection and known service replacement, not Run
+- Promotion owns artifact selection and app replacement, not conversation
   lifecycle.
 - A schema clone protects preview and recovery; it can also leave old writers
   authoring the prior, now-unselected store.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -38,7 +39,14 @@ def main() -> None:
         if case.get("wave"):
             cmd.extend(["--wave", case["wave"]])
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=ROOT)
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            env=dict(os.environ, LF_USER_NAME="Fixture Participant"),
+        )
         case_path.with_suffix(".md").write_text(result.stdout)
 
 

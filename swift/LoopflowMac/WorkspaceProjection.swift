@@ -89,7 +89,12 @@ struct WorkspaceProjection {
                 }
             }
             if let session = unmatchedSessions.first(where: { $0.id == sessionId }) {
-                return WorkspaceBreadcrumb(wave: nil, task: nil, session: session, siblings: [session])
+                let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
+                let wave = waves.first { $0.roadmap.wave.id == waveId }
+                let siblings = session.work.map { work in
+                    unmatchedSessions.filter { $0.work == work }
+                } ?? [session]
+                return WorkspaceBreadcrumb(wave: wave, task: nil, session: session, siblings: siblings)
             }
         }
         guard let selection else { return nil }
@@ -97,7 +102,9 @@ struct WorkspaceProjection {
             if wave.id.work == selection {
                 return WorkspaceBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
             }
-            if let task = wave.tasks.first(where: { $0.id.work == selection }) {
+            if let task = wave.tasks.first(where: {
+                $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+            }) {
                 return WorkspaceBreadcrumb(wave: wave, task: task, session: nil, siblings: task.sessions)
             }
         }
@@ -111,7 +118,7 @@ struct WorkspaceProjection {
                 return task.id.work
             }
         }
-        return nil
+        return unmatchedSessions.first { $0.id == sessionId }?.work
     }
 }
 
@@ -121,6 +128,17 @@ struct WorkspaceBreadcrumb {
     let task: WorkspaceTask?
     let session: SessionRecord?
     let siblings: [SessionRecord]
+
+    var waveWork: WorkReference? {
+        if let id = session?.waveId { return .wave(id: id) }
+        if let work = session?.work, work.kind == .wave { return work }
+        return wave?.id.work
+    }
+
+    var taskWork: WorkReference? {
+        if let work = session?.work, work.kind == .task { return work }
+        return task?.id.work
+    }
 }
 
 struct WorkspaceOutlineSubject {
@@ -240,7 +258,26 @@ extension WorkspaceProjection {
             }
             if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }
         }
-        // Sessions without Work never join the tree; `orphanSessions` owns them.
+        // Known Work stays visible when its planning row is unavailable.
+        // Only genuinely unbound Sessions belong in the orphan section.
+        for session in unmatchedSessions where session.work != nil || session.waveId != nil {
+            let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
+            let wave = waves.first { $0.roadmap.wave.id == waveId }
+            var ancestors: [WorkspaceOutlineSubject] = []
+            if let waveId {
+                ancestors.append(WorkspaceOutlineSubject(
+                    key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: .wave(id: waveId)),
+                    title: wave?.roadmap.wave.name ?? "Wave \(waveId)"
+                ))
+            }
+            if let work = session.work, work.kind != .wave {
+                ancestors.append(WorkspaceOutlineSubject(
+                    key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: work),
+                    title: "\(work.kind == .task ? "Task" : "Project") \(work.id)"
+                ))
+            }
+            appendSession(session, depth: 0, ancestors: ancestors)
+        }
         if presentation == .sessions {
             // The shortest ancestry suffix that distinguishes equal titles. IDs
             // remain the tie-breaker for two conversations on the same subject.
@@ -268,12 +305,23 @@ extension WorkspaceProjection {
     /// filtered like the outline. Their Task is never guessed from a checkout.
     func orphanSessions(search: String) -> [SessionRecord] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return unmatchedSessions }
         return unmatchedSessions.filter { session in
-            [session.title, session.detail, session.workPath ?? ""]
+            guard session.work == nil, session.waveId == nil else { return false }
+            return query.isEmpty || [session.title, session.detail, session.workPath ?? ""]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
+}
+
+/// One exact Session's assignment confirmation, retained through a failed commit.
+struct SessionBindingDraft: Equatable {
+    let id = UUID()
+    let sessionId: String
+    let title: String
+    var selector = ""
+    var preview: SessionBindingPreview?
+    var submitting = false
+    var error: String?
 }
 
 /// An in-place Session name edit. It belongs to exactly one Session; a
@@ -289,7 +337,7 @@ struct SessionRenameDraft: Equatable {
 struct FlowNodeSelection: Equatable {
     /// nil identifies the unstarted preview, never an old invocation.
     let invocationId: String?
-    let node: String
+    let node: UInt32
 }
 
 /// One Task's Flow selection and in-flight control. Presentation only: the
@@ -322,9 +370,14 @@ final class WorkspaceNavigation {
             if let renaming, renaming.sessionId != selectedSessionId, !renaming.submitting {
                 self.renaming = nil
             }
+            if let binding, binding.sessionId != selectedSessionId, !binding.submitting {
+                self.binding = nil
+            }
         }
     }
     var renaming: SessionRenameDraft?
+    var binding: SessionBindingDraft?
+    var showsHeadlessSessions = false
     /// Flow drafts by planning Task id; they survive Task and Session navigation.
     var flowDrafts: [String: TaskFlowDraft] = [:]
     var startingTaskSessions: Set<String> = []

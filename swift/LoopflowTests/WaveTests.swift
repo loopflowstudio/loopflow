@@ -10,7 +10,7 @@ struct WaveTests {
             name: "infrastructure",
             repo: "/tmp/repo",
             status: .ready,
-
+            
         ))
 
         #expect(wave.id == "wave-123")

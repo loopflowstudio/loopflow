@@ -1,277 +1,93 @@
-//! Deterministic chapter rotation. Skills author plans; this operation alone
-//! replaces their membership, preserving Task execution and resumable receipts.
+//! Repository chapter rotation converges on fresh Linear Project status.
+//! No local record owns the chapter or remembers a partially applied operation.
 
+use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use crate::durable::WorkRef;
 use crate::engine::git::{is_clean, rev_parse};
 use crate::ops::{OpsError, OpsResult};
-use crate::pm::{PmItem, PmProject, ProjectContent, ProjectFlowPlan};
+use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
 use crate::store::Store;
-use crate::work::chapter::{
-    classify_task, Chapter, ChapterHistoryEntry, ChapterId, ChapterMetricEvidence, ChapterPhase,
-    ChapterSnapshot, ChapterTask, TaskDisposition, TaskStartEvidence,
-};
 use crate::work::project::{Project, ProjectId};
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{
-    fetch_pm_snapshot, linear_project_name, pm_store, refresh_pm_snapshot, resolve_context,
-    resolve_wave, PmContext,
+    checked_projects, linear_project_name, pm_store, refresh_pm_snapshot, resolve_context,
+    PmContext,
 };
 
-#[derive(Debug, Clone)]
-pub struct NewChapterRequest {
-    pub wave: Option<String>,
-    pub chapter: ChapterId,
-    pub content: ProjectContent,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskDisposition {
+    Move,
+    Abandon,
+    Historical,
+    Unresolved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChapterTask {
+    pub task: PmItem,
+    pub disposition: TaskDisposition,
+    pub reason: String,
+    pub observed_at: i64,
+}
+
+/// A preview/result, never a persisted Chapter or recovery receipt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChapterRotation {
+    pub name: String,
+    pub waves: Vec<WaveRotation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WaveRotation {
+    pub wave: String,
+    pub successor_id: String,
+    pub predecessor: Option<PmProject>,
+    pub successor: Option<PmProject>,
+    pub tasks: Vec<ChapterTask>,
 }
 
 fn error(value: impl std::fmt::Display) -> OpsError {
     OpsError::Message(value.to_string())
 }
 
-pub fn empty_plan() -> ProjectContent {
-    ProjectContent {
-        metric_targets: Vec::new(),
-        flows: ProjectFlowPlan::empty(),
-        krs: Vec::new(),
-    }
-}
-
-pub fn new_chapter(repo: &Path, request: &NewChapterRequest, dry_run: bool) -> OpsResult<Chapter> {
+pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterRotation> {
     tokio::runtime::Runtime::new()
         .map_err(error)?
-        .block_on(rotate(repo, request, dry_run))
-}
-
-pub fn chapter_snapshot(
-    repo: &Path,
-    wave: Option<&str>,
-    chapter: Option<&ChapterId>,
-) -> OpsResult<ChapterSnapshot> {
-    let wave =
-        crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
-    tokio::runtime::Runtime::new()
-        .map_err(error)?
-        .block_on(async {
-            let store = pm_store().await?;
-            read_chapter(&store, &wave, chapter).await
-        })
-}
-
-pub(crate) async fn read_chapter(
-    store: &Store,
-    wave: &Wave,
-    id: Option<&ChapterId>,
-) -> OpsResult<ChapterSnapshot> {
-    let chapters = store.chapters(wave.id()).await.map_err(error)?;
-    if let Some(id) = id.filter(|id| !chapters.iter().any(|chapter| &chapter.id == *id)) {
-        for next in &chapters {
-            for predecessor in &next.predecessors {
-                if id.as_str() == format!("legacy-{}", predecessor.id) {
-                    return frozen_chapter(wave, id.clone(), predecessor, next, next.clone());
-                }
-            }
-        }
-    }
-    let chapter = store
-        .chapter(wave.id(), id)
-        .await
-        .map_err(error)?
-        .ok_or_else(|| error("no recorded chapter for this Wave"))?;
-    let successor = store
-        .chapters(wave.id())
-        .await
-        .map_err(error)?
-        .into_iter()
-        .find(|next| {
-            next.activated_at.is_some()
-                && next
-                    .predecessors
-                    .iter()
-                    .any(|project| project.id == chapter.project_id)
-        });
-    if let Some(successor) = successor {
-        let plan = successor
-            .predecessors
-            .iter()
-            .find(|project| project.id == chapter.project_id)
-            .expect("successor contains predecessor");
-        return frozen_chapter(wave, chapter.id.clone(), plan, &successor, chapter);
-    }
-    let row = store
-        .pm_snapshot(wave.id())
-        .await
-        .map_err(error)?
-        .ok_or_else(|| error("chapter evidence unavailable; run `lf wave sync --wave <wave>`"))?;
-    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&row.payload).map_err(error)?;
-    let plan = snapshot
-        .projects
-        .into_iter()
-        .find(|project| project.id == chapter.project_id)
-        .ok_or_else(|| {
-            error("current chapter content unavailable; resume its transition or refresh PM")
-        })?;
-    let mut tasks = Vec::new();
-    for item in snapshot
-        .items
-        .into_iter()
-        .filter(|item| item.project_id == chapter.project_id)
-    {
-        tasks.push(disposition(store, item).await?);
-    }
-    let evaluated_at = time::OffsetDateTime::now_utc();
-    let metrics =
-        super::metrics::chapter_metric_portfolio(store, wave, &plan.metric_targets, evaluated_at)
-            .await
-            .map_err(error)?;
-    Ok(ChapterSnapshot {
-        metrics,
-        metrics_evaluated_at: evaluated_at.unix_timestamp(),
-        id: chapter.id.clone(),
-        wave: wave.name().to_string(),
-        source_project_id: chapter.project_id.clone(),
-        source_project_slug: plan.slug.clone(),
-        content: ProjectContent {
-            metric_targets: plan.metric_targets.clone(),
-            flows: plan.flows.unwrap_or_else(ProjectFlowPlan::empty),
-            krs: plan.krs,
-        },
-        tasks,
-        observed_at: row.synced_at,
-        closed_at: None,
-        transition: chapter,
-    })
-}
-
-fn frozen_chapter(
-    wave: &Wave,
-    id: ChapterId,
-    plan: &PmProject,
-    successor: &Chapter,
-    transition: Chapter,
-) -> OpsResult<ChapterSnapshot> {
-    let observed_at = successor
-        .activated_at
-        .ok_or_else(|| error("chapter boundary is not yet recorded"))?;
-    let evidence = successor
-        .predecessor_metrics
-        .iter()
-        .find(|evidence| evidence.project_id == plan.id)
-        .ok_or_else(|| error("chapter metric boundary evidence unavailable"))?;
-    Ok(ChapterSnapshot {
-        metrics: evidence.portfolio.clone(),
-        metrics_evaluated_at: evidence.evaluated_at,
-        id,
-        wave: wave.name().to_string(),
-        source_project_id: plan.id.clone(),
-        source_project_slug: plan.slug.clone(),
-        content: ProjectContent {
-            metric_targets: plan.metric_targets.clone(),
-            flows: plan.flows.clone().unwrap_or_else(ProjectFlowPlan::empty),
-            krs: plan.krs.clone(),
-        },
-        tasks: successor
-            .tasks
-            .iter()
-            .filter(|task| task.at_boundary && task.task.project_id == plan.id)
-            .cloned()
-            .collect(),
-        observed_at,
-        closed_at: Some(observed_at),
-        transition,
-    })
-}
-
-pub fn chapter_history(repo: &Path, wave: Option<&str>) -> OpsResult<Vec<ChapterHistoryEntry>> {
-    let wave =
-        crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
-    tokio::runtime::Runtime::new()
-        .map_err(error)?
-        .block_on(async {
-            let store = pm_store().await?;
-            let chapters = store.chapters(wave.id()).await.map_err(error)?;
-            let mut history = Vec::new();
-            for chapter in &chapters {
-                let successor = chapters.iter().find(|next| {
-                    next.activated_at.is_some()
-                        && next
-                            .predecessors
-                            .iter()
-                            .any(|plan| plan.id == chapter.project_id)
-                });
-                let source = successor.and_then(|next| {
-                    next.predecessors
-                        .iter()
-                        .find(|plan| plan.id == chapter.project_id)
-                });
-                let local = store
-                    .get_project_by_project(&chapter.project_id)
-                    .await
-                    .map_err(error)?;
-                history.push(ChapterHistoryEntry {
-                    id: chapter.id.clone(),
-                    source_project_id: chapter.project_id.clone(),
-                    source_project_slug: source
-                        .map(|plan| plan.slug.clone())
-                        .or_else(|| local.as_ref().map(|project| project.plan.slug.clone()))
-                        .unwrap_or_default(),
-                    source_work_id: local.map(|project| project.id.to_string()),
-                    closed_at: successor.and_then(|next| next.activated_at),
-                    phase: chapter.phase,
-                });
-                for source in &chapter.predecessors {
-                    if chapter.activated_at.is_some()
-                        && !chapters.iter().any(|old| old.project_id == source.id)
-                    {
-                        history.push(ChapterHistoryEntry {
-                            id: ChapterId::parse(&format!("legacy-{}", source.id))
-                                .map_err(error)?,
-                            source_project_id: source.id.clone(),
-                            source_project_slug: source.slug.clone(),
-                            source_work_id: store
-                                .get_project_by_project(&source.id)
-                                .await
-                                .map_err(error)?
-                                .map(|project| project.id.to_string()),
-                            closed_at: chapter.activated_at,
-                            phase: ChapterPhase::Complete,
-                        });
-                    }
-                }
-            }
-            Ok(history)
-        })
+        .block_on(rotate(repo, name, dry_run))
 }
 
 pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
     content.validate().map_err(error)?;
+    if content.flow.trim().is_empty() {
+        return Err(error("Project content requires a nonempty flow: line"));
+    }
     let wave =
         crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
     tokio::runtime::Runtime::new()
         .map_err(error)?
         .block_on(async {
-            let store = pm_store().await?;
-            require_chapter_home(&store, &wave).await?;
             let _lock = rotation_lock(&wave).await?;
-            let chapter = store
-                .chapter(wave.id(), None)
-                .await
-                .map_err(error)?
-                .ok_or_else(|| error("Wave has no chapter"))?;
             super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
                 .map_err(error)?;
             let ctx = resolve_context(repo, wave.name()).await?;
-            let project = ctx
+            let projects = checked_projects(repo, &ctx, wave.name()).await?;
+            let project = select_current(wave.name(), &projects)?;
+            let provider = ctx
                 .client
-                .project_ownership(&chapter.project_id)
+                .project_ownership(&project.id)
                 .await
                 .map_err(error)?;
             ctx.client
-                .update_project(&project.id, &project.name, content)
+                .update_project(&provider.id, &provider.name, content)
                 .await
                 .map_err(error)?;
             refresh_pm_snapshot(repo, wave.name(), &ctx).await?;
@@ -279,31 +95,715 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
         })
 }
 
+pub(crate) fn select_current(wave: &str, projects: &[PmProject]) -> OpsResult<PmProject> {
+    let current: Vec<_> = projects
+        .iter()
+        .filter(|project| project.status == ProjectStatus::Started)
+        .collect();
+    match current.as_slice() {
+        [project] => Ok((*project).clone()),
+        [] => Err(error(format!("Wave {wave} has no In Progress Project"))),
+        _ => Err(error(format!(
+            "Wave {wave} has competing In Progress Projects: {}",
+            current
+                .iter()
+                .map(|project| format!("{} ({})", project.name, project.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
-    let chapter = store
-        .chapter(wave.id(), None)
-        .await
-        .map_err(error)?
-        .ok_or_else(|| {
-            error(format!(
-                "Wave {} has no chapter; run `lf wave new-chapter --wave {} --chapter <id>`",
-                wave.name(),
-                wave.name()
-            ))
-        })?;
     let snapshot = store
         .pm_snapshot(wave.id())
         .await
         .map_err(error)?
-        .ok_or_else(|| error("chapter planning is unavailable; refresh the Wave's PM snapshot"))?;
-    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(error)?;
-    snapshot
-        .projects
-        .into_iter()
-        .find(|project| project.id == chapter.project_id)
         .ok_or_else(|| {
-            error("current chapter is missing from the PM snapshot; refresh its evidence")
+            error("Project planning is unavailable; run `lf wave sync --wave <wave>`")
+        })?;
+    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).map_err(error)?;
+    select_current(wave.name(), &snapshot.projects)
+}
+
+// Stable across Homes, including a lost create response before initiative attachment.
+fn successor_id(initiative: &str, name: &str) -> String {
+    let digest = Sha256::digest(format!("loopflow-project\0{initiative}\0{name}"));
+    let mut bytes = [0; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
+
+fn plan_rotation(
+    name: &str,
+    inventories: &[(String, String, Vec<PmProject>)],
+) -> OpsResult<ChapterRotation> {
+    if name.trim().is_empty()
+        || name.trim() != name
+        || name.len() > 160
+        || name.contains(['\n', '\r'])
+    {
+        return Err(error("chapter name must be 1–160 characters on one line"));
+    }
+    let predecessor_names: BTreeSet<_> = inventories
+        .iter()
+        .flat_map(|(_, _, projects)| projects)
+        .filter(|project| project.status == ProjectStatus::Started && project.name != name)
+        .map(|project| project.name.as_str())
+        .collect();
+    if predecessor_names.len() > 1 {
+        return Err(error(format!(
+            "competing current chapter names: {}; resolve the Projects in Linear",
+            predecessor_names.into_iter().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let predecessor_name = predecessor_names.first().copied();
+    let mut waves = Vec::new();
+    for (wave, initiative, projects) in inventories {
+        let targets: Vec<_> = projects
+            .iter()
+            .filter(|project| project.name == name)
+            .collect();
+        let successor = match targets.as_slice() {
+            [] => None,
+            [project]
+                if matches!(
+                    project.status,
+                    ProjectStatus::Planned | ProjectStatus::Started
+                ) =>
+            {
+                Some((*project).clone())
+            }
+            [_] => {
+                return Err(error(format!(
+                    "Wave {wave}: target {name} exists but is neither Planned nor In Progress"
+                )))
+            }
+            _ => {
+                return Err(error(format!(
+                    "Wave {wave}: several Projects are named {name}; choose one in Linear"
+                )))
+            }
+        };
+        let current: Vec<_> = projects
+            .iter()
+            .filter(|project| project.status == ProjectStatus::Started && project.name != name)
+            .collect();
+        let predecessor = match current.as_slice() {
+            [project] => Some((*project).clone()),
+            [] if successor
+                .as_ref()
+                .is_some_and(|project| project.status == ProjectStatus::Started) =>
+            {
+                None
+            }
+            [] if projects.is_empty() || (projects.len() == 1 && successor.is_some()) => None,
+            [] => {
+                // Recover the inverse status-write order only with shared predecessor evidence.
+                let previous: Vec<_> = projects
+                    .iter()
+                    .filter(|project| {
+                        Some(project.name.as_str()) == predecessor_name
+                            && project.status == ProjectStatus::Completed
+                    })
+                    .collect();
+                match previous.as_slice() {
+                    [project] if successor.is_some() => Some((*project).clone()),
+                    _ => return Err(error(format!("Wave {wave} has no unambiguous current predecessor; set its Project status in Linear"))),
+                }
+            }
+            _ => {
+                return Err(error(format!(
+                    "Wave {wave} has competing In Progress predecessors"
+                )))
+            }
+        };
+        let id = successor
+            .as_ref()
+            .map(|project| project.id.clone())
+            .unwrap_or_else(|| successor_id(initiative, name));
+        waves.push(WaveRotation {
+            wave: wave.clone(),
+            successor_id: id,
+            predecessor,
+            successor,
+            tasks: Vec::new(),
+        });
+    }
+    Ok(ChapterRotation {
+        name: name.into(),
+        waves,
+    })
+}
+
+pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterRotation> {
+    let store = pm_store().await?;
+    let names = super::pm::list_local_waves(repo)?;
+    if names.is_empty() {
+        return Err(error("repository has no Waves"));
+    }
+    let mut contexts = Vec::new();
+    let mut inventories = Vec::new();
+    let mut locks = Vec::new();
+    for wave_name in names {
+        let wave = if dry_run {
+            let locator = WaveLocator::discover(repo, &wave_name).map_err(error)?;
+            store
+                .get_wave_at(&locator)
+                .await
+                .map_err(error)?
+                .unwrap_or_else(|| {
+                    Wave::new(
+                        crate::id::WaveId::new(),
+                        wave_name.clone(),
+                        repo.display().to_string(),
+                    )
+                })
+        } else {
+            crate::work::wave::ensure_wave_row(&store, repo, &wave_name)
+                .await
+                .map_err(error)?
+        };
+        if !dry_run {
+            locks.push(rotation_lock(&wave).await?);
+        }
+        let ctx = resolve_context(repo, &wave_name).await?;
+        let projects = checked_projects(repo, &ctx, &wave_name).await?;
+        inventories.push((wave_name, ctx.initiative.clone(), projects));
+        contexts.push((wave, ctx));
+    }
+    let mut plan = plan_rotation(name, &inventories)?;
+    // Evaluate every Wave before the first provider write, even if an earlier Wave is ready.
+    for (entry, (wave, ctx)) in plan.waves.iter_mut().zip(&contexts) {
+        entry.tasks = rotation_tasks(&store, wave, ctx, entry).await?;
+    }
+    if dry_run {
+        return Ok(plan);
+    }
+    for entry in &plan.waves {
+        let flow = entry
+            .successor
+            .as_ref()
+            .or(entry.predecessor.as_ref())
+            .map(|project| project.flow.as_str())
+            .unwrap_or("feature");
+        if flow.trim().is_empty() {
+            return Err(error(format!(
+                "Wave {}: set the Project's flow: line before rotating; no Project status changed",
+                entry.wave
+            )));
+        }
+        if let Some(task) = entry
+            .tasks
+            .iter()
+            .find(|task| task.disposition == TaskDisposition::Unresolved)
+        {
+            return Err(error(format!(
+                "{}: {}; no Project status changed",
+                task.task.identifier, task.reason
+            )));
+        }
+    }
+    for (entry, (wave, ctx)) in plan.waves.iter_mut().zip(&contexts) {
+        adopt_legacy_projects(repo, &store, wave.name(), ctx, true).await?;
+        apply_rotation(repo, &store, wave, ctx, name, entry)
+            .await
+            .map_err(|cause| error(format!("{cause}; retry `lf repo new-chapter {name}`")))?;
+        refresh_pm_snapshot(repo, wave.name(), ctx).await?;
+    }
+    for (wave, ctx) in &contexts {
+        let projects = checked_projects(repo, ctx, wave.name()).await?;
+        let current = select_current(wave.name(), &projects)?;
+        if current.name != name {
+            return Err(error(format!(
+                "Wave {} now selects {}; reconcile competing chapter changes in Linear",
+                wave.name(),
+                current.name
+            )));
+        }
+    }
+    Ok(plan)
+}
+
+// The migration marker scopes old-content decoding to the exact pre-upgrade
+// records. New Planned Projects never enter this transition. Reads project the
+// conversion; explicit sync/rotation confirms it remotely before clearing it.
+pub(crate) async fn adopt_legacy_projects(
+    repo: &Path,
+    store: &Store,
+    wave_name: &str,
+    ctx: &PmContext,
+    apply: bool,
+) -> OpsResult<Vec<PmProject>> {
+    let locator = WaveLocator::discover(repo, wave_name).map_err(error)?;
+    let Some(wave) = store.get_wave_at(&locator).await.map_err(error)? else {
+        return Ok(Vec::new());
+    };
+    let pending = store
+        .projects_pending_adoption(wave.id())
+        .await
+        .map_err(error)?;
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut projects = ctx
+        .client
+        .list_projects(&ctx.initiative)
+        .await
+        .map_err(error)?;
+    for (id, _) in &pending {
+        if !projects.iter().any(|project| &project.id == id) {
+            projects.push(ctx.client.project_ownership(id).await.map_err(error)?);
+        }
+    }
+    let has_current = projects
+        .iter()
+        .any(|project| project.status == ProjectStatus::Started);
+    let candidates: Vec<_> = pending
+        .iter()
+        .filter(|(id, evidence)| {
+            *evidence != 0
+                && projects.iter().any(|project| {
+                    &project.id == id
+                        && matches!(
+                            project.status,
+                            ProjectStatus::Backlog | ProjectStatus::Planned
+                        )
+                })
         })
+        .collect();
+    let recorded: Vec<_> = candidates
+        .iter()
+        .filter(|(_, evidence)| *evidence == 1)
+        .collect();
+    let promote = if has_current {
+        None
+    } else if let [candidate] = recorded.as_slice() {
+        Some(candidate.0.as_str())
+    } else if recorded.is_empty()
+        && candidates.len() == 1
+        && projects
+            .iter()
+            .filter(|project| {
+                matches!(
+                    project.status,
+                    ProjectStatus::Backlog | ProjectStatus::Planned
+                )
+            })
+            .count()
+            == 1
+    {
+        Some(candidates[0].0.as_str())
+    } else if candidates.is_empty() {
+        None
+    } else {
+        return Err(error(format!("Wave {wave_name}: legacy current Project is ambiguous; set the intended Project In Progress in Linear")));
+    };
+    // Validate the entire Wave before performing the first conversion.
+    let mut converted = Vec::new();
+    for (id, _) in &pending {
+        converted.push(
+            ctx.client
+                .adopt_project(
+                    id,
+                    &ctx.initiative,
+                    &ctx.team_id,
+                    promote == Some(id.as_str()),
+                    false,
+                )
+                .await
+                .map_err(error)?,
+        );
+    }
+    if apply {
+        for project in &converted {
+            let confirmed = ctx
+                .client
+                .adopt_project(
+                    &project.id,
+                    &ctx.initiative,
+                    &ctx.team_id,
+                    promote == Some(project.id.as_str()),
+                    true,
+                )
+                .await
+                .map_err(error)?;
+            if confirmed != *project {
+                return Err(error(format!(
+                    "Project {} changed during adoption; refresh and retry",
+                    project.id
+                )));
+            }
+            store
+                .finish_project_adoption(wave.id(), &project.id)
+                .await
+                .map_err(error)?;
+        }
+    }
+    Ok(converted)
+}
+
+async fn rotation_tasks(
+    store: &Store,
+    wave: &Wave,
+    ctx: &PmContext,
+    entry: &WaveRotation,
+) -> OpsResult<Vec<ChapterTask>> {
+    let Some(predecessor) = &entry.predecessor else {
+        return Ok(Vec::new());
+    };
+    let mut items = ctx
+        .client
+        .list_items(&predecessor.id)
+        .await
+        .map_err(error)?;
+    let projects = store.list_projects(Some(wave.id())).await.map_err(error)?;
+    for task in store.list_tasks(Some(wave.id())).await.map_err(error)? {
+        if !projects.iter().any(|project| {
+            project.id == task.project_id && project.plan.id.as_str() == predecessor.id
+        }) || items.iter().any(|item| item.id == task.plan.id.as_str())
+        {
+            continue;
+        }
+        let (item, _) = ctx
+            .client
+            .issue_ownership(task.plan.id.as_str())
+            .await
+            .map_err(error)?;
+        if item.project_id != predecessor.id && item.project_id != entry.successor_id {
+            return Err(error(format!(
+                "{} moved outside this chapter transition",
+                item.identifier
+            )));
+        }
+        items.push(item);
+    }
+    let mut tasks = Vec::new();
+    for item in items {
+        tasks.push(disposition(store, item).await?);
+    }
+    Ok(tasks)
+}
+
+/// Adopt provider Project facts and same-Wave issue moves without creating Task execution.
+pub(crate) async fn sync_projects(
+    store: &Store,
+    wave: &Wave,
+    snapshot: &crate::pm::PmSnapshot,
+) -> OpsResult<()> {
+    for plan in &snapshot.projects {
+        let project = record_project(store, wave, plan).await?;
+        for item in snapshot
+            .items
+            .iter()
+            .filter(|item| item.project_id == plan.id)
+        {
+            if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
+                if task.project_id != project.id {
+                    store
+                        .move_chapter_task(&task.id, &project.id)
+                        .await
+                        .map_err(error)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn record_project(store: &Store, wave: &Wave, plan: &PmProject) -> OpsResult<Project> {
+    if let Some(mut project) = store
+        .get_project_by_project(&plan.id)
+        .await
+        .map_err(error)?
+    {
+        project.plan =
+            super::project::project_plan(plan, time::OffsetDateTime::now_utc().unix_timestamp())?;
+        store.update_project(&project).await.map_err(error)?;
+        return Ok(project);
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let project = Project {
+        id: ProjectId::new(),
+        plan: super::project::project_plan(plan, now.unix_timestamp())?,
+        wave_id: wave.id().clone(),
+        iteration: 0,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store.create_project(&project).await.map_err(error)?;
+    Ok(project)
+}
+
+async fn apply_rotation(
+    repo: &Path,
+    store: &Store,
+    wave: &Wave,
+    ctx: &PmContext,
+    name: &str,
+    entry: &mut WaveRotation,
+) -> OpsResult<()> {
+    let linear_name = linear_project_name(repo, wave.name(), name).await?;
+    let mut successor = match ctx
+        .client
+        .find_project(&entry.successor_id)
+        .await
+        .map_err(error)?
+    {
+        Some(project) => project,
+        None if entry.successor.is_some() => {
+            return Err(error(
+                "the selected Planned Project disappeared; refresh its ownership",
+            ))
+        }
+        None => {
+            let flow = entry
+                .predecessor
+                .as_ref()
+                .map(|project| project.flow.as_str())
+                .unwrap_or("feature");
+            if flow.trim().is_empty() {
+                return Err(error(
+                    "predecessor has no flow: line; set its default Flow before rotating",
+                ));
+            }
+            let content = ProjectContent {
+                flow: flow.to_string(),
+                metric_targets: Vec::new(),
+                krs: Vec::new(),
+            };
+            ctx.client
+                .create_project(
+                    &ctx.initiative,
+                    &linear_name,
+                    &content,
+                    Some(&entry.successor_id),
+                )
+                .await
+                .map_err(error)?;
+            ctx.client
+                .project_ownership(&entry.successor_id)
+                .await
+                .map_err(error)?
+        }
+    };
+    if (successor.name != linear_name && successor.name != name)
+        || successor.team_ids != vec![ctx.team_id.clone()]
+        || successor
+            .initiative_ids
+            .iter()
+            .any(|id| id != &ctx.initiative)
+    {
+        return Err(error(
+            "successor identity or ownership changed; reconcile it in Linear",
+        ));
+    }
+    if !successor.initiative_ids.contains(&ctx.initiative) {
+        ctx.client
+            .attach_project(&ctx.initiative, &successor.id)
+            .await
+            .map_err(error)?;
+        successor = ctx
+            .client
+            .project_ownership(&successor.id)
+            .await
+            .map_err(error)?;
+        if successor.initiative_ids != vec![ctx.initiative.clone()] {
+            return Err(error("successor attachment is not confirmed"));
+        }
+    }
+    if !matches!(
+        successor.status,
+        ProjectStatus::Planned | ProjectStatus::Started
+    ) {
+        return Err(error("successor is no longer Planned or In Progress"));
+    }
+    if successor.status != ProjectStatus::Started {
+        ctx.client
+            .set_project_status(&successor.id, ProjectStatus::Started)
+            .await
+            .map_err(error)?;
+        successor = ctx
+            .client
+            .project_ownership(&successor.id)
+            .await
+            .map_err(error)?;
+        if successor.status != ProjectStatus::Started {
+            return Err(error("successor activation is not confirmed"));
+        }
+    }
+    successor.name = name.to_string();
+    successor.slug = crate::pm::project_slug(name);
+    let local = record_project(store, wave, &successor).await?;
+    // Reconcile a transfer that another Home or an interrupted caller already performed.
+    for item in ctx.client.list_items(&successor.id).await.map_err(error)? {
+        if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
+            store
+                .move_chapter_task(&task.id, &local.id)
+                .await
+                .map_err(error)?;
+        }
+    }
+    entry.successor = Some(successor);
+    let Some(predecessor) = entry.predecessor.as_ref() else {
+        return Ok(());
+    };
+    let fresh = ctx
+        .client
+        .project_ownership(&predecessor.id)
+        .await
+        .map_err(error)?;
+    if !matches!(
+        fresh.status,
+        ProjectStatus::Started | ProjectStatus::Completed
+    ) || fresh.team_ids != vec![ctx.team_id.clone()]
+        || fresh.initiative_ids != vec![ctx.initiative.clone()]
+    {
+        return Err(error(
+            "predecessor status or ownership changed; reconcile it in Linear",
+        ));
+    }
+    entry.tasks = rotation_tasks(store, wave, ctx, entry).await?;
+    for decision in &entry.tasks {
+        let (item, _) = ctx
+            .client
+            .issue_ownership(&decision.task.id)
+            .await
+            .map_err(error)?;
+        let task = store.get_task_by_issue(&item.id).await.map_err(error)?;
+        if item.project_id == entry.successor_id {
+            if let Some(task) = task {
+                store
+                    .move_chapter_task(&task.id, &local.id)
+                    .await
+                    .map_err(error)?;
+            }
+            continue;
+        }
+        if item.project_id != predecessor.id {
+            return Err(error(format!(
+                "{} moved outside this transition",
+                item.identifier
+            )));
+        }
+        let mut decision = disposition(store, item).await?;
+        if decision.disposition == TaskDisposition::Abandon {
+            if let Some(task) = &task {
+                if !store
+                    .retire_chapter_backlog(&task.id)
+                    .await
+                    .map_err(error)?
+                {
+                    decision = disposition(store, decision.task).await?;
+                }
+            }
+        }
+        match decision.disposition {
+            TaskDisposition::Move => {
+                ctx.client
+                    .move_item_to_project(&decision.task.id, &entry.successor_id)
+                    .await
+                    .map_err(error)?;
+                let (confirmed, _) = ctx
+                    .client
+                    .issue_ownership(&decision.task.id)
+                    .await
+                    .map_err(error)?;
+                if confirmed.project_id != entry.successor_id {
+                    return Err(error("Task transfer is not confirmed"));
+                }
+                if let Some(task) = task {
+                    store
+                        .move_chapter_task(&task.id, &local.id)
+                        .await
+                        .map_err(error)?;
+                }
+            }
+            TaskDisposition::Abandon => {
+                ctx.client
+                    .cancel_item(&decision.task.id)
+                    .await
+                    .map_err(error)?;
+                let (confirmed, _) = ctx
+                    .client
+                    .issue_ownership(&decision.task.id)
+                    .await
+                    .map_err(error)?;
+                if confirmed.project_id != predecessor.id
+                    || confirmed.state.as_deref() != Some("canceled")
+                {
+                    return Err(error("Task cancellation is not confirmed"));
+                }
+            }
+            TaskDisposition::Historical => {}
+            TaskDisposition::Unresolved => {
+                return Err(error(format!(
+                    "{}: {}",
+                    decision.task.identifier, decision.reason
+                )))
+            }
+        }
+    }
+    let remaining = rotation_tasks(store, wave, ctx, entry).await?;
+    if remaining.iter().any(|task| {
+        task.task.project_id == predecessor.id && task.disposition != TaskDisposition::Historical
+    }) {
+        return Err(error(
+            "predecessor still has unfinished Tasks; refresh and retry",
+        ));
+    }
+    let current = checked_projects(repo, ctx, wave.name()).await?;
+    if current.iter().any(|project| {
+        project.status == ProjectStatus::Started
+            && project.id != predecessor.id
+            && project.id != entry.successor_id
+    }) {
+        return Err(error(
+            "another In Progress Project appeared during rotation; reconcile it in Linear",
+        ));
+    }
+    let current_successor = current
+        .iter()
+        .find(|project| project.id == entry.successor_id)
+        .ok_or_else(|| error("successor is missing from the final Project inventory"))?;
+    if current_successor.status != ProjectStatus::Started || current_successor.name != name {
+        return Err(error(
+            "successor is no longer the intended In Progress Project; reconcile it in Linear",
+        ));
+    }
+    let current_predecessor = current
+        .iter()
+        .find(|project| project.id == predecessor.id)
+        .ok_or_else(|| error("predecessor is missing from the final Project inventory"))?;
+    match current_predecessor.status {
+        ProjectStatus::Started => {
+            ctx.client
+                .set_project_status(&predecessor.id, ProjectStatus::Completed)
+                .await
+                .map_err(error)?;
+        }
+        ProjectStatus::Completed => {}
+        _ => {
+            return Err(error(
+                "predecessor status changed during rotation; reconcile it in Linear",
+            ));
+        }
+    }
+    let mut completed = ctx
+        .client
+        .project_ownership(&predecessor.id)
+        .await
+        .map_err(error)?;
+    if completed.status != ProjectStatus::Completed {
+        return Err(error("predecessor completion is not confirmed"));
+    }
+    completed.name = predecessor.name.clone();
+    completed.slug = predecessor.slug.clone();
+    record_project(store, wave, &completed).await?;
+    Ok(())
 }
 
 pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResult<()> {
@@ -337,7 +837,7 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
         .truncate(false)
         .open(path.join(format!("{}.lock", wave.id())))
         .map_err(error)?;
-    // OS ownership releases on crash; durable receipts make the next holder a resumer.
+    // OS ownership releases on crash; provider state makes the next holder a resumer.
     for _ in 0..300 {
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(file),
@@ -352,322 +852,18 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
     ))
 }
 
-pub(crate) async fn rotate(
-    repo: &Path,
-    request: &NewChapterRequest,
-    dry_run: bool,
-) -> OpsResult<Chapter> {
-    request.content.validate().map_err(error)?;
-    let store = pm_store().await?;
-    let name = match request.wave.as_deref() {
-        Some(name) => resolve_wave(Some(name))?,
-        None => crate::work::wave::context::resolve_managed_wave(
-            Some(&store),
-            Some(repo),
-            None,
-            std::env::var(crate::work::wave::context::WAVE_ID_ENV)
-                .ok()
-                .as_deref(),
-        )
-        .await
-        .map_err(error)?
-        .name()
-        .to_string(),
-    };
-    let locator = WaveLocator::discover(repo, &name).map_err(error)?;
-    let wave = if dry_run {
-        store
-            .get_wave_at(&locator)
-            .await
-            .map_err(error)?
-            .ok_or_else(|| error("initialize the Wave before previewing its first chapter"))?
-    } else {
-        crate::controller::wave::registry::ensure_wave_row(&store, repo, &name)
-            .await
-            .map_err(error)?
-    };
-    if !dry_run {
-        require_chapter_home(&store, &wave).await?;
-    }
-    let _lock = if dry_run {
-        None
-    } else {
-        Some(rotation_lock(&wave).await?)
-    };
-    let existing = store
-        .chapter(wave.id(), Some(&request.chapter))
-        .await
-        .map_err(error)?;
-    if let Some(chapter) = &existing {
-        if chapter.content != request.content {
-            return Err(error("this chapter id already has different content; update its plan explicitly or use a new id"));
-        }
-        if chapter.phase == ChapterPhase::Complete {
-            return Ok(chapter.clone());
-        }
-    }
-    // Once activated, resume the recorded boundary even if instruments changed.
-    // Task transfers must not depend on resampling already-frozen metric evidence.
-    if existing
-        .as_ref()
-        .is_none_or(|chapter| chapter.activated_at.is_none())
-    {
-        super::metrics::validate_chapter_targets(&wave, &request.content.metric_targets)
-            .map_err(error)?;
-    }
-    let ctx = resolve_context(repo, &name).await?;
-    let mut chapter = match existing {
-        Some(mut chapter) => {
-            if dry_run && chapter.activated_at.is_none() {
-                refresh_boundary(repo, &store, &wave, &ctx, &mut chapter).await?;
-            }
-            chapter
-        }
-        None => {
-            if store
-                .chapters(wave.id())
-                .await
-                .map_err(error)?
-                .iter()
-                .any(|chapter| chapter.phase != ChapterPhase::Complete)
-            {
-                return Err(error(
-                    "resume the unfinished chapter before starting another",
-                ));
-            }
-            let snapshot = fetch_pm_snapshot(repo, &name, &ctx).await?;
-            let tasks =
-                rotation_tasks(&store, &wave, &ctx, &snapshot.projects, snapshot.items).await?;
-            Chapter {
-                predecessor_metrics: Vec::new(),
-                id: request.chapter.clone(),
-                wave_id: wave.id().clone(),
-                wave: name.clone(),
-                project_id: uuid::Uuid::new_v4().to_string(),
-                content: request.content.clone(),
-                predecessors: snapshot.projects,
-                tasks,
-                phase: if dry_run {
-                    ChapterPhase::Preview
-                } else {
-                    ChapterPhase::Preparing
-                },
-                created_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                activated_at: None,
-                completed_at: None,
-                error: None,
-            }
-        }
-    };
-    if dry_run {
-        chapter.phase = ChapterPhase::Preview;
-        for index in 0..chapter.tasks.len() {
-            if chapter.activated_at.is_some() && !chapter.tasks[index].applied {
-                chapter.tasks[index] =
-                    refresh_disposition(&store, &ctx, &chapter, &chapter.tasks[index]).await?;
-            }
-        }
-        return Ok(chapter);
-    }
-    chapter.error = None;
-    store.save_chapter(&chapter, false).await.map_err(error)?;
-    if let Err(cause) = apply_rotation(repo, &store, &wave, &ctx, &mut chapter).await {
-        let failure = format!(
-            "{cause}; retry `lf wave new-chapter --wave {} --chapter {}`",
-            wave.name(),
-            chapter.id.as_str()
-        );
-        chapter.error = Some(failure.clone());
-        store.save_chapter(&chapter, false).await.map_err(|cause| {
-            error(format!(
-                "{failure}; failed to persist chapter recovery: {cause}"
-            ))
-        })?;
-    }
-    Ok(chapter)
-}
-
-async fn rotation_tasks(
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    predecessors: &[PmProject],
-    mut items: Vec<PmItem>,
-) -> OpsResult<Vec<ChapterTask>> {
-    let projects = store.list_projects(Some(wave.id())).await.map_err(error)?;
-    for task in store.list_tasks(Some(wave.id())).await.map_err(error)? {
-        let belongs = projects.iter().any(|project| {
-            project.id == task.project_id
-                && predecessors
-                    .iter()
-                    .any(|plan| plan.id == project.plan.id.as_str())
-        });
-        if !belongs || items.iter().any(|item| item.id == task.plan.id.as_str()) {
-            continue;
-        }
-        // A list omission is not evidence that durable predecessor work disappeared.
-        let (item, _) = ctx
-            .client
-            .issue_ownership(task.plan.id.as_str())
-            .await
-            .map_err(|cause| {
-                error(format!(
-                    "{}: chapter Task evidence unavailable: {cause}",
-                    task.plan.identifier
-                ))
-            })?;
-        if !predecessors.iter().any(|plan| plan.id == item.project_id) {
-            return Err(error(format!(
-                "{}: provider membership conflicts with its recorded chapter; reconcile the Task before rotating",
-                task.plan.identifier
-            )));
-        }
-        items.push(item);
-    }
-    let mut tasks = Vec::new();
-    for item in items {
-        tasks.push(disposition(store, item).await?);
-    }
-    Ok(tasks)
-}
-
-async fn refresh_boundary(
-    repo: &Path,
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    chapter: &mut Chapter,
-) -> OpsResult<()> {
-    let snapshot = fetch_pm_snapshot(repo, wave.name(), ctx).await?;
-    let predecessors: Vec<_> = snapshot
-        .projects
-        .into_iter()
-        .filter(|project| project.id != chapter.project_id)
-        .collect();
-    let items = snapshot
-        .items
-        .into_iter()
-        .filter(|item| item.project_id != chapter.project_id)
-        .collect();
-    let tasks = rotation_tasks(store, wave, ctx, &predecessors, items).await?;
-    // Keep the previous complete boundary if any fresh evidence is unavailable.
-    chapter.predecessors = predecessors;
-    chapter.tasks = tasks;
-    Ok(())
-}
-
-async fn refresh_disposition(
-    store: &Store,
-    ctx: &PmContext,
-    chapter: &Chapter,
-    recorded: &ChapterTask,
-) -> OpsResult<ChapterTask> {
-    let local = store
-        .get_task_by_issue(&recorded.task.id)
-        .await
-        .map_err(error)?;
-    let retired = if let Some(task) = &local {
-        store
-            .chapter_task_evidence(&task.id)
-            .await
-            .map_err(error)?
-            .abandoned
-    } else {
-        false
-    };
-    // A retired issue may no longer support the ordinary ownership read. The
-    // captured boundary supplies identity; only positive provider evidence can
-    // acknowledge a deletion whose response or local receipt was lost.
-    if chapter.activated_at.is_some()
-        && (recorded.disposition == TaskDisposition::Abandon || retired)
-        && ctx
-            .client
-            .item_is_deleted(&recorded.task.id)
-            .await
-            .map_err(error)?
-    {
-        let mut decision = recorded.clone();
-        if local.is_some() {
-            let current = disposition(store, recorded.task.clone()).await?;
-            if !retired || current.disposition != TaskDisposition::Historical {
-                decision.disposition = TaskDisposition::Unresolved;
-                decision.reason = format!(
-                    "Linear deletion conflicts with local retirement: {}",
-                    current.reason
-                );
-                return Ok(decision);
-            }
-        }
-        decision.disposition = TaskDisposition::Abandon;
-        decision.reason = "reconcile confirmed Linear deletion".into();
-        return Ok(decision);
-    }
-    let (fresh, _) = ctx
-        .client
-        .issue_ownership(&recorded.task.id)
-        .await
-        .map_err(error)?;
-    let mut decision = disposition(store, fresh).await?;
-    if decision.task.project_id != chapter.project_id
-        && !chapter
-            .predecessors
-            .iter()
-            .any(|project| project.id == decision.task.project_id)
-    {
-        decision.disposition = TaskDisposition::Unresolved;
-        decision.reason =
-            "provider membership is outside this chapter transition; reconcile the Task before retrying"
-                .into();
-    }
-    if decision.disposition == TaskDisposition::Unresolved {
-        return Ok(decision);
-    }
-    // Preview and application reconcile the same successful, unacknowledged effects.
-    if decision.task.project_id == chapter.project_id {
-        decision.disposition = TaskDisposition::Move;
-        decision.reason = "reconcile recorded chapter transfer".into();
-    } else if !decision.task.completed
-        && matches!(
-            decision.task.state.as_deref(),
-            Some("backlog" | "unstarted" | "triage" | "canceled")
-        )
-        && (retired
-            || (recorded.disposition == TaskDisposition::Abandon
-                && decision.task.state.as_deref() == Some("canceled")))
-    {
-        decision.disposition = TaskDisposition::Abandon;
-        decision.reason = "reconcile recorded backlog retirement".into();
-    }
-    Ok(decision)
-}
-
 async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
     let mut evidence = TaskStartEvidence {
         begun: false,
         worker_claimed: false,
-        authored: Some(false),
+        // This Home's missing Task row says nothing about work on another Home.
+        authored: None,
         published: false,
         abandoned: false,
         completed: false,
     };
     if let Some(task) = store.get_task_by_issue(&item.id).await.map_err(error)? {
         evidence = store.chapter_task_evidence(&task.id).await.map_err(error)?;
-        let home = crate::store::observability_home_dir();
-        #[cfg(test)]
-        let home = super::pm::PM_TEST_CONTEXT
-            .try_with(|context| context.path.with_extension("runs"))
-            .unwrap_or(home);
-        evidence.begun |=
-            crate::run_record::scan_runs_since(&home, task.created_at.unix_timestamp())
-                .map_err(error)?
-                .iter()
-                .any(|run| {
-                    run.subject("task").is_some_and(|subject| {
-                        subject == task.id.as_str()
-                            || subject == task.plan.id.as_str()
-                            || subject == task.plan.identifier
-                    })
-                });
         let prs = store.task_prs(&task.id).await.map_err(error)?;
         evidence.published = prs
             .iter()
@@ -685,219 +881,85 @@ async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
         task: item,
         disposition,
         reason,
-        applied: false,
         observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        at_boundary: false,
     })
 }
 
-async fn ensure_successor(
-    repo: &Path,
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    chapter: &Chapter,
-) -> OpsResult<Project> {
-    let title = format!("Chapter {}", chapter.id.as_str());
-    let linear_name = linear_project_name(repo, wave.name(), &title).await?;
-    let project = match ctx.client.project_ownership(&chapter.project_id).await {
-        Ok(project) => project,
-        Err(_) => {
-            let create = ctx
-                .client
-                .create_project(
-                    &ctx.initiative,
-                    &linear_name,
-                    &chapter.content,
-                    Some(&chapter.project_id),
-                )
-                .await;
-            match ctx.client.project_ownership(&chapter.project_id).await {
-                Ok(project) => project,
-                Err(read_error) => return Err(error(create.err().unwrap_or(read_error))),
-            }
-        }
-    };
-    if project.name != linear_name || !project.team_ids.contains(&ctx.team_id) {
-        return Err(error(
-            "successor identity conflicts with the recorded chapter",
-        ));
-    }
-    if !project.initiative_ids.contains(&ctx.initiative) {
-        ctx.client
-            .attach_project(&ctx.initiative, &chapter.project_id)
-            .await
-            .map_err(error)?;
-    }
-    if let Some(project) = store
-        .get_project_by_project(&chapter.project_id)
-        .await
-        .map_err(error)?
-    {
-        return Ok(project);
-    }
-    let now = time::OffsetDateTime::now_utc();
-    let project = Project {
-        id: ProjectId::new(),
-        plan: super::project::project_plan(&project, now.unix_timestamp())?,
-        wave_id: wave.id().clone(),
-        iteration: 0,
-        abandon_intent: None,
-        created_at: now,
-        updated_at: now,
-    };
-    store.create_project(&project).await.map_err(error)?;
-    Ok(project)
+/// Missing local evidence is distinct from evidence that no work began.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskStartEvidence {
+    pub begun: bool,
+    pub worker_claimed: bool,
+    pub authored: Option<bool>,
+    pub published: bool,
+    pub abandoned: bool,
+    pub completed: bool,
 }
 
-async fn apply_rotation(
-    repo: &Path,
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    chapter: &mut Chapter,
-) -> OpsResult<()> {
-    // Re-enumerate before cutover: a Task created since preview belongs in the receipt.
-    if chapter.activated_at.is_none() {
-        refresh_boundary(repo, store, wave, ctx, chapter).await?;
-        store.save_chapter(chapter, false).await.map_err(error)?;
+pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDisposition, String) {
+    let state = task.state.as_deref();
+    let terminal = matches!(state, Some("completed" | "canceled" | "duplicate")) || task.completed;
+    if evidence.abandoned
+        && !terminal
+        && (state == Some("started")
+            || evidence.worker_claimed
+            || evidence.begun
+            || evidence.published
+            || evidence.authored != Some(false))
+    {
+        let reason = if evidence.authored.is_none() {
+            "local retirement has unavailable checkout evidence"
+        } else {
+            "local retirement conflicts with refreshed start evidence"
+        };
+        return (TaskDisposition::Unresolved, reason.into());
     }
-    if chapter.activated_at.is_none() {
-        if let Some(task) = chapter
-            .tasks
-            .iter()
-            .find(|task| task.disposition == TaskDisposition::Unresolved)
-        {
-            return Err(error(format!("{}: {}", task.task.identifier, task.reason)));
-        }
+    if evidence.completed && !terminal {
+        return (
+            TaskDisposition::Unresolved,
+            "local completion awaits provider settlement".into(),
+        );
     }
-    let successor = ensure_successor(repo, store, wave, ctx, chapter).await?;
-    if chapter.activated_at.is_none() {
-        let evaluated_at = time::OffsetDateTime::now_utc();
-        chapter.predecessor_metrics.clear();
-        for plan in &chapter.predecessors {
-            let portfolio = super::metrics::chapter_metric_portfolio(
-                store,
-                wave,
-                &plan.metric_targets,
-                evaluated_at,
-            )
-            .await
-            .map_err(error)?;
-            chapter.predecessor_metrics.push(ChapterMetricEvidence {
-                project_id: plan.id.clone(),
-                evaluated_at: evaluated_at.unix_timestamp(),
-                portfolio,
-            });
-        }
-        chapter.activated_at = Some(evaluated_at.unix_timestamp());
-        for task in &mut chapter.tasks {
-            task.at_boundary = true;
-        }
-        chapter.phase = ChapterPhase::Transferring;
-        store.save_chapter(chapter, true).await.map_err(error)?;
+    if evidence.abandoned && !terminal && !evidence.completed {
+        return (
+            TaskDisposition::Abandon,
+            "finish confirmed local backlog retirement".into(),
+        );
     }
-    for index in 0..chapter.tasks.len() {
-        if chapter.tasks[index].applied {
-            continue;
+    if terminal || evidence.completed {
+        if evidence.worker_claimed {
+            return (
+                TaskDisposition::Unresolved,
+                "terminal planning state conflicts with an active worker claim".into(),
+            );
         }
-        let original = chapter.tasks[index].task.clone();
-        let mut decision = refresh_disposition(store, ctx, chapter, &chapter.tasks[index]).await?;
-        let local = store.get_task_by_issue(&original.id).await.map_err(error)?;
-        if decision.disposition == TaskDisposition::Abandon {
-            if let Some(task) = &local {
-                if !store
-                    .retire_chapter_backlog(&task.id)
-                    .await
-                    .map_err(error)?
-                {
-                    decision = disposition(store, decision.task).await?;
-                    if decision.disposition == TaskDisposition::Abandon {
-                        decision.disposition = TaskDisposition::Unresolved;
-                        decision.reason =
-                            "Task changed during retirement; refresh its execution evidence".into();
-                    }
-                }
-            }
-        }
-        chapter.tasks[index].disposition = decision.disposition;
-        chapter.tasks[index].reason = decision.reason;
-        store.save_chapter(chapter, false).await.map_err(error)?;
-        match decision.disposition {
-            TaskDisposition::Move => {
-                if decision.task.project_id != chapter.project_id {
-                    ctx.client
-                        .move_item_to_project(&original.id, &chapter.project_id)
-                        .await
-                        .map_err(error)?;
-                }
-                if let Some(task) = local {
-                    store
-                        .move_chapter_task(&task.id, &successor.id)
-                        .await
-                        .map_err(error)?;
-                }
-            }
-            TaskDisposition::Abandon => {
-                ctx.client.delete_item(&original.id).await.map_err(error)?;
-            }
-            TaskDisposition::Historical => {}
-            TaskDisposition::Unresolved => {
-                return Err(error(format!(
-                    "{}: {}",
-                    original.identifier, chapter.tasks[index].reason
-                )))
-            }
-        }
-        *chapter = store
-            .record_chapter_task_applied(chapter, &original.id)
-            .await
-            .map_err(error)?;
+        return (
+            TaskDisposition::Historical,
+            "work is already terminal".into(),
+        );
     }
-    // External Task filing can race with cutover. Never archive unseen work.
-    let mut added = false;
-    for predecessor in &chapter.predecessors {
-        for item in ctx
-            .client
-            .list_items(&predecessor.id)
-            .await
-            .map_err(error)?
-        {
-            if !chapter.tasks.iter().any(|task| task.task.id == item.id) {
-                chapter.tasks.push(disposition(store, item).await?);
-                added = true;
-            }
-        }
+    if evidence.worker_claimed
+        || evidence.begun
+        || evidence.published
+        || evidence.authored == Some(true)
+        || state == Some("started")
+    {
+        return (
+            TaskDisposition::Move,
+            "work has started; retain its identity and execution".into(),
+        );
     }
-    if added {
-        store.save_chapter(chapter, false).await.map_err(error)?;
-        return Err(error(
-            "new Tasks appeared during rotation; retry this chapter to reconcile them",
-        ));
+    if evidence.authored == Some(false) && matches!(state, Some("backlog" | "unstarted" | "triage"))
+    {
+        return (
+            TaskDisposition::Abandon,
+            "unstarted backlog expires at the chapter boundary".into(),
+        );
     }
-    for predecessor in &chapter.predecessors {
-        ctx.client
-            .archive_project(&predecessor.id)
-            .await
-            .map_err(error)?;
-        if let Some(project) = store
-            .get_project_by_project(&predecessor.id)
-            .await
-            .map_err(error)?
-        {
-            let work = WorkRef::Project(project.id);
-            if store.work_status(&work).await.map_err(error)? == crate::durable::WorkStatus::Ready {
-                store
-                    .abandon(&work, "chapter replaced")
-                    .await
-                    .map_err(error)?;
-            }
-        }
-    }
-    refresh_pm_snapshot(repo, wave.name(), ctx).await?;
-    chapter.phase = ChapterPhase::Complete;
-    chapter.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    store.save_chapter(chapter, false).await.map_err(error)
+    (
+        TaskDisposition::Unresolved,
+        "start evidence is unavailable; refresh before retiring this Task".into(),
+    )
 }
 
 #[cfg(test)]

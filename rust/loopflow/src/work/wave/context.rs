@@ -24,8 +24,8 @@ pub fn resolve_ambient_wave_name() -> Option<String> {
         .map(|wave| wave.name().to_string())
 }
 
-/// The run-attribution decision for the current process: the wave name to
-/// attribute a run to (if any), plus a classified failure to record when a
+/// The Exec attribution decision for the current process: the wave name to
+/// attribute an Exec to (if any), plus a classified failure to record when a
 /// supplied managed identity failed validation.
 ///
 /// - valid UUID or registered repository-local name → `wave: Some(name)`, `failure: None`
@@ -35,28 +35,28 @@ pub fn resolve_ambient_wave_name() -> Option<String> {
 ///   naming the stale source and the safe explicit recovery (`--wave <name>`)
 ///
 /// Attribution is non-fatal: a stale identity is never silently re-attributed to
-/// a wave inferred from the worktree. The run records `None` and the failure so
+/// a wave inferred from the worktree. The command journal records `None` and the failure so
 /// the stale source stays visible and actionable; see W2-239.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunAttribution {
+pub struct ExecAttribution {
     pub wave: Option<String>,
     pub failure: Option<String>,
 }
 
-/// The run-attribution decision for the current process environment inside
-/// `repo`. One classification shared by every trace/run attribution site
-/// ([`crate::journal::ensure_run_context`] and the `lf` run wrapper).
-pub fn run_attribution(repo: Option<&Path>) -> RunAttribution {
+/// The Exec attribution decision for the current process environment inside
+/// `repo`. One classification shared by every trace/Exec attribution site
+/// ([`crate::journal::ensure_run_context`] and the `lf` Exec wrapper).
+pub fn exec_attribution(repo: Option<&Path>) -> ExecAttribution {
     match resolve_managed_wave_sync(repo, None) {
-        Ok(wave) => RunAttribution {
+        Ok(wave) => ExecAttribution {
             wave: Some(wave.name().to_string()),
             failure: None,
         },
-        Err(WaveResolveError::NoContext) => RunAttribution {
+        Err(WaveResolveError::NoContext) => ExecAttribution {
             wave: None,
             failure: None,
         },
-        Err(error) => RunAttribution {
+        Err(error) => ExecAttribution {
             wave: None,
             failure: Some(attribution_failure_text(&error)),
         },
@@ -442,7 +442,7 @@ fn render_wave_memory(base: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// `run_attribution` keeps the classified failure instead of swallowing it.
+    /// `exec_attribution` keeps the classified failure instead of swallowing it.
     /// Absent context is `(None, None)` — worktree inference stays a legitimate
     /// fallback for it alone. A hand-set name resolves through the same scoped
     /// registry as every interactive command; an unregistered name is stale context,
@@ -451,7 +451,8 @@ mod tests {
     fn run_attribution_classifies_absent_context_and_hand_set_names() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let previous = std::env::var(WAVE_ID_ENV).ok();
-        let repo = crate::repo::find_repo_root().unwrap();
+        let fixture = loopflow_test_support::TestRepo::new();
+        let repo = fixture.path().to_path_buf();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -469,17 +470,17 @@ mod tests {
         });
 
         std::env::remove_var(WAVE_ID_ENV);
-        let absent = run_attribution(Some(&repo));
+        let absent = exec_attribution(Some(&repo));
         assert_eq!(absent.wave, None);
         assert_eq!(absent.failure, None);
 
         std::env::set_var(WAVE_ID_ENV, "product");
-        let named = run_attribution(Some(&repo));
+        let named = exec_attribution(Some(&repo));
         assert_eq!(named.wave.as_deref(), Some("product"));
         assert_eq!(named.failure, None);
 
         std::env::set_var(WAVE_ID_ENV, "ghost");
-        let unregistered = run_attribution(Some(&repo));
+        let unregistered = exec_attribution(Some(&repo));
         assert_eq!(unregistered.wave, None);
         assert!(unregistered
             .failure

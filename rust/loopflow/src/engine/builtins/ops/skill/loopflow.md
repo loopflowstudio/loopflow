@@ -4,7 +4,7 @@ description: Control Loopflow from a live terminal conversation.
 
 # Terminal control
 
-When the human wants to step back and rethink a Task mid-flight, use
+When the user wants to step back and rethink a Task mid-flight, use
 `concept-review` to examine its product concepts, core types, and APIs together.
 
 Keep this conversation open as the User's terminal-native Loopflow control
@@ -16,18 +16,18 @@ At the beginning of every User turn, and again after any Session mutation, run:
 lf session list --json
 ```
 
-Treat that command as the only current unresolved work awaiting review. Never rely
+Use the fresh list to identify conversations and unresolved reviews. Never rely
 on Session content remembered from an earlier turn or embedded in the launch
 prompt.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
-repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf
-status` is already single-Wave and repo-resolved.
+repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
+status` resolves one Wave within the repository.
 
 When the User selects a Session, run `lf session open <session-id> --json`.
-It prepares or recovers the boundary's ordinary provider Run and returns its
+It prepares or recovers the boundary's AgentSession and captured input and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
 the conversation opened; verify provider readiness in the requested terminal.
@@ -37,7 +37,7 @@ installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new session,
+ordinary `lf --as <work> : "<prompt>"` contribution. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
 ## Launching and advancing work
@@ -65,13 +65,28 @@ lf task run <existing-issue> --flow <chosen-flow>
 Stdin becomes the durable Task description; `--directive` supplies worker
 direction and does not replace that brief.
 
-Use an explicit `--flow` the user selected; otherwise use the Wave chapter's current
-recommendation. Read the actual Flow before describing its review gates. Do not
-infer policy from obsolete fix/feature flags or first/loop/finally settings.
+Use an explicit `--flow` the user selected; otherwise use the current Linear
+Project's required `flow:` default. Read the actual Flow before describing its
+review gates. Do not infer policy from obsolete fix/feature flags or
+first/loop/finally settings.
 
-Chapter planning edits use `lf wave update-plan`; chapter replacement uses
-`lf wave new-chapter` with its preview and resumable receipt. Select the Wave;
-its current internal Project is resolved automatically.
+Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
+The complete content object has `metric_targets`, a nonempty `flow` string and
+`krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
+It updates the Wave's one In Progress Linear Project. Planned Projects hold
+future plans; Completed Projects retain history. Future plan edits require an
+available authorized Linear writer, not a current-plan update.
+
+Chapter rotation is repository-wide: preview with
+`lf repo new-chapter <name> --dry-run --json`, then apply the accepted name with
+`lf repo new-chapter <name> --json`. It takes no plan file or per-Wave selector.
+Respect the start-chapter direction and plan-review gates; prior authorization
+still applies. Retry interruptions with the same name against fresh Linear
+state. Started unfinished Tasks retain identity and execution; proven untouched
+backlog is canceled, retaining issues and history. Predecessor Projects become
+Completed. Missing evidence and competing plans require resolution, never a
+new name chosen to bypass them. Rotation output is dated evidence, not another
+durable Chapter owner.
 
 Select from the installed catalog: `feature` runs design review, repeats
 implement → compress → refresh → loop-decide, publishes after convergence, then parks
@@ -130,7 +145,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Use the Flow the user selected and inspect its contents when explaining where it
-begins; otherwise use the Wave chapter recommendation. Continue the design already
+begins; otherwise use the current Project's Flow default. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify
 supplied context separately from worker startup.
@@ -155,9 +170,11 @@ be forwarded; durable workers use credentials installed on their Home.
 Prepare a Task without launching it with `lf task checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
-selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
-asserts the existing identity. A bounded Run does not advance the Work's Flow
-or claim exclusive ownership. Task execution uses its existing checkout.
+attributes a skill, inline prompt, or Flow. Attribution resolves this command's
+`--as`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
+Process ancestry supplies no Work attribution. A direct contribution does not
+advance the Task's selected managed Flow or claim exclusive ownership. `task run`
+sets the same declaration and drives the ordinary Flow in the Task checkout.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
@@ -170,10 +187,10 @@ to the parent's active PR. Never create another branch for the same Task.
 When evidence invalidates the attempt, update the Task and wait for required
 contributions, then `lf task restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
-and starts the chapter's recommended Flow fresh. It interrupts an exact live
-Task worker; independent bounded Runs remain independent. Reconcile prior
+and starts the current Project's default Flow fresh. It interrupts an exact live
+Task worker; other attributed Flows and conversations remain independent. Reconcile prior
 scratch against the new evidence rather than treating it as approved design.
-An explicitly selected Flow governs even when it differs from that recommendation.
+An explicitly selected Flow governs even when it differs from that default.
 
 ## Diagnose execution and auth
 

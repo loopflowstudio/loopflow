@@ -3,8 +3,11 @@ pub mod ask;
 pub mod auth;
 pub mod ci;
 pub mod desktop;
+pub mod discord;
 pub mod doctor;
+pub mod exec;
 pub mod flow;
+pub mod flow_inventory;
 pub mod home;
 pub mod install;
 pub mod list;
@@ -31,19 +34,4 @@ pub(crate) struct WorkFilter<'a> {
     pub wave: Option<&'a str>,
     pub project: Option<&'a str>,
     pub task: Option<&'a str>,
-}
-
-impl WorkFilter<'_> {
-    pub(crate) fn matches(
-        &self,
-        wave: Option<&str>,
-        project: Option<&str>,
-        task: Option<&str>,
-    ) -> bool {
-        self.wave.is_none_or(|expected| wave == Some(expected))
-            && self
-                .project
-                .is_none_or(|expected| project == Some(expected))
-            && self.task.is_none_or(|expected| task == Some(expected))
-    }
 }

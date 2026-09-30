@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::id::WaveId;
 use crate::work::project::ProjectId;
 use crate::work::task::TaskId;
 
@@ -65,13 +64,6 @@ pub(crate) use prefixed_uuid_id;
 pub enum ChildDataError {
     #[error("invalid child Work id: {0}")]
     InvalidId(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ObservationRecipient {
-    Wave { wave_id: WaveId },
-    Project { project_id: ProjectId },
 }
 
 /// Typed audit record for a body handoff. Work and Run identity are intentionally

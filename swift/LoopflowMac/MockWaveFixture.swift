@@ -75,7 +75,7 @@ enum MockWaveFixture {
         var result: [String: WavePlan] = [:]
         for wave in waves {
             let key = PortfolioRepoState.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            result[key] = WavePlan(objective: objective(for: wave.name), chapter: wave.name == detailWaveName ? selectedWaveDetail()?.chapter : nil)
+            result[key] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
         }
         return result
     }
@@ -247,24 +247,9 @@ enum MockWaveFixture {
             "truncated": false,
             "items": [
               {
-                "id": "run_00000000000000000000000000000001",
-                "parent_run_id": null,
                 "repo": "/src/loopflow",
                 "worktree": "/src/loopflow.task",
-                "subjects": [
-                  {
-                    "selector": "wave:infrastructure",
-                    "source": "declared"
-                  },
-                  {
-                    "selector": "task:INF-123",
-                    "source": "declared"
-                  }
-                ],
                 "skill": "task/pursue",
-                "outcome": "completed",
-                "started": 1784052000,
-                "ended": 1784052600,
                 "usage": {
                   "streams": 1,
                   "final_streams": 1,
@@ -282,41 +267,45 @@ enum MockWaveFixture {
                 "evidence_gaps": 0,
                 "harness": "codex",
                 "model": "gpt-5",
-                "surface": "headless"
+                "surface": "headless",
+                "first_provider_attempt_at": 1784052010,
+                "task_pr_id": "pr_33333333333333333333333333333333",
+                "session_id": "run_00000000000000000000000000000001",
+                "providers": [],
+                "task_id": "task_22222222222222222222222222222222",
+                "wave_id": "11111111-1111-4111-8111-111111111111",
+                "task_identifier": "INF-123",
+                "wave_name": "infrastructure",
+                "work_source": null,
+                "artifact_key": "run_00000000000000000000000000000001",
+                "captured": 12,
+                "caller_artifact_key": null,
+                "observed_at": 1784052000,
+                "recorded_outcome": "completed",
+                "recorded_at": 1784052600
               }
             ]
           },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "ssh://jack@mini-heart",
-              "created_at": "2026-07-01T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            },
-            "state": "running",
-            "reason": "resident is serving on the Home",
-            "endpoint": "127.0.0.1:7777",
-            "action": {
-              "kind": "attach",
-              "endpoint": "127.0.0.1:7777"
-            }
-          },
-          "chapter": {
-            "id": "current",
-            "source_project_id": "project-1",
-          "source_project_slug": "release-feedback",
-            "metric_targets": [],
-            "flows": {
-              "recommended": "incident"
-            },
-            "krs": [
+          "projects": {
+            "state": "ok",
+            "items": [
               {
-                "text": "Every failed run has an owner",
-                "holds": false
+                "id": "project-1",
+                "work_id": null,
+                "slug": "release-feedback",
+                "name": "current",
+                "flow": "incident",
+                "status": "started",
+                "metric_targets": [],
+                "krs": [
+                  {
+                    "text": "Every failed run has an owner",
+                    "holds": false
+                  }
+                ]
               }
             ],
-            "phase": "complete",
-            "error": null
+            "truncated": false
           },
           "tasks": {
             "state": "ok",

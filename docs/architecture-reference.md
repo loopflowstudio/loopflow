@@ -24,7 +24,9 @@ schemas and old format readers. The cutover retains current Work and links,
 accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf session connect` has `open` as
-an alias; `--replace` replaces an owned client. The explicit conversation/engine
+an alias; `--replace` stops owned clients and connects through the same live
+Codex engine, preserving its active turn and other conversations. It does not
+restart that engine. The explicit conversation/engine
 restart contract below has no public `--restart` flag yet. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier

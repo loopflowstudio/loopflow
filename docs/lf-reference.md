@@ -760,10 +760,13 @@ existing Wave and Flow constraints are checked by the binding transaction.
 
 Connect uses the live engine where possible and retains conversation identity,
 name, feedback and native history. The new driver receives write authority; the
-old client can remain a passive display. Restart explicitly replaces the exact
-conversation owner. It preserves recorded history and does not kill a shared
-engine or its other conversations. Unsubmitted editor text requires its own
-surface-preservation proof.
+old client can remain a passive display. `--replace` stops Loopflow-owned clients
+before connecting here; with a live Codex engine, the active turn and sibling
+conversations continue in that engine. `--json --replace` prepares the command
+without stopping clients or transferring the driver. Engine restart is not
+exposed by this flag; its remaining contract is tracked in the
+[cutover status](architecture-reference.md#cutover-status).
+Unsubmitted editor text requires its own surface-preservation proof.
 
 Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered
 Task checkout supplies it when no explicit selector is present. A conversation

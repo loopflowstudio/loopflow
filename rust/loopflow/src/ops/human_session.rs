@@ -1361,8 +1361,13 @@ pub(crate) async fn open(
         {
             let native = NativeRun::of(session)?;
             let provider_session = native.history(store, session)?;
+            if resume {
+                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+                if mode == OpenMode::Replace {
+                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+                }
+            }
             if resume
-                && mode != OpenMode::Replace
                 && native.provider == "codex"
                 && connect_live_codex(store, session, &native.dir, &provider_session).await?
             {
@@ -1372,9 +1377,6 @@ pub(crate) async fn open(
                     .ok_or_else(|| session_not_found(&session.id))?;
                 return surface(store, &session).await;
             }
-            if resume {
-                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-            }
             match mode {
                 OpenMode::Refuse if !native.clients()?.is_empty() => {
                     require_session_action(
@@ -1383,11 +1385,7 @@ pub(crate) async fn open(
                         SessionActionKind::Open,
                     )?;
                 }
-                OpenMode::Replace if resume => {
-                    native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?
-                }
-                OpenMode::Replace => {}
-                OpenMode::Refuse | OpenMode::Try => {}
+                OpenMode::Replace | OpenMode::Refuse | OpenMode::Try => {}
             }
             let mut result = surface(store, session).await?;
             if resume {

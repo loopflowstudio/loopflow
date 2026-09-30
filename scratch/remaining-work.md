@@ -53,10 +53,11 @@ will not run that proof.
 1. **Code and unresolved behavior.** Keep the implemented three-owner model and
    three direct migrations; do not rebuild historical import or split the PR.
    The Task restart stop path now retains the selected child after claim release;
-   the real-child proof and its boundaries are recorded below. Reconcile the architecture reference's remaining public
-   conversation/engine restart obligation with `session connect --replace`,
-   which currently selects client replacement; implement any missing accepted
-   behavior and its focused proof rather than treating the flag as engine restart.
+   the real-child proof and its boundaries are recorded below. Client replacement
+   now reconnects through the retained live Codex engine; its focused proof is
+   recorded below. Implement the architecture reference's remaining explicit
+   conversation/engine restart contract and its public proof. `session connect
+   --replace` replaces clients and does not satisfy that separate obligation.
    Explicitly disposition the earlier Task-row/publication, stacking and
    refused-start cleanup reports against #1359 and current code. #1359's landing
    alone does not establish all three repaired. Leave `agent_events` and
@@ -120,7 +121,27 @@ fixture-server BrokenPipe diagnostic; the protocol/identity assertions passed.
 consistency and diff checks passed. Website docs were synced. This is not a final
 gate or configured provider/Desktop acceptance.
 
-Checkpoint publication is blocked after local code commit `58ea71c2b`.
+Client replacement implementation, 2026-09-30: `session connect --replace` had
+bypassed the live-engine relay and attempted a separate native resume. It now
+stops the exact owned clients and uses the ordinary fenced connection path.
+The maintained public-connect proof in `tests/e2e/codex_connect.py` reproduced
+that bypass before the fix (`connect-replace-red-3.log`) and passes on the
+candidate (`connect-replace-final-tree.log` and its output directory). Evidence
+lives under `.lf/tmp/test-compress/`. It retains the active turn, sibling
+conversation, native identity, provider generation, history and usage; the next
+agent-issued Exec names the replacement driver. Both prior clients exit, and
+`--replace --json` leaves clients and ownership unchanged. Earlier red-1/2 runs
+were fixture setup failures, not product reproductions. This uses real Codex
+0.157.1 with synthetic local Responses and controlled protocol clients, not
+configured-provider or rendered Desktop acceptance. Explicit engine restart
+remains outstanding. Review also moved the existing deleted-Task check ahead
+of live connection so it cannot be bypassed by a driver handoff.
+`connect-replace-retained-task.log` records the retained/deleted-Task regression
+passing; `connect-replace-clippy.log` records all-target Clippy passing. Build,
+formatting, Ruff, architecture coverage, regenerated HTML consistency and diff
+checks passed. Website docs were synced. No integrated gate ran in this slice.
+
+`lf pr publish` checkpoint publication is blocked after local code commit `58ea71c2b`.
 `lf pr publish` refused: Task LOO-298 records base `00cf9dffe840`, behind the
 merged branch fork `4a696c074073`, and requests `lf rebase`. The accepted merge-only
 direction remains authoritative. `lf rebase --adopt` only controls an existing
@@ -128,6 +149,9 @@ raw rebase; it does not adopt a completed merge. No rebase, direct store edit or
 promotion was performed. This is fresh evidence for the remaining publication
 incident disposition; #1359 alone did not close this path. The supervising
 session needs a supported way to record the merged base before publication.
+LOO-351 owns that repair. Jack Heart's supervising session subsequently
+authorized plain `git push` (never force) for implementation checkpoints while
+it is pending, and retained ownership of the integrated gate and shipping.
 
 ## Before a release migrates ~/.lf
 

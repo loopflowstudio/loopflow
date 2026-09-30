@@ -69,7 +69,7 @@ Home, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
-Read `lf name --json`: a personal Loopflow `user.name` override wins,
+Read `lf user --json`: a personal Loopflow `user.name` override wins,
 otherwise Git's configured `user.name` supplies the baseline. An available name
 needs no additional setup. Agents may also use a name already known in the session.
 In an interactive session, if neither source supplies a name, ask what name to

@@ -1231,6 +1231,69 @@ mod tests {
     }
 
     #[test]
+    fn context_choices_override_config_and_omission_inherits() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("context-choice");
+        repo.create_file("changed.txt", "changed file body\n");
+        repo.stage_all();
+        repo.commit("Add changed content");
+        for configured in [false, true] {
+            repo.create_file(
+                ".lf/config.yaml",
+                &format!(
+                "diff: {configured}\ndiff_files: {configured}\nchrome: {configured}\npaste: false\n"
+            ),
+            );
+            for (choice, files, patch) in [
+                (None, configured, configured),
+                (Some("files"), true, false),
+                (Some("patch"), false, true),
+                (Some("both"), true, true),
+                (Some("none"), false, false),
+            ] {
+                let mut args = vec!["lf", "--batch"];
+                if let Some(choice) = choice {
+                    args.extend(["--diff", choice]);
+                }
+                for browser in [None, Some("on"), Some("off")] {
+                    let mut args = args.clone();
+                    if let Some(browser) = browser {
+                        args.extend(["--chrome", browser]);
+                    }
+                    let cli = Cli::parse_from(args);
+                    let built =
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
+                            .unwrap();
+                    assert_eq!(
+                        built
+                            .components
+                            .diff_files
+                            .iter()
+                            .any(|file| file.content.contains("changed file body")),
+                        files
+                    );
+                    assert_eq!(
+                        built
+                            .components
+                            .diff
+                            .as_ref()
+                            .is_some_and(|diff| diff.contains("+changed file body")),
+                        patch
+                    );
+                    assert_eq!(
+                        built.capabilities.chrome,
+                        browser.map_or(configured, |value| value == "on")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
         let _restore = EnvironmentRestore::capture(&[

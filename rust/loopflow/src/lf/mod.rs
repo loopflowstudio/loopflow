@@ -7,12 +7,26 @@ pub const TASK_SKILL_OPTIONS_ENV: &str = "LF_TASK_SKILL_OPTIONS";
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub mod commands;
 pub mod discovery;
 pub mod navigation;
 pub mod output;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BrowserMode {
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DiffContext {
+    Files,
+    Patch,
+    Both,
+    None,
+}
 
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
@@ -80,29 +94,13 @@ pub struct Cli {
     #[arg(long)]
     pub ide: bool,
 
-    /// Enable Chrome integration (Claude)
-    #[arg(long)]
-    pub chrome: bool,
+    /// Override Chrome integration; omission inherits configuration
+    #[arg(long, value_enum)]
+    pub chrome: Option<BrowserMode>,
 
-    /// Disable Chrome integration (Claude)
-    #[arg(long = "no-chrome", overrides_with = "chrome")]
-    pub no_chrome: bool,
-
-    /// Include files changed on branch
-    #[arg(long = "diff-files")]
-    pub diff_files: bool,
-
-    /// Exclude files changed on branch
-    #[arg(long = "no-diff-files", overrides_with = "diff_files")]
-    pub no_diff_files: bool,
-
-    /// Include raw git diff
-    #[arg(long = "diff")]
-    pub diff: bool,
-
-    /// Exclude raw git diff
-    #[arg(long = "no-diff", overrides_with = "diff")]
-    pub no_diff: bool,
+    /// Select changed-code context; omission inherits configuration
+    #[arg(long, value_enum)]
+    pub diff: Option<DiffContext>,
 
     /// Maximum agent turns for this invocation
     #[arg(long = "max-turns")]
@@ -191,11 +189,7 @@ impl Cli {
             tui: self.tui,
             ide: self.ide,
             chrome: self.chrome,
-            no_chrome: self.no_chrome,
-            diff_files: self.diff_files,
-            no_diff_files: self.no_diff_files,
             diff: self.diff,
-            no_diff: self.no_diff,
             max_turns: self.max_turns,
             wave: self.wave.clone(),
             task: self.task.clone(),
@@ -206,29 +200,18 @@ impl Cli {
         }
     }
 
-    fn toggle_setting(enabled: bool, disabled: bool) -> Option<bool> {
-        if enabled {
-            Some(true)
-        } else if disabled {
-            Some(false)
-        } else {
-            None
-        }
-    }
-
-    /// Get chrome setting: Some(true) if --chrome, Some(false) if --no-chrome, None if neither.
     pub fn chrome_setting(&self) -> Option<bool> {
-        Self::toggle_setting(self.chrome, self.no_chrome)
+        self.chrome.map(|mode| mode == BrowserMode::On)
     }
 
-    /// Get diff_files setting: Some(true) if --diff-files, Some(false) if --no-diff-files, None if neither.
     pub fn diff_files_setting(&self) -> Option<bool> {
-        Self::toggle_setting(self.diff_files, self.no_diff_files)
+        self.diff
+            .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both))
     }
 
-    /// Get diff setting: Some(true) if --diff, Some(false) if --no-diff, None if neither.
     pub fn diff_setting(&self) -> Option<bool> {
-        Self::toggle_setting(self.diff, self.no_diff)
+        self.diff
+            .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both))
     }
 
     /// The most specific Work selected for direct execution.
@@ -261,25 +244,11 @@ pub struct ScreenshotArgs {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum UserCommand {
-    /// Show the display name from personal Loopflow configuration or Git
-    Name {
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Inspect recorded lf processes and their command outcomes
     Exec {
         #[command(subcommand)]
         cmd: commands::exec::ExecCommand,
-    },
-    /// Inspect the current user
-    User {
-        #[command(subcommand)]
-        cmd: UserCommand,
     },
     /// Run an inline prompt
     #[command(name = ":")]
@@ -612,8 +581,6 @@ pub enum FlowCommand {
         #[arg(long)]
         sessions: bool,
     },
-    /// Validate a flow and its review points
-    Validate { name: String },
     /// Continue a saved Flow invocation
     Resume {
         invocation: String,
@@ -1170,8 +1137,6 @@ pub enum PrCommand {
         logs: bool,
     },
 
-    /// Show current branch's PR state
-    Status,
     /// After an out-of-band merge, rotate this Task to its next serial PR,
     /// carrying committed and uncommitted follow-up onto the new branch.
     Next {
@@ -1405,6 +1370,11 @@ pub enum RepoCommand {
 /// Inspect and observe durable Homes.
 #[derive(Debug, Subcommand)]
 pub enum HomeCommand {
+    /// Print the configured participant display name.
+    User {
+        #[arg(long)]
+        json: bool,
+    },
     /// Print this machine's stable local Home identity.
     Id {
         #[arg(long)]

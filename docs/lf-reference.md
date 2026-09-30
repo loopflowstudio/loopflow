@@ -85,7 +85,7 @@ $ lf publish  # lf-doc: ambiguous
 ```
 
 Use an explicit owner to narrow the search. `lf task status` keeps its own
-meaning; inspecting just the PR is `lf task pr status`.
+meaning; inspecting just the PR is `lf task pr`.
 
 Shortcuts have the same arguments and effects as their canonical command.
 `lf help land` shows `lf task pr land`. Examples below use full paths so the
@@ -183,7 +183,7 @@ for skill files and [Configuration](config.md) for defaults.
 
 ```bash
 lf flow show feature
-lf flow validate feature
+lf help flow feature
 lf run code                            # implement and simplify
 lf run queue                           # prepare and verify without publishing
 lf run pursue                          # iterate, publish, and review the demo
@@ -191,6 +191,7 @@ lf run feature                         # design review through delivery
 ```
 
 A flow composes skills and operations. Repository flows live in `.lf/flows/`.
+`lf help flow NAME` also validates expansion and stable review IDs without execution.
 Inspect the definition before choosing its endpoint; starting an agent is not
 the same as asking it to publish or merge.
 
@@ -242,14 +243,13 @@ an ordinary branch stays unbound.
 | `-m, --model MODEL` | Select a provider/model independently of the account |
 | `--docs PATH[,PATH...]` | Add files, directories, or globs to context |
 | `-c, --clipboard` | Include clipboard content |
-| `--diff` / `--no-diff` | Include or omit the raw Git diff |
-| `--diff-files` / `--no-diff-files` | Include or omit changed files |
+| `--diff files\|patch\|both\|none` | Select changed file bodies, patch, both, or neither; omission inherits config |
 | `--no-loopflow` | Omit Loopflow's operating guidance |
 | `-i, --interactive` | Run interactively |
 | `-b, --batch` | Run headlessly |
 | `--max-turns N` | Bound provider turns for this launch |
 | `--tui` / `--ide` | Select terminal or supported provider-app handoff |
-| `--chrome` / `--no-chrome` | Enable or disable browser automation |
+| `--chrome on\|off` | Override browser automation; omission inherits config |
 
 Repository agent guidance, recursive scratch notes, and selected work context
 are assembled automatically. Direct launches leave edits for an explicit
@@ -417,7 +417,7 @@ lf task list                           # work in this repository
 lf task list --wave designer
 lf task list --all                     # work across this Home's repositories
 lf task status                         # Task bound to this checkout
-lf task pr status                      # current branch's PR, with or without a Task
+lf task pr                      # current branch's PR, with or without a Task
 ```
 
 Task commands manage concrete work. Commit, rebase, worktree, and PR operations
@@ -1124,7 +1124,7 @@ credential readiness, and observed capacity are reported separately.
 ```bash
 lf home id --json
 lf home doctor
-lf home user name
+lf home user
 lf home desktop
 lf home install
 lf home install schedule daily
@@ -1232,14 +1232,11 @@ in configuration. Release evidence combines the exact shipped range with
 ```bash
 lf repo reteam                         # preview the repository Team migration
 lf repo reteam --apply
-doppler run -- lf repo webhook register --url https://example.com/linear
-doppler run -- lf repo webhook serve
 ```
 
 Reteam moves linked planning onto the repository's Team and refreshes ownership
 and snapshots. It defers work that can still write an old identifier and resumes
-an incomplete migration. Webhooks deliver connected issue and comment changes
-to the Task workflow; the signing secret is supplied through Doppler.
+an incomplete migration.
 
 ## Scripts and structured output
 

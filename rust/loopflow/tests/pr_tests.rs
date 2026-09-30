@@ -101,6 +101,10 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         );
         output.stdout
     };
+    assert_eq!(
+        String::from_utf8(run(&["pr"])).unwrap().trim(),
+        "No open PR for the current branch."
+    );
     run(&["task", "commit", "-m", "Record local work"]);
     let committed = repo.head_sha();
     assert_ne!(before, committed);
@@ -128,6 +132,8 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
             "No Task required.",
         ]);
         assert_eq!(fs::read_to_string(&state).unwrap(), expected);
+        let status = String::from_utf8(run(&["task", "pr"])).unwrap();
+        assert!(status.contains("#1") && status.contains("https://example.com/pr/1"));
     }
     let remote = Command::new("git")
         .args(["ls-remote", "origin", "refs/heads/ordinary"])

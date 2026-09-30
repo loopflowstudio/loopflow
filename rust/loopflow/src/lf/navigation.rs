@@ -210,9 +210,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         Commands::Help { .. }
             | Commands::List { .. }
             | Commands::Flow {
-                cmd: FlowCommand::List { .. }
-                    | FlowCommand::Show { .. }
-                    | FlowCommand::Validate { .. }
+                cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
             }
     ) {
         return None;
@@ -238,9 +236,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 anyhow::ensure!(!json, "--json requires --sessions for flow show");
                 crate::lf::commands::flow::show(name, &repo)?;
             }
-            Commands::Flow {
-                cmd: FlowCommand::Validate { name },
-            } => crate::lf::commands::flow::validate(name, &repo)?,
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -385,11 +380,15 @@ fn definition_help(
             DefinitionKind::Skill,
             skill.content.clone().unwrap_or_default(),
         ),
-        Target::Flow(flow) => (
-            flow.name.as_str(),
-            DefinitionKind::Flow,
-            crate::lf::discovery::format_written_steps(&flow.items),
-        ),
+        Target::Flow(flow) => {
+            let mut reviews = crate::engine::human_occurrence_ids(flow, repo)?;
+            reviews.sort();
+            let mut description = crate::lf::discovery::format_written_steps(&flow.items);
+            if !reviews.is_empty() {
+                description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
+            }
+            (flow.name.as_str(), DefinitionKind::Flow, description)
+        }
     };
     let label = kind.as_str();
     let source = definition_source(repo, name, kind);

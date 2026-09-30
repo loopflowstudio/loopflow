@@ -140,7 +140,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     for args in [
         vec!["list"],
         vec!["flow", "show", "code"],
-        vec!["flow", "validate", "code"],
+        vec!["help", "flow", "code"],
         vec!["account", "--cached"],
         vec!["account", "--cached", "--details"],
         vec!["account", "route"],

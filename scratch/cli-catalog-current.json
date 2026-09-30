@@ -210,12 +210,10 @@
     "short_aliases": []
   },
   {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
+    "action": "Set",
+    "defaults": [],
     "global": false,
-    "help": "Enable Chrome integration (Claude)",
+    "help": "Override Chrome integration; omission inherits configuration",
     "hidden": false,
     "id": "chrome",
     "kind": "argument",
@@ -229,92 +227,14 @@
     "short_aliases": []
   },
   {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
+    "action": "Set",
+    "defaults": [],
     "global": false,
-    "help": "Disable Chrome integration (Claude)",
-    "hidden": false,
-    "id": "no_chrome",
-    "kind": "argument",
-    "long": "no-chrome",
-    "long_aliases": [],
-    "path": [
-      "lf"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Include files changed on branch",
-    "hidden": false,
-    "id": "diff_files",
-    "kind": "argument",
-    "long": "diff-files",
-    "long_aliases": [],
-    "path": [
-      "lf"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Exclude files changed on branch",
-    "hidden": false,
-    "id": "no_diff_files",
-    "kind": "argument",
-    "long": "no-diff-files",
-    "long_aliases": [],
-    "path": [
-      "lf"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Include raw git diff",
+    "help": "Select changed-code context; omission inherits configuration",
     "hidden": false,
     "id": "diff",
     "kind": "argument",
     "long": "diff",
-    "long_aliases": [],
-    "path": [
-      "lf"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Exclude raw git diff",
-    "hidden": false,
-    "id": "no_diff",
-    "kind": "argument",
-    "long": "no-diff",
     "long_aliases": [],
     "path": [
       "lf"
@@ -459,85 +379,6 @@
     ],
     "required": false,
     "short": "V",
-    "short_aliases": []
-  },
-  {
-    "about": "Inspect the current user",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "user"
-    ]
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "user"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Show the display name from personal Loopflow configuration or Git",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "user",
-      "name"
-    ]
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "user",
-      "name"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "user",
-      "name"
-    ],
-    "required": false,
-    "short": "h",
     "short_aliases": []
   },
   {
@@ -1986,44 +1827,6 @@
     "action": "Set",
     "defaults": [],
     "global": false,
-    "help": "The staged lfd built from the same candidate source",
-    "hidden": false,
-    "id": "daemon_source",
-    "kind": "argument",
-    "long": "daemon-source",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "install",
-      "promote"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "The global lfd symlink to replace (e.g. ~/.local/bin/lfd)",
-    "hidden": false,
-    "id": "daemon_target",
-    "kind": "argument",
-    "long": "daemon-target",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "install",
-      "promote"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
     "help": "A staged Loopflow.app bundle to install alongside the CLI",
     "hidden": false,
     "id": "app_source",
@@ -2177,44 +1980,6 @@
     "id": "candidate",
     "kind": "argument",
     "long": "candidate",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "install",
-      "rollback"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "The global lfd symlink to restore with the CLI",
-    "hidden": false,
-    "id": "daemon_target",
-    "kind": "argument",
-    "long": "daemon-target",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "install",
-      "rollback"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "The retained immutable lfd binary paired with the CLI candidate",
-    "hidden": false,
-    "id": "daemon_candidate",
-    "kind": "argument",
-    "long": "daemon-candidate",
     "long_aliases": [],
     "path": [
       "lf",
@@ -3837,142 +3602,6 @@
     "short_aliases": []
   },
   {
-    "about": "Register or serve Linear webhooks",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "repo",
-      "webhook"
-    ]
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "repo",
-      "webhook"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Run the receiver that turns Linear edits into Task direction. Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler)",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "serve"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [
-      "127.0.0.1:8899"
-    ],
-    "global": false,
-    "help": "Address to bind (a reverse proxy gives Linear the public HTTPS URL)",
-    "hidden": false,
-    "id": "addr",
-    "kind": "argument",
-    "long": "addr",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "serve"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "serve"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Register the Issue/Comment webhook with Linear (one-time). Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "register"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Public HTTPS URL Linear will POST deliveries to",
-    "hidden": false,
-    "id": "url",
-    "kind": "argument",
-    "long": "url",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "register"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "repo",
-      "webhook",
-      "register"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
     "about": "Inspect this Home and observe routes to other Homes",
     "aliases": [],
     "hidden": false,
@@ -3995,6 +3624,57 @@
     "path": [
       "lf",
       "home"
+    ],
+    "required": false,
+    "short": "h",
+    "short_aliases": []
+  },
+  {
+    "about": "Print the configured participant display name",
+    "aliases": [],
+    "hidden": false,
+    "kind": "command",
+    "path": [
+      "lf",
+      "home",
+      "user"
+    ]
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "json",
+    "kind": "argument",
+    "long": "json",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "home",
+      "user"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Help",
+    "defaults": [],
+    "global": false,
+    "help": "Print help",
+    "hidden": false,
+    "id": "help",
+    "kind": "argument",
+    "long": "help",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "home",
+      "user"
     ],
     "required": false,
     "short": "h",
@@ -4871,7 +4551,7 @@
     "short_aliases": []
   },
   {
-    "about": "Serve a Wave or rotate its chapter plan",
+    "about": "Manage Wave identity, placement and planning",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -5096,76 +4776,6 @@
       "lf",
       "wave",
       "status"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Probe a Wave's Home for liveness and the one contextual action",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "wave",
-      "probe"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Wave name; defaults to the ambient wave",
-    "hidden": false,
-    "id": "wave",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "probe"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "probe"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help (see more with '--help')",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "probe"
     ],
     "required": false,
     "short": "h",
@@ -5833,93 +5443,6 @@
     "short_aliases": []
   },
   {
-    "about": "Inspect historical Wave Flow work, or explicitly cancel its saved continuation",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "wave",
-      "recover"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "name",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "recover"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Cancel exactly this journal source sequence without executing its work",
-    "hidden": false,
-    "id": "cancel",
-    "kind": "argument",
-    "long": "cancel",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "recover"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "reason",
-    "kind": "argument",
-    "long": "reason",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "recover"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "wave",
-      "recover"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
     "about": "Replace the plan, carry started Tasks, and retire unopened backlog",
     "aliases": [],
     "hidden": false,
@@ -6187,136 +5710,6 @@
     "short_aliases": []
   },
   {
-    "about": "Internal: connect chat through the owning Home",
-    "aliases": [],
-    "hidden": true,
-    "kind": "command",
-    "path": [
-      "lf",
-      "__chat-connect"
-    ]
-  },
-  {
-    "action": "Append",
-    "defaults": [],
-    "global": false,
-    "help": "Wave names. With none, starts eligible Waves in the current repo",
-    "hidden": false,
-    "id": "waves",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__chat-connect"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Append",
-    "defaults": [],
-    "global": false,
-    "help": "Internal identity bindings carried by an explicit Home SSH hop",
-    "hidden": true,
-    "id": "wave_ids",
-    "kind": "argument",
-    "long": "wave-id",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__chat-connect"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__chat-connect"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__chat-connect"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Internal: the resident body a listener spawns for its own wave. Never booted by hand — the Home daemon owns the listener half",
-    "aliases": [],
-    "hidden": true,
-    "kind": "command",
-    "path": [
-      "lf",
-      "__resident"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Wave name",
-    "hidden": false,
-    "id": "name",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__resident"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "__resident"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
     "about": "Concrete work, worktrees, commits, and pull requests",
     "aliases": [],
     "hidden": false,
@@ -6445,38 +5838,6 @@
       "task",
       "pr",
       "checks"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Show current branch's PR state",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "task",
-      "pr",
-      "status"
-    ]
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "task",
-      "pr",
-      "status"
     ],
     "required": false,
     "short": "h",
@@ -10624,286 +9985,6 @@
     "short_aliases": []
   },
   {
-    "about": "Observe wave-chat message(s) and print a reply only if one is warranted. A direct capability: no listener, resident, or governance loop",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "reply"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Wave name",
-    "hidden": false,
-    "id": "wave",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "reply"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Append",
-    "defaults": [],
-    "global": false,
-    "help": "Recent message text (reads stdin when omitted)",
-    "hidden": false,
-    "id": "text",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "reply"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Override the provider (e.g. `claude`, `codex`); default is configured",
-    "hidden": false,
-    "id": "agent",
-    "kind": "argument",
-    "long": "agent",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "reply"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Cap provider turns for the reply",
-    "hidden": false,
-    "id": "max_turns",
-    "kind": "argument",
-    "long": "max-turns",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "reply"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "reply"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Converse with a Wave; --follow replays its thread",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "chat"
-    ]
-  },
-  {
-    "action": "Append",
-    "defaults": [],
-    "global": false,
-    "help": "Message text (reads stdin when omitted unless --follow or --history)",
-    "hidden": false,
-    "id": "text",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Replay and follow the thread while typed lines post into it",
-    "hidden": false,
-    "id": "follow",
-    "kind": "argument",
-    "long": "follow",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Read the latest durable turns without requiring a live listener",
-    "hidden": false,
-    "id": "history",
-    "kind": "argument",
-    "long": "history",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Emit the durable history snapshot as JSON",
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Maximum durable turns to return (default: 12)",
-    "hidden": false,
-    "id": "limit",
-    "kind": "argument",
-    "long": "limit",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Select one immutable conversation epoch",
-    "hidden": false,
-    "id": "epoch",
-    "kind": "argument",
-    "long": "epoch",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": "Target wave by name",
-    "hidden": false,
-    "id": "wave",
-    "kind": "argument",
-    "long": "wave",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": "w",
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Target the invoking wave's parent (escalation up the wave tree)",
-    "hidden": false,
-    "id": "parent",
-    "kind": "argument",
-    "long": "parent",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "chat"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
     "about": "Run lf on a Home or SSH host carrying your local credentials",
     "aliases": [],
     "hidden": false,
@@ -11246,55 +10327,6 @@
       "lf",
       "flow",
       "show"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Validate a flow and its review points",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "flow",
-      "validate"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "name",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "flow",
-      "validate"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "flow",
-      "validate"
     ],
     "required": false,
     "short": "h",

@@ -52,8 +52,8 @@
       "verdict": "rename",
       "target": "lf home user",
       "concept": "Configured participant display name",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "row_id": "C002",
@@ -84,8 +84,8 @@
       "verdict": "merge into",
       "target": "lf home user",
       "concept": "Participant display name",
-      "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "row_id": "C003",
@@ -819,8 +819,8 @@
       "verdict": "merge into",
       "target": "lf task pr",
       "concept": "Current pull request summary",
-      "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "row_id": "C029",
@@ -1770,77 +1770,6 @@
       "decision_state": "adopted target; implementation not implied"
     },
     {
-      "row_id": "C062",
-      "path": "lf repo webhook",
-      "owner": "lf repo",
-      "description": "Register or serve Linear webhooks",
-      "hidden": false,
-      "source_line": 1449,
-      "source_end": 1452,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          880,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/ops/mod.rs",
-          825,
-          "test"
-        ]
-      ],
-      "overlap": "Concept: Planning change delivery endpoint namespace. Owns Register or serve Linear webhooks; no equivalent operation identified.",
-      "verdict": "keep",
-      "target": "lf repo webhook",
-      "concept": "Planning change delivery endpoint namespace",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C063",
-      "path": "lf repo webhook serve",
-      "owner": "lf repo webhook",
-      "description": "Run the receiver that turns Linear edits into Task direction. Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler)",
-      "hidden": false,
-      "source_line": 1459,
-      "source_end": 1466,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          881,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Concept: Receipt and attribution of signed planning change notifications. Owns Run the receiver that turns Linear edits into Task direction. Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET (source it from Doppler); no equivalent operation identified.",
-      "verdict": "keep",
-      "target": "lf repo webhook serve",
-      "concept": "Receipt and attribution of signed planning change notifications",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C064",
-      "path": "lf repo webhook register",
-      "owner": "lf repo webhook",
-      "description": "Register the Issue/Comment webhook with Linear (one-time). Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET",
-      "hidden": false,
-      "source_line": 1466,
-      "source_end": 1470,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          880,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Concept: Provider registration of the planning notification destination. Owns Register the Issue/Comment webhook with Linear (one-time). Reads the signing secret from LF_LINEAR_WEBHOOK_SECRET; no equivalent operation identified.",
-      "verdict": "keep",
-      "target": "lf repo webhook register",
-      "concept": "Provider registration of the planning notification destination",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
       "row_id": "C065",
       "path": "lf home",
       "owner": "lf",
@@ -2313,38 +2242,6 @@
       "decision_state": "adopted target; implementation not implied"
     },
     {
-      "row_id": "C081",
-      "path": "lf wave probe",
-      "owner": "lf wave",
-      "description": "Probe a Wave's Home for liveness and the one contextual action",
-      "hidden": false,
-      "source_line": 859,
-      "source_end": 867,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          82,
-          "Desktop"
-        ],
-        [
-          "swift/LoopflowMac/Views/RoadmapView.swift",
-          521,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/home.rs",
-          74,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "LOO-298 deletes the daemon/listener being probed. SSH destination access belongs to launch readiness, not a Wave server probe.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired Wave listener liveness",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
       "row_id": "C082",
       "path": "lf wave connect",
       "owner": "lf wave",
@@ -2544,38 +2441,6 @@
       "decision_state": "adopted target; implementation not implied"
     },
     {
-      "row_id": "C089",
-      "path": "lf wave recover",
-      "owner": "lf wave",
-      "description": "Inspect historical Wave Flow work, or explicitly cancel its saved continuation",
-      "hidden": false,
-      "source_line": 932,
-      "source_end": 941,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          59,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/recovery.rs",
-          105,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          502,
-          "documented public use"
-        ]
-      ],
-      "overlap": "LOO-298 imports or explicitly accounts for old Wave continuations. Read/recover through the surviving FlowSession; unknown unmapped history remains named evidence. Delete this old controller path only after preservation proof.",
-      "verdict": "merge into",
-      "target": "lf flow resume",
-      "concept": "Recovery of retained Flow execution",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
       "row_id": "C090",
       "path": "lf wave new-chapter",
       "owner": "lf wave",
@@ -2669,70 +2534,6 @@
       "target": "lf wave update-plan",
       "concept": "Content of the current chapter plan",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C093",
-      "path": "lf __chat-connect",
-      "owner": "lf",
-      "description": "Internal: connect chat through the owning Home",
-      "hidden": true,
-      "source_line": 347,
-      "source_end": 359,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          93,
-          "Desktop"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/bin/lf.rs",
-          2239,
-          "test"
-        ]
-      ],
-      "overlap": "LOO-298 removes lfd/listeners and built-in Wave chat. No connection callback survives for a nonexistent service; future Discord delivery owns its own transport.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat connection",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C094",
-      "path": "lf __resident",
-      "owner": "lf",
-      "description": "Internal: the resident body a listener spawns for its own wave. Never booted by hand — the Home daemon owns the listener half",
-      "hidden": true,
-      "source_line": 359,
-      "source_end": 365,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          13,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/mod.rs",
-          21,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/resident.rs",
-          3,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Finite ordinary Flow commands replace resident execution. Preserve historical execution evidence; delete the executable resident role and its dispatch.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired Wave resident execution",
-      "follows": "LOO-298; LOO-333",
       "decision_state": "adopted target; implementation not implied"
     },
     {
@@ -3688,7 +3489,7 @@
       "target": "lf monitor",
       "concept": "Execution and conversation evidence inspection",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "demo/integration choice open; see destination audit"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "row_id": "C125",
@@ -3720,70 +3521,6 @@
       "target": "lf monitor replay",
       "concept": "New execution from captured provider inputs",
       "follows": "LOO-298; Intelligence memory",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C126",
-      "path": "lf reply",
-      "owner": "lf wave",
-      "description": "Observe wave-chat message(s) and print a reply only if one is warranted. A direct capability: no listener, resident, or governance loop",
-      "hidden": false,
-      "source_line": 551,
-      "source_end": 565,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave reply generation",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "row_id": "C127",
-      "path": "lf chat",
-      "owner": "lf wave",
-      "description": "Converse with a Wave; --follow replays its thread",
-      "hidden": false,
-      "source_line": 565,
-      "source_end": 598,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread",
-      "follows": "LOO-298; LOO-333",
       "decision_state": "adopted target; implementation not implied"
     },
     {
@@ -3992,8 +3729,8 @@
       "verdict": "merge into",
       "target": "lf help flow",
       "concept": "Read-only authored Flow compilation",
-      "follows": "LOO-298; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "row_id": "C135",
@@ -4653,7 +4390,7 @@
       "target": "--chrome on|off",
       "concept": "Default direct provider conversation and command entry point: explicit browser capability override.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "SetTrue",
@@ -4690,7 +4427,7 @@
       "target": "--chrome off",
       "concept": "Default direct provider conversation and command entry point: explicit browser capability override.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "SetTrue",
@@ -4727,7 +4464,7 @@
       "target": "--diff files",
       "concept": "Default direct provider conversation and command entry point: selected changed-code evidence in the prompt.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "SetTrue",
@@ -4764,7 +4501,7 @@
       "target": "--diff patch|none",
       "concept": "Default direct provider conversation and command entry point: selected changed-code evidence in the prompt.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "SetTrue",
@@ -4801,7 +4538,7 @@
       "target": "--diff files|patch|both|none",
       "concept": "Default direct provider conversation and command entry point: selected changed-code evidence in the prompt.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "SetTrue",
@@ -4838,7 +4575,7 @@
       "target": "--diff files|none",
       "concept": "Default direct provider conversation and command entry point: selected changed-code evidence in the prompt.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented after main rebase; assembled prompt and browser-capability proof"
     },
     {
       "action": "Set",
@@ -5167,8 +4904,8 @@
       "verdict": "keep",
       "target": "--help",
       "concept": "Shared help protocol applied to configured participant display name.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "SetTrue",
@@ -5216,8 +4953,8 @@
       "verdict": "merge into",
       "target": "lf home user --json",
       "concept": "Shared json protocol applied to participant display name.",
-      "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "Help",
@@ -5263,8 +5000,8 @@
       "verdict": "merge into",
       "target": "lf home user --help",
       "concept": "Shared help protocol applied to participant display name.",
-      "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "Append",
@@ -8016,100 +7753,6 @@
       "action": "Set",
       "defaults": [],
       "global": false,
-      "help": "The staged lfd built from the same candidate source",
-      "hidden": false,
-      "id": "daemon_source",
-      "kind": "argument",
-      "long": "daemon-source",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "install",
-        "promote"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A091",
-      "canonical": "lf install promote --daemon-source",
-      "owner": "lf home install promote",
-      "description": "The staged lfd built from the same candidate source",
-      "source_line": 1207,
-      "callers": [
-        [
-          "scripts/install.py",
-          508,
-          "script"
-        ],
-        [
-          "rust/loopflow/src/store/mod.rs",
-          337,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/store/sqlite.rs",
-          352,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "LOO-298 removes lfd; installation retains CLI/app and store transaction, not daemon artifact controls.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Atomic activation of a specific candidate's CLI, app and store: matching daemon candidate bytes.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "The global lfd symlink to replace (e.g. ~/.local/bin/lfd)",
-      "hidden": false,
-      "id": "daemon_target",
-      "kind": "argument",
-      "long": "daemon-target",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "install",
-        "promote"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A092",
-      "canonical": "lf install promote --daemon-target",
-      "owner": "lf home install promote",
-      "description": "The global lfd symlink to replace (e.g. ~/.local/bin/lfd)",
-      "source_line": 1210,
-      "callers": [
-        [
-          "scripts/install.py",
-          508,
-          "script"
-        ],
-        [
-          "rust/loopflow/src/store/mod.rs",
-          337,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/store/sqlite.rs",
-          352,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "LOO-298 removes lfd; installation retains CLI/app and store transaction, not daemon artifact controls.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Atomic activation of a specific candidate's CLI, app and store: daemon activation symlink destination.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
       "help": "A staged Loopflow.app bundle to install alongside the CLI",
       "hidden": false,
       "id": "app_source",
@@ -8455,68 +8098,6 @@
       "decision_state": "adopted target; implementation not implied"
     },
     {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "The global lfd symlink to restore with the CLI",
-      "hidden": false,
-      "id": "daemon_target",
-      "kind": "argument",
-      "long": "daemon-target",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "install",
-        "rollback"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A101",
-      "canonical": "lf install rollback --daemon-target",
-      "owner": "lf home install rollback",
-      "description": "The global lfd symlink to restore with the CLI",
-      "source_line": 1239,
-      "callers": [],
-      "overlap": "LOO-298 removes lfd; installation retains CLI/app and store transaction, not daemon artifact controls.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Restoration of retained installed bytes compatible with the existing store: daemon activation symlink destination.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "The retained immutable lfd binary paired with the CLI candidate",
-      "hidden": false,
-      "id": "daemon_candidate",
-      "kind": "argument",
-      "long": "daemon-candidate",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "install",
-        "rollback"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A102",
-      "canonical": "lf install rollback --daemon-candidate",
-      "owner": "lf home install rollback",
-      "description": "The retained immutable lfd binary paired with the CLI candidate",
-      "source_line": 1242,
-      "callers": [],
-      "overlap": "LOO-298 removes lfd; installation retains CLI/app and store transaction, not daemon artifact controls.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Restoration of retained installed bytes compatible with the existing store: retained matching daemon executable.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
       "action": "Help",
       "defaults": [],
       "global": false,
@@ -8766,8 +8347,8 @@
       "verdict": "merge into",
       "target": "lf task pr --help",
       "concept": "Shared help protocol applied to current pull request summary.",
-      "follows": "LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "Set",
@@ -14634,202 +14215,6 @@
       "long_aliases": [],
       "path": [
         "lf",
-        "repo",
-        "webhook"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A239",
-      "canonical": "lf repo webhook --help",
-      "owner": "lf repo webhook",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 1449,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          880,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/ops/mod.rs",
-          825,
-          "test"
-        ]
-      ],
-      "overlap": "Controls read-only explanation of this exact invocation. Shared Clap help affordance, not another domain operation.",
-      "verdict": "keep",
-      "target": "--help",
-      "concept": "Shared help protocol applied to planning change delivery endpoint namespace.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [
-        "127.0.0.1:8899"
-      ],
-      "global": false,
-      "help": "Address to bind (a reverse proxy gives Linear the public HTTPS URL)",
-      "hidden": false,
-      "id": "addr",
-      "kind": "argument",
-      "long": "addr",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "repo",
-        "webhook",
-        "serve"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A240",
-      "canonical": "lf repo webhook serve --addr",
-      "owner": "lf repo webhook serve",
-      "description": "Address to bind (a reverse proxy gives Linear the public HTTPS URL)",
-      "source_line": 1462,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          881,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Controls local webhook listener address. Input to this operation; same spelling elsewhere selects that other object.",
-      "verdict": "keep",
-      "target": "--addr",
-      "concept": "Receipt and attribution of signed planning change notifications: local webhook listener address.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "repo",
-        "webhook",
-        "serve"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A241",
-      "canonical": "lf repo webhook serve --help",
-      "owner": "lf repo webhook serve",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 1459,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          881,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Controls read-only explanation of this exact invocation. Shared Clap help affordance, not another domain operation.",
-      "verdict": "keep",
-      "target": "--help",
-      "concept": "Shared help protocol applied to receipt and attribution of signed planning change notifications.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Public HTTPS URL Linear will POST deliveries to",
-      "hidden": false,
-      "id": "url",
-      "kind": "argument",
-      "long": "url",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "repo",
-        "webhook",
-        "register"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A242",
-      "canonical": "lf repo webhook register --url",
-      "owner": "lf repo webhook register",
-      "description": "Public HTTPS URL Linear will POST deliveries to",
-      "source_line": 1469,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          880,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Controls public webhook delivery destination. Input to this operation; same spelling elsewhere selects that other object.",
-      "verdict": "keep",
-      "target": "--url",
-      "concept": "Provider registration of the planning notification destination: public webhook delivery destination.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "repo",
-        "webhook",
-        "register"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A243",
-      "canonical": "lf repo webhook register --help",
-      "owner": "lf repo webhook register",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 1466,
-      "callers": [
-        [
-          "docs/lf-reference.md",
-          880,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Controls read-only explanation of this exact invocation. Shared Clap help affordance, not another domain operation.",
-      "verdict": "keep",
-      "target": "--help",
-      "concept": "Shared help protocol applied to provider registration of the planning notification destination.",
-      "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
         "home"
       ],
       "required": false,
@@ -17060,149 +16445,6 @@
       "action": "Set",
       "defaults": [],
       "global": false,
-      "help": "Wave name; defaults to the ambient wave",
-      "hidden": false,
-      "id": "wave",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "probe"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A294",
-      "canonical": "lf wave probe <wave>",
-      "owner": "lf wave probe",
-      "description": "Wave name; defaults to the ambient wave",
-      "source_line": 861,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          82,
-          "Desktop"
-        ],
-        [
-          "swift/LoopflowMac/Views/RoadmapView.swift",
-          521,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/home.rs",
-          74,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 deletes the daemon/listener being probed. SSH destination access belongs to launch readiness, not a Wave server probe.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired Wave listener liveness: Wave target or scope.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": null,
-      "hidden": false,
-      "id": "json",
-      "kind": "argument",
-      "long": "json",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "probe"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A295",
-      "canonical": "lf wave probe --json",
-      "owner": "lf wave probe",
-      "description": "Emit structured evidence for this operation",
-      "source_line": 863,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          82,
-          "Desktop"
-        ],
-        [
-          "swift/LoopflowMac/Views/RoadmapView.swift",
-          521,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/home.rs",
-          74,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 deletes the daemon/listener being probed. SSH destination access belongs to launch readiness, not a Wave server probe.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared json protocol applied to retired wave listener liveness.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help (see more with '--help')",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "probe"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A296",
-      "canonical": "lf wave probe --help",
-      "owner": "lf wave probe",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 859,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          82,
-          "Desktop"
-        ],
-        [
-          "swift/LoopflowMac/Views/RoadmapView.swift",
-          521,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/home.rs",
-          74,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 deletes the daemon/listener being probed. SSH destination access belongs to launch readiness, not a Wave server probe.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared help protocol applied to retired wave listener liveness.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
       "help": "Wave name (auto-detected if omitted)",
       "hidden": false,
       "id": "wave",
@@ -18539,194 +17781,6 @@
       "global": false,
       "help": null,
       "hidden": false,
-      "id": "name",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "recover"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A327",
-      "canonical": "lf wave recover <name>",
-      "owner": "lf wave recover",
-      "description": "Select name",
-      "source_line": 933,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          59,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/recovery.rs",
-          105,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          502,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-298 imports or explicitly accounts for old Wave continuations. Read/recover through the surviving FlowSession; unknown unmapped history remains named evidence. Delete this old controller path only after preservation proof.",
-      "verdict": "merge into",
-      "target": "lf flow resume <name>",
-      "concept": "Recovery of retained Flow execution: owner name or local checkout/slug identity.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Cancel exactly this journal source sequence without executing its work",
-      "hidden": false,
-      "id": "cancel",
-      "kind": "argument",
-      "long": "cancel",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "recover"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A328",
-      "canonical": "lf wave recover --cancel",
-      "owner": "lf wave recover",
-      "description": "Cancel exactly this journal source sequence without executing its work",
-      "source_line": 936,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          59,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/recovery.rs",
-          105,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          502,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-298 imports or explicitly accounts for old Wave continuations. Read/recover through the surviving FlowSession; unknown unmapped history remains named evidence. Delete this old controller path only after preservation proof.",
-      "verdict": "merge into",
-      "target": "lf flow resume --cancel",
-      "concept": "Recovery of retained Flow execution: exact historical continuation selected for cancellation.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": null,
-      "hidden": false,
-      "id": "reason",
-      "kind": "argument",
-      "long": "reason",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "recover"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A329",
-      "canonical": "lf wave recover --reason",
-      "owner": "lf wave recover",
-      "description": "Select reason",
-      "source_line": 938,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          59,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/recovery.rs",
-          105,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          502,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-298 imports or explicitly accounts for old Wave continuations. Read/recover through the surviving FlowSession; unknown unmapped history remains named evidence. Delete this old controller path only after preservation proof.",
-      "verdict": "merge into",
-      "target": "lf flow resume --reason",
-      "concept": "Recovery of retained Flow execution: durable explanation for disposition or retry.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "wave",
-        "recover"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A330",
-      "canonical": "lf wave recover --help",
-      "owner": "lf wave recover",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 932,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          59,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/recovery.rs",
-          105,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          502,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-298 imports or explicitly accounts for old Wave continuations. Read/recover through the surviving FlowSession; unknown unmapped history remains named evidence. Delete this old controller path only after preservation proof.",
-      "verdict": "merge into",
-      "target": "lf flow resume --help",
-      "concept": "Shared help protocol applied to recovery of retained flow execution.",
-      "follows": "LOO-298",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": null,
-      "hidden": false,
       "id": "wave",
       "kind": "argument",
       "long": "wave",
@@ -19289,284 +18343,6 @@
       "target": "--help",
       "concept": "Shared help protocol applied to content of the current chapter plan.",
       "follows": "LOO-338 catalog and primary-source research",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Append",
-      "defaults": [],
-      "global": false,
-      "help": "Wave names. With none, starts eligible Waves in the current repo",
-      "hidden": false,
-      "id": "waves",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__chat-connect"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A343",
-      "canonical": "lf __chat-connect <waves>",
-      "owner": "lf __chat-connect",
-      "description": "Wave names. With none, starts eligible Waves in the current repo",
-      "source_line": 349,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          93,
-          "Desktop"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/bin/lf.rs",
-          2239,
-          "test"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes lfd/listeners and built-in Wave chat. No connection callback survives for a nonexistent service; future Discord delivery owns its own transport.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat connection: Wave identities selected for chat connection.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Append",
-      "defaults": [],
-      "global": false,
-      "help": "Internal identity bindings carried by an explicit Home SSH hop",
-      "hidden": true,
-      "id": "wave_ids",
-      "kind": "argument",
-      "long": "wave-id",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__chat-connect"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A344",
-      "canonical": "lf __chat-connect --wave-id",
-      "owner": "lf __chat-connect",
-      "description": "Internal identity bindings carried by an explicit Home SSH hop",
-      "source_line": 352,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          93,
-          "Desktop"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/bin/lf.rs",
-          2239,
-          "test"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes lfd/listeners and built-in Wave chat. No connection callback survives for a nonexistent service; future Discord delivery owns its own transport.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat connection: identity bindings preserved across a Home transport.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": null,
-      "hidden": false,
-      "id": "json",
-      "kind": "argument",
-      "long": "json",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__chat-connect"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A345",
-      "canonical": "lf __chat-connect --json",
-      "owner": "lf __chat-connect",
-      "description": "Emit structured evidence for this operation",
-      "source_line": 354,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          93,
-          "Desktop"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/bin/lf.rs",
-          2239,
-          "test"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes lfd/listeners and built-in Wave chat. No connection callback survives for a nonexistent service; future Discord delivery owns its own transport.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared json protocol applied to retired built-in wave chat connection.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__chat-connect"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A346",
-      "canonical": "lf __chat-connect --help",
-      "owner": "lf __chat-connect",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 347,
-      "callers": [
-        [
-          "swift/Loopflow/Services/RegistryQuery.swift",
-          93,
-          "Desktop"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ],
-        [
-          "rust/loopflow/src/bin/lf.rs",
-          2239,
-          "test"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes lfd/listeners and built-in Wave chat. No connection callback survives for a nonexistent service; future Discord delivery owns its own transport.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared help protocol applied to retired built-in wave chat connection.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Wave name",
-      "hidden": false,
-      "id": "name",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__resident"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A347",
-      "canonical": "lf __resident <name>",
-      "owner": "lf __resident",
-      "description": "Wave name",
-      "source_line": 361,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          13,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/mod.rs",
-          21,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/resident.rs",
-          3,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Finite ordinary Flow commands replace resident execution. Preserve historical execution evidence; delete the executable resident role and its dispatch.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired Wave resident execution: owner name or local checkout/slug identity.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "__resident"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A348",
-      "canonical": "lf __resident --help",
-      "owner": "lf __resident",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 359,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          13,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/mod.rs",
-          21,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/resident.rs",
-          3,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Finite ordinary Flow commands replace resident execution. Preserve historical execution evidence; delete the executable resident role and its dispatch.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared help protocol applied to retired wave resident execution.",
-      "follows": "LOO-298; LOO-333",
       "decision_state": "adopted target; implementation not implied"
     },
     {
@@ -25299,7 +24075,7 @@
       "target": "lf monitor --active",
       "concept": "Execution and conversation evidence inspection: selection of current provider discovery rather than recorded history.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "SetTrue",
@@ -25347,7 +24123,7 @@
       "target": "lf monitor --watch",
       "concept": "Execution and conversation evidence inspection: continuous observation of this result.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25393,7 +24169,7 @@
       "target": "lf monitor <run>",
       "concept": "Execution and conversation evidence inspection: selected execution record or requested immediate Task execution.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25439,7 +24215,7 @@
       "target": "lf monitor --parent",
       "concept": "Execution and conversation evidence inspection: execution ancestry or parent Wave conversation target.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "SetTrue",
@@ -25487,7 +24263,7 @@
       "target": "lf monitor --events",
       "concept": "Execution and conversation evidence inspection: append-only evidence for the selected execution/session.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "SetTrue",
@@ -25535,7 +24311,7 @@
       "target": "lf monitor --final",
       "concept": "Execution and conversation evidence inspection: last durable provider conclusion for the selected execution/session.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "SetTrue",
@@ -25583,7 +24359,7 @@
       "target": "lf monitor --resume",
       "concept": "Execution and conversation evidence inspection: provider continuation duplicated outside its Session owner.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25629,7 +24405,7 @@
       "target": "lf monitor --task",
       "concept": "Execution and conversation evidence inspection: Task target or scope.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25675,7 +24451,7 @@
       "target": "lf monitor --project",
       "concept": "Execution and conversation evidence inspection: historical Project attribution filter inside a Wave.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25721,7 +24497,7 @@
       "target": "lf monitor --wave",
       "concept": "Execution and conversation evidence inspection: Wave target or scope.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "SetTrue",
@@ -25769,7 +24545,7 @@
       "target": "lf monitor --json",
       "concept": "Shared json protocol applied to execution and conversation evidence inspection.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Help",
@@ -25815,7 +24591,7 @@
       "target": "lf monitor --help",
       "concept": "Shared help protocol applied to execution and conversation evidence inspection.",
       "follows": "LOO-298; Jack Heart 2026-09-30",
-      "decision_state": "open for Jack at demo; comparison table"
+      "decision_state": "selected without demo by latest steer; requires LOO-298 owner integration; see post-rebase decisions"
     },
     {
       "action": "Set",
@@ -25907,658 +24683,6 @@
       "target": "--help",
       "concept": "Shared help protocol applied to new execution from captured provider inputs.",
       "follows": "LOO-298; Intelligence memory",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Wave name",
-      "hidden": false,
-      "id": "wave",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "reply"
-      ],
-      "required": true,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A484",
-      "canonical": "lf reply <wave>",
-      "owner": "lf wave reply",
-      "description": "Wave name",
-      "source_line": 553,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave reply generation: Wave target or scope.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Append",
-      "defaults": [],
-      "global": false,
-      "help": "Recent message text (reads stdin when omitted)",
-      "hidden": false,
-      "id": "text",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "reply"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A485",
-      "canonical": "lf reply <text>",
-      "owner": "lf wave reply",
-      "description": "Recent message text (reads stdin when omitted)",
-      "source_line": 556,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave reply generation: conversation material to post or evaluate.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Override the provider (e.g. `claude`, `codex`); default is configured",
-      "hidden": false,
-      "id": "agent",
-      "kind": "argument",
-      "long": "agent",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "reply"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A486",
-      "canonical": "lf reply --agent",
-      "owner": "lf wave reply",
-      "description": "Override the provider (e.g. `claude`, `codex`); default is configured",
-      "source_line": 559,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave reply generation: provider/model selection duplicated inside reply.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Cap provider turns for the reply",
-      "hidden": false,
-      "id": "max_turns",
-      "kind": "argument",
-      "long": "max-turns",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "reply"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A487",
-      "canonical": "lf reply --max-turns",
-      "owner": "lf wave reply",
-      "description": "Cap provider turns for the reply",
-      "source_line": 562,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave reply generation: maximum provider turns for this execution.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "reply"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A488",
-      "canonical": "lf reply --help",
-      "owner": "lf wave reply",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 551,
-      "callers": [
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          6,
-          "runtime/source reference"
-        ],
-        [
-          "rust/loopflow/src/lf/commands/reply.rs",
-          1,
-          "runtime/source reference"
-        ],
-        [
-          "docs/architecture-reference.md",
-          188,
-          "documented public use"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: Removed Wave listener/chat no longer owns this reply operation. Ordinary finite prompts/skills can produce text; no public reply command for a deleted conversation service.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared help protocol applied to retired built-in wave reply generation.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Append",
-      "defaults": [],
-      "global": false,
-      "help": "Message text (reads stdin when omitted unless --follow or --history)",
-      "hidden": false,
-      "id": "text",
-      "kind": "argument",
-      "long": null,
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A489",
-      "canonical": "lf chat <text>",
-      "owner": "lf wave chat",
-      "description": "Message text (reads stdin when omitted unless --follow or --history)",
-      "source_line": 568,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: conversation material to post or evaluate.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": "Replay and follow the thread while typed lines post into it",
-      "hidden": false,
-      "id": "follow",
-      "kind": "argument",
-      "long": "follow",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A490",
-      "canonical": "lf chat --follow",
-      "owner": "lf wave chat",
-      "description": "Replay and follow the thread while typed lines post into it",
-      "source_line": 571,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: continuous conversation replay with explicit posts.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": "Read the latest durable turns without requiring a live listener",
-      "hidden": false,
-      "id": "history",
-      "kind": "argument",
-      "long": "history",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A491",
-      "canonical": "lf chat --history",
-      "owner": "lf wave chat",
-      "description": "Read the latest durable turns without requiring a live listener",
-      "source_line": 574,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: durable conversation reads independent of listener availability.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": "Emit the durable history snapshot as JSON",
-      "hidden": false,
-      "id": "json",
-      "kind": "argument",
-      "long": "json",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A492",
-      "canonical": "lf chat --json",
-      "owner": "lf wave chat",
-      "description": "Emit structured evidence for this operation",
-      "source_line": 577,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared json protocol applied to retired built-in wave chat thread.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Maximum durable turns to return (default: 12)",
-      "hidden": false,
-      "id": "limit",
-      "kind": "argument",
-      "long": "limit",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A493",
-      "canonical": "lf chat --limit",
-      "owner": "lf wave chat",
-      "description": "Maximum durable turns to return (default: 12)",
-      "source_line": 580,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: bounded row count with explicit truncation evidence.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Select one immutable conversation epoch",
-      "hidden": false,
-      "id": "epoch",
-      "kind": "argument",
-      "long": "epoch",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A494",
-      "canonical": "lf chat --epoch",
-      "owner": "lf wave chat",
-      "description": "Select one immutable conversation epoch",
-      "source_line": 583,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: immutable conversation generation.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Set",
-      "defaults": [],
-      "global": false,
-      "help": "Target wave by name",
-      "hidden": false,
-      "id": "wave",
-      "kind": "argument",
-      "long": "wave",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": "w",
-      "short_aliases": [],
-      "row_id": "A495",
-      "canonical": "lf chat --wave",
-      "owner": "lf wave chat",
-      "description": "Target wave by name",
-      "source_line": 106,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: Wave target or scope.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "SetTrue",
-      "defaults": [
-        "false"
-      ],
-      "global": false,
-      "help": "Target the invoking wave's parent (escalation up the wave tree)",
-      "hidden": false,
-      "id": "parent",
-      "kind": "argument",
-      "long": "parent",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": null,
-      "short_aliases": [],
-      "row_id": "A496",
-      "canonical": "lf chat --parent",
-      "owner": "lf wave chat",
-      "description": "Target the invoking wave's parent (escalation up the wave tree)",
-      "source_line": 509,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Retired built-in Wave chat thread: execution ancestry or parent Wave conversation target.",
-      "follows": "LOO-298; LOO-333",
-      "decision_state": "adopted target; implementation not implied"
-    },
-    {
-      "action": "Help",
-      "defaults": [],
-      "global": false,
-      "help": "Print help",
-      "hidden": false,
-      "id": "help",
-      "kind": "argument",
-      "long": "help",
-      "long_aliases": [],
-      "path": [
-        "lf",
-        "chat"
-      ],
-      "required": false,
-      "short": "h",
-      "short_aliases": [],
-      "row_id": "A497",
-      "canonical": "lf chat --help",
-      "owner": "lf wave chat",
-      "description": "Explain this canonical command without performing it",
-      "source_line": 565,
-      "callers": [
-        [
-          "swift/Loopflow/Services/WaveChatClient.swift",
-          263,
-          "Desktop"
-        ],
-        [
-          "swift/README.md",
-          266,
-          "Desktop"
-        ],
-        [
-          "rust/loopflow/src/controller/wave/README.md",
-          4,
-          "runtime/source reference"
-        ]
-      ],
-      "overlap": "Owning obsolete operation is removed: LOO-298 removes built-in chat. Preserve historical transcript evidence; do not migrate this verb onto an unimplemented Discord API.",
-      "verdict": "delete",
-      "target": "—",
-      "concept": "Shared help protocol applied to retired built-in wave chat thread.",
-      "follows": "LOO-298; LOO-333",
       "decision_state": "adopted target; implementation not implied"
     },
     {
@@ -27457,8 +25581,8 @@
       "verdict": "merge into",
       "target": "lf help flow <name>",
       "concept": "Read-only authored Flow compilation: owner name or local checkout/slug identity.",
-      "follows": "LOO-298; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "Help",
@@ -27499,8 +25623,8 @@
       "verdict": "merge into",
       "target": "lf help flow --help",
       "concept": "Shared help protocol applied to read-only authored flow compilation.",
-      "follows": "LOO-298; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "follows": "LOO-338; Jack Heart 2026-09-30",
+      "decision_state": "implemented after main rebase; focused public CLI proof"
     },
     {
       "action": "Set",

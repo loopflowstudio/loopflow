@@ -219,6 +219,12 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
+        &["--no-diff"][..],
+        &["--diff-files"][..],
+        &["--no-diff-files"][..],
+        &["--no-chrome"][..],
+        &["--diff", "invalid"][..],
+        &["--chrome", "invalid"][..],
         &["task", "changes", "INF-123", "--json"][..],
         &["task", "diff", "INF-123", "src.rs", "--files"],
         &["task", "diff", "INF-123", "--files", "--draft"],
@@ -561,4 +567,47 @@ fn command_tree_has_no_registered_aliases() {
         }
     }
     check(&loopflow::lf::navigation::command_tree());
+}
+
+#[test]
+fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let flow = repo.path().join(".lf/flows/inspection.yaml");
+    fs::write(
+        &flow,
+        "- step:\n    name: solo\n    id: review\n    human: true\n",
+    )
+    .unwrap();
+    let output = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "flow", "inspection"],
+    ));
+    assert!(String::from_utf8_lossy(&output).contains("Review steps: review"));
+    for (definition, expected) in [
+        ("- flow: absent-flow\n", "absent-flow"),
+        ("- step:\n    name: solo\n    human: true\n", "stable id"),
+        ("- step:\n    name: solo\n    id: review\n    human: true\n- step:\n    name: solo\n    id: review\n    human: true\n", "not unique"),
+    ] {
+        fs::write(&flow, definition).unwrap();
+        let output = run(repo.path(), home.path(), &["help", "flow", "inspection"]);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains(expected), "{error}");
+    }
+    for args in [vec!["home", "user", "name"], vec!["task", "pr", "status"]] {
+        let output = run(repo.path(), home.path(), &args);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+    }
+    fs::write(
+        repo.path().join(".lf/flows/validate.yaml"),
+        "- step: solo\n",
+    )
+    .unwrap();
+    let output = success(run(repo.path(), home.path(), &["help", "flow", "validate"]));
+    assert!(String::from_utf8_lossy(&output).contains("solo"));
+    assert!(!home.path().join(".lf").exists());
 }

@@ -5,6 +5,15 @@ use anyhow::anyhow;
 
 pub fn run(cmd: &HomeCommand) -> anyhow::Result<()> {
     match cmd {
+        HomeCommand::User { json } => {
+            let name = crate::engine::config::load_user_name()?;
+            if *json {
+                println!("{}", serde_json::to_string(&name)?);
+            } else if let Some(name) = name {
+                println!("{name}");
+            }
+            Ok(())
+        }
         HomeCommand::Id { json } => id_cmd(*json),
         HomeCommand::Observe {
             home_id,

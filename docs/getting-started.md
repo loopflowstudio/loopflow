@@ -54,7 +54,7 @@ scratch notes, and clipboard—and passes it to the coding agent. Before the
 provider starts, Loopflow reserves the AgentSession and captures its input in
 this Home. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Exec records the command result. Add repo
-docs explicitly with `--docs` and changed file bodies with `--diff-files`.
+docs explicitly with `--docs` and changed file bodies with `--diff files`.
 
 `LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
 
@@ -81,7 +81,7 @@ lf : "add type hints to utils.py"
 |------|--------------|
 | `-c` | Clipboard content |
 | `--docs PATH,PATH` | Add specific files, globs, or directories to context |
-| `--diff-files` | Full content of files changed on the branch |
+| `--diff files` | Full content of files changed on the branch |
 | `--diff` | Raw `git diff` output |
 | `-i` | Interactive mode |
 | `-b` | Batch/headless mode |

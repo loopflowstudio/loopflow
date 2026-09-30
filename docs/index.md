@@ -92,7 +92,7 @@ explicitly:
 ```bash
 lf gate --docs VISUAL_DESIGN.md        # one doc
 lf gate --docs 'docs/*.md'             # a glob
-lf gate --diff-files                   # bodies of files changed on the branch
+lf gate --diff files                   # bodies of files changed on the branch
 lf debug -c                            # the clipboard
 lf token-compress --docs RELEASE_NOTES.md: fit this history into 2,000 tokens
 ```

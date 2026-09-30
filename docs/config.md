@@ -1,8 +1,8 @@
 # Configuration
 
 ```bash
-lf name                                # show the resolved display name
-lf name --json                         # name as a JSON string, or null when unavailable
+lf user                                # show the resolved display name
+lf user --json                         # name as a JSON string, or null when unavailable
 ```
 
 Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
@@ -34,7 +34,7 @@ submitting a prompt or resetting its participant. Agents can use a name they
 already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
-`lf user name --json` resolves the name without provider or PM access.
+`lf user --json` resolves the name without provider or PM access.
 Session prompts carry the selected participant name. Stored transcripts retain
 their original wording; unnamed historical messages remain anonymous.
 
@@ -65,7 +65,7 @@ config files.
 | Model | `-m claude:opus` | `agent: claude:opus` |
 | Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include branch files | `--diff-files` | `diff_files: true` |
+| Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Disable Loopflow guidance | `--no-loopflow` | — |
@@ -240,11 +240,11 @@ Full content of files modified on the current branch.
 
 | | |
 |---|---|
-| **CLI** | `--diff-files` / `--no-diff-files` |
+| **CLI** | `--diff files` / `--diff none` |
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
+Use `--diff files` when the agent needs complete file bodies, not just line changes. Use `--diff both` when the exact patch also matters.
 
 ### Clipboard
 
@@ -263,11 +263,11 @@ Include `git diff main...HEAD` output showing exact line changes.
 
 | | |
 |---|---|
-| **CLI** | `--diff` / `--no-diff` |
+| **CLI** | `--diff patch` / `--diff none` |
 | **Config** | `diff: true` |
 | **Default** | `false` (not included) |
 
-Use when you want the agent to see precisely what changed. Can combine with `--diff-files`.
+Use when you want the agent to see precisely what changed. Use `--diff both` to include changed file bodies too.
 
 ### Context Files
 
@@ -358,7 +358,7 @@ Enable browser automation for Claude Code.
 
 | | |
 |---|---|
-| **CLI** | `--chrome` / `--no-chrome` |
+| **CLI** | `--chrome on` / `--chrome off` |
 | **Config** | `chrome: true` |
 | **Default** | `false` |
 

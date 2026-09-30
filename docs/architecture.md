@@ -262,7 +262,7 @@ fourth execution object or a generic attempt type under another name.
 
 ```bash
 lf debug -c
-lf gate --diff-files
+lf gate --diff files
 ```
 
 These commands need the execution area only: discover, prompt, route, launch,

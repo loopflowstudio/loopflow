@@ -1,8 +1,9 @@
 # CLI ownership and readiness · LOO-338
 
 Jack Heart requested implementation of every deferred CLI requirement from
-LOO-337 on 2026-09-30. This branch ships as one PR and waits at demo for Jack;
-no landing is authorized.
+LOO-337 on 2026-09-30. Jack Heart’s latest steer supersedes the demo boundary: finish autonomously;
+the supervising session ships after the catalog and CLI agree and focused checks pass.
+Earlier demo requirements below are historical; they no longer require a wait.
 
 ## Complete target
 
@@ -49,23 +50,15 @@ No competing model migration belongs here.
    establish this proof or an autonomous lifecycle.
 5. Docs and generated copies describe implemented behavior; Jack reviews at demo.
 
-## This slice
+## Current work after the latest steer
 
-Merge C140 into C120: `list skill [namespace] [--json]` owns skill discovery.
-Delete SkillCommand::List and its inspection dispatch; change emitted namespace
-invocations and current docs together. Keep explicit skill execution, including
-skills named list, and read-only typed help. With no list definition, the former
-`skill list` input must fail lookup without launching or writing runtime state;
-with one, it selects that definition under ordinary explicit-skill semantics.
-No rejection shim should reserve a retired catalog verb.
-
-Dependency refresh at `3dd912634`: LOO-298 remains `c7fcd31ec`; LOO-340 remains
-already-integrated `32b6eef00`. LOO-334 advanced to `9fea0552f`, whose recorded
-installation-copy provenance still fails the public continuation proof at the
-production-database guard. Its design explicitly stops dependent implementation
-for contract review. Preserve that counterexample and isolation; integrate no
-unfinished execution cut merely to rename its readers. This pass takes the
-independent C140 merge explicitly selected by the preceding iteration direction.
+Rebase onto main first; reconcile #1360's deleted service commands and their
+arguments. Merge independent duplicate readers C002/C028/C134, updating Desktop,
+help, documentation and public-CLI proofs together. Finish the remaining owner
+and option cuts and integrate actual Exec/Session readers for Monitor. Jack Heart
+removed the demo wait and delegated monitoring keep-or-cut choices; selected
+choices are in the catalog's post-rebase section. The supervisor ships only after
+the final catalog and CLI match. This pass does not select Flow navigation.
 
 ## Slice ledger
 
@@ -922,3 +915,44 @@ Compression after `f63912dc3` consolidates duplicate reserved-skill fixtures and
 help assertions, separates namespace discovery, and shares catalog JSON decoding.
 Isolated `cli_discovery` (14), formatting, all-target Clippy (four jobs) and diff
 checks passed. Production behavior, compiled counts and remaining scope are unchanged.
+
+### Main rebase and independent cull · 2026-09-30
+
+Rebased `f91ec1731` onto main `3dc89bc9a` with `lf rebase --manual` and
+Loopflow-owned continuations, ending at `7164a0d81`. Conflicts retained main's
+service deletion and this branch's ownership/cull changes. No push occurred.
+The catalog drops nine service command rows and four daemon artifact inputs;
+its baseline JSON remains unchanged.
+
+C002/C028/C134 now merge User name, PR status and Flow validate into Home User,
+bare PR and typed Flow help. Desktop User argv, short guides and canonical
+reference moved together. Flow help expands and validates review IDs before
+printing; the retired validate name becomes available for authored Flows.
+A011–A016 consolidate context into `--diff files|patch|both|none` and browser
+capability into `--chrome on|off`. Omission still inherits config; no dual parser
+or alias is retained. Native provider flags and lf-prompt inputs are separate
+interfaces and unchanged.
+
+Executed focused proofs with inherited LF_* cleared and LF_BIN pinned locally:
+CLI discovery 15, documented commands 3, User CLI 2, ordinary-branch delivery 1,
+no-repo machine commands 1, init instruction contract 1, assembled-context
+choice/inheritance 1. The latter assembles real temporary Git changes under both
+config defaults and checks file bodies, patches and browser capability for every
+choice without launching a provider. PR/GitHub and browser effects are simulated;
+User and context tests use real disposable Git data. Skill alignment passed 4.
+
+Two counterexamples were corrected: duplicate review IDs report “not unique,”
+not the new test's assumed “duplicate”; documentation checking found a stale
+retired-op compatibility row left by the rebase. Neither initial failure was a
+pass. Final discovery/documentation reruns passed. Architecture inventory passed.
+Final formatting, all-target Clippy (four jobs), and diff checks passed.
+Website docs and architecture HTML regenerated. Compiled counts are 123 commands
+below root / 15 hidden / 393 flags / 82 positionals / zero aliases.
+
+Review retained one config translation at the existing prompt owner and removed
+the unused toggle helper. It left native browser flags and prompt-tool flags
+intact. Monitor still requires real Exec/Session owners; current Run records are
+not renamed. Refreshed LOO-298 `25548d567` and LOO-334 `1fd99a284` contracts replace
+older dependency assumptions. `lf rebase --plan 25548d567` reports direct rebase
+of 28 commits, touching 268 files; no integration has yet been applied. The full
+catalog/CLI agreement and remaining requirements are not complete.

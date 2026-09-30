@@ -89,7 +89,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["user", "name", "--json"], nil)
+        let stdout = try await run(["home", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
     }
 

@@ -1549,17 +1549,6 @@ fn execute_command(
             })
         }
         Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
-        Some(Commands::User {
-            cmd: loopflow::lf::UserCommand::Name { json },
-        }) => {
-            let name = loopflow::engine::config::load_user_name()?;
-            if *json {
-                println!("{}", serde_json::to_string(&name)?);
-            } else if let Some(name) = name {
-                println!("{name}");
-            }
-            Ok(())
-        }
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
         Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),

@@ -30,3 +30,14 @@
   sibling edit, installed-store conversion or account repair is authorized.
   LOO-298/334 remain unfinished; their model is not replaced or relabeled here.
   LOO-340's remaining store/bundle/reset work still requires later integration.
+
+- 2026-09-30 latest steer supersedes the demo/review wait: Jack Heart delegates
+  remaining cull decisions; the supervisor ships after matching CLI/catalog and
+  focused proof. Monitoring keep-or-cut choices are now selected in the catalog.
+  The main rebase is complete at `7164a0d81` over #1360 (`3dc89bc9a`).
+- Current dependency evidence supersedes the older unavailable-branch notes:
+  LOO-298 `25548d567` implements a current-state cutover and explicitly retires
+  older history-import obligations, while retaining current resumable Sessions.
+  LOO-334 `1fd99a284` restarts its accepted planning design. Integrating either
+  requires reconciling these actual owners with the now-deleted resident service;
+  copying command names alone cannot satisfy Monitor or Task discovery.

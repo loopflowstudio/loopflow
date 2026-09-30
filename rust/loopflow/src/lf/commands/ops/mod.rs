@@ -38,7 +38,7 @@ use std::time::Instant;
 pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
-        None | Some(PrCommand::Status) => pr_status(),
+        None => pr_status(),
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
         Some(PrCommand::Publish { model, title, body }) => publish_pr(
             title.clone(),

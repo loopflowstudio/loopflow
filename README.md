@@ -120,7 +120,7 @@ Watch this repository and the current Home:
 
 ```bash
 lf wave list                  # every durable Wave and its Home/runtime evidence
-lf name           # display name from Git or a personal Loopflow override
+lf user           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks

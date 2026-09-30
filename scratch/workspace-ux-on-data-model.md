@@ -99,3 +99,12 @@ nice -n 10 swift test --package-path swift --no-parallel --jobs 2 -Xswiftc -gnon
 `git diff --check` passed. Resource preflight reported 38.9 GiB free, above the
 32 GiB reserve, with no recovery. Earlier Rust and retained-PTY proof remains
 applicable to unchanged paths; no broader suite or demo was repeated.
+
+Sync onto main `61d21f885`, 2026-09-30: resolved 117 conflicted paths using
+main outside LOO-303 and carrying the navigation delta from the merged LOO-298
+parent. Review found three inherited migration drafts already incorporated into
+main's `0.12.29.001_release.sql`; removed the redundant drafts. Main's release,
+delivery, storage and headless-test updates remain intact. `lf sync --continue`
+completed locally; the waiting caller owns the push.
+
+Check: `nice -n 10 cargo test -p loopflow --lib template_resolution_preserves_composition_and_execution --jobs 2` — 1 passed; `nice -n 10 bash scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter 'WorkspaceDestinationTests|TaskFlowTests/(flowFixtures|templateDisclosure)'` — 12 passed with WindowServer denied; `git diff --check` passed. Native terminal proof and broader checks remain with capable gate/CI; no installed acceptance claimed.

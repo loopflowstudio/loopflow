@@ -176,7 +176,7 @@ fn retain_installation_and_select_store(store: &std::path::Path) {
             .clone(),
         activation: ActivationTargets {
             cli: root.join("lf"),
-            daemon: root.join("lfd"),
+            daemon: None,
             app: None,
             legacy_app: None,
         },
@@ -310,7 +310,7 @@ fn incompatible_branch_data_recommends_only_a_verified_retained_pair() {
     assert!(message.contains("Verified retained pair:"), "{message}");
     assert!(message.contains("--reuse-home 'task-proof'"), "{message}");
     assert!(message.contains("--cli-target"), "{message}");
-    assert!(message.contains("--daemon-target"), "{message}");
+    assert!(!message.contains("--daemon-target"), "{message}");
     assert!(message.contains("--preview"), "{message}");
     assert_eq!(bytes(), before);
     assert_eq!(std::fs::read(&later_db).unwrap(), later_bytes);

@@ -125,8 +125,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 
         // The Home runtime evidence carries the state and the one contextual action.
-        #expect(detail.homeRuntime.state == .running)
-        #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
         #expect(detail.chapter?.flows.recommended == "task-design")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
@@ -244,17 +242,6 @@ struct DTOFixtureTests {
         _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
-    @Test("child activity preserves typed delivery evidence")
-    func childActivityPreservesTypedDeliveryEvidence() throws {
-        let data = try loadFixtureData("child_control_activity.json")
-        let activity = try JSONDecoder().decode(ChildControlActivity.self, from: data)
-
-        #expect(activity.subject == .task)
-        #expect(activity.subjectId == "INF-123")
-        #expect(activity.workId == "ts_22222222222222222222222222222222")
-        #expect(activity.kind == .prOpened)
-        #expect(activity.title == "Opened PR #1073")
-    }
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(
@@ -383,27 +370,6 @@ struct DTOFixtureTests {
         return try #require(json as? [String: Any])
     }
 
-    @Test("Governance bodies decode without historical Flow coordinates")
-    func governanceBody() throws {
-        let data = try loadFixtureData("resident_deltas.json")
-        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let deltas = try #require(json["deltas"] as? [[String: Any]])
-        var value = try #require(deltas.first?["body"] as? [String: Any])
-        let body = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
-        #expect(body.invocationId == nil)
-        #expect(body.stepIndex == nil)
-        #expect(body.flow == nil)
-        #expect(body.iteration == nil)
-        #expect(body.step == "wave/operate")
-        let failed = try ChatTurn(id: "failed", role: .assistant, authorName: nil, text: "", status: .failed,
-                              items: [], createdAt: body.startedAt, body: body, activity: nil)
-        value["body_id"] = "different-attempt"
-        let laterBody = try JSONDecoder().decode(BodyProvenance.self, from: JSONSerialization.data(withJSONObject: value))
-        let later = try ChatTurn(id: "later", role: .assistant, authorName: nil, text: "", status: .completed,
-                             items: [], createdAt: body.startedAt, body: laterBody, activity: nil)
-        let failures = attemptFailurePresentations(turns: [failed, later])
-        #expect(failures[failed.id]?.state == .failed)
-    }
 
     private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
         let testFile = URL(fileURLWithPath: sourceFile)

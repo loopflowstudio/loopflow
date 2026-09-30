@@ -8,7 +8,6 @@ pub mod harness;
 pub mod id;
 pub mod journal;
 pub mod lf;
-pub mod lfd;
 pub mod machine_install;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
 #[allow(dead_code)]
@@ -28,8 +27,6 @@ pub mod security;
 pub mod store;
 pub mod subscription;
 pub mod trace;
-pub(crate) mod wave_host;
-pub mod webhook;
 pub mod work;
 
 #[cfg(test)]

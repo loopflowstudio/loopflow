@@ -2146,7 +2146,7 @@ operations available to helpers without becoming resident Work identities.</p>
 </tr>
 <tr>
 <td>Homes</td>
-<td>Placement, <code>lfd</code>, Wave listeners, SSH routing, machine install</td>
+<td>Placement, SSH routing, machine install</td>
 <td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
 </tr>
 <tr>
@@ -2337,7 +2337,7 @@ Those commands act on delivery facts, not on Flow-driving authority. <code>submi
 <code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper Runs, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf chat --follow -w product
+<pre tabindex="0"><code class="language-bash">lf --wave product wave/operate        # one finite planning pass
 lf task run INF-123
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
 lf wave status product
@@ -2380,7 +2380,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
 </tr>
 <tr>
-<td>daemons, remote execution, placement, process control, promotion</td>
+<td>remote execution, placement, process control, promotion</td>
 <td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
 </tr>
 <tr>
@@ -2394,9 +2394,9 @@ the behavior.</p>
 </tbody>
 </table>
 <p>For exhaustive lookup, open the <a href="https://loopflow.studio/architecture/reference">checked architecture reference</a>.
-Its maps are machine-verified against CLI families, process boundaries, live
-SQLite tables, HTTP routes, providers, subprocess edges, projections,
-compatibility seams, and retired vocabulary.</p>        <nav aria-label="Documentation pages" class="docs-pager">
+Its bounded checker compares CLI families, process boundaries, SQLite tables,
+HTTP routes, providers, subprocess edges, projections, and historical vocabulary.
+A successful check covers that inventory, not configured runtime behavior.</p>        <nav aria-label="Documentation pages" class="docs-pager">
 <a href="https://loopflow.studio/architecture/execution" class="docs-pager-link docs-pager-next"><span class="docs-pager-direction">Next</span><span class="docs-pager-title">Execution</span></a>        </nav>
       </article>
       <nav aria-label="On this page" class="docs-outline">

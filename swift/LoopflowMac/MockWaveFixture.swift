@@ -57,14 +57,14 @@ enum MockWaveFixture {
         [
             Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
                  status: .ready,
-                 live: true, activeTasks: 1),
+                 activeTasks: 1),
             Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
-                 live: false, activeTasks: 2),
+                 activeTasks: 2),
             Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
-                 live: false, activeTasks: 0),
+                 activeTasks: 0),
             Wave(id: "wave-4", name: "cadenza", repo: repoPath,
                  status: .ready,
-                 live: true, activeTasks: 0, parentWaveId: "wave-1"),
+                 activeTasks: 0, parentWaveId: "wave-1"),
         ]
     }
 
@@ -129,9 +129,6 @@ enum MockWaveFixture {
             "goal": "Make releases boring.",
             "repo": "/src/loopflow",
             "active_tasks": 1,
-            "live": true,
-
-            "endpoint": "127.0.0.1:7777",
             "created_at": "2026-07-01T00:00:00Z",
             "parent_wave_id": null,
             "retired_at": null,
@@ -144,7 +141,6 @@ enum MockWaveFixture {
               "observed_at": "2026-07-17T00:00:00Z"
             }
           },
-          "loop_state": "idle",
           "metric_portfolio": {
             "metrics": [
               {

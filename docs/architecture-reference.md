@@ -31,7 +31,7 @@ boundary executors remain domain-specific because their settlement rules differ.
                                       |
                         +-------------v------------+
                         | multi-Home placement     |
-                        | HomeId / lfd / lf ssh    |
+                        | HomeId / lf ssh          |
                         +-------------+------------+
                                       |
                         +-------------v------------+
@@ -65,7 +65,7 @@ boundary executors remain domain-specific because their settlement rules differ.
   Task execution adds a versioned worker claim to its saved Flow position.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
 - **Multi-Home placement:** run the same commands on a selected machine through
-  `lfd` or explicit `lf ssh`.
+  explicit `lf ssh`.
 - **Surfaces:** derive CLI and Mac views from planning facts, provider truth,
   local process observation, and Run records.
 
@@ -167,7 +167,6 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migrations engine, durable rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | Login, encrypted tokens, account homes, routes and leases |
-| Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave/service reconciliation |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifact switching, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | Immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | Shared DTOs/services and macOS UI |
@@ -185,16 +184,16 @@ provider, and literal subprocess edge must appear exactly once.
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
 | **Flow** — an authored graph with optional backward edges | Expansion captures Skills and all Xor routers/paths. `ExecutionCursor::finish` owns traversal; ordinary file locks and Task transactions retain their separate settlement authority. | [`Flow`](../rust/loopflow/src/engine/flow.rs), [`ExecutionCursor`](../rust/loopflow/src/engine/execution.rs), [`FlowRun`](../rust/loopflow/src/ops/flow_run.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | `.lf/flows/`; ordinary Home `flows/<UUID>/position.json`; Task invocation and full cursor in its existing position row | Ordinary CLI driver or hidden `lf task __worker` | `lf flow`, `lf run` (flow-first definition execution), `lf task run --flow` | — |
-| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable readable locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`, `observation_outbox` (deferred Wave observations); `wave/<name>/`; `.lf/journal/waves/<name>/journal.jsonl`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | `lf __chat-connect` opens chat through the Home daemon; `lf __resident` behind the Wave listener; listener and relocation share the repository locator lock | `lf wave`, `lf chat`, `lf reply`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf wave relocate`; `wave GET /health`, `wave GET /channel`, `wave GET /conversation`, `wave GET /events`, `wave POST /messages`, `wave POST /observations`, `wave POST /stop`, `wave POST /resident/attach`, `wave POST /resident/deltas`, `wave GET /resident/context` | Discord when configured |
+| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable readable locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`, `observation_outbox` (retained data); `wave/<name>/`; relocation receipts under `.lf/tmp/wave-relocations/` | Bounded CLI planning commands | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf wave relocate` | — |
 | **Chapter** — one replaceable Wave plan | Linear owns its KRs, metric targets, Flow recommendation, and Tasks; the chapter binding selects the current plan. | [`Chapter`](../rust/loopflow/src/work/chapter.rs), [`Project`](../rust/loopflow/src/work/project.rs) | `wave_chapters`, `projects`, `project_events` (retained chapter history), Linear Project content | deterministic resumable rotation | `lf wave new-chapter`, `lf wave history` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/controller/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/controller/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/controller/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/controller/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground and resident Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
 | **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. One Task worker at a time owns advancement of the selected Flow; helpers and delivery commands may mutate the worktree without that claim. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_flow_positions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | hidden `lf task __worker` drives successive claimed boundaries until a stop; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf rebase`, `lf commit` | Linear |
-| **PR landing** — one watched attempt to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation owns one supervisor, which repairs current failures until resolved; CI incidents record evidence rather than admit execution. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | Healthy Home daemon when it claims the generation; otherwise the invoking `lf pr land` process | `lf pr arm`, `lf pr land`, `lf ci`; `lfd POST /landings/claim` | `provider:github`, model provider for `ci-fix`, `exec:git`, `exec:gh` |
+| **PR landing** — one watched attempt to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation owns one supervisor, which repairs current failures until resolved; CI incidents record evidence rather than admit execution. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The invoking `lf pr land` process | `lf pr arm`, `lf pr land`, `lf ci` | `provider:github`, model provider for `ci-fix`, `exec:git`, `exec:gh` |
 | **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. Confirmed native deletions suppress stale items without rewriting historical workflow outcomes. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf repo`, `lf wave sync` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its advancing worker | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task worker refreshes comments and attempts live input; successor workers refresh their seed | `lf task comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **Session** — one resumable interactive provider conversation or unresolved human boundary | An interactive Run records the provider's native session id; `lf ask` parks its Run while a TUI agent shares the exact checkout; a human node persists its Task FlowPosition or ordinary FlowRun boundary. Complete removes an interactive Session without deleting provider history, returns an Ask summary to its blocked caller, or returns review feedback to the next Flow step. A following deciding occurrence owns navigation. | [`ProviderSessionRef`](../rust/loopflow/src/run_record.rs), [`SessionRecord`](../rust/loopflow/src/ops/human_session.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | Home-local Run artifacts and `human-sessions/`; human Flow boundaries reuse their Task or ordinary position | The native provider owns conversation history; `lf __provider-session` binds provider identity to its Run; the blocked Run or saved Flow position owns a human boundary | `lf session`, `lf ask`, interactive `lf` | — |
-| **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, service replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to rebase. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | `lfd` starts eligible Wave listeners; the promotion command owns only its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule`; `lfd GET /health`, `lfd GET /status`, `lfd POST /waves/start`, `lfd POST /waves/reconcile`, `lfd POST /linear/webhook`, `lfd POST /github/webhook` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
+| **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, service replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to rebase. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf install schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
 | **Run evidence** — one immutable harness record and one disposable projection | Run identity names launch evidence only. A replayable manifest records the exact prompt, agent/model, non-secret account identity, and tool boundary; replay creates an ordinary child Run. An unterminated record is unknown, not proven live, and may not authorize a Work mutation or signal. Provider usage remains cumulative direct evidence with explicit omissions, gaps, and provider finality. | [`RunManifest`](../rust/loopflow/src/run_record.rs), [`RunLaunchRequest`](../rust/loopflow/src/run_record.rs), [`RunSnapshot`](../rust/loopflow/src/run_record.rs), [`RunUsage`](../rust/loopflow/src/run_record.rs) | Home-local `runs/<prefix>/<run-id>/` | Harness launch creates the record; no central keeper repairs it | `lf runs`, `lf replay`, `lf usage`, `lf activity`; Work/status Run evidence | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | `run_events`; Home-local Exec receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf prune`, `lf doctor` | `exec:/bin/ps`, `exec:ps`, `exec:lsof`, `exec:kill`, `exec:which` |
@@ -298,8 +297,6 @@ Task/Wave-bound helper Runs ---------> shared Skill execution components
 | `lf runs`, `usage`, `ps`, `top`, `prune`, `doctor` | Execution and process observation | Current Home only |
 | `lf home`, `lf wave`, `start`, `stop`, `pause`, `resume` | Home identity and Wave service lifecycle | Current Home unless routed explicitly |
 | `lf ssh <home-id> <args...>` | Run the target Home's `lf` | Explicit remote Home; no implicit fan-out |
-| `lfd` HTTP API | Start/stop/reconcile Waves, receive webhooks, claim landings | One Home |
-| Wave HTTP API | Channel, conversation, events, messages, observations, resident attachment | One Wave listener |
 | Loopflow.app | Swift projections and user interaction | Queries the same DTOs and remote routes; owns no lifecycle |
 
 Most commands are local by default. `lf ssh` is transport, not a second API:
@@ -495,12 +492,7 @@ completes the review. Ordinary completion retains a finished record; Task
 completion removes its active position and records `FlowFinished`, without
 completing Task Work.
 
-The Wave scheduler runs one captured `wave/operate` harness attempt per wake.
-Its turn journal records input claims, provider session and outcome; chat replies
-append independently. The resident has no Flow cursor or step dispatcher.
-Historical Wave Flow snapshots remain read-only recovery evidence: inspect them
-with `lf wave recover <name>` and explicitly disposition unresolved work.
-An unclosed attempt with unknown provider liveness blocks replacement.
+Wave planning runs as bounded commands through `lf --wave <name> wave/operate`.
 
 Clients present recorded attempts and reasons. Only historical bodies with the
 same saved invocation, step and iteration establish a retry relationship;
@@ -634,10 +626,9 @@ Loopflow.app / shell / external harness
                                       Home-local Run record
 ```
 
-`lfd` starts eligible placed Wave listeners, reconciles services and webhook
-deliveries, and serves Home endpoints. The Wave listener owns HTTP, discovery,
-journal, and the resident child it directly spawned. Crossing Homes is an
-explicit `lf ssh` hop whose target proves its Home identity.
+Wave operations are finite conversations. Tasks drive their selected invocation; local
+PR supervision watches delivery. Crossing Homes is an explicit `lf ssh` hop
+whose target proves its Home identity.
 
 ### Multi-Home placement and execution
 
@@ -645,39 +636,15 @@ explicit `lf ssh` hop whose target proves its Home identity.
 moving Work. `Placement` maps one `WorkRef` to one Home and can independently
 enable or disable automatic startup.
 
-```text
-origin Home                         target Home
------------                         -----------
-lf wave place ... home_B  ------->  HomeId = home_B
-
-lf ssh home_B chat --follow -w wave_X
-        |
-        `--- SSH transport --------> target `lf chat --follow -w wave_X`
-                                      |
-                                      v
-                                     lfd
-                                      |
-                                      v
-                                Wave listener/resident
-                                      |
-                                      v
-                               local provider + Run record
+```bash
+lf home observe <home-id> ssh://jack@mini.local
+lf wave place <wave-id> <home-id>
+lf ssh <home-id> --wave product wave/operate
 ```
 
-The operating sequence is:
-
-1. `lf home observe` records a stable Home id and current route.
-2. `lf wave place` records where a Wave/Task belongs.
-3. A local command acts on the current Home. `lf ssh <home> ...` runs the same
-   command on the target Home after verifying identity.
-4. `lfd` starts only eligible, enabled Work placed on that Home.
-5. The target uses its own planning store, repository/worktree, provider homes,
-   service manager, OS locks, and Run directory.
-
-Run records and process observations are not replicated. To inspect another
-Home, run the reader there through `lf ssh`. Foreground SSH may explicitly
-forward selected account authority; detached processes must use credentials
-installed on the target.
+The target uses its own store, repository, provider homes, OS locks and payload
+directory. Reads remain Home-local. Foreground SSH may explicitly forward
+selected account authority; detached processes use installed credentials.
 
 Wave selection always resolves `(canonical repository, slug)` to one UUID.
 Bare-slug diagnostics fail when more than one repository owns the slug; no
@@ -767,7 +734,6 @@ model.
 <!-- architecture-shims:start -->
 | Seam | Current concept | Source and removal boundary |
 | --- | --- | --- |
-| `shim:legacy-chat-import` | Old journal turns become one immutable Wave conversation epoch. | [`ConversationEpochImport`](../rust/loopflow/src/controller/wave/journal.rs); remove only when old journals are no longer supported. |
 | `shim:retired-op` / `lf op` | Rejected namespace returns the surviving top-level command name. | [`Commands`](../rust/loopflow/src/lf/mod.rs); remove when external callers no longer need the diagnostic tombstone. |
 | `shim:rams-alias` | Installed `rams/rams` command resolves to the Skill model. | [`SkillSource`](../rust/loopflow/src/lf/discovery.rs); remove when the external single-file command is no longer supported. |
 | `shim:retired-app-replacement` | Promotion removes the previously shipped app bundle after the current app commits. | [`AppPromotion`](../rust/loopflow/src/lf/commands/install.rs); remove after the retired bundle name is outside supported installs. |

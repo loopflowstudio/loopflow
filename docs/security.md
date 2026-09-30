@@ -96,22 +96,10 @@ The target does not need its own Claude or Codex login for the first two
 commands. The account can exist only on your laptop and still run an agent on a
 credential-free build box.
 
-Work that continues after SSH returns is different:
-
-```bash
-lf chat --follow -w shipper
-lf ssh shipper-home chat --follow -w shipper
-```
-
-The foreground control command can borrow origin authority. The resident it
-starts cannot: it must use credentials and repository routes installed on the
-machine where it keeps running. A foreground `--account` preference is not
-durable configuration.
-
-Wave `owner` and `home` fields are automatic-start policy, not an authorization
-boundary. They stop a Home daemon from volunteering for somebody else's Wave;
-a user who can write the repository or local registry can still change
-placement explicitly.
+Detached work must use credentials and repository routes installed on the
+machine where it continues. A foreground `--account` preference is not durable
+configuration. Wave placement and enablement guide execution; they are not an
+authorization boundary for a person who can write the repository or registry.
 
 See [Subscription Management](/docs/subscriptions) for connecting identities,
 repository routes, account selectors, and the exact merged selection order.
@@ -217,28 +205,7 @@ local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
 Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
 that machine.
 
-## Keep network services inside their intended boundary
+## Remote operation
 
-`lfd` listens on `127.0.0.1` by default. It is not a remote multi-user identity
-system; use SSH for remote operation. A non-loopback bind requires
-`LF_LFD_ALLOW_NON_LOOPBACK=1`. Linear and GitHub webhook routes verify their
-provider signatures. `/health` and `/status` are public on the bound interface,
-so a non-loopback listener must sit behind a firewall or authenticating proxy.
-Wave start and stop require a random per-process control capability stored in
-the local endpoint record with owner-only permissions; the capability is never
-logged or sent to agents.
-
-The detached development fallback that a chat connection launches when no lfd service
-is live is deliberately scrubbed. It can host Waves, but it does not retain
-webhook secrets from the invoking shell. Install lfd as the Home service for
-durable webhook ingress.
-
-`lfd` keeps webhook secrets inside the Home server process. Its in-process
-`WaveHost` listeners are trusted Loopflow control code, not agents. When they
-spawn Wave bodies and provider processes, the durable boundary removes daemon
-secrets along with forwarded SSH credentials. Agents do not inherit ingress
-authority.
-
-Repository instructions, skills, plugins, MCP servers, browser connections,
-hooks, and installers can all extend what an agent can reach. Review their
-source and configuration before adding them to a high-authority environment.
+Use `lf ssh` to run a command on another Home. Foreground commands may forward
+explicit account authority; detached work uses credentials installed on its Home.

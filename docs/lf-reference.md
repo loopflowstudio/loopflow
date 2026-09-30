@@ -489,7 +489,7 @@ not invent another PR when settled work can already complete the Task.
 ```bash
 lf wave list
 lf wave status designer
-lf wave chat --wave designer --follow
+lf --wave designer wave/operate
 lf --wave designer skill wave/operate "Review progress toward keyboard access"
 ```
 
@@ -542,22 +542,12 @@ alone does not erase recorded execution or authored work. Repeat the same
 operation to recover an incomplete transition rather than manually rotating
 provider Projects.
 
-### Conversations
+### Wave planning
 
 ```bash
-lf wave chat --wave designer "Prioritize the dialog audit"
-lf wave chat --wave designer --follow
-lf wave chat --wave designer --history --json
-lf wave reply designer "Does this change need a response?"
+lf --wave designer wave/operate "Review the current plan"
+lf wave status designer
 ```
-
-Chat posts into the durable Wave thread. `--follow` replays recent turns and
-keeps the conversation open; `/status` reads health and `/quit` leaves.
-`--history` reads saved conversation without starting a listener. Reply makes
-one reply decision and prints only a warranted response.
-
-Select a Wave explicitly outside bound work. A repository may contain several
-Waves; its location alone does not select one.
 
 ### Schedules
 
@@ -582,12 +572,10 @@ The Home's installation-update schedule is separate under `home install`.
 
 ```bash
 lf wave place WAVE_ID HOME_ID
-lf wave probe designer
 lf wave relocate WAVE_ID --name platform
 lf wave relocate WAVE_ID --repo ../platform
 lf wave retire designer --reason "Responsibility transferred"
 lf wave forget WAVE_ID --dry-run
-lf wave recover designer
 ```
 
 Placement selects the Home responsible for execution. It does not launch work
@@ -595,8 +583,7 @@ or redirect every local command to that machine. Relocation preserves identity
 and authored state; it reports live work that must settle first.
 
 Retirement retains history. Forget removes an empty registration after authored
-files have been removed. Recover inspects retained historical continuations;
-cancel one explicitly with `--cancel SEQUENCE --reason TEXT` when appropriate.
+files have been removed.
 `wave rename NAME --title TEXT` changes the connected provider's display title.
 
 ## Session: conversations and reviews

@@ -86,7 +86,7 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf chat --follow -w designer
+lf --wave designer wave/operate        # one finite planning pass
 lf --wave designer wave/operate "ship the button audit first"
 ```
 

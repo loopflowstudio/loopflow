@@ -24,7 +24,6 @@ complexity.
 | Boundary execution | `controller/` | — | optional Wave service and claimed Task Flow boundaries |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes, routes, leases |
-| Home daemon | `lfd/` | 2,900 | Home HTTP API, webhooks, Wave and service reconciliation |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Run records, artifacts, repository identity, subscriptions |
 | Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | immutable schema history and current draft frontier |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
@@ -51,7 +50,6 @@ subprocess edge to one concept.
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave automation | [`controller/wave/`](../../rust/loopflow/src/controller/wave/) | listener, resident, placement policy, runtime |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
-| Home daemon | [`lfd/mod.rs`](../../rust/loopflow/src/lfd/mod.rs) | Home HTTP and service reconciliation |
 | machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
 
@@ -60,8 +58,6 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
-lfd                        one Home's service keeper and webhook receiver
-lf __resident              Wave resident process
 lf task __worker           one already-claimed Task boundary
 lf __provider-session      provider hook that binds native session identity to a Run
 lf __screenshot-supervisor bounded browser-capture owner

@@ -18,9 +18,6 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -37,9 +34,6 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -74,9 +68,6 @@ struct RegistryQueryTests {
             "goal": "ship the roadmap",
             "repo": "/tmp/repo-a",
             "active_tasks": 1,
-            "live": true,
-
-            "endpoint": "127.0.0.1:5678",
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -93,9 +84,6 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-b",
             "active_tasks": 0,
-            "live": false,
-
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -292,9 +280,6 @@ struct RegistryQueryTests {
         let result = try await query.status(wave: "goals", cwd: nil)
         #expect(result.wave.id == "goals")
         #expect(result.wave.goal == "g")
-        #expect(result.homeRuntime.state == .stopped)
-        #expect(result.homeRuntime.action == .connect(homeId: "home_00000000000000000000000000000001"))
-        #expect(result.loopState == "turning")
         #expect(result.workMap.chapter?.flows.recommended == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
@@ -353,142 +338,9 @@ struct RegistryQueryTests {
         #expect(result.items[0].subject == "W2-144")
     }
 
-    @Test("Wave Chat history uses the backing-aware DTO")
-    func chatHistoryUsesBackingAwareDTO() async throws {
-        let query = RegistryQuery { args, cwd in
-            #expect(args == [
-                "chat", "--history", "--json", "--limit", "12", "--wave", "product",
-            ])
-            #expect(cwd == "/tmp/repo")
-            return #"{"epochs":[],"selected_epoch_id":null,"state":"missing","detail":"No durable Wave Chat history exists yet.","messages":[],"truncated":false}"#
-        }
-
-        let snapshot = try await query.chatHistory(
-            wave: "product",
-            limit: 12,
-            cwd: "/tmp/repo"
-        )
-        #expect(snapshot.state == .missing)
-        #expect(snapshot.messages.isEmpty)
-        #expect(!snapshot.truncated)
-    }
-
-    @Test("lf wave probe decodes the state and the one contextual action")
-    func homeProbeDecodesStateAndAction() async throws {
-        let json = #"""
-        {
-          "home": {
-            "id": "home_00000000000000000000000000000001",
-            "route": "local",
-            "created_at": "1970-01-01T00:00:00Z",
-            "observed_at": "1970-01-01T00:00:00Z"
-          },
-          "state": "stopped",
-          "reason": "reachable, no resident",
-          "endpoint": null,
-          "action": {
-            "kind": "connect",
-            "home_id": "home_00000000000000000000000000000001"
-          }
-        }
-        """#
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["wave", "probe", "product", "--json"])
-            #expect(cwd == "/tmp/repo")
-            return json
-        }
-
-        let runtime = try await query.homeProbe(wave: "product", cwd: "/tmp/repo")
-        #expect(runtime.state == .stopped)
-        #expect(runtime.endpoint == nil)
-        #expect(runtime.action == .connect(homeId: "home_00000000000000000000000000000001"))
-    }
-
-    @Test("Chat connection for returns the existing Wave status contract")
-    func startReturnsWaveStatus() async throws {
-        let json = #"""
-        [
-          {
-            "id": "wave-1",
-            "name": "product",
-            "status": "ready",
-            "goal": "Ship product",
-            "repo": "/tmp/repo",
-            "active_tasks": 1,
-            "live": true,
-
-            "endpoint": "127.0.0.1:7777",
-            "created_at": "2026-07-17T00:00:00Z",
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "2026-07-17T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            }
-          }
-        ]
-        """#
-        let query = RegistryQuery { args, cwd in
-            #expect(args == ["__chat-connect", "product", "--json"])
-            #expect(cwd == "/tmp/repo")
-            return json
-        }
-
-        let result = try await query.connectChat(wave: "product", cwd: "/tmp/repo")
-        #expect(result[0].live)
-        #expect(result[0].endpoint == "127.0.0.1:7777")
-        #expect(result[0].home.id == "home_00000000000000000000000000000001")
-    }
-
-    @Test("Chat connection for rejects a non-live receipt")
-    func startRejectsNonLiveReceipt() async {
-        let json = #"""
-        [
-          {
-            "id": "wave-1",
-            "name": "product",
-            "status": "ready",
-            "goal": "Ship product",
-            "repo": "/tmp/repo",
-            "active_tasks": 1,
-            "live": false,
-
-            "endpoint": null,
-            "created_at": "2026-07-17T00:00:00Z",
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "2026-07-17T00:00:00Z",
-              "observed_at": "2026-07-17T00:00:00Z"
-            }
-          }
-        ]
-        """#
-        let query = RegistryQuery { _, _ in json }
-
-        await #expect(throws: RegistryQueryError.self) {
-            try await query.connectChat(wave: "product", cwd: "/tmp/repo")
-        }
-    }
-
-    @Test("Chat connection for surfaces an actionable preflight failure")
-    func startSurfacesPreflightFailure() async {
-        let query = RegistryQuery { _, _ in
-            throw RegistryQueryError("Wave broken failed preflight: invalid chat policy")
-        }
-
-        do {
-            _ = try await query.connectChat(wave: "broken", cwd: "/tmp/repo")
-            Issue.record("expected the preflight failure")
-        } catch {
-            #expect(error.localizedDescription.contains("failed preflight"))
-            #expect(error.localizedDescription.contains("invalid chat policy"))
-        }
-    }
-
-    @Test("lf wave status keeps unavailable evidence unavailable")
+    /// Unreadable evidence must reach the surface as its reason, never as an
+    /// empty list — a broken ledger is not a quiet wave.
+    @Test("lf status keeps unavailable evidence unavailable")
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
@@ -499,9 +351,6 @@ struct RegistryQueryTests {
             "goal": "g",
             "repo": "/tmp/repo-a",
             "active_tasks": 0,
-            "live": false,
-
-            "endpoint": null,
             "created_at": null,
             "parent_wave_id": null,
             "home": {
@@ -511,7 +360,6 @@ struct RegistryQueryTests {
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "loop_state": null,
           "runs": {
             "state": "unavailable",
             "reason": "run ledger unavailable: disk is gone"

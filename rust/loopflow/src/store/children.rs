@@ -435,29 +435,7 @@ impl Store {
             store.append_task_event(&write_task_id, &write_kind)
         })
         .await?;
-        self.nudge_task_event(&task_id, &kind, &event).await?;
         Ok(event)
-    }
-
-    async fn nudge_task_event(
-        &self,
-        task_id: &TaskId,
-        kind: &TaskEventKind,
-        event: &TaskEvent,
-    ) -> StoreResult<()> {
-        if kind.is_wave_observable() {
-            if let Some(task) = self.get_task(task_id).await? {
-                if let Some(wave) = self.get_wave(&task.wave_id).await? {
-                    if let Err(error) =
-                        crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                    {
-                        tracing::debug!(%error, %task_id, event_id = event.id,
-                            "Task delivery failed; the Wave observer will retry its durable outbox");
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     pub async fn task_events_after(
@@ -528,30 +506,6 @@ impl Store {
             store.append_project_event(&write_project_id, &write_kind)
         })
         .await?;
-        if kind.is_wave_observable() {
-            if let Some(project) = self.get_project(&project_id).await? {
-                match self.get_wave(&project.wave_id).await? {
-                    Some(wave) => {
-                        if let Err(error) =
-                            crate::lf::commands::chat::nudge_child_observations(wave.name()).await
-                        {
-                            tracing::debug!(
-                                %error,
-                                %project_id,
-                                event_id = event.id,
-                                "live Project observation delivery failed; Wave observer will retry"
-                            );
-                        }
-                    }
-                    None => tracing::error!(
-                        wave_id = %project.wave_id,
-                        %project_id,
-                        event_id = event.id,
-                        "Project observation cannot nudge its missing owning Wave"
-                    ),
-                }
-            }
-        }
         Ok(event)
     }
 

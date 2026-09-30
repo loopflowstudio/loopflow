@@ -1,7 +1,7 @@
 # Planning
 
 ```bash
-lf chat --follow -w product
+lf --wave product wave/operate
 lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
@@ -232,30 +232,7 @@ lf session ready "Human feedback, revised design, remaining work"
 lf session complete <flow-session-id>
 ```
 
-Review completion persists before successor launch and provider teardown.
-Its feedback reaches the next step through the cursor's direction. The following
-loop-decide chooses Advance or Iterate using its own explicit edge. Readiness
-and provider exit do not complete a review; Ask Complete returns to the blocked
-caller. Both Flow adapters and
-Asks project through `SessionRecord`, using `flow` and `ask` kinds. The Mac app
-uses the shared Session surface and provider-native history; it owns no second
-Session state. A thin detached PTY cradle keeps the initial provider client
-alive before a UI arrives.
-
-## Execution topology
-
-```text
-Task CLI / Session Complete
-  `-- mechanical Task driver
-        `-- exact Task Flow-position claim
-              `-- one finite boundary Run at a time
-
-Wave operation
-  `-- one finite wave/operate Run
-
-lfd
-  `-- Wave listener / resident
-```
+## Author and discover executable targets
 
 The Wave listener and resident are not prerequisites for Task
 motion. The exact Task-position claim admits one worker. Other agent

@@ -20,7 +20,6 @@ mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 mod pr_landings;
-pub mod provider_deliveries;
 pub mod rows;
 pub mod sqlite;
 mod token_crypto;

@@ -203,8 +203,8 @@ and event, while legacy status contexts keep their own identities.
 
 Rerun `lf pr land` after resolving a blocker. It resumes the existing landing
 under a fresh supervisor generation, including when the SHA has not changed.
-The waiting CLI displays completed `ci-fix` conclusions from existing Run
-records for this worktree, including when lfd supervises the landing. Use
+The waiting CLI displays completed `ci-fix` conclusions from recorded conversation
+records for this worktree, while the local process supervises the landing. Use
 `lf runs <run> --final` to inspect a conclusion separately.
 
 Watched repairs return `published` or `blocked` with a summary in their existing

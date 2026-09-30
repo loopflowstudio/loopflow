@@ -4,7 +4,7 @@ pub mod config;
 pub mod context;
 pub mod memory;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
@@ -49,26 +49,6 @@ impl WaveLocator {
 
     pub fn slug(&self) -> &str {
         &self.slug
-    }
-}
-
-/// The one-time typed wake derived from a child Wave's durable promotion occurrence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PromotionWake {
-    pub(crate) parent_wave_id: WaveId,
-    pub(crate) parent: String,
-}
-
-impl PromotionWake {
-    pub(crate) fn inbox_id(&self) -> String {
-        format!("promotion:{}", self.parent_wave_id)
-    }
-
-    pub(crate) fn prompt(&self) -> String {
-        format!(
-            "Promotion from parent Wave '{}' is complete. Begin the first child-Wave pass and report what this Wave now owns.",
-            self.parent
-        )
     }
 }
 

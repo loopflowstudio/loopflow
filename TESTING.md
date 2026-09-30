@@ -427,28 +427,6 @@ missing-sample and PID-reuse counterexamples when changing the projection.
 Repeated samples of a reused body PID must remain Unknown; they cannot replace
 the observer's original body identity and later establish a stall for that Run.
 
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
-```
-
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
-
-When changing Wave listener ownership or placement, include the Home reconciler
-and relocation proofs:
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(wave_host::tests::) | test(controller::wave::relocate::tests::)' --no-fail-fast
-```
-
-Retirement fixtures must use Wave relocation's retirement transition; generic
-Work abandonment does not retire a Wave registration. Keep simulated listeners
-pending until the host stops them, and assert the desired Wave set before
-reconciliation so an incidental startup failure cannot masquerade as shutdown.
-
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
 steering publishes to Linear and belongs with the mocked Linear boundary tests.
@@ -720,9 +698,9 @@ uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
 ```
 
 Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
-`uv`. Install the published CLI/daemon fallback and promote the candidate with
+`uv`. Install the published CLI fallback and promote the candidate with
 `lf install promote --from-build ...` first. That Home needs a registered
-repository and `tmux` so promotion can verify its daemon. Never mount a real
+repository. Never mount a real
 Home or credentials into this container: the fixture replaces its Linear row
 and seeds planning data in the selected development store.
 
@@ -741,8 +719,8 @@ uv run --no-project --python 3.14 /fixture/install_bootstrap.py
 ```
 
 Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
-pair to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
-`/fixture/bin/{lf,lfd}`. Build the pair in a separate disposable source snapshot
+CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
+`/fixture/bin/lf`. Build the CLI in a separate disposable source snapshot
 after `canonicalize_migrations.py --materialize-for-tests`, using release
 provenance and published migration authority only in that isolated build.
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
@@ -752,7 +730,7 @@ external-installer transition.
 
 The script creates separate OS accounts and a local HTTPS release endpoint.
 It exercises the real CLI, verified shell installer, store creation, repeat
-installation, missing-daemon repair, checkout preservation, and recovery after
+installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
@@ -792,16 +770,6 @@ cargo test -p loopflow --lib ops::flow_run::tests
 Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
 a human review preserves its invocation and cursor while preparing its Run;
 assert those facts instead of equality of the entire versioned Flow record.
-
-When changing Wave chat operations, include the parent module's HTTP and SSE
-tests. Selecting only `runner::tests` or steering-named tests misses them.
-
-```bash
-cargo nextest run -p loopflow --lib -E 'test(controller::wave::)' --no-fail-fast
-```
-
-Retired operations must be rejected without journaling, while ordinary messages
-and bare interrupts retain their behavior.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;

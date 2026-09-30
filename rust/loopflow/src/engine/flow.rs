@@ -264,7 +264,8 @@ pub fn wave_memory_section(memory: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
+    let reference = crate::engine::prompt::render_reference(trimmed);
+    Some(format!("<lf:wave-memory>\n{reference}\n</lf:wave-memory>"))
 }
 
 /// Sections run stable → volatile so providers can prefix-cache the front of

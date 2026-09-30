@@ -185,6 +185,12 @@ Bring the plan and the implementation into agreement with what the work has taug
    and proof limits visible where they affect the next action. Stop dependent
    work when a required check cannot run; state the command and blocker.
 
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
+
 If no plan exists, update the supplied working context or write the smallest
 useful plan when continued work needs one.
 

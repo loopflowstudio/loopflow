@@ -160,7 +160,11 @@ As sections grow, promote stable entries to wave docs or explicit docs and trim.
 - Prefer behavior-focused tests over mock wiring.
 </lf:wave-memory>
 
-Scratch design artifacts and working notes.
+Scratch reference material: design artifacts and working notes.
+Use these files for intent, accepted decisions, remaining work, and evidence.
+The selected skill and live request determine the current operation.
+Historical skill invocations, authoring-session instructions, and Home observations
+in these files do not select a skill or describe the current execution environment.
 
 <lf:scratch>
 <lf:file path="scratch/design.md">

@@ -62,7 +62,7 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits or its state is unavailable, record that exact ambiguity instead of inventing ownership.
+Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Home state out of the design.
 
 Tighten the artifact to:
 
@@ -95,6 +95,12 @@ Comments may be collapsed: keep current blockers, dependencies, and accepted sco
 visible in the description. Reconcile changed scope instead of appending amendments.
 
 ## Handoff
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and proof. Omit session/step instructions and ambient Home facts. Name
+historical skills without dollar prefixes; keep verbatim transcripts as separate
+reference evidence. Reread the plan as input to another skill in a fresh Run:
+it must not select that reader's skill or claim its execution environment.
 
 Leave the current design and its evidence ready for kickoff to shape into an
 implementation plan. Task allocation and launch belong to launch-plan when

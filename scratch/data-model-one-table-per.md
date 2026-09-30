@@ -44,8 +44,14 @@ driver or engine. A dead driver does not establish a dead provider. Viewing is
 passive. Connecting does not complete a review or advance a Flow.
 
 A Task selects one managed FlowSession and may have other attributed FlowSessions.
-Taskless Flows use the same driver and record. A FlowSession's captured template
-composition stays expanded; only actual runtime nesting creates child sessions.
+Taskless Flows use the same driver and record. One started Flow is one FlowSession.
+Its captured template composition stays expanded; loop passes are positions in
+that graph, identified by node and iteration tuple in AgentSession and Flow
+history. Passes and subflows are display lenses, without another Session, claim
+or lifecycle. Retry retains the same pass; Iterate advances the cursor and return
+counters. Jack Heart selected this on 2026-09-30, superseding the runtime-child
+contract. Implementation must fold existing child-pass history into the root by
+forward migration before removing child rows and their ownership machinery.
 
 ## Usage to implement
 
@@ -328,7 +334,7 @@ paging/reconciliation remains the following coordinated cut.
 | Every lf command visible | Root, direct child and agent child Execs, command result and searchable Task/repo/parent filters; no fake process rows |
 | Stable resumable agent conversations | Fresh headless and interactive CLI launches plus connect/handoff/restart, same identity/title/feedback/native history, one current driver |
 | Exact authority | Concurrent connect/restart, stale writer/late completion, PID reuse, engine outliving driver, shared-engine sibling preserved |
-| Common FlowSession | Task/taskless, multiple attributed Flows with one managed pointer, source-independent resume, XOR, runtime loop children, retries, mechanical-operation interruption |
+| Common FlowSession | Task/taskless, multiple attributed Flows with one managed pointer, source-independent resume, XOR, loop positions and return counters, same-pass retries, mechanical-operation interruption; child-pass migration preserves history |
 | Attribution and Started | Typed nullable ancestry matrix, bind race/same-target/done-Task, read-only command leaves Started unchanged, timestamp monotonicity and import provenance |
 | History and usage | Four-origin plus command/headless import, old IDs and unknowns, no fabricated process, interrupted/idempotent import, separate failed/successful turn usage with missingness |
 | Fast searchable reads | SQL filters and limits precede payload IO; indexed Task/Session/parent and text search plan; measure cold/warm list and detail on representative dense fixture, report scale and actual latency |

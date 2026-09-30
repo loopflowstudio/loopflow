@@ -200,7 +200,9 @@ default, not another objective, memory or operator.
 Tasks have zero or more attributed FlowSessions and select one managed FlowSession.
 The Project's Flow supplies the default; explicit Flow selection is allowed.
 Taskless execution uses the same captured graph, cursor, return counts and driver.
-Template composition expands the graph; only runtime loop nesting creates parents.
+Template composition expands the graph. One started Flow is one FlowSession;
+loop passes are node/iteration positions and lenses over its history, not child
+FlowSessions. Retry retains the pass; Iterate advances its return counters.
 
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated

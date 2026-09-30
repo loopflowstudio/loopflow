@@ -71,7 +71,7 @@ cannot release live work. Durable interrupts remain the first provider request.
 | `LF_PARENT_RUN_ID` | Delete: no production reader. |
 | Session driver/provider Exec + generations | Keep: mutable driver and surviving/shared engine are different facts. |
 | Session event Exec/capture references | Keep: native turns and instructions are not nodes in the process tree. |
-| `flow_sessions.parent_id` | Keep: runtime loop nesting, not Exec ancestry. |
+| `flow_sessions.parent_id` | Remove: Jack Heart's 2026-09-30 decision makes passes positions in one FlowSession. Preserve child history by forward migration first. |
 | captured caller key / manifest parent | Remove new ancestry copy; Exec supplies it. Retain old import decoding. Separate replay source and Ask identity from ancestry. |
 | journal parent process copy | Trace journal is outside this naming cut; verify whether its writer still needs a duplicate. |
 
@@ -80,7 +80,7 @@ cannot release live work. Durable interrupts remain the first provider request.
 | Fact | Owner and reduction |
 | --- | --- |
 | Current conversation Task/Wave + source/bound time | AgentSession. Task implies Wave; existing ancestry validation stays. |
-| Flow work | FlowSession; Session membership must agree on writes. Runtime children derive/validate against parent. |
+| Flow work | FlowSession; Session membership must agree on writes. Fold the superseded runtime child passes into that owner. |
 | Prospective history owner | Immutable capture or native start observation, not every output/usage/completion. Derive child receipts through that observation; validate Task→Wave and live Session agreement on new writes. Preserve imported evidence exactly. |
 | Post-hoc usage alternative | One history-reader choice of current Session assignment versus retained observation; keep prospective until Jack decides. Timestamps alone cannot reconstruct same-second binding order. |
 | Bound repository | Wave, via Task when present. Remove unvalidated Session repo copies; keep nullable unbound observation and validate assignment. |
@@ -279,7 +279,7 @@ requires a managed account and verifies it before Task/provider effects, while a
 direct skill may use ambient provider credentials. Deleting this would change
 Task-create preflight and attribution policy. OpenCode also lacks the Task
 execution-boundary treatment used by Codex/Claude. The 2026-09-30
-[slice review](skill-command-review.md) found that managed-account preflight
+[slice review](https://github.com/loopflowstudio/loopflow/blob/e54efaf44/scratch/skill-command-review.md) found that managed-account preflight
 survives at entry, but no longer at a later agent change or after an op-first
 boundary. The execution boundary remains enforced in the child. Jack has not
 approved weakening the managed-account policy; resolve this exception before
@@ -343,7 +343,7 @@ These are proposals for the separate naming commit, not selected schema changes.
 
 | Current name | Proposed name | Meaning |
 | --- | --- | --- |
-| `flow_sessions.parent_id` | `pass_of_id` | Runtime pass belongs to the FlowSession waiting for its result. |
+| `flow_sessions.parent_id` | Delete | Jack Heart removed child-pass FlowSessions on 2026-09-30; no replacement name or relation. |
 | `flow_parents` / graph `parents` | `definition_path` | Ordered definition provenance for grouping compiled steps. Display only. |
 | `expand_flow` and equivalent definition-to-graph terms | `compile_flow` / compile | Compile definitions, then capture the compiled graph and step input. |
 | `execs.parent_exec_id` | Keep | The one causal parent relation: an Exec's parent Exec. |
@@ -412,6 +412,6 @@ coverage and diff checks also pass. The pre-existing `scratch/questions.md`
 contribution is unchanged. Final gate and materialized full-matrix proof remain
 with their planned boundaries.
 
-The subsequent [shared-command slice review](skill-command-review.md) repairs
+The subsequent [shared-command slice review](https://github.com/loopflowstudio/loopflow/blob/e54efaf44/scratch/skill-command-review.md) repairs
 managed review dispatch after claim release and records the named deleted test,
 fresh public proof, full-matrix failures/repairs and checkpoint publication.

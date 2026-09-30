@@ -496,6 +496,13 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
         pr.base_commit, stale_base,
         "publication must not advance the recorded integration base"
     );
+    let publication = pr.publication.as_ref().expect("adopted publication");
+    assert_eq!(publication.github.as_ref().unwrap().number, 925);
+    assert_eq!(
+        publication.presentation.as_ref().unwrap().head_sha,
+        before_publish
+    );
+    assert!(publication.merge.is_none());
     let files = git_out(
         &repo,
         &["diff", "--name-only", &format!("{}..HEAD", pr.base_commit)],

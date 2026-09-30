@@ -16,6 +16,9 @@ use loopflow::ops::task::task_stack;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
 };
+use loopflow::work::task::{
+    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 
@@ -430,6 +433,201 @@ fn valid_authority_publishes_and_records_the_pr() {
         .github()
         .expect("GitHub PR must be attached under valid authority");
     assert_eq!(github.number, 1, "the published PR number must be attached");
+}
+
+fn gh_publication_script(home: &std::path::Path) -> String {
+    let home = home.display();
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'gh version 1.0.0'
+  exit 0
+fi
+echo "$@" >> "{home}/gh.log"
+case "$1 $2" in
+  'pr list')
+    if [ ! -f "{home}/created" ]; then
+      echo '[]'
+    elif [ -f "{home}/fail-read" ]; then
+      echo 'fixture follow-up read failed' >&2
+      exit 1
+    else
+      cat "{home}/pr.json"
+    fi
+    ;;
+  'pr create')
+    touch "{home}/created"
+    echo 'https://example.com/pr/7'
+    ;;
+  'pr ready')
+    if [ -f "{home}/fail-ready" ]; then
+      echo 'fixture readiness failed' >&2
+      exit 1
+    fi
+    ;;
+esac
+"#
+    )
+}
+
+#[test]
+fn acknowledged_creation_survives_failed_read_and_retries_without_duplicate() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let script = gh_publication_script(home.path());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let branch = "jack/acknowledged-publication";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    fs::write(
+        home.path().join("pr.json"),
+        serde_json::json!([{
+            "url": "https://example.com/pr/7", "number": 7,
+            "state": "OPEN", "isDraft": false, "headRefOid": head
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(home.path().join("fail-read"), "").unwrap();
+    let options = PrOptions {
+        title: Some("acknowledged publication".to_string()),
+        body: Some("publication preservation proof".to_string()),
+        agent: None,
+        draft: false,
+    };
+
+    let error = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap_err();
+    assert!(
+        error.to_string().contains("fixture follow-up read failed"),
+        "{error}"
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let read_pr = || {
+        runtime
+            .block_on(task.store.active_task_pr(&task.task.id))
+            .unwrap()
+            .unwrap()
+    };
+    let acknowledged = read_pr();
+    assert_eq!(acknowledged.id, task.pr.id);
+    assert_eq!(acknowledged.parent_pr_id, task.pr.parent_pr_id);
+    let github = acknowledged.github().unwrap();
+    assert_eq!(github.number, 7);
+    assert_eq!(github.url, "https://example.com/pr/7");
+    assert_eq!(github.head_sha, None, "creation did not report a head");
+    // No Wave config exists in this fixture: Linear linkage must remain visibly
+    // degraded without losing the acknowledged GitHub identity.
+    assert!(acknowledged.linear_link_error.is_some());
+
+    fs::remove_file(home.path().join("fail-read")).unwrap();
+    let result = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
+    assert!(!result.created);
+    let retried = read_pr();
+    assert_eq!(retried.id, acknowledged.id);
+    assert_eq!(retried.github().unwrap().number, 7);
+    assert_eq!(
+        retried.github().unwrap().head_sha.as_deref(),
+        Some(head.as_str())
+    );
+    assert!(retried.linear_link_error.is_some());
+    let log = fs::read_to_string(home.path().join("gh.log")).unwrap();
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.starts_with("pr create "))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn existing_pr_identity_survives_readiness_failure() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let script = gh_publication_script(home.path());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let branch = "jack/failed-readiness";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let now = time::OffsetDateTime::now_utc();
+    let mut pinned = task.pr.clone();
+    pinned.publication = Some(PrPublication {
+        requested_at: now,
+        presentation: Some(PrPresentation {
+            title: "Previous head".into(),
+            body: "Retained review".into(),
+            head_sha: base.clone(),
+        }),
+        github: Some(GithubPr {
+            number: 7,
+            url: "https://example.com/pr/7".into(),
+            head_sha: Some(base.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: now,
+            head_sha: base.clone(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    runtime
+        .block_on(task.store.update_task_pr(&pinned))
+        .unwrap();
+    fs::write(
+        home.path().join("pr.json"),
+        serde_json::json!([{
+            "url": "https://example.com/pr/7", "number": 7,
+            "state": "OPEN", "isDraft": true, "headRefOid": head
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(home.path().join("created"), "").unwrap();
+    fs::write(home.path().join("fail-ready"), "").unwrap();
+
+    let error = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("known draft".to_string()),
+            body: Some("readiness preservation proof".to_string()),
+            agent: None,
+            draft: false,
+        },
+        &NullProgress,
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("fixture readiness failed"),
+        "{error}"
+    );
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(pr.id, task.pr.id);
+    let github = pr.github().unwrap();
+    assert_eq!(github.number, 7);
+    assert_eq!(github.url, "https://example.com/pr/7");
+    assert_eq!(github.head_sha.as_deref(), Some(head.as_str()));
+    assert!(
+        pr.merge_request().is_none(),
+        "the previous head cannot retain merge intent"
+    );
+    let log = fs::read_to_string(home.path().join("gh.log")).unwrap();
+    assert!(!log.lines().any(|line| line.starts_with("pr create ")));
 }
 
 /// Ordinary non-Task PR flows remain explicit: a healthy registry that

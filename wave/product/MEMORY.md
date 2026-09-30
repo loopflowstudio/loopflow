@@ -5,6 +5,58 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Participation and primary Sessions (2026-09-30)
+
+Jack Heart accepted a Task workspace that keeps Sessions, shells and files
+together while background Flows prepare the next interactive stage. Direct
+Flow reviews and Task Asks remain their own conversations. Completing an Ask
+releases its exact caller; closing a pane, provider exit, or a matching checkout
+does not complete a boundary. Conversation availability is distinct from Ready
+to Complete. Task/Wave participation indications remain a review recommendation.
+
+Jack selected eager repo/Wave primary Sessions on desktop discovery and one
+TaskSession when a Task launches. Repo owns onboarding and last-resort help,
+including without Waves or PM; Wave combines autonomous operation and emerging
+design; TaskSession operates the existing Task Flow authority. Primary repo/Wave
+Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
+never silently restart its Flow. Ordinary reads remain read-only.
+
+Jack's “switch now” and “finish, then switch” replace a captured invocation while
+retaining Task identity, TaskSession and files. “Finish” stops at the next loop
+point of the innermost active loop before its decider. Durable acceptance must
+serialize with worker claims and retain the captured successor across recovery;
+checkpoint final writes after confirmed stop. Crossing repeat intervals and an
+already-claimed decider need explicit resolution, not an invented inner boundary.
+These are required implementation mechanics, not delivered behavior.
+
+Jack accepted automatic Wave wakes for operational blockers and reading existing
+Task/Session output. A repo-associated Session may request repo attention with
+original evidence and a reason. These asynchronous requests never release direct
+Asks and do not introduce a messaging UI. Upstream `3dc89bc9a` already removed
+the resident/listener, external chat bridge and turn claims. The outbox survives
+without a production dispatcher. Establish primary-owned claims and receipts;
+do not restore that service or assume its journal still provides recovery.
+Prove structured wakes and interactive draft input through one native execution
+owner before primary cutover. A second Harness or terminal keystroke injection
+does not prove that integration.
+
+The first internal Task-workspace cut implements Rust-derived checkout association
+and a paged directory browser independent of Project hydration and PR diff bases.
+Keep `(Home, resolved checkout)` location separate from Run attribution and Flow
+membership. Batch placement reads must propagate failure, preserving stale UI
+inventory. Readable symlinks are read-only; refresh access before equal-revision
+shortcuts so an identical-content replacement disables editing and autosave
+without losing drafts. Comparison failure must leave directory browsing usable.
+
+Recorded Rust/Swift focused proofs, fixtures, Clippy and fallback compilation
+support that cut; Swift transport was simulated. Home-aware retained panes,
+collapse/focus, live reassociation, participation projection, raw Ask keys and
+configured desktop/provider proof remain. Remote owning-Home resolution is also
+unproved. The headless run cannot execute the required `--ui-host` gate or live
+Ask/Flow handoff. Unit 1 is not ready to ship; primary native wake delivery and
+durable Flow replacement remain separate Unit 2 obligations. These checks earn
+no external-product weekly-progress credit.
+
 ## Skill reduction decisions (2026-09-28)
 
 Jack reported uncertainty among repair and implementation entry points and
@@ -155,29 +207,27 @@ Decisions that outlive the branch (Jack's, verbatim where quoted):
   kinda liking the serif task title now"). Sidebar Wave rows are sans
   ("sans-serif wins") with no glyph, no count, no dot ("nothing at all is
   even simpler"); a needs-you dot may return later.
-- Orphan Sessions leave the Wave tree into a collapsed "Orphan sessions · N"
-  section at the bottom above search; the planned header opens a control room
-  (the multiplexer, all orphans tiled without a cap, Bind at rest). This branch's
-  header opens the first orphan until LOO-299 implements the room. Sessions launched
-  through `lf` in a Task worktree gain checkout binding in S5; auto-assignment is the
-  long-term aim from both sides. Pre-binding orphans in a Task worktree stay
-  orphans with a preselected one-click bind; no Swift-side path inference.
+- The earlier orphan control-room direction is superseded by Jack's September 30
+  Task workspace and primary-Session direction above. Rust now derives Task
+  grouping from checkout identity, including previously unbound Sessions; Swift
+  consumes that association without rewriting Run attribution. The global
+  Session browser becomes diagnostic when primary navigation is implemented.
 - One universal bind from the room, ⌘K and Task rows ("worth making the
   design and architecture simple and universal if it takes a little extra").
   Bind changes a Run's Task, never its name, panes or Flow membership.
-  The target orphan predicate is `task == null`, including Wave-only Runs;
-  today's unmatched-roadmap predicate remains until the data model changes.
-  When the room empties after binding, jump to that Session under its Task.
+  September 30's location grouping is independent of this attribution operation;
+  it needs no bind to present a Session under its checkout's Task.
 - The Session view has one toolbar: the breadcrumb bar, worktree as a quiet
   mono chip, no pane header with one pane, split/close/zoom by keybind and a
   hover trio, terminal edge-to-edge in warm charcoal. "Similar tool sets on
   both the run and the session" must be collapsed or progressively disclosed.
 - Two Flow views: the Task page shows the folded Flow template until a Run
   exists, then the fully unrolled Flow invocation. Both draw the same
-  flattened graph today; LOO-299 owns the change.
-- Where a Session can be launched from, and what each launch point infers,
-  is design work still to do; assume Waves exist, the waveless beginner
-  waits. Wave-page New session is deferred "until we like the basics".
+  flattened graph in this baseline. September 30's accepted design makes the
+  interactive-stage projection primary, with actual automated work inspectable
+  on its edges; exact captured occurrence identity remains required.
+- The September 30 primary-Session direction supersedes deferring the waveless
+  beginner: repository onboarding must work before any Wave or Task exists.
 - Perf continues in a follow-up; the Session read-path changes follow the data model.
 
 State-of-the-art baseline adopted: one row component per sidebar level;
@@ -187,8 +237,10 @@ blue means running and loop region and nothing else; only the running node
 animates. Research sources and Jack's decisions are preserved in
 [the branch's design history](https://github.com/loopflowstudio/loopflow/tree/be7a02db0/scratch).
 
-Follow-ups: LOO-299 (control room, bind, Flow views, ⌘K, dark mode) after
-LOO-298's data model; LOO-300 for performance.
+Historical follow-up split: LOO-299 (control room, bind, Flow views, ⌘K, dark
+mode) after LOO-298's data model; LOO-300 for performance. The September 30
+direction supersedes the control-room approach; this local reconciliation does
+not establish the current scope or status of those external Tasks.
 
 Jack separated those three follow-ups so LOO-291 can deliver S1–S5, the recorder,
 signposts and assign-on-change fixes. The accepted Run/Session tables and universal
@@ -218,13 +270,16 @@ and [demo feedback](https://github.com/loopflowstudio/loopflow/blob/611ed031a031
 preserve the failed attempts and superseded proposals. Current usage lives in
 [the Mac README](../../swift/README.md) and [CLI reference](../../docs/lf.md).
 
-- **Task placement owns both surfaces.** One `scratch/` and `diff` navigator
-  sits beside retained Ghostty, with the recorded PR link above only navigation
+- **Task placement owns both surfaces.** The September 30 internal cut expands
+  the original `scratch/` and `diff` navigator to paged immediate directories,
+  with optional Changes over the same documents. It sits beside retained
+  Ghostty, with the recorded PR link above only navigation
   and aligned headers. Task context shows its recorded worktree without an
   independent selector. One document per Task/path in the window's existing
   workspace registry shares draft, selection and Undo across both sources,
   File/Diff, sheets and Sessions. Browser visibility survives relaunch; unsaved
-  drafts remain window-local. This is a small editor, not a repository explorer.
+  drafts remain window-local. File browsing, read and save do not require a PR
+  or hydrated Project; comparisons still require their recorded base.
 - **Comparison authority stays in `lf`.** Parent means the active Task PR's
   recorded base, HEAD its resolved worktree commit. The exact SHA pins list and
   patch reads; membership is net difference, including staged/untracked changes
@@ -272,7 +327,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
 Repo → Wave → Task → named Session is the public hierarchy. Project is internal
 chapter ownership. Optimize one repository: connected header/sidebar, started
 Tasks only, bottom search. Starting work is durable evidence, independent of
-Session/process liveness; inspection never starts work. Wave detail holds its
+Session/process liveness; inspection never starts Task execution. The accepted
+September 30 desktop discovery operation ensures primary repo/Wave conversations;
+ordinary list/status reads remain read-only. Wave detail holds its
 objective, Current KRs and complete Task plan, including unstarted Tasks.
 
 The accepted visual direction is D: sidebar A, center structure B, mood C.
@@ -843,7 +900,12 @@ preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f01
 and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
 They explain the topology change; they are not current setup instructions.
 
-## Wave controls & truthful failures (built this branch, `wave-controls`)
+## Historical Wave controls & truthful failures (`wave-controls`)
+
+The resident/listener Stop lifecycle and chat rendering below are historical:
+upstream `3dc89bc9a` removed those runtime and UI surfaces. Do not restore them
+as dependencies of primary Sessions. The failure-evidence, native UI proof and
+dictation lessons remain useful independently.
 
 The 2026-07-10 dogfood exposed four independent surface failures; all repaired
 here on top of PR #849's signed-test/release hardening.

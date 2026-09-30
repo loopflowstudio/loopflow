@@ -82,11 +82,18 @@ The first internal cut now implements shared checkout association, directory pag
 file access without Project/PR hydration, and retained read-only access changes.
 Swift grouping and the file navigator consume those readings. Focused Rust and
 Swift proofs have passed; the connected desktop/provider demo remains outstanding.
+Remote Flow readings retain recorded placement with an unavailable explanation;
+owning-Home checkout resolution remains unproved and must be verified before
+claiming association complete across Homes.
 The retained workspace, participation projection/indications, and raw Ask retry key
 in cuts 2–4 remain to build. Keep them in this PR's delivery boundary.
 Unit 2 is not launch-ready:
 native primary-turn delivery remains unproved, and Flow replacement needs the
-durable transition specified below. [Evidence](kickoff-evidence.md) separates
+durable transition specified below. Upstream `3dc89bc9a` has already removed the
+Wave resident, listener, external chat bridge, and their scheduling/turn claims.
+Unit 2 must establish primary-owned observation delivery from the retained outbox;
+there is no live resident consumer to migrate. Restoring that service is outside
+this design. [Evidence](kickoff-evidence.md) separates
 source findings and executed probes from required implementation proof.
 
 ## Unit 1 — the Task workspace
@@ -380,9 +387,11 @@ raise consequential unresolved choices with evidence. No mandatory Wave relay.
 
 ### Internal cuts and proof
 
-1. **This slice — association and prepared files.** Add the shared workspace
-   association and whole-worktree file reading; remove the PR dependency from
-   file read/save. Prove an unbound Session in a Task subdirectory groups correctly,
+1. **Implemented internal cut — association and prepared files.** The shared workspace
+   association and whole-worktree file reading remove the PR dependency from
+   file read/save. Recorded focused proofs provide partial coverage; the cases
+   below remain the acceptance contract, including connected desktop proof.
+   Prove an unbound Session in a Task subdirectory groups correctly,
    a sibling checkout does not, and an unstarted checkout can read/save a file.
    Exercise that no-PR case through the Swift directory navigator, post-save
    refresh and filesystem invalidation; a direct Rust read/save pass alone does
@@ -639,9 +648,9 @@ an explicit discovery operation, revising the older passive-chat product directi
 
 Design writing needs a stable checkout. Reuse Loopflow's existing create/reuse
 agent-worktree operation with explicit scope placement, not its move-main-edits
-path. Generalize the existing Wave placement helper out of resident ownership;
-retaining a checkout must not require starting a resident service. Preserve existing
-files and recorded checkout placement on replacement. Primary placement uses
+path. The former Wave resident placement wrapper was deleted upstream;
+use `engine::worktrees::ensure_agent_worktree` as the surviving shared owner.
+Preserve existing files and recorded checkout placement on replacement. Primary placement uses
 the local default ref and does not require the helper's current origin fetch;
 add an explicit local-base path to the shared placement operation. Unavailable
 Git hosting or PM must not prevent conversation with an available provider.
@@ -680,15 +689,20 @@ accepted native terminal experience or adding a resident service, return this
 unit to design review; do not silently relax automatic wakes or terminal retention.
 Unit 1 is independent and can proceed while this later unit remains bounded.
 
-The receipt boundary also needs work. `observation_outbox.delivered_at` currently
-means transfer to the Wave listener. The listener journal separately records
-`TurnOpened.answers`, claims pending observations, and requeues incomplete turns.
-Delivery is not recovery completion. Move selected recovery observations to one
-consumer before either resident or primary can claim them, retaining the existing
-claim/requeue semantics under the primary execution owner. Already-claimed
-governance work must settle before the primary takes that occurrence. Cadence
-passes must respect that ownership too; filtering one wake source alone cannot
-prevent two agents attempting recovery.
+The receipt boundary also needs work. The outbox and its pending/delivered
+operations survive, but the Wave listener and its `TurnOpened.answers`
+claim/requeue implementation were deleted in `3dc89bc9a`. Current source has no
+production caller of `pending_observations` or `mark_observation_delivered`.
+Retained `delivered_at` values describe historical transfer, never recovery
+completion. Establish durable claims, incomplete-turn recovery, and receipts
+under the primary Session's one execution owner using the existing outbox/store.
+Do not treat those guarantees as inherited from the deleted journal or restore
+the listener to obtain them. Before acting, reconcile retained observations and
+any existing Task worker/operating Run; missing listener state proves no provider
+has stopped. Explicit `wave/operate` Runs and TaskSession recovery must share
+the Task's execution authority. Filtering one wake source alone cannot prevent
+two agents attempting recovery. This mechanism remains Unit 2 work, conditional
+on the native turn-delivery spike.
 
 Independent Run failures and repo attention are not current child observations:
 `ObservationRecipient` names Wave/Project and `ChildRef` names Task/Project.
@@ -743,9 +757,9 @@ Task events continue through the existing durable runtime. Deliver operational
 wakes to the same persistent Wave Session, serialize with Jack's conversation
 without submitting through terminal input, retain pending observations across
 replacement, and coalesce repeat observations of the same unresolved occurrence.
-Current Work observations wake resident governance: migrate ownership for the
-selected recovery observations so primary and resident cannot both attempt that
-recovery. Other governance responsibilities remain. The implementation must
+Current Work observations persist without the removed resident dispatcher.
+Connect selected operational outcomes to the primary owner and fence recovery
+against other operating Runs through existing Task controls. The implementation must
 establish provider turn delivery and receipt ownership without a second supervisor,
 planning cursor, or new resident service. These are Unit 2 implementation gaps to
 resolve, not evidence that native primary delivery already works.
@@ -761,13 +775,11 @@ cause an unbounded fresh-agent loop. Collapsing a pane does not replace anything
 Repository/Wave navigation opens the primary conversation with planning/context
 available beside it. Task selection still opens the Task workspace. Move the
 orphan/global Session browser to Diagnostics. Native desktop Wave conversations
-use this Session path, so opening them no longer connects a resident chat responder.
-Keep external channel transport and governance scheduling for their remaining
-responsibilities. Move the selected blocker observations to their single primary
-consumer as specified above; do not leave duplicate recovery consumers. Update
-relevant UI/docs so they no longer describe native primary chat as the resident's
-channel. This is a bounded
-surface cutover, not two responders consuming the same input.
+use this Session path. Upstream already removed the resident chat surface and
+external bridge; there is no responder to detach. Keep explicit Wave operation
+available, and establish one consumer for selected blocker observations as
+specified above. Do not restore external chat transport or automatic governance
+scheduling as a prerequisite for primary Sessions.
 
 The desktop is the eager initiator. Closing it does not invent a new wake service;
 ordinary process/session lifecycle applies, and pending work remains durable until
@@ -788,7 +800,7 @@ continues. Trigger an operational failure after the Wave Session becomes idle:
 it wakes, reads the Task's original evidence, and performs one useful recovery
 without Jack opening it. Include a failed independent Session associated by Task
 worktree, not just a Flow worker. Duplicate observations, Ctrl-C replacement, and
-an existing governance pass must not duplicate the recovery. An interactive review
+an existing explicit Wave operation must not duplicate the recovery. An interactive review
 remains available to Jack throughout. Demonstrate a repo attention request from
 an independent Task-worktree Session and one from a Session outside any Wave.
 Both reach the current repo Session across replacement, preserve the source
@@ -893,7 +905,7 @@ run. The layout defaults, sole surface owner, explicit Session lifetimes, and
 same-checkout proof directly address those failures.
 
 Exclusions: changing authorization, removing Flow captures, merging all chats into
-one transcript, replacing governance/cadence or external chat transport, new
+one transcript, restoring the removed resident scheduler or external chat bridge, new
 cross-Home process supervision, automatic cross-worktree Flow propagation, and
 changing direct Flow/Ask Ctrl-C semantics. Exact backend storage and new DTOs are
 implemented with migrations/fixtures where required, not compatibility defaults.
@@ -919,5 +931,6 @@ Source inspection also distinguishes boundary availability from `SessionState::R
 which enables Complete after a summary. Jack accepted automatic Wave wake on
 operational blockers, reading existing Task/Session output, and a narrow explicit
 repo attention request. Reliable delivery and single recovery ownership are
-required implementation work. This accepted product direction does not authorize
-implementation launch or create a general messaging system.
+required implementation work. The later implementation acceptance at the top of
+this plan selects Unit 1 first; this review record does not expand that boundary
+to Unit 2 launch or a general messaging system.

@@ -48,17 +48,12 @@ judgment. “Raise a chat whenever desired” would broaden the interaction poli
 
 ## Existing continuity
 
-`controller/wave/README.md` describes a durable Wave channel with identity,
-memory, and journal, separate from its governance scheduler. The resident
-process survives across turns, but `controller/wave/chat_reply.rs::reply_prepared`
-creates a harness, runs one reply, and stops it. A persistent runtime is not
-evidence of one persistent provider conversation.
-
-`wave/skill/wave_chat.md` supplies Wave identity/memory and recent messages,
-defaults to silence, and launches work only when asked. It is not currently
-specified as a general agent receiving every Task's Ask. Ordinary native Sessions
-also support continuation, but neither mechanism establishes cross-Task Ask
-routing or one primary conversational owner.
+The earlier inspection described the Wave resident, `chat_reply::reply_prepared`,
+and `wave_chat.md`. Upstream `3dc89bc9a` deleted those paths, the listener and
+external chat bridge. They are historical evidence only. The surviving
+`controller/wave/journal.rs` contains a short-ID formatter, not turn ownership.
+Ordinary native Sessions still support continuation; this does not establish
+primary scope identity, automatic turn delivery, or cross-Task Ask routing.
 
 ## Proof limits and design pressure
 
@@ -72,14 +67,15 @@ mechanisms, but does not establish scope-owned primary identity or Ask routing.
 The existing `complete_ask` lifecycle resolves a request and stops its native
 Session. This can fit Jack's clarified direct Task Ask UX. Only requests handled
 inside a persistent primary conversation would need resolution independent of
-conversation completion. The Wave resident's governance scheduler and the
-listener's transport/journal responsibilities are separate migration concerns.
+conversation completion. Automatic wakes need a new consumer of the surviving
+observation outbox under the primary execution owner; the removed listener's
+claim/requeue behavior is no longer an available migration mechanism.
 
-`swift/LoopflowMac/WorkspaceProjection.swift` currently groups Task Sessions by
-their explicit Work binding and the Task runtime's Work ID. It does not match
-worktrees in that projection. `SessionFlowMembership` is a separate execution
-property. Jack requires Task worktree grouping even for independently launched
-Sessions; this needs presentation/association work, not inferred Flow membership.
+`swift/LoopflowMac/WorkspaceProjection.swift` now groups Task Sessions using
+Rust-derived `workspace.taskId` and the Task runtime's Work ID. The first internal
+cut supplies checkout association independently of Run attribution and
+`SessionFlowMembership`. Home/worktree-keyed pane retention and live reassociation
+remain to build; grouping alone does not prove surface continuity.
 
 Existing simulated tests cover keyed Ask reuse, independent boundaries, retained
 completion, and completion surviving cleanup failure. These tests were read,

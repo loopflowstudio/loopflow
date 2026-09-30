@@ -4,7 +4,39 @@ These are source observations and local probes, not configured desktop
 or provider proof. The accepted direction is in `intent.md`; the implementation
 plan is `growth-thoughts.md`.
 
-## Session grouping
+## Current reconciliation
+
+Read-only source review at `171d6f2e2`, 2026-09-30; no new behavioral test or
+configured desktop/provider run. The first-cut proof recorded below is reused
+as historical evidence. The working tree was clean at review start.
+
+- Upstream `3dc89bc9a` removed the resident/listener, Wave chat surfaces, external
+  bridge, and turn claim/requeue implementation. Earlier findings below about
+  those paths describe the pre-removal design baseline. The surviving
+  `controller/wave/journal.rs` only formats short IDs. The outbox and its
+  pending/delivered methods remain; source search finds their callers only in
+  store wrappers/tests, with no production dispatcher. Unit 2 must establish
+  primary-owned claims and receipts after proving native turn delivery, not
+  migrate a live resident consumer or revive the removed service.
+- `engine::worktrees::ensure_agent_worktree` survives independently of the
+  deleted Wave placement wrapper. Its create path still selects
+  `agent_base_ref(..., true)`; the offline primary placement requirement remains.
+- The first cut's Rust association and Swift `workspace.taskId` grouping agree.
+  The registry and outer worktree selectors remain path-keyed; the old Task
+  terminal owner remains. No collapse API, interaction projection, or raw Ask
+  key exists yet. Remote Flow workspace readings remain explicitly unavailable
+  locally; owning-Home resolution is not established by the local resolver test.
+- Product memory now carries Jack's accepted participation/primary-Session
+  direction and the no-Project/no-PR, same-revision access lessons. Earlier
+  orphan-only binding and scratch/Changes-only browser guidance is superseded.
+
+The plan and questions now use this baseline. Unit 1 still requires its remaining
+workspace, participation and Ask implementation plus the configured desktop
+demo. `uv run python scripts/test.py --ui-host` and the real-provider Ask/Flow
+handoff remain unavailable in this headless run's supplied no-rendering
+environment. No compilation or simulated transport result substitutes for them.
+
+## Initial Session grouping findings (before the first cut)
 
 `WorkspaceProjection.init` joins `SessionRecord.work` to `task.runtime.workId`.
 It does not associate by checkout. `SessionFlowMembership` separately identifies
@@ -81,7 +113,7 @@ and preparation of a new Task validates against main. Saved source and captured
 execution are intentionally distinct. Any Flow editor must refresh from the
 execution checkout and distinguish a future definition from a pinned invocation.
 
-## Primary Session lifecycle
+## Initial primary Session lifecycle findings (historical baseline)
 
 Provider Session identity and resume commands already exist in `run_record.rs`,
 `ops/human_session.rs`, and `commands/util.rs`. Session launch locks and prepared
@@ -111,7 +143,7 @@ Flow fixtures must move together. Planning did not run their suites or launch
 an external agent. The focused model probe above and checkout probe below are
 the executed local evidence; neither is a configured application demonstration.
 
-## Primary roles and requested handoff
+## Initial primary roles and requested handoff (historical baseline)
 
 Jack clarified active Wave operation plus design capture, and repo onboarding plus
 last-resort help. Current `wave/chat` is a selective responder, while wave/operate

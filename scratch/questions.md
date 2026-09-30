@@ -21,10 +21,12 @@ remain visible without reopening Jack Heart's established direction.
 - **Chapter persistence:** Default Flow edits the current Project recommendation
   through Wave settings. Carrying that preference across chapter rotation is an
   unaccepted extension; keep the existing chapter ownership.
-- **Native versus external Wave chat:** native desktop conversation moves to its
-  primary Session. Existing external channel transport and governance remain.
-  Unifying an external channel with the same provider conversation would require
-  a separate authority and delivery decision.
+- **Primary wake mechanism:** upstream `3dc89bc9a` removed the resident, listener,
+  external chat bridge, and turn claims. The outbox remains without a production
+  dispatcher. Unit 2 must prove native turn delivery and implement durable
+  primary-owned claims/recovery; this is no longer a resident-consumer migration.
+  Restoring a service or replacing native terminal input requires design review.
+  External chat integration remains outside the accepted scope.
 - **Chapter alignment at future launch:** Product fits the workspace/user-contract
   objective. Its current shared read reports no chapter and unavailable Tasks;
   current KRs and existing Task overlap cannot be verified. Product memory warns
@@ -45,7 +47,7 @@ Wave/repo roles are decided: Wave combines autonomous operation and design-to-Ta
 capture; repo owns onboarding, general help, and last-resort diagnosis. Scope-aware
 prompts must work without a resident. Jack accepted automatic Wave turns for
 operational blockers, including when Jack works elsewhere. Provider turn delivery,
-coalescing, and ownership against existing governance are required Unit 2 work.
+coalescing, and ownership against explicit operating Runs are required Unit 2 work.
 Jack also accepted reading existing Task/Session output, including Sessions
 associated by Task worktree, and one narrow push capability: any repo-associated
 Session can request repo attention with a source reference and reason. This is

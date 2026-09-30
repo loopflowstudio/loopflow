@@ -881,6 +881,27 @@ pub enum WaveCommand {
     },
 }
 
+#[derive(Args, Debug)]
+pub struct RebaseArgs {
+    /// Print the planned rebase strategy without mutating git
+    #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
+    pub plan: bool,
+    /// Keep the rebase local and leave conflicts for this process to resolve
+    #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+    pub manual: bool,
+    /// Stage resolved conflict paths and continue the local rebase
+    #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
+    pub continue_rebase: bool,
+    /// Abort the local rebase in progress
+    #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+    pub abort: bool,
+    /// Explicitly claim a raw rebase that has no Loopflow owner
+    #[arg(long, conflicts_with_all = ["plan", "manual"])]
+    pub adopt: bool,
+    /// Branch to rebase onto
+    pub onto: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
     /// Pull request lifecycle
@@ -894,25 +915,7 @@ pub enum TaskCommand {
         cmd: WtCommand,
     },
     /// Rebase current branch onto target (default: main)
-    Rebase {
-        /// Print the planned rebase strategy without mutating git
-        #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
-        plan: bool,
-        /// Keep the rebase local and leave conflicts for this process to resolve
-        #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
-        manual: bool,
-        /// Stage resolved conflict paths and continue the local rebase
-        #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
-        continue_rebase: bool,
-        /// Abort the local rebase in progress
-        #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
-        abort: bool,
-        /// Explicitly claim a raw rebase that has no Loopflow owner
-        #[arg(long, conflicts_with_all = ["plan", "manual"])]
-        adopt: bool,
-        /// Branch to rebase onto
-        onto: Option<String>,
-    },
+    Rebase(RebaseArgs),
     /// Commit changes
     Commit {
         #[arg(short = 'm', long = "message")]
@@ -2731,13 +2734,13 @@ mod tests {
             .expect("parse manual rebase");
         assert!(matches!(
             manual.command,
-            Some(Commands::Task { cmd: TaskCommand::Rebase{
+            Some(Commands::Task { cmd: TaskCommand::Rebase(RebaseArgs {
                 manual: true,
                 continue_rebase: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
-            } }) if onto == "origin/main"
+            }) }) if onto == "origin/main"
         ));
 
         assert!(Cli::try_parse_from(["lf", "task", "rebase", "--continue", "--abort"]).is_err());

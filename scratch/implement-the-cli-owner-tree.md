@@ -245,3 +245,8 @@ Full-design checks remain incomplete: remaining owner moves, both overviews,
 LOO-298 integration, local discovery, child readiness and real provider
 walkthrough still precede Jack's demo. No publication, landing or Task completion
 is implied by this pass.
+
+Compression passes named `RebaseArgs` through CLI/Flow dispatch and removes
+redundant commit defaults (29 net Rust lines removed). Rebase parser (1), ordinary
+branch delivery (1), discovery (10), formatting, all-target Clippy and diff checks
+passed; the compiled catalog is byte-identical. Remaining requirements are unchanged.

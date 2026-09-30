@@ -32,26 +32,18 @@ pub fn execute_flow_command(
             cmd: TaskCommand::Pr { cmd: Some(pr) },
         }) => execute_pr(repo, pr, progress),
         Some(Commands::Task {
-            cmd:
-                TaskCommand::Rebase {
-                    plan,
-                    manual,
-                    continue_rebase,
-                    abort,
-                    adopt,
-                    onto,
-                },
+            cmd: TaskCommand::Rebase(args),
         }) => {
-            if manual || continue_rebase || abort || adopt {
+            if args.manual || args.continue_rebase || args.abort || args.adopt {
                 return Err(OpsError::Message(
                     "manual rebase recovery is only available from the CLI".to_string(),
                 ));
             }
-            if plan {
+            if args.plan {
                 return Ok(());
             }
             let base = get_default_branch(repo)?;
-            let onto_ref = onto.unwrap_or_else(|| format!("origin/{base}"));
+            let onto_ref = args.onto.unwrap_or_else(|| format!("origin/{base}"));
             rebase_with_recovery(
                 repo,
                 &RebaseOptions {
@@ -71,8 +63,6 @@ pub fn execute_flow_command(
                 repo,
                 &CommitOptions {
                     add: !no_add,
-                    push: false,
-                    create_draft_pr: false,
                     message,
                     ..CommitOptions::for_task("commit")
                 },

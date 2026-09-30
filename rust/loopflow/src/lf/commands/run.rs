@@ -775,7 +775,7 @@ fn exec_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf task pr land` rotates worktrees).
+    // (e.g. `cd` after `lf task worktree switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {

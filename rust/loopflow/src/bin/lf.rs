@@ -972,21 +972,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
     match command {
         TaskCommand::Pr { cmd } => loopflow::lf::commands::ops::run_pr(cmd.as_ref(), agent),
         TaskCommand::Worktree { cmd } => loopflow::lf::commands::ops::run_wt(cmd),
-        TaskCommand::Rebase {
-            plan,
-            manual,
-            continue_rebase,
-            abort,
-            adopt,
-            onto,
-        } => loopflow::lf::commands::ops::run_rebase(
-            onto.as_deref(),
-            *plan,
-            *manual,
-            *continue_rebase,
-            *abort,
-            *adopt,
-        ),
+        TaskCommand::Rebase(args) => loopflow::lf::commands::ops::run_rebase(args),
         TaskCommand::Commit { message, no_add } => {
             loopflow::lf::commands::ops::run_commit(message.as_deref(), *no_add, agent)
         }
@@ -1663,7 +1649,7 @@ fn execute_command(
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Task {
-            cmd: cmd @ TaskCommand::Rebase { .. },
+            cmd: cmd @ TaskCommand::Rebase(_),
         }) => {
             let repo =
                 loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf task rebase")?;

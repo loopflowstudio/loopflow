@@ -15,7 +15,7 @@ use crate::engine::{
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, resolve_definition, Target};
 use crate::lf::output::{column_width, Colors};
-use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
+use crate::lf::{CronCommand, PrCommand, RebaseArgs, ReleaseCommand, RepoCommand, WtCommand};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, arm,
@@ -216,28 +216,22 @@ impl Progress for CliProgress {
     }
 }
 
-pub fn run_rebase(
-    onto: Option<&str>,
-    plan_only: bool,
-    manual: bool,
-    continue_rebase: bool,
-    abort: bool,
-    adopt: bool,
-) -> Result<()> {
+pub fn run_rebase(args: &RebaseArgs) -> Result<()> {
+    let onto = args.onto.as_deref();
     let progress = &CliProgress;
     let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task rebase")?;
-    if onto.is_some() && (continue_rebase || abort) {
+    if onto.is_some() && (args.continue_rebase || args.abort) {
         return Err(anyhow!(
             "a rebase target cannot be combined with --continue or --abort"
         ));
     }
-    if adopt && !(continue_rebase || abort) {
+    if args.adopt && !(args.continue_rebase || args.abort) {
         return Err(anyhow!(
             "--adopt is only valid with `lf task rebase --continue` or `lf task rebase --abort`"
         ));
     }
-    if continue_rebase {
-        if adopt {
+    if args.continue_rebase {
+        if args.adopt {
             continue_rebase_after_authorization(&repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     &repo_root,
@@ -251,8 +245,8 @@ pub fn run_rebase(
         progress.status("Rebase complete; branch remains local.");
         return Ok(());
     }
-    if abort {
-        if adopt {
+    if args.abort {
+        if args.adopt {
             abort_rebase_after_authorization(&repo_root, true, || {
                 crate::ops::task::record_task_pr_repair(
                     &repo_root,
@@ -270,7 +264,7 @@ pub fn run_rebase(
     let default = get_default_branch(&repo_root)?;
     let upstream = format!("origin/{default}");
     let on_main = current_branch(&repo_root)?.as_deref() == Some(&default);
-    if !plan_only {
+    if !args.plan {
         crate::ops::checkout::refresh_main(&repo_root, progress)?;
         if on_main && onto.is_none_or(|target| target == upstream) {
             progress.status("Main is current; unpublished commits and edits remain local.");
@@ -301,11 +295,11 @@ pub fn run_rebase(
         fork_base.clone(),
     )?;
     let onto_ref = plan.base_ref.clone();
-    if plan_only {
+    if args.plan {
         print_rebase_plan(&plan);
         return Ok(());
     }
-    if manual {
+    if args.manual {
         return start_rebase_for_resolution(
             &repo_root,
             &RebaseOptions {
@@ -643,8 +637,6 @@ pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&s
         &repo_root,
         &CommitOptions {
             add: !no_add,
-            push: false,
-            create_draft_pr: false,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")

@@ -20,6 +20,12 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ### This slice — normal promotion prerequisites, 2026-09-30 (blocked)
 
+Compression: shared the fixtures' unbound CLI setup and the harness's exact-test
+command; removed transient build history from TESTING.md. Production routing and
+assertions are unchanged. Formatting, all-target Clippy, Python/shell syntax and
+whitespace checks pass. The harness retry stops at Docker's ten-second preflight;
+no new container or behavioral result. Earlier container cleanup remains unconfirmed.
+
 Preserved the supplied terminal-forwarding repair, PTY fixture and documentation
 in `53fbf5435` before editing. The current pass adds a real-promotion regression
 and corrects the existing divergent-copy fixture; it changes no production routing.

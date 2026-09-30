@@ -6,6 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -20,6 +21,17 @@ use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 use support::{register_unrun_task, EnvGuard};
+
+fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(cli);
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            command.env_remove(name);
+        }
+    }
+    command.current_dir(repo).args(args);
+    command
+}
 
 #[test]
 fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
@@ -45,19 +57,15 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     fs::write(repo.path().join("main-notes"), "keep main edits").unwrap();
     fs::write(invoking.join("caller-notes"), "keep caller edits").unwrap();
     let checkout = || {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_") {
-                command.env_remove(name);
-            }
-        }
-        command
-            .current_dir(&invoking)
-            .args(["task", "checkout", "INF-123", "--json"])
-            .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
-            .output()
-            .unwrap()
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &invoking,
+            &["task", "checkout", "INF-123", "--json"],
+        )
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .output()
+        .unwrap()
     };
     let first = checkout();
     assert!(
@@ -377,14 +385,9 @@ fn normal_promotion_preserves_pending_task_review() {
         "#!/bin/sh\ncase \"$1\" in\nnew-session) for argument do last=$argument; done; sh -c \"$last\" >>'{}' 2>&1 & ;;\nhas-session) exit 1 ;;\nesac\n", log.display(),
     )).unwrap();
     fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
-    let command = |cli: &std::path::Path, args: &[&str]| {
-        let mut command = Command::new(cli);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_") {
-                command.env_remove(name);
-            }
-        }
-        command.current_dir(repo.path()).args(args).env(
+    let command = |cli: &Path, args: &[&str]| {
+        let mut command = unbound_command(cli, repo.path(), args);
+        command.env(
             "PATH",
             format!(
                 "{}:{}",
@@ -620,16 +623,7 @@ fn installation_switch_preserves_task_review_without_store_overrides() {
         .block_on(task.store.set_flow_position(&task.task.id, position))
         .unwrap();
     let installation = installation::Installation::new(home.path());
-    let command = |cli: &std::path::Path, args: &[&str]| {
-        let mut command = Command::new(cli);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_") {
-                command.env_remove(name);
-            }
-        }
-        command.current_dir(repo.path()).args(args);
-        command
-    };
+    let command = |cli: &Path, args: &[&str]| unbound_command(cli, repo.path(), args);
     let started = command(&installation.cli, &["task", "run", "INF-123", "--json"])
         .output()
         .unwrap();

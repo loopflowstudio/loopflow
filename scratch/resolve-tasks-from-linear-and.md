@@ -17,6 +17,52 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### Slice review — migration integration, 2026-09-30
+
+Reviewed `08e70e45c..d6f71dcc2` against Jack Heart's completed migration unblock.
+The migration cut is supported; installation continuity is still blocked.
+Fresh command: `uv run python scripts/test_task_installation.py`, log
+`.lf/tmp/loo334-review-migration-installation.log`. Resource preflight passed at
+35.6 GiB free. In disposable Docker, all 43 drafts materialized, the three
+populated release/branch-history and rollback tests passed, and the normalized
+planning preservation test passed. Both executable variants built. Applied
+checksums remain unchanged and temporary snapshot inputs leave no runtime owner.
+
+The first installation test, `normal_promotion_preserves_pending_task_review`,
+failed with `Task PR authority refused: the shared Loopflow registry path is not
+usable: first installation is unfinished`, followed by `install switch candidate
+exited exit status: 1`. The latter diagnostic identifies **advance-switch**, not
+a demonstrated recovery attempt. Source explains the cycle: `run_switch_candidate`
+inherits the Git checkout; `advance_switch` calls `guard_task_checkout` before
+receipt validation; Task ownership resolution requests ordinary installation
+selection, which has no prior selection during first install. `recover_switch`
+has the same early guard. Its failure is a source finding, not a separately run
+recovery proof. The previous note's “recovery child” description was imprecise.
+
+The supplied review-slice instruction says an unrunnable required proof is a stop.
+Return this implementation gap to the next cut: let the receipt-pinned machine
+operation validate its own authority without requiring ordinary startup selection,
+while preserving the prohibition on Task-owned promotion. Do not move the fixture
+outside Git to hide the failure. Then rerun the harness through exact review
+completion and both real worker boundaries with selected-artifact digest evidence.
+No promotion or worker proof passed; later harness cases did not execute. The
+proof container was independently confirmed absent after cleanup. No installed
+Home was accessed and no production code changed during review.
+
+Measurement against `08e70e45c`: **+130 / −29 production Rust lines**, excluding
+test modules/helpers, integration tests, scripts, docs and inherited parent work;
+three new SQL files add **62 lines**, with two existing dependency-header changes.
+The 40 historical receipts are import data. This repairs the shared migration
+owner rather than adding another runtime store. Existing static-check results
+below remain prior evidence; this review adds the disposable harness result.
+
+Full-design cases 1–15 remain the publication boundary. Normal promotion's new
+two-worker assertions do not include the decoy PATH setup; the separate poisoned
+runtime fixture cannot establish recursive agent PATH correctness. Session-owner
+discovery, divergent installation copies, chapter completion/archive integration
+and the independent pending relationship decision remain open. No publication,
+Task completion or Flow navigation is justified by this review.
+
 
 ### Current slice — preserving migration integration, 2026-09-30
 

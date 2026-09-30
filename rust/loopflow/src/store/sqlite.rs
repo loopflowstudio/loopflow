@@ -2127,8 +2127,8 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
             "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,caller_flow_turn)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(id) DO NOTHING",
+                via_agent,caller_session_id,caller_provider_generation)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(id) DO NOTHING",
             params![
                 row.process_id,
                 row.run_id,
@@ -2140,7 +2140,6 @@ impl SqliteStore {
                 caller.is_some(),
                 caller.map(|caller| &caller.session_id),
                 caller.map(|caller| caller.provider_generation),
-                caller.and_then(|caller| caller.flow_turn.as_deref())
             ],
         )?;
         let outcome = match (row.node.as_str(), row.event.as_str()) {

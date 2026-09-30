@@ -6318,11 +6318,8 @@ mod tests {
     #[allow(clippy::await_holding_lock)] // the guard serializes process-wide Run env
     async fn parent_run_cannot_override_task_worktree_resolution() {
         let _lock = crate::journal::test_env_lock();
-        let _environment = EnvRestore::capture(&[
-            crate::durable::RUN_ID_ENV,
-            crate::run_record::RUN_DIR_ENV,
-            "LF_PARENT_RUN_ID",
-        ]);
+        let _environment =
+            EnvRestore::capture(&[crate::durable::RUN_ID_ENV, crate::run_record::RUN_DIR_ENV]);
         let repository = loopflow_test_support::TestRepo::new();
         repository.create_branch("test/task-recovery-fixture");
         repository.push_new_branch("test/task-recovery-fixture");
@@ -6331,7 +6328,6 @@ mod tests {
         let parent_run_id = crate::run_record::new_artifact_key();
         std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
         std::env::remove_var(crate::run_record::RUN_DIR_ENV);
-        std::env::remove_var("LF_PARENT_RUN_ID");
 
         let resolved = super::task_for_checkout(&store, &task.worktree)
             .await

@@ -1053,7 +1053,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- op: rebase --plan\n",
+        "- cmd: rebase --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))

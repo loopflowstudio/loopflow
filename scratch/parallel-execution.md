@@ -22,10 +22,15 @@ SQL, selected Skills come from the captured boundary before catalog lookup,
 and Ask handles reserved Skill names. The short CLI guide remains in
 `docs/lf.md`; detailed contracts live in `docs/lf-reference.md`.
 
-Next is item 3: remove dead `caller_flow_turn`/`AgentCaller.flow_turn`, its index,
-and residual `LF_PARENT_RUN_ID` handling, while retaining exact Session/provider
-generation resolution of an agent-issued command's parent Exec. Then naming,
-released-populated import, and final docs. The naming proposals remain proposals.
+Item 3 is implemented in the current pass, together with Jack Heart's requested
+rebase CI repairs. The forward draft preserves historical caller tokens and
+removes the dead column/index; Rust, Swift, fixtures and environment handling
+no longer carry them. Session/provider-generation parent resolution is retained.
+Main's command grammar remains, and shared-command checkpointing now recognizes
+checkout and inherited declarations. [Current evidence](evidence.md#caller-token-removal-and-rebase-repairs--2026-09-30)
+records the requested file suites, focused migration/ancestry proofs and any
+unexecuted installation check. Next is naming, then released-populated import
+and final docs. Naming proposals remain proposals.
 
 Jack's current feature Flow uses implement → compress → rebase → realign →
 loop-decide per item, with focused checks and hosted CI. Full local Rust coverage

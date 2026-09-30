@@ -70,29 +70,19 @@ No new full-suite or configured acceptance result follows from this realignment.
    rebase; the 13 rebase checks above cover the reconciled discovery/execution paths.
    See [evidence](evidence.md#one-flowsession-through-loop-passes--2026-09-30).
    Configured acceptance and the whole-design import obligations remain open.
-3. **Simplify attribution and the parent tree — next** (Jack). Before and after tables
-   are in [exec-per-step.md](exec-per-step.md); the inventory is
-   `.lf/tmp/attribution-tree/inventory.md`. Delete the dead per-turn
-   `caller_flow_turn` column/field, `AgentCaller.flow_turn` and associated index,
-   plus residual `LF_PARENT_RUN_ID` filtering/fixtures. The environment writer is
-   already removed. Preserve historical evidence with a forward migration;
-   released/applied migration bytes stay immutable. One owner per attribution
-   fact; derive the rest. Keep the lookup that resolves an agent-issued command's parent through Session and
-   provider generation. Jack's final September 30 precedence is explicit `--as`
-   on this command (including Task shortcuts), then checkout ownership, then
-   an ancestor's explicit `--as` through `LF_AS`. The current attribution slice
-   deletes `agent_work_in`, `LF_TASK_ORIGIN`, claim/manifest Task discovery and
-   the `LF_PARENT_RUN_ID` writer; PR/installation checks use the common reader.
-   The public cross-checkout proof passes. The Task-shortcut public proof failed
-   on hosted `36cbb3d4b`: its inherited OpenCode selection cannot enforce the
-   checkout boundary. The fixture now selects Claude for Y's mechanical Flow;
-   confinement is unchanged. The subsequent
-   [slice review evidence](evidence.md#task-command-slice-review--2026-09-30) executed the corrected public
-   proof successfully in disposable Linux after Docker recovered, plus three
-   public attribution checks. Post-CI repairs pass the complete
-   materialized Rust matrix (2,024 passed, 17 skipped); see the retained failures
-   and final source receipt in evidence. Keep the dead per-turn token and Flow membership
-   provenance audit open. See [evidence](evidence.md).
+3. **Simplify attribution and the parent tree — implemented this pass** (Jack).
+   The forward `drop_flow_turn_caller` draft archives non-null historical tokens,
+   removes `execs.caller_flow_turn` and `flow_turn_caller`, and retains selected
+   Flow-event payloads unchanged. Rust/Swift/DTO mirrors, `AgentCaller.flow_turn`,
+   unused `FlowTurnSelection.caller_token`, and `LF_PARENT_RUN_ID` are removed.
+   Native test helpers reference the existing Session event sequence, without
+   synthetic caller Execs. Session/provider-generation parent resolution remains.
+   Explicit command `--as` → checkout → inherited `LF_AS` is unchanged.
+   The rebase repair uses that same binding reader when deciding whether a skill
+   may checkpoint shared edits; main's `skill -- NAME` and `cmd:` grammar stays.
+   [This pass's evidence](evidence.md#caller-token-removal-and-rebase-repairs--2026-09-30)
+   records verification and the disposable installation blocker. Broader Flow
+   membership provenance and full-design import obligations remain open.
 4. **One naming commit** (Jack). Exec instead of launch or run for one agent
    start under one lf process; Session names for conversation things; "compile"
    for turning a definition into its graph; "parent" only for Exec to Exec, so

@@ -50,7 +50,7 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
         write_flow(
             repo.path(),
             "path-proof",
-            "- op: rebase --plan\n- op: rebase --plan\n",
+            "- cmd: rebase --plan\n- cmd: rebase --plan\n",
         );
         // A replacement executable delegates the actual effect to lf, then
         // simulates a future build committing an additive schema migration.
@@ -149,7 +149,7 @@ fn mechanical_flow_boundaries_each_have_their_own_child_exec() {
     write_flow(
         repo.path(),
         "mechanical-proof",
-        "- op: rebase --plan\n- op: rebase --plan\n",
+        "- cmd: rebase --plan\n- cmd: rebase --plan\n",
     );
     let output = run_lf(
         repo.path(),
@@ -218,7 +218,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     write_flow(
         repo.path(),
         "mechanical-failure",
-        "- op: rebase --plan\n- op: __telemetry-scorecard\n",
+        "- cmd: rebase --plan\n- cmd: __telemetry-scorecard\n",
     );
     let output = run_lf(
         repo.path(),
@@ -298,7 +298,7 @@ fn mechanical_task_step_owns_its_effect_without_taking_the_driver_claim() {
         "mechanical-task",
         &repo.head_sha(),
     );
-    write_flow(repo.path(), "task-op", "- op: rebase --plan\n");
+    write_flow(repo.path(), "task-op", "- cmd: rebase --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
@@ -441,7 +441,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     write_flow(
         repo.path(),
         "survive",
-        "- op: __telemetry-scorecard\n- op: rebase --plan\n",
+        "- cmd: __telemetry-scorecard\n- cmd: rebase --plan\n",
     );
     let mut driver = lf_command(repo.path(), home.path(), &["-b", "flow", "survive"], None)
         .stdout(std::process::Stdio::null())
@@ -979,7 +979,6 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                         claim: Some(claim.clone()),
                         session_id: session.id,
                         after: 0,
-                        caller_token: None,
                     }),
                     ..Default::default()
                 })
@@ -1303,8 +1302,8 @@ fn a_review_executes_its_captured_skill_after_sources_disappear() {
     assert_eq!(commands.len(), 1, "one actual skill Exec: {commands:?}");
     let argv: Vec<String> = serde_json::from_str(&commands[0]).unwrap();
     assert!(argv
-        .windows(2)
-        .any(|pair| pair == ["skill", "saved-review"]));
+        .windows(3)
+        .any(|args| args == ["skill", "--", "saved-review"]));
     assert_eq!(
         conn.query_row("SELECT state FROM flow_sessions", [], |row| row
             .get::<_, String>(0))
@@ -1784,6 +1783,9 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     };
 
     write_skill(repo.path(), "binding-work", "Do proof-owned work.");
+    // Both branches keep their definitions when an unbound command checkpoints.
+    repo.stage_all();
+    repo.commit("Keep the shared launch fixture skill across branches");
     // An explicit `--task` launch runs in that Task's worktree, which has its
     // own uncommitted catalog.
     write_skill(&sibling_worktree, "binding-work", "Do proof-owned work.");
@@ -1932,7 +1934,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
-    write_flow(repo.path(), "claim-proof", "- op: rebase --plan\n");
+    write_flow(repo.path(), "claim-proof", "- cmd: rebase --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
@@ -2816,7 +2818,7 @@ fn flow_step_executable_falls_back_without_losing_its_store() {
     assert!(!loopflow::machine_install::root().unwrap().exists());
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    write_flow(repo.path(), "fallback-proof", "- op: rebase --plan\n");
+    write_flow(repo.path(), "fallback-proof", "- cmd: rebase --plan\n");
     let execute = |driver: &Path, path: &str, expected: &Path| {
         let mut command = Command::new(driver);
         for (key, _) in std::env::vars_os() {

@@ -185,13 +185,12 @@ pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> any
     Ok(())
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
     crate::durable::RUN_ID_ENV,
     crate::run_record::RUN_DIR_ENV,
-    "LF_PARENT_RUN_ID",
 ];
 
 #[derive(Clone, Default)]

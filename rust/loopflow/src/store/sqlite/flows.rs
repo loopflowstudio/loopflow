@@ -943,7 +943,6 @@ impl SqliteStore {
             claim: flow.claim,
             session_id,
             after,
-            caller_token: None,
         }))
     }
 
@@ -1015,10 +1014,8 @@ impl SqliteStore {
             claim,
             session_id,
             after,
-            caller_token,
             ..
         } = selection;
-        let caller_token = caller_token.as_deref();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -1076,9 +1073,9 @@ impl SqliteStore {
         )?;
         tx.execute(
             "INSERT INTO flow_events(flow_id,version,node,iterations,kind,session_event,observed_at,payload)
-             VALUES(?1,?2,?3,?4,'selected',?5,?6,json_object('caller_token',?7))
+             VALUES(?1,?2,?3,?4,'selected',?5,?6,'{}')
              ON CONFLICT(flow_id,kind,session_event) DO NOTHING",
-            params![id, i64::try_from(*version).map_err(invalid)?, node, serde_json::to_string(&iterations)?, start, now_unix(),caller_token],
+            params![id, i64::try_from(*version).map_err(invalid)?, node, serde_json::to_string(&iterations)?, start, now_unix()],
         )?;
         tx.commit()?;
         Ok(())
@@ -1763,23 +1760,7 @@ pub(super) fn decode_flow_cursor(
 
 #[cfg(test)]
 impl SqliteStore {
-    /// A fixture tool command from one selected native turn; no Run grants navigation.
-    pub(crate) fn test_turn_caller(
-        &self,
-        session: &str,
-        generation: i64,
-        token: &str,
-    ) -> crate::id::ExecId {
-        let actor = crate::id::ExecId::new();
-        self.conn.lock().unwrap().execute(
-            "INSERT INTO execs(id,trace_id,started_at,via_agent,caller_session_id,caller_provider_generation,caller_flow_turn)
-             VALUES(?1,'fixture',1,1,?2,?3,?4)",
-            params![actor,session,generation,token],
-        ).unwrap();
-        actor
-    }
-
-    pub(crate) fn test_flow_turn(&self, run: &str) -> crate::id::ExecId {
+    pub(crate) fn test_flow_turn(&self, run: &str) -> i64 {
         let session = self.session_for_artifact(run).unwrap().unwrap();
         let driver = self
             .session_driver(&session.id)
@@ -1797,9 +1778,8 @@ impl SqliteStore {
                 self.claim_session_driver(&session.id, None, &exec, false)
                     .unwrap()
             });
-        let mut selection = self.flow_turn_selection(run).unwrap().unwrap();
+        let selection = self.flow_turn_selection(run).unwrap().unwrap();
         let turn = uuid::Uuid::new_v4().to_string();
-        selection.caller_token = Some(turn.clone());
         let start = self
             .record_session_turn_origin(
                 &session.id,
@@ -1811,19 +1791,16 @@ impl SqliteStore {
             .unwrap();
         self.select_flow_turn(&selection, &session.id, &driver, start)
             .unwrap();
-        self.test_turn_caller(&session.id, driver.provider_generation, &turn)
+        start
     }
 
-    pub(crate) fn test_output(
-        &self,
-        actor: &crate::id::ExecId,
-        value: &serde_json::Value,
-    ) -> StoreResult<()> {
-        let (session,thread,turn): (String,String,String) = self.conn.lock().unwrap().query_row(
-            "SELECT start.session_id,start.provider_thread,start.provider_turn FROM execs e
-             JOIN flow_events selected ON json_extract(selected.payload,'$.caller_token')=e.caller_flow_turn
-             JOIN session_events start ON start.seq=selected.session_event WHERE e.id=?1", [actor],
-             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+    pub(crate) fn test_output(&self, start: &i64, value: &serde_json::Value) -> StoreResult<()> {
+        let (session, thread, turn): (String, String, String) =
+            self.conn.lock().unwrap().query_row(
+                "SELECT session_id,provider_thread,provider_turn FROM session_events WHERE seq=?1",
+                [start],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
         self.record_session_event(
             &session,
             &thread,
@@ -1836,19 +1813,23 @@ impl SqliteStore {
 
     pub(crate) fn test_decision_output(
         &self,
-        actor: &crate::id::ExecId,
+        start: &i64,
         verdict: &crate::engine::transitions::FlowVerdict,
     ) -> StoreResult<()> {
-        self.test_output(actor, &serde_json::to_value(verdict)?)
+        self.test_output(start, &serde_json::to_value(verdict)?)
     }
 
-    pub(crate) fn test_finish_flow_turn(&self, actor: &crate::id::ExecId, status: &str) {
-        let (session,thread,turn): (String,String,String) = self.conn.lock().unwrap().query_row(
-            "SELECT start.session_id,start.provider_thread,start.provider_turn FROM execs e
-             JOIN flow_events selected ON json_extract(selected.payload,'$.caller_token')=e.caller_flow_turn
-             JOIN session_events start ON start.seq=selected.session_event WHERE e.id=?1", [actor],
-            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-        ).unwrap();
+    pub(crate) fn test_finish_flow_turn(&self, start: &i64, status: &str) {
+        let (session, thread, turn): (String, String, String) = self
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT session_id,provider_thread,provider_turn FROM session_events WHERE seq=?1",
+                [start],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
         self.record_session_event(
             &session,
             &thread,
@@ -1991,10 +1972,7 @@ mod tests {
                 &serde_json::json!({"status":"completed"}),
             )
             .unwrap();
-        let mut selection = store.flow_turn_selection(run).unwrap().unwrap();
-        selection.caller_token = Some("selected-token".into());
-        let actor =
-            store.test_turn_caller(&session.id, driver.provider_generation, "selected-token");
+        let selection = store.flow_turn_selection(run).unwrap().unwrap();
         assert!(store
             .select_flow_turn(&selection, &session.id, &driver, earlier)
             .is_err());
@@ -2007,6 +1985,7 @@ mod tests {
                 &exec,
             )
             .unwrap();
+        let actor = start;
         let mut stale = selection.clone();
         stale.version += 1;
         assert!(store
@@ -2062,7 +2041,6 @@ mod tests {
                 &serde_json::json!({"status":"failed"}),
             )
             .unwrap();
-        selection.caller_token = Some("retry-token".into());
         store
             .select_flow_turn(&selection, &session.id, &driver, automatic_start)
             .unwrap();
@@ -2073,7 +2051,7 @@ mod tests {
             store.flow_output(flow.id()).is_err(),
             "a failed turn's retained result cannot navigate the retry"
         );
-        let actor = store.test_turn_caller(&session.id, driver.provider_generation, "retry-token");
+        let actor = automatic_start;
         assert!(
             store
                 .flow(flow.id())
@@ -2129,8 +2107,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        let mut retry_selection = store.flow_turn_selection(retry_run).unwrap().unwrap();
-        retry_selection.caller_token = Some("explicit-retry-token".into());
+        let retry_selection = store.flow_turn_selection(retry_run).unwrap().unwrap();
         assert!(store
             .select_flow_turn(&retry_selection, &session.id, &driver, earlier)
             .is_err());
@@ -2387,14 +2364,11 @@ mod tests {
             .current_attempt
             .is_none());
 
-        // Navigation names the selected native turn through the tool's Exec.
+        // Navigation consumes the selected native turn's recorded output.
         let run = attempt(&store, &id, Some("loop-decide"), "codex");
         assert_eq!(run.node, Some(1));
         let actor = store.test_flow_turn(&run.artifact_key);
         let iterate = verdict(FlowDecision::Iterate);
-        assert!(store
-            .test_decision_output(&crate::id::ExecId::new(), &iterate)
-            .is_err());
         assert!(store.flow_output(&id).is_err());
         store.test_decision_output(&actor, &iterate).unwrap();
         store.test_decision_output(&actor, &iterate).unwrap();

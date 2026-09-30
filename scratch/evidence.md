@@ -487,3 +487,77 @@ pass (`fold-compress-focused.log`, `fold-compress-boundaries.log`), including
 Task claim/progress fencing and public Task/taskless retry, loop and review paths
 with scripted providers. All-target Clippy with warnings denied
 (`fold-compress-clippy.log`), formatting and diff checks pass. No full suite ran.
+
+## Caller-token removal and rebase repairs · 2026-09-30
+
+Jack Heart requested the hosted regressions and remaining-work item 3 together,
+then commit, publish and stop. Baseline: `7f34e9087e`.
+
+- Main's ordinary typed skill command is `skill -- NAME`; the review argv proof
+  now includes that reserved-name escape and still proves saved instructions run
+  after source removal. Mechanical fixture definitions now use `cmd:` throughout
+  both requested files, including the disposable installation cases.
+- The shared command's automatic checkpoint used only explicit binding flags.
+  It now consults the existing checkout/inherited-declaration binding reader too,
+  preserving the Task's managed Flow, HEAD and another contributor's edits.
+  That fix exposed a fixture depending on an incidental earlier commit: its
+  unbound launch committed the skill only on another branch. The fixture now
+  commits its shared skill before branch changes.
+- The forward draft archives non-null old Exec caller tokens in immutable
+  `import_evidence`, then drops the column and unique index. Existing selected
+  Flow payloads and all other Exec evidence remain unchanged. No applied SQL is
+  edited. The unused Rust selection token, caller fields, Swift/DTO mirrors and
+  obsolete parent environment handling are deleted. Tests use native start-event
+  references rather than synthetic tool-command Execs.
+- Review retained `agent_parent`: matching provider generation/origin resolves
+  the current conversation driver; stale engines retain the proven original
+  parent. Causation grants neither Work attribution nor settlement authority.
+
+Initial compilation caught the reduced environment-array length; it was corrected
+before behavioral execution. `caller-files-2.log` ran all 56 selected tests without
+fail-fast: 51 passed, five failed, four skipped. Four failures were additional
+`op:` fixtures, and one was the branch-local skill fixture above. Their fixes
+are included in the final run. No failure is counted as a passing proof.
+
+The final file run (`caller-files-final.log`) completed without fail-fast:
+55 passed, one fixture setup failed, four skipped. Its commit helper required
+explicit staging; that setup is fixed and the exact case is rerun separately.
+The 15 selected source unit checks (`caller-units-final.log`) passed 13 and
+found two fixture mismatches: missing Flow identity in migration setup and one
+remaining three-variable environment expectation. Both are corrected for the
+materialized proof. Compilation also exposed three assertions that exercised
+only the deleted fixture caller lookup; those assertions are removed. Actual
+selected-turn, failed-turn and conflicting-output behavior remains tested.
+
+Focused completion: `caller-public-final.log` passes all three selected proofs:
+repaired checkout fixture, Rust Exec DTO and actual Codex parent handoff. Together
+with `caller-files-final.log`, all 56 runnable cases in the requested two files
+pass (four disposable-installation cases remain skipped), without rerunning the
+whole repository. The Session file contributes 33 passes. Real Codex 0.159.0 uses
+credential-free local Responses and isolated Homes; its command parents follow
+the replacement driver, while a replaced provider retains its historical parent.
+This is not configured-account acceptance. `caller-swift.log` passes all 18 Swift
+DTO tests.
+
+Production measured against `7f34e9087e`: Rust/Swift code **+20/−34 (net −14)**;
+forward SQL **+11/−0**; combined **+31/−34 (net −3)**. The per-file receipt is
+`caller-lines.log`. Counts exclude inline/integration tests, DTO fixtures,
+scratch and generated files. The removed fixture lookup and three assertions
+are test deletion, not production reduction.
+
+The first materialized check (`caller-canonical.log`) passed three of four
+cases and found the fixture's missing selected-event reference. After adding
+the existing Session/native-start evidence, `caller-migration-final.log` passes
+the populated source upgrade. The first three materialized passes retain exact
+native-result settlement, Exec discovery and the repaired environment fixture.
+`caller-canonical-final.log` passes the populated upgrade on the final
+materialized schema. `caller-canonical-final-source.json` records the exact
+source hashes, command, development provenance and successful exit; Rust,
+Swift, Cargo and fixture inputs still match the checkout. All-target Clippy
+with warnings denied passes on final bytes (`caller-clippy-final.log`), as do
+formatting, diff whitespace, migration history and architecture coverage.
+No full local suite was run. No configured-provider, rendered Desktop,
+installed-Home conversion, merge or Task completion is claimed.
+The disposable fallback attempt (`caller-install.log`) stopped at Docker's
+ten-second probe, before creating a container. It did not reach the corrected
+assertions. No host service restart or installed-Home access was attempted.

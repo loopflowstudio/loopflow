@@ -579,6 +579,8 @@ fn execute_target(
             let name = skill.name.as_str();
             with_runtime(&repo_root, args, || {
                 with_skill_runtime(&repo_root, name, || {
+                    let shared = binding.is_some()
+                        || loopflow::lf::commands::run::implicit_binding(cli)?.is_some();
                     match binding {
                         Some(binding) => loopflow::lf::commands::run::run_bound(
                             Some(name),
@@ -589,9 +591,7 @@ fn execute_target(
                         None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if binding.is_none()
-                        && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none()
-                    {
+                    if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf commit: {name}")),

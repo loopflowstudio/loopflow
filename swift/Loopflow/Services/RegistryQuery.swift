@@ -99,6 +99,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
+    public func localHomeId() async throws -> String {
+        struct HomeIdentity: Decodable { let id: String }
+        return try Self.decode(HomeIdentity.self, from: await run(["home", "id", "--json"], nil)).id
+    }
+
     public func userName() async throws -> String? {
         let stdout = try await run(["user", "name", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)

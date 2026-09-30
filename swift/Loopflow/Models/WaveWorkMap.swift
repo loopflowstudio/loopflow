@@ -103,6 +103,8 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+    public let homeId: String?
+    public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
     public let worktree: String
@@ -110,6 +112,7 @@ public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
+        case homeId = "home_id"
         case localExists = "local_exists"
     }
 }

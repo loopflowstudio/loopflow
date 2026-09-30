@@ -241,7 +241,7 @@ struct WorkSurfaceView: View {
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
                 }
-                TaskFlowView(model: model, task: task, wave: found.wave.wave)
+                TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession)
                     .id(task.id)
                 TaskRunsView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)

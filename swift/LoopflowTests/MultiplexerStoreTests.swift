@@ -4,6 +4,47 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Focus restores the prior selection and collapsed arrangement")
+    func focusCollapsedPaneAndRestore() {
+        let store = MultiplexerStore()
+        store.reveal(sessionId: "design")
+        let design = store.focusedPaneId
+        store.reveal(sessionId: "ask")
+        let ask = store.focusedPaneId
+        store.setCollapsed(paneId: design, collapsed: true)
+        let original = store.layout
+        store.toggleZoom(design)
+        #expect(store.zoomedPaneId == design)
+        #expect(store.layout.pane(for: design)?.content == .session(id: "design"))
+        store.toggleZoom(design)
+        #expect(store.focusedPaneId == ask)
+        #expect(store.collapsedPaneIds == [design])
+        #expect(store.layout == original)
+        #expect(store.visibleLayout?.allPanes.map(\.id) == [ask])
+    }
+
+    @Test("Collapse preserves the layout, shell command and ratios; reveal restores the same pane")
+    func collapseRetainsPane() throws {
+        let store = MultiplexerStore()
+        store.newShell(command: ["server"])
+        let shell = store.focusedPaneId
+        store.reveal(sessionId: "ask")
+        let ask = store.focusedPaneId
+        store.updateRatio(between: shell, and: ask, ratio: 0.37)
+        let original = store.layout
+        store.setCollapsed(paneId: shell, collapsed: true)
+        #expect(store.layout == original)
+        #expect(store.visibleLayout?.allPanes.map(\.id) == [ask])
+        #expect(store.shellCommands[shell] == ["server"])
+        store.setCollapsed(paneId: ask, collapsed: true)
+        #expect(store.visibleLayout == nil)
+        store.reveal(sessionId: "ask")
+        #expect(store.focusedPaneId == ask)
+        store.setCollapsed(paneId: shell, collapsed: false)
+        #expect(store.visibleLayout == original)
+        #expect(store.shellCommands[shell] == ["server"])
+    }
+
     @Test("starts with one focused empty pane")
     func startsWithOnePane() {
         let store = MultiplexerStore()

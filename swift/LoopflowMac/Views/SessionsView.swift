@@ -19,7 +19,29 @@ final class PaneHover {
 /// One window's terminal workspace for a checkout: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
+@Observable
 final class SessionsWorkspace {
+    var showsFiles = false
+    var fileWidth: CGFloat = 700
+    var showsDetails = false
+    var filesBeforeFocus: Bool?
+
+    func toggleFocus(_ paneId: String) {
+        Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
+        if multiplexer.zoomedPaneId == nil {
+            filesBeforeFocus = showsFiles
+            showsFiles = false
+        } else if multiplexer.zoomedPaneId == paneId {
+            showsFiles = filesBeforeFocus ?? showsFiles
+            filesBeforeFocus = nil
+        }
+        multiplexer.toggleZoom(paneId)
+    }
+    func setCollapsed(paneId: String, collapsed: Bool) {
+        Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace")
+        multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
+    }
+
     let multiplexer = MultiplexerStore()
     let hover = PaneHover()
     private var taskFiles: [String: TaskFilesStore] = [:]
@@ -68,20 +90,29 @@ final class SessionsWorkspace {
 @Observable
 final class SessionsWorkspaceRegistry {
     // Observable only for environment delivery; lazy creation must not invalidate views.
-    @ObservationIgnored private var workspaces: [String: SessionsWorkspace] = [:]
-    @ObservationIgnored private var layouts: [String: WorktreeLayoutStore] = [:]
+    @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
+    @ObservationIgnored private var layouts: [WorkspaceIdentity: WorktreeLayoutStore] = [:]
     let surfaces = GhosttySurfacePool()
+    private(set) var localHomeId: String?
+    private(set) var homeError: String?
 
-    func layout(for repoPath: String) -> WorktreeLayoutStore {
+    init(localHomeId: String? = nil) { self.localHomeId = localHomeId }
+
+    func refreshHome(query: RegistryQuery) async {
+        do { localHomeId = try await query.localHomeId(); homeError = nil }
+        catch { homeError = error.localizedDescription }
+    }
+
+    func layout(for repoPath: WorkspaceIdentity) -> WorktreeLayoutStore {
         if let layout = layouts[repoPath] { return layout }
         let layout = WorktreeLayoutStore(path: repoPath)
         layouts[repoPath] = layout
         return layout
     }
 
-    var paths: [String] { workspaces.keys.sorted() }
+    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) } }
 
-    func path(containingShell id: String) -> String? {
+    func path(containingShell id: String) -> WorkspaceIdentity? {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
     }
 
@@ -95,7 +126,19 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    func workspace(for repoPath: String) -> SessionsWorkspace {
+    /// Inventory establishes existence before location changes remove old placements.
+    /// Neither moving a Session nor hiding its pane releases its native surface.
+    func reconcileMembership(_ records: [SessionRecord]) {
+        let locations = Dictionary(uniqueKeysWithValues: records.compactMap { record in
+            record.workspace.map { (record.id, $0.identity) }
+        })
+        for (identity, workspace) in workspaces {
+            let ids = Set(records.filter { locations[$0.id] == identity || locations[$0.id] == nil }.map(\.id))
+            workspace.multiplexer.reconcileSessions(ids)
+        }
+    }
+
+    func workspace(for repoPath: WorkspaceIdentity) -> SessionsWorkspace {
         if let existing = workspaces[repoPath] { return existing }
         let workspace = SessionsWorkspace(surfaces: surfaces)
         workspaces[repoPath] = workspace
@@ -168,7 +211,10 @@ final class SessionsStore: ObservableObject {
                 ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
             if let index = _index(record.id) {
                 // Keep a prepared command until the retained native view consumes it.
-                if case .prepared = sessions[index].state { continue }
+                if case .prepared = sessions[index].state {
+                    sessions[index].record.workspace = record.workspace
+                    continue
+                }
                 sessions[index].record = record
                 if case .opening = sessions[index].state { continue }
                 if case .failed = sessions[index].state, observedState == .pending { continue }
@@ -322,9 +368,36 @@ private final class SessionsLatencyMetrics {
     }
 }
 
-/// Unified Work navigation around the existing retained native workspace.
 struct SessionsView: View {
-    @AppStorage("taskFilesVisible") private var showsFiles = false
+    let model: PodiumModel
+    let repoPath: String
+    let workspaces: SessionsWorkspaceRegistry
+    var query: RegistryQuery = RegistryQueryLocal.shared
+
+    var body: some View {
+        Group {
+            if let home = workspaces.localHomeId {
+                SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
+                                    homeId: home, query: query)
+            } else {
+                HStack {
+                    WorkspaceNavigator(model: model, onOpenSession: { _ in })
+                    ContentUnavailableView("Reading workspace Home", systemImage: "folder",
+                        description: Text(workspaces.homeError ?? "Reading local checkout identity…"))
+                }
+            }
+        }
+        .task { await workspaces.refreshHome(query: query) }
+    }
+}
+
+/// Unified Work navigation around the existing retained native workspace.
+struct SessionsContentView: View {
+    let homeId: String
+    private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: store.repoPath) }
+    private var currentIdentity: WorkspaceIdentity { taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity }
+    private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
+    private var showsFiles: Bool { workspace.showsFiles }
     @Bindable var model: PodiumModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
@@ -336,41 +409,40 @@ struct SessionsView: View {
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
-        workspaces.workspace(for: taskPath ?? worktreeLayout.focusedPath ?? store.repoPath).multiplexer
+        workspace.multiplexer
     }
-    private var taskPath: String? {
-        guard let task = fileTask else {
-            return selectedWorkspace?.taskId == nil ? nil : selectedWorkspace?.worktree
+    private var taskIdentity: WorkspaceIdentity? {
+        if let task = fileTask {
+            return navigation.preparedTaskWorktrees[task.task.id] ?? task.task.reference.workspace?.identity
         }
-        let workspace = task.task.reference.workspace
-        if workspace?.localExists != true, let prepared = navigation.preparedTaskWorktrees[task.task.id] {
-            return prepared
-        }
-        return workspace?.worktree
+        return selectedWorkspace?.taskId == nil ? nil : selectedWorkspace?.identity
     }
+    private var taskPath: String? { taskIdentity?.worktree }
     private var selectedWorkspace: SessionWorkspace? {
-        model.sessions.value?.first { $0.id == navigation.selectedSessionId }?.workspace
+        guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
+        return model.sessions.value?.first { $0.id == navigation.selectedSessionId }?.workspace
     }
     private var fileTaskId: String? {
         fileTask?.task.runtime?.workId ?? selectedWorkspace?.taskId ?? fileTask?.task.task.identifier
     }
-    private var availablePaths: [String] {
-        worktreeLayout.knownPaths.union(store.sessions.map { $0.record.workspace?.worktree ?? $0.record.cwd }).sorted()
+    private var availablePaths: [WorkspaceIdentity] {
+        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) }
     }
 
     init(model: PodiumModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
-         query: RegistryQuery = RegistryQueryLocal.shared) {
+         homeId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+        self.homeId = homeId
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        worktreeLayout = workspaces.layout(for: repoPath)
-        let store = workspaces.workspace(for: repoPath).sessionStore(repoPath: repoPath, query: query)
+        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath))
+        let store = workspaces.workspace(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
         store.onResolved = { [weak model] id in model?.sessionResolved(id, repo: repoPath) }
         _store = ObservedObject(wrappedValue: store)
     }
 
     private var navigation: WorkspaceNavigation { model.navigation }
-    private var terminalsVisible: Bool { navigation.content == .terminals }
+    private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
     private var fileTask: WorkspaceTask? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
@@ -391,7 +463,7 @@ struct SessionsView: View {
                     model.select(work)
                     startConversation()
                 }, onNewShell: {
-                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(store.repoPath) }
+                    if worktreeLayout.focusedPath == nil { worktreeLayout.select(rootIdentity) }
                     multiplexer.newShell()
                     navigation.content = .terminals
                 }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask)
@@ -405,7 +477,7 @@ struct SessionsView: View {
                             onOpenSession: openSession, onMonitor: showMonitor
                         ) {
                             if taskPath != nil {
-                                Button(showsFiles ? "Hide Files" : "Show Files") { showsFiles.toggle() }
+                                Button(showsFiles ? "Hide Files" : "Show Files") { workspace.showsFiles.toggle() }
                                     .buttonStyle(.plain).fixedSize()
                             }
                             if terminalsVisible {
@@ -416,17 +488,33 @@ struct SessionsView: View {
                                         .accessibilityLabel("Task worktree")
                                         .accessibilityIdentifier("task-worktree-location")
                                 } else if fileTask == nil { worktreeChip }
+                                if multiplexer.zoomedPaneId != nil {
+                                    Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
+                                        .accessibilityIdentifier("workspace-restore")
+                                }
                                 if fileTask == nil || taskPath != nil { completionControls }
                             }
+                        }
+                        if multiplexer.zoomedPaneId == nil, let task = fileTask, let found = model.task(id: task.task.id) {
+                            TaskFlowView(model: model, task: found.task, wave: found.wave.wave, onOpenSession: openSession)
+                                .padding(.horizontal, Spacing.md)
                         }
                         ZStack {
                             Group {
                                 if let taskPath {
-                                    WorktreeTerminalsView(workspace: workspaces.workspace(for: taskPath),
-                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                        .id(taskPath)
+                                    HStack(spacing: 0) {
+                                        if multiplexer.zoomedPaneId == nil { taskMaterials }
+                                        WorktreeTerminalsView(workspace: workspace,
+                                            path: taskPath, isFocused: terminalsVisible, sessions: store)
+                                            .id(taskIdentity)
+                                    }
                                 } else if fileTask != nil {
-                                    ContentUnavailableView("Task workspace unavailable", systemImage: "folder")
+                                    VStack(spacing: Spacing.md) {
+                                        if let task = fileTask { Text(task.task.task.description) }
+                                        Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
+                                        Button("New conversation") { prepareTaskWorkspace(conversation: true) }
+                                        if let error = launchError { Text(error).foregroundStyle(Color.statusWarning) }
+                                    }.padding()
                                 } else {
                                     WorktreeNodeView(
                                         node: worktreeLayout.layout, layout: worktreeLayout,
@@ -466,12 +554,15 @@ struct SessionsView: View {
                     }
                     if showsFiles, let taskId = fileTaskId, let taskPath {
                         TaskFilesView(
-                            store: workspaces.workspace(for: taskPath).files(
+                            store: workspace.files(
                                 taskId: taskId, issue: taskId, cwd: taskPath, query: query),
                             prURL: fileTask?.task.activePr?.publication?.github?.url
                         )
-                        .id(taskId)
-                        .frame(minWidth: 480, idealWidth: 700)
+                        .id(taskIdentity)
+                        .frame(minWidth: 480, idealWidth: workspace.fileWidth)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                            if width > 0, multiplexer.zoomedPaneId == nil { workspace.fileWidth = width }
+                        }
                     }
                 }
             }
@@ -489,14 +580,34 @@ struct SessionsView: View {
             guard notification.object is MultiplexerStore else { return }
             layoutRevision += 1
         }
+        .onChange(of: multiplexer.focusedPaneId) { _, _ in
+            guard terminalsVisible, model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
+            if case .session(let id) = multiplexer.focusedPane.content { navigation.selectedSessionId = id }
+            else { navigation.selectedSessionId = nil }
+        }
+        .onChange(of: taskIdentity, initial: true) { _, _ in
+            if navigation.selectedSessionId == nil, let work = model.selection, work.kind == .task {
+                enterTask(work)
+            }
+        }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
                   let records else { return }
+            let previousLocations = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0.record.workspace?.identity) })
             let previous = Set(store.sessions.map(\.id))
             store.reconcile(records)
             let ids = Set(store.sessions.map(\.id))
             for id in previous.subtracting(ids) { store.releaseSurface(id) }
             workspaces.removeSessions(previous.subtracting(ids))
+            if model.sessions.errorMessage == nil {
+                workspaces.reconcileMembership(records)
+                if let selected = navigation.selectedSessionId,
+                   let record = records.first(where: { $0.id == selected }),
+                   let identity = record.workspace?.identity,
+                   let prior = previousLocations[selected], prior != identity {
+                    workspaces.workspace(for: identity).multiplexer.reveal(sessionId: selected)
+                }
+            }
         }
         .onChange(of: store.sessions.map(\.id)) { previous, ids in
             for id in Set(previous).subtracting(ids) { store.releaseSurface(id) }
@@ -509,6 +620,12 @@ struct SessionsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
         }
+        .sheet(isPresented: Binding(get: { workspace.showsDetails }, set: { workspace.showsDetails = $0 })) {
+            VStack {
+                HStack { Spacer(); Button("Done") { workspace.showsDetails = false } }.padding()
+                WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask, onNewSession: newTaskSession)
+            }.frame(minWidth: 680, minHeight: 560)
+        }
         .alert("Could not start conversation", isPresented: Binding(
             get: { launchError != nil },
             set: { if !$0 { launchError = nil } }
@@ -516,6 +633,89 @@ struct SessionsView: View {
             Button("OK") { launchError = nil }
         } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
+    }
+
+    private var taskMaterials: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Conversations").font(Typography.textStrong)
+            ForEach(store.sessions.filter { $0.record.workspace?.identity == taskIdentity }) { item in
+                HStack {
+                    Button { openSession(item.record) } label: {
+                        VStack(alignment: .leading) {
+                            Text(item.record.title).lineLimit(2)
+                            Text(item.error == nil ? item.record.participationLabel : "Needs recovery").font(Typography.meta)
+                                .foregroundStyle(palette.textSecondary)
+                            if let reason = item.record.workspace?.unavailable {
+                                Text(reason).font(Typography.meta).foregroundStyle(Color.statusWarning)
+                            }
+                        }
+                    }.buttonStyle(.plain)
+                    if let caller = item.record.callerRunId {
+                        Button("Caller · \(TaskRunsView.shortId(caller))") {
+                            if let session = store.sessions.first(where: { $0.record.runId == caller }) {
+                                openSession(session.record)
+                            } else if let taskId = item.record.workspace?.taskId {
+                                showMonitor(taskId)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Waiting Run: \(caller). Open its conversation or Task activity.")
+                        .disabled(!store.sessions.contains(where: { $0.record.runId == caller }) && item.record.workspace?.taskId == nil)
+                    }
+                    Spacer()
+                    if let pane = multiplexer.pane(forSessionId: item.id) {
+                        Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
+                            workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
+                        }.buttonStyle(.plain)
+                        Button("Focus") { workspace.toggleFocus(pane.id) }.buttonStyle(.plain)
+                    } else {
+                        Button("Expand") { openSession(item.record) }.buttonStyle(.plain)
+                    }
+                }.accessibilityIdentifier("workspace-material-\(item.id)")
+            }
+            ForEach(multiplexer.layout.allPanes.filter { $0.content == .shell }) { pane in
+                HStack {
+                    Button("Shell") { workspace.setCollapsed(paneId: pane.id, collapsed: false); multiplexer.setFocusedPane(pane.id) }
+                    Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
+                        workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
+                    }
+                    Button("Terminate") { store.surfaces.release(.shell(pane.id)); multiplexer.close(pane.id) }
+                }.buttonStyle(.plain)
+            }
+            Divider()
+            if fileTask?.task.reference.workspace?.localExists == false,
+               navigation.preparedTaskWorktrees[fileTask?.task.id ?? ""] == nil {
+                Text("Recorded checkout is missing").font(Typography.meta)
+                Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
+            }
+            Button("Task details") { workspace.showsDetails = true }
+            Button("New conversation") { prepareTaskWorkspace(conversation: true) }
+            Button("New shell") { multiplexer.newShell() }
+                .disabled(taskIdentity?.homeId != homeId)
+            Button(showsFiles ? "Hide files" : "Files") { workspace.showsFiles.toggle() }
+            if let task = fileTask {
+                Text(task.task.task.description).font(Typography.meta).lineLimit(8)
+            }
+            Spacer()
+        }.padding(Spacing.sm).frame(width: 240)
+    }
+
+    private func prepareTaskWorkspace(conversation: Bool) {
+        guard let task = fileTask else { return }
+        Task { @MainActor in
+            do {
+                if conversation { try await newTaskSession(task.task.id) }
+                else {
+                    let repo = store.repoPath
+                    let issue = task.task.task.identifier
+                    let path = try await Task.detached(priority: .userInitiated) {
+                        try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
+                    }.value
+                    navigation.preparedTaskWorktrees[task.task.id] = path
+                    workspace.showsFiles = true
+                }
+            } catch { launchError = error.localizedDescription }
+        }
     }
 
     private func openSession(_ record: SessionRecord) {
@@ -532,23 +732,35 @@ struct SessionsView: View {
             multiplexer.setFocusedPane(id)
             store.surfaces.focus(.shell(id))
         } else {
-            worktreeLayout.select(record.workspace?.worktree ?? record.cwd)
-            multiplexer.load(sessionId: record.id)
+            worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
+            multiplexer.reveal(sessionId: record.id)
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
         Task { @MainActor in await store.select(record.id) }
     }
 
-    /// A Task with exactly one open Session drills into that Session; zero or
-    /// several open the Task overview, which names each conversation.
     private func openTask(_ work: WorkReference) {
+        model.select(work)
+        navigation.content = .terminals
+        enterTask(work)
+    }
+
+    private func enterTask(_ work: WorkReference) {
+        guard let identity = taskIdentity else { return }
+        let panes = workspaces.workspace(for: identity).multiplexer
+        if case .session(let id) = panes.focusedPane.content {
+            navigation.selectedSessionId = id
+            return
+        }
+        guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
         let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
             .first { $0.id.work == work }?.sessions ?? []
-        if sessions.count == 1, let session = sessions.first {
+        if let session = sessions.first(where: {
+            if $0.kind == .flow, case .step(_, _, _, _, _, .current) = $0.flowMembership { return true }
+            return false
+        }) ?? sessions.first(where: { $0.state != .closed }) {
             openSession(session)
-        } else {
-            model.select(work)
         }
     }
 
@@ -559,7 +771,7 @@ struct SessionsView: View {
                 $0.content == .monitor(taskId: taskId)
             }
         }
-        let path = existing ?? workspace.flatMap { $0.localExists == true ? $0.worktree : nil } ?? store.repoPath
+        let path = existing ?? workspace?.identity ?? rootIdentity
         worktreeLayout.select(path)
         navigation.selectedSessionId = nil
         navigation.content = .terminals
@@ -576,11 +788,13 @@ struct SessionsView: View {
     /// `navigation` belongs to the repository that requested the launch; a
     /// launch that finishes after the human switched repositories must not
     /// redirect the repository now on screen.
-    private func launch(_ scope: ConversationScope, in navigation: WorkspaceNavigation) throws {
+    private func launch(_ scope: ConversationScope, in navigation: WorkspaceNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
-        worktreeLayout.select(scope.repoPath)
+        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(homeId: homeId, worktree: scope.repoPath)
+        guard identity.homeId == homeId else { throw RegistryQueryError("Open a conversation on its owning Home") }
+        worktreeLayout.select(identity)
         navigation.content = .terminals
-        workspaces.workspace(for: scope.repoPath).multiplexer.newShell(
+        workspaces.workspace(for: identity).multiplexer.newShell(
             command: ConversationLaunch(scope: scope).arguments(lf: lf))
     }
 
@@ -591,17 +805,17 @@ struct SessionsView: View {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
         let issue = found.task.task.identifier
-        let worktree: String
-        if let workspace = found.task.reference.workspace, workspace.localExists == true {
-            worktree = workspace.worktree
+        let checkout: WorkspaceIdentity
+        if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
+            checkout = identity
         } else {
             let repo = store.repoPath
-            worktree = try await Task.detached(priority: .userInitiated) {
+            checkout = try await Task.detached(priority: .userInitiated) {
                 try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
             }.value
-            origin.preparedTaskWorktrees[taskId] = worktree
+            origin.preparedTaskWorktrees[taskId] = checkout
         }
-        try launch(.task(repo: worktree, id: issue), in: origin)
+        try launch(.task(repo: checkout.worktree, id: issue), in: origin, identity: checkout)
     }
 
     /// The focused worktree as a quiet mono chip; its menu holds every
@@ -611,7 +825,7 @@ struct SessionsView: View {
         let path = worktreeLayout.focusedPath
         return Menu {
             ForEach(availablePaths, id: \.self) { candidate in
-                Button(URL(fileURLWithPath: candidate).lastPathComponent) {
+                Button(URL(fileURLWithPath: candidate.worktree).lastPathComponent) {
                     worktreeLayout.select(candidate, in: slot)
                 }
             }
@@ -633,7 +847,7 @@ struct SessionsView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "folder").font(.system(size: 10))
-                Text(path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose worktree")
+                Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
                     .font(Typography.code(11))
                     .lineLimit(1)
             }
@@ -646,7 +860,7 @@ struct SessionsView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(path ?? "Choose a worktree for this slot")
+        .help(path?.worktree ?? "Choose a worktree for this slot")
         .accessibilityLabel("Worktree")
         .accessibilityIdentifier("worktree-chip")
     }
@@ -737,7 +951,7 @@ struct SessionsView: View {
         case .undoClose:
             multiplexer.undoClose()
         case .zoom:
-            multiplexer.toggleZoom(multiplexer.focusedPaneId)
+            workspace.toggleFocus(multiplexer.focusedPaneId)
         case .focus(let direction):
             multiplexer.focus(direction)
         }
@@ -763,7 +977,7 @@ private struct WorktreeNodeView: View {
                 if showsStrips {
                     HStack(spacing: 8) {
                         Image(systemName: "folder").font(.system(size: 10))
-                        Text(path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose worktree")
+                        Text(path.map { URL(fileURLWithPath: $0.worktree).lastPathComponent } ?? "Choose worktree")
                             .font(Typography.code(11))
                             .lineLimit(1)
                         Spacer()
@@ -779,7 +993,7 @@ private struct WorktreeNodeView: View {
                 }
                 if let path {
                     WorktreeTerminalsView(
-                        workspace: workspaces.workspace(for: path), path: path,
+                        workspace: workspaces.workspace(for: path), path: path.worktree,
                         isFocused: isActive && layout.focusedSlotId == id,
                         sessions: sessions
                     )
@@ -818,14 +1032,33 @@ private struct WorktreeTerminalsView: View {
     var body: some View {
         let _ = revision
         let store = workspace.multiplexer
+        Group {
+        if let layout = store.zoomedPaneId == nil ? store.visibleLayout : store.layout {
         MultiplexerView(
-            layout: store.layout,
+            layout: layout,
             focusedPaneId: isFocused ? store.focusedPaneId : "",
             zoomedPaneId: store.zoomedPaneId,
             workingDirectory: path, sessions: sessions, store: store, hover: workspace.hover
         )
+        } else {
+            ContentUnavailableView("Panes collapsed", systemImage: "rectangle.compress.vertical",
+                description: Text("Expand a conversation or shell from the list."))
+        }
+        }
+        .onChange(of: store.zoomedPaneId) { previous, current in
+            if previous == nil, current != nil, workspace.filesBeforeFocus == nil {
+                workspace.filesBeforeFocus = workspace.showsFiles
+                workspace.showsFiles = false
+            } else if current == nil, let files = workspace.filesBeforeFocus {
+                workspace.showsFiles = files
+                workspace.filesBeforeFocus = nil
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            if let source = notification.object as? MultiplexerStore, source === store { revision += 1 }
+            if let source = notification.object as? MultiplexerStore, source === store {
+                revision += 1
+                Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+            }
         }
     }
 }

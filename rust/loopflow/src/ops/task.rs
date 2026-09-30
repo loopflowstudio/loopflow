@@ -90,6 +90,7 @@ pub struct TaskControlResult {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSnapshot {
+    pub home_id: Option<crate::durable::HomeId>,
     pub issue_id: String,
     pub issue_identifier: String,
     pub task_id: String,
@@ -4418,7 +4419,24 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             skill.as_ref().map(|step| &step.skill),
         );
         let (provider, _) = parse_agent(&agent);
+        let home_id = store
+            .task_checkouts()
+            .await
+            .map_err(task_error)?
+            .into_iter()
+            .find(|row| row.task_id == task.id)
+            .and_then(|row| row.home_id);
+        let local_home = store.local_home().await.map_err(task_error)?;
+        let worktree = if home_id.as_ref() == Some(&local_home.id) {
+            crate::engine::git::worktree_root(&task.worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task.worktree.clone())
+        } else {
+            task.worktree.clone()
+        };
         Ok(TaskSnapshot {
+            home_id,
             issue_id: task.plan.id.as_str().to_string(),
             issue_identifier: task.plan.identifier,
             task_id: task.id.to_string(),
@@ -4432,7 +4450,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             execution,
             runs,
             runs_truncated,
-            worktree: task.worktree.display().to_string(),
+            worktree: worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             agent: task.agent,
             provider,

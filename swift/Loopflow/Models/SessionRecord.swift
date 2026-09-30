@@ -130,6 +130,7 @@ public struct SessionAction: Codable, Sendable, Hashable {
 }
 
 public struct SessionWorkspace: Codable, Sendable, Hashable {
+    public var identity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: worktree) }
     public let homeId: String
     public let worktree: String
     public let taskId: String?
@@ -147,9 +148,10 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let runId: String
+    public let callerRunId: String?
     public let kind: SessionKind
     public let work: WorkReference?
-    public let workspace: SessionWorkspace?
+    public var workspace: SessionWorkspace?
     public let waveId: String?
     public let workPath: String?
     public let actions: [SessionAction]
@@ -166,6 +168,22 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let openArgv: [String]
     public let terminalIds: [String]
 
+    public var offersParticipation: Bool {
+        guard state != .closed else { return false }
+        let boundary: Bool
+        if kind == .ask { boundary = true }
+        else if kind == .flow, case .step(_, _, _, _, _, .current) = flowMembership { boundary = true }
+        else { boundary = false }
+        return boundary && actions.contains { ($0.kind == .open || $0.kind == .moveHere || $0.kind == .complete) && $0.unavailableReason == nil }
+    }
+
+    public var participationLabel: String {
+        if state == .ready { return "Ready to complete" }
+        if offersParticipation { return state == .active ? "Available · discussing" : "Available · preparing" }
+        if kind == .ask || kind == .flow { return "Needs recovery" }
+        return state == .active ? "Active" : "Conversation"
+    }
+
     public func action(_ kind: SessionActionKind) -> SessionAction? {
         actions.first { $0.kind == kind }
     }
@@ -175,6 +193,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case waveId = "wave_id"
         case actions
         case runId = "run_id"
+        case callerRunId = "caller_run_id"
         case titleSource = "title_source"
         case flowMembership = "flow_membership"
         case workPath = "work_path"

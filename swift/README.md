@@ -78,26 +78,25 @@ without changing its destination.
 Binary, missing, unsupported and over-1-MB files have explicit states. Extremely
 long lines retain the native editor's known responsiveness limitation.
 
-Select a repository in the outline, then choose a Task or Session. Use the
-outline menu for **Compact**, **Full hierarchy**, or **Sessions**. Compact
-shows repo → Wave → Task → Session and promotes descendants of singleton Waves
-when planning is readable;
-Tasks remain visible even before they have a Session. Disclosure folds a branch,
-while presentation changes preserve its saved expansion and selection.
-The sidebar lists started Tasks; unstarted Tasks remain in the Wave plan.
-Repository conversations and Sessions with unavailable ancestry stay reachable
-in **Orphan sessions** above search. Its header opens the first Session; the
-control room and manual binding are follow-up work.
+Select a repository, then a Task. Its workspace retains conversations, shells,
+file drafts and layout across visits. **Collapse** hides a pane while its process
+continues; **Expand** returns to it. **Focus** gives one conversation the content
+area; **Restore** brings back the panes and files. **Terminate** ends a shell.
+New conversations arrive in the list without taking focus.
 
-Right-click a row to inspect its subject or ancestors, start a scoped conversation,
-or open an ordinary terminal. Right-click the outline background for repository
-actions. **Show retained terminals** restores the existing pane layout. Search,
-scroll, presentation, expansion and selection survive repository switches within
-the window. Selecting a Task with exactly one open Session enters that Session;
-otherwise it opens the Task overview, which names each conversation. Monitor is
-an explicit breadcrumb control. Selecting a Session opens its exact terminal
-through the shared Session action.
-The Task overview draws its Flow from the shared read: before start, the chosen
+Task rows show available direct Ask and interactive Flow conversations. Collapsed
+Wave rows roll up those conversations; choose a name to open it directly.
+**Available** means the conversation can be joined; **Ready to complete** means
+its agent has recorded a summary. Failed provider starts offer recovery.
+
+Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
+Repository conversations and Sessions with unavailable ancestry stay reachable
+below the outline. **Task details** opens the description, comments and Run history.
+
+The Task's compact Flow shows interactive stages and inspectable background work.
+Select a current stage to join its exact conversation; select a future stage to
+inspect it. **Detailed Flow** exposes the captured branches and repeats. The header
+uses the shared read: before start, the chosen
 Flow's preview (click its name to search the catalogue) and **Start**; once
 started, the pinned definition, the current occurrence, and each loop's iteration.
 Hover or focus the name for **Stop & restart…**, which confirms before replacing
@@ -280,7 +279,6 @@ codebase tree, and registry health.
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — current chapter plan, Tasks and Runs
-- `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess

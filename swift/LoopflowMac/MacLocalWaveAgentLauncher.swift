@@ -82,19 +82,18 @@ enum LocalWaveAgentLauncher {
 
     /// Ensure Task Work and its checkout without starting a worker; returns
     /// the authoritative worktree.
-    static func checkoutTask(repoPath: String, issue: String) throws -> String {
+    static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
         let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
-        return try taskCheckoutWorktree(stdout)
+        return try taskCheckoutWorkspace(stdout)
     }
 
     static func taskCheckoutCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "checkout", issue, "--json"]
     }
 
-    static func taskCheckoutWorktree(_ stdout: String) throws -> String {
-        struct Prepared: Decodable { let worktree: String }
+    static func taskCheckoutWorkspace(_ stdout: String) throws -> WorkspaceIdentity {
         do {
-            return try JSONDecoder().decode(Prepared.self, from: Data(stdout.utf8)).worktree
+            return try JSONDecoder().decode(WorkspaceIdentity.self, from: Data(stdout.utf8))
         } catch {
             throw LocalLfError(
                 errorDescription: "lf task checkout returned an invalid receipt: \(error.localizedDescription)"

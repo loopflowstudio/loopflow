@@ -93,15 +93,25 @@ struct LocalWaveAgentLauncherTests {
         ))
     }
 
+    @Test("Prepared checkout receipts retain the owning Home and require its evidence")
+    func checkoutIdentityFixture() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let json = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_checkout.json"), encoding: .utf8)
+        #expect(try LocalWaveAgentLauncher.taskCheckoutWorkspace(json) == fixtureWorkspace("/src/loopflow.workspace"))
+        #expect(throws: LocalLfError.self) {
+            try LocalWaveAgentLauncher.taskCheckoutWorkspace("{\"worktree\":\"/repo\"}")
+        }
+    }
+
     @Test("New session prepares Task Work without running its Flow and uses the returned checkout")
     func taskCheckoutUsesReceiptWorktree() throws {
         #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
             == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])
-        let worktree = try LocalWaveAgentLauncher.taskCheckoutWorktree("""
-        {"id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
+        let worktree = try LocalWaveAgentLauncher.taskCheckoutWorkspace("""
+        {"home_id": "home_00000000000000000000000000000001", "id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
         """)
-        #expect(worktree == "/src/loopflow.main-view-task")
-        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorktree("not json") }
+        #expect(worktree == fixtureWorkspace("/src/loopflow.main-view-task"))
+        #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorkspace("not json") }
     }
 
     // MARK: - Bundled binary boundary

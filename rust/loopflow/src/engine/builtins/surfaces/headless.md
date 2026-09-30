@@ -4,7 +4,10 @@ conversational question or wait for turn text — no one will answer here.
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary Run explicitly with
 `lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
-run `lf ask "<exact request>"`. It opens a durable session in this Run's
+run `lf ask --key <stable-question-key> "<exact request>"`. Reuse the key when
+retrying the same consequential question; keys belong to this Run, and a retry
+returns the retained answer or joins the same Session. Distinct questions need
+distinct keys. Include the evidence and exact decision needed. It opens a durable session in this Run's
 checkout and blocks until the user completes the conversation. The session
 agent marking itself ready does not complete or remove the session.
 

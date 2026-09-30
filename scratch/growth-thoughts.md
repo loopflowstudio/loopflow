@@ -77,16 +77,21 @@ later units here as bounded implementation direction; elaborate their final
 launch plans when selected. Keep all three units visible during design review.
 This kickoff files no follow-up Tasks and launches no implementation workers.
 
-Unit 1 remains the selected implementation boundary and is not ready to ship.
-The first internal cut now implements shared checkout association, directory pages,
-file access without Project/PR hydration, and retained read-only access changes.
-Swift grouping and the file navigator consume those readings. Focused Rust and
-Swift proofs have passed; the connected desktop/provider demo remains outstanding.
-Remote Flow readings retain recorded placement with an unavailable explanation;
-owning-Home checkout resolution remains unproved and must be verified before
-claiming association complete across Homes.
-The retained workspace, participation projection/indications, and raw Ask retry key
-in cuts 2–4 remain to build. Keep them in this PR's delivery boundary.
+Unit 1 remains the selected delivery boundary. Its local implementation now includes
+Home/worktree identity in checkout receipts, planning readings and outer slots;
+one retained Task workspace with collapse, focus/restore, shells and files;
+interaction projection and exact direct-Session navigation; Task/Wave participation
+indications; and caller-scoped raw Ask keys. The old Task terminal owner is removed.
+Focused Rust/Swift proofs and the fallback Xcode build are recorded in
+`kickoff-evidence.md`. These remain internal changes in one PR.
+
+Remaining acceptance belongs to the configured demo: cross-Task discovery without
+focus theft, real provider Ask/Flow continuation, retained input/processes/documents,
+file split restoration, and at least 20 measured layout actions plus idle CPU/process
+counts. Remote Flow readings still carry recorded Home/Task identity with an explicit
+unavailable checkout-resolution reason. Owning-Home remote association must be
+verified before claiming association complete across Homes. No shipping claim or
+performance result follows from local model/transport proof.
 Unit 2 is not launch-ready:
 native primary-turn delivery remains unproved, and Flow replacement needs the
 durable transition specified below. Upstream `3dc89bc9a` has already removed the
@@ -97,6 +102,19 @@ this design. [Evidence](kickoff-evidence.md) separates
 source findings and executed probes from required implementation proof.
 
 ## Unit 1 — the Task workspace
+
+### Delete — do not maintain
+
+Removed: `TaskWorkspaceView.swift`, `TaskTerminalStore`, `TaskWorkspaceSection`,
+and the exclusive `TerminalIdentity.taskTerminal` case. Their consumers now use
+the retained Sessions workspace; keep these predecessors deleted. Preserve file documents, shell
+processes, and direct Session completion in the surviving window-owned registry.
+Replace path-only registry/outer-slot keys with Home and checkout identity; keep
+terminal identity independent of grouping. Focused retention tests own this proof.
+
+Jack Heart's supervising direction places configured desktop/provider proof at
+the final demo boundary. Local implementation and focused proof continue before
+that demonstration; shipping still requires it.
 
 ### Interaction
 
@@ -376,8 +394,8 @@ Keep `lf ask`, its optional skill, and its focused Session completion lifecycle.
 Keep direct Flow Session completion/navigation semantics. Both use the same Task
 workspace and terminal presentation; their recorded actions determine the controls.
 
-Raw Ask currently allocates a new UUID on every call, while blocked-decision Asks
-have reusable boundary keys. Extend raw Ask with an optional stable `--key` scoped
+Raw Ask without a key allocates a new UUID on every call. Blocked-decision Asks
+have reusable boundary keys. Raw Ask now also accepts an optional stable `--key` scoped
 to its caller Run, using existing keyed storage. Repeating that question joins its
 Session or returns its retained answer; distinct questions remain distinct. Do not
 identify questions by hashing prose. Automatic recovery uses its exact existing
@@ -408,11 +426,11 @@ raise consequential unresolved choices with evidence. No mandatory Wave relay.
    autosave stop while the draft survives, including a symlink in a parent path. Move
    Swift grouping and DTO fixtures with the resolver so the new reading has a
    real consumer in this cut.
-2. Retained Task workspace: integrate the inventory, collapse, focus/restore,
+2. **Implemented; configured demo pending.** Retained Task workspace: integrate the inventory, collapse, focus/restore,
    files, and shells. Prove layout transitions preserve the same surface identities
    and documents, including a live Session reassociated between workspace groups.
    Delete superseded Task terminal ownership in this cut.
-3. Participatory Flow projection and direct Session navigation; expose Asks in
+3. **Implemented; configured demo pending.** Participatory Flow projection and direct Session navigation; expose Asks in
    that workspace and complete retry behavior. Derive participation indications
    on existing Task/Wave rows. Prove loops, branching, repeated skills, independent
    conversations, exact caller/occurrence resolution, and discovering a review

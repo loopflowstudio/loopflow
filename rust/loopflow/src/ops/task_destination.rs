@@ -273,6 +273,7 @@ mod tests {
         local.execute_batch("CREATE TABLE branch_draft(value TEXT); INSERT INTO branch_draft VALUES ('private write');").unwrap();
         let task_id = crate::work::task::TaskId::new();
         let snapshot = crate::ops::task::TaskSnapshot {
+            home_id: None,
             issue_id: "issue-installed".into(),
             issue_identifier: "LOO-1".into(),
             task_id: task_id.to_string(),

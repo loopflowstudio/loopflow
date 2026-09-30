@@ -21,7 +21,11 @@ public final class MultiplexerStore {
     public private(set) var zoomedPaneId: String?
     public private(set) var shellCommands: [String: [String]] = [:]
 
+    public private(set) var collapsedPaneIds: Set<String> = []
+    public var visibleLayout: LayoutNode? { layout.visible(excluding: collapsedPaneIds) }
+
     private var closedState: ClosedState?
+    private var focusBeforeZoom: String?
 
     public init(layout: LayoutNode = .defaultLayout()) {
         self.layout = layout
@@ -48,8 +52,32 @@ public final class MultiplexerStore {
         }
     }
 
+    public func setCollapsed(paneId: String, collapsed: Bool) {
+        guard layout.pane(for: paneId) != nil else { return }
+        if collapsed { collapsedPaneIds.insert(paneId) }
+        else { collapsedPaneIds.remove(paneId) }
+        if collapsed && zoomedPaneId == paneId { zoomedPaneId = nil }
+        if collapsed && focusedPaneId == paneId, let first = visibleLayout?.firstPane {
+            focusedPaneId = first.id
+        }
+        _notify()
+    }
+
+    public func reveal(sessionId: String) {
+        if let pane = pane(forSessionId: sessionId) {
+            setCollapsed(paneId: pane.id, collapsed: false)
+            setFocusedPane(pane.id)
+        } else if focusedPane.content == .empty {
+            load(sessionId: sessionId)
+            setCollapsed(paneId: focusedPaneId, collapsed: false)
+        } else {
+            _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
+        }
+    }
+
     public func setFocusedPane(_ paneId: String) {
         guard layout.pane(for: paneId) != nil, focusedPaneId != paneId else { return }
+        collapsedPaneIds.remove(paneId)
         focusedPaneId = paneId
         if zoomedPaneId != nil { zoomedPaneId = paneId }
         _notify()
@@ -79,10 +107,12 @@ public final class MultiplexerStore {
         closedState = ClosedState(
             layout: layout,
             focusedPaneId: focusedPaneId,
-            zoomedPaneId: zoomedPaneId
+            zoomedPaneId: zoomedPaneId,
+            collapsedPaneIds: collapsedPaneIds
         )
         // Undo may restore a shell pane, but must never replay a completed or
         // interrupted conversation's initial launch command.
+        collapsedPaneIds.remove(paneId)
         shellCommands.removeValue(forKey: paneId)
         if layout.allPanes.count == 1 {
             layout = layout.replacingContent(of: paneId, with: .empty)
@@ -105,6 +135,7 @@ public final class MultiplexerStore {
         layout = closedState.layout
         focusedPaneId = closedState.focusedPaneId
         zoomedPaneId = closedState.zoomedPaneId
+        collapsedPaneIds = closedState.collapsedPaneIds
         self.closedState = nil
         _notify()
     }
@@ -162,8 +193,17 @@ public final class MultiplexerStore {
 
     public func toggleZoom(_ paneId: String) {
         guard layout.pane(for: paneId) != nil else { return }
-        zoomedPaneId = zoomedPaneId == paneId ? nil : paneId
-        focusedPaneId = paneId
+        if zoomedPaneId == paneId {
+            zoomedPaneId = nil
+            if let previous = focusBeforeZoom, layout.pane(for: previous) != nil {
+                focusedPaneId = previous
+            }
+            focusBeforeZoom = nil
+        } else {
+            if zoomedPaneId == nil { focusBeforeZoom = focusedPaneId }
+            zoomedPaneId = paneId
+            focusedPaneId = paneId
+        }
         _notify()
     }
 
@@ -222,6 +262,7 @@ public final class MultiplexerStore {
         guard !stale.isEmpty || undoIsStale else { return }
 
         for pane in stale {
+            collapsedPaneIds.remove(pane.id)
             if layout.allPanes.count == 1 {
                 layout = .leaf(PaneState(id: pane.id, content: .empty))
             } else if let updated = layout.removing(pane.id) {
@@ -254,7 +295,7 @@ public final class MultiplexerStore {
     }
 
     private func _paneFrames() -> [String: CGRect] {
-        _paneFrames(for: layout)
+        visibleLayout.map { _paneFrames(for: $0) } ?? [:]
     }
 
     private func _paneFrames(for layout: LayoutNode) -> [String: CGRect] {
@@ -347,5 +388,6 @@ public final class MultiplexerStore {
         let layout: LayoutNode
         let focusedPaneId: String
         let zoomedPaneId: String?
+        let collapsedPaneIds: Set<String>
     }
 }

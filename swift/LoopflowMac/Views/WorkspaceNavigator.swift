@@ -235,8 +235,8 @@ struct WorkspaceNavigator: View {
             }
             .help(row.title)
             .accessibilityIdentifier(identifier(row))
-            if let key = row.workKey, !row.inlineSessions.isEmpty {
-                sessionCount(row.inlineSessions, work: key.work)
+            if let key = row.workKey, row.inlineSessions.contains(where: \.offersParticipation) {
+                sessionCount(row.inlineSessions.filter(\.offersParticipation), work: key.work)
             }
         }
         .padding(.horizontal, 6)
@@ -268,20 +268,18 @@ struct WorkspaceNavigator: View {
     /// the Task overview without entering any one of them.
     private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
         let names = sessions.map(\.title).joined(separator: ", ")
-        return Button { model.select(work) } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "bubble.left").font(.system(size: 10))
-                Text("\(sessions.count)").monospacedDigit()
+        return Menu {
+            ForEach(sessions) { session in
+                Button(session.title) { onOpenSession(session) }
             }
-            .font(Typography.meta)
-            .foregroundStyle(palette.textTertiary)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .fixedSize()
-            .contentShape(Capsule())
+        } label: {
+            Label("\(sessions.count)", systemImage: "bubble.left")
+                .font(Typography.meta).foregroundStyle(palette.accentInk)
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
         .help(names)
-        .accessibilityLabel("\(sessions.count) open \(sessions.count == 1 ? "Session" : "Sessions"): \(names). Inspect Task")
+        .accessibilityLabel("\(sessions.count) available conversations: \(names)")
         .accessibilityIdentifier("workspace-session-count-\(work.id)")
     }
 

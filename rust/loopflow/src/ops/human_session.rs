@@ -174,6 +174,7 @@ fn flow_actions(position: &FlowPosition) -> Vec<SessionAction> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
+    pub caller_run_id: Option<RunId>,
     pub run_id: RunId,
     pub kind: SessionKind,
     pub work: Option<WorkRef>,
@@ -340,6 +341,23 @@ enum SessionTarget {
         position: FlowPosition,
     },
     StandaloneFlow(crate::ops::flow_run::StepToken),
+}
+
+/// Raw Ask keys belong to the originating Run, independently of Flow membership.
+pub(crate) async fn ask_with_key(
+    store: &SharedStore,
+    key: Option<&str>,
+    question: &str,
+    skill: Option<&str>,
+) -> Result<String> {
+    if let Some(key) = key {
+        anyhow::ensure!(!key.trim().is_empty(), "Ask key cannot be empty");
+        let manifest = active_run_manifest()?;
+        let scoped = serde_json::to_string(&("raw_ask", manifest.run_id, key))?;
+        ask_once(store, &scoped, question, skill).await
+    } else {
+        ask(store, question, skill).await
+    }
 }
 
 pub(crate) async fn ask(
@@ -1471,6 +1489,7 @@ async fn interactive_surface(
             .unwrap_or_else(|| crate::engine::naming::word_pair(manifest.run_id.as_str())),
     )?;
     Ok(SessionRecord {
+        caller_run_id: None,
         id: manifest.run_id.to_string(),
         run_id: manifest.run_id.clone(),
         kind: SessionKind::Interactive,
@@ -1799,7 +1818,11 @@ pub(crate) fn native_session_state(
     if !crate::lf::commands::util::active_provider_clients(&dir, &manifest.harness)?.is_empty() {
         return Ok(SessionState::Active);
     }
-    if crate::run_record::read_provider_session(&dir)?.is_some() {
+    if crate::run_record::read_provider_session(&dir)?.is_some()
+        || crate::run_record::read_run_snapshot(&dir)?
+            .outcome
+            .is_some()
+    {
         Ok(SessionState::Closed)
     } else {
         Ok(SessionState::Waiting)
@@ -1928,6 +1951,7 @@ async fn flow_surface(
         None
     };
     Ok(SessionRecord {
+        caller_run_id: None,
         run_id,
         id,
         kind: SessionKind::Flow,
@@ -1971,6 +1995,7 @@ async fn ask_surface(store: &SharedStore, record: &AskSessionRecord) -> Result<S
         .flatten();
     let flow_membership = run_flow_membership(store, manifest.as_ref(), &run_id).await;
     Ok(SessionRecord {
+        caller_run_id: Some(record.parent_run_id.clone()),
         id: record.id.clone(),
         run_id,
         kind: SessionKind::Ask,
@@ -2539,6 +2564,10 @@ mod tests {
                 let sessions = wait_until_asks(&store, 2).await;
                 for session in sessions {
                     assert!(session.id.starts_with("ask_once_"));
+                    assert_eq!(
+                        session.caller_run_id,
+                        Some(super::active_run_manifest().unwrap().run_id)
+                    );
                     assert!(!session.id.contains("checkout"));
                     let record = read_ask_record(&session.id).unwrap().unwrap();
                     assert_eq!(record.parent_run_dir.as_deref(), Some(home.home.path()));
@@ -2566,6 +2595,98 @@ mod tests {
                 "first"
             );
             assert_eq!(ASK_LAUNCHERS.lock().unwrap().len(), 2);
+        });
+    }
+
+    #[test]
+    fn raw_ask_key_reuses_the_answer_only_within_its_caller_run() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let finish = async {
+                let sessions = wait_until_asks(&store, 1).await;
+                finish_simulated_ask(&sessions[0].id, "accepted").await;
+            };
+            let (first, retry, ()) = tokio::join!(
+                super::ask_with_key(&store, Some("policy"), "Choose policy", None),
+                super::ask_with_key(&store, Some("policy"), "Retry", None),
+                finish
+            );
+            assert_eq!(first.unwrap(), "accepted");
+            assert_eq!(retry.unwrap(), "accepted");
+            assert_eq!(
+                super::ask_with_key(&store, Some("policy"), "", Some("missing-skill"))
+                    .await
+                    .unwrap(),
+                "accepted"
+            );
+            let mut manifest = super::active_run_manifest().unwrap();
+            manifest.run_id = RunId::new();
+            std::fs::write(
+                home.home.path().join("manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            std::env::set_var("LF_RUN_ID", manifest.run_id.as_str());
+            let finish_other = async {
+                let sessions = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let sessions = list_ask_sessions(&store).await.unwrap();
+                        if sessions.len() == 1 && ASK_LAUNCHERS.lock().unwrap().len() == 2 {
+                            break sessions;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                finish_simulated_ask(&sessions[0].id, "other caller").await;
+            };
+            let (other, ()) = tokio::join!(
+                super::ask_with_key(&store, Some("policy"), "Choose policy", None),
+                finish_other
+            );
+            assert_eq!(other.unwrap(), "other caller");
+            assert_eq!(ASK_LAUNCHERS.lock().unwrap().len(), 2);
+        });
+    }
+
+    #[test]
+    fn failed_provider_start_is_recovery_not_an_available_boundary() {
+        let _lock = crate::journal::test_env_lock();
+        let home = AskHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let mut record = super::prepare_ask_record(&store, "Choose policy", None)
+                .await
+                .unwrap();
+            super::prepare_ask_run(&mut record).unwrap();
+            let run_id = record.session_run_id.as_ref().unwrap();
+            assert_eq!(
+                super::native_session_state(Some(run_id), None).unwrap(),
+                super::SessionState::Waiting
+            );
+            let dir = super::local_session_run_dir(run_id).unwrap();
+            let receipt = crate::run_record::TerminalReceipt {
+                schema_version: 1,
+                outcome: "failed".into(),
+                ended_at: time::OffsetDateTime::now_utc(),
+                result_ref: None,
+            };
+            std::fs::write(
+                dir.join("terminal.json"),
+                serde_json::to_vec(&receipt).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                super::native_session_state(Some(run_id), None).unwrap(),
+                super::SessionState::Closed
+            );
+            assert_eq!(
+                super::native_session_state(Some(run_id), Some("ready")).unwrap(),
+                super::SessionState::Ready
+            );
         });
     }
 
@@ -2885,6 +3006,21 @@ mod tests {
         // A remote Session's Run manifest is not here: no provider is claimed.
         assert_eq!(sessions.last().unwrap().provider, None);
         assert_eq!(sessions[0].provider.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn ask_fixture_names_its_exact_waiting_caller() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/ask_session.json"
+        ))
+        .unwrap();
+        let session: super::SessionRecord = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            session.caller_run_id.as_ref().unwrap().as_str(),
+            "run_00000000000000000000000000000002"
+        );
+        assert_ne!(session.caller_run_id.as_ref(), Some(&session.run_id));
+        assert_eq!(serde_json::to_value(session).unwrap(), value);
     }
 
     #[test]

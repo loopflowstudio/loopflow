@@ -221,6 +221,7 @@ pub struct TaskReferenceSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWorkspaceSnapshot {
+    pub home_id: Option<crate::durable::HomeId>,
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
     /// Task settles. `None` is explicit for legacy Tasks with no PR record.
@@ -927,6 +928,8 @@ async fn snapshot_tasks(
     planning: PmSnapshot,
     probe_pr_empty: bool,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
+    let checkouts = store.task_checkouts().await?;
+    let local_home = store.local_home().await?;
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
@@ -935,7 +938,16 @@ async fn snapshot_tasks(
         });
         let recommended = recommended_flow(&planning.projects, &item.project_id);
         details.push(
-            snapshot_task_detail(store, item, runtime_task, recommended, probe_pr_empty).await?,
+            snapshot_task_detail(
+                store,
+                item,
+                runtime_task,
+                recommended,
+                probe_pr_empty,
+                &checkouts,
+                &local_home.id,
+            )
+            .await?,
         );
     }
 
@@ -978,7 +990,16 @@ async fn snapshot_tasks(
         };
         let recommended = crate::ops::task::recommended_task_flow(plan).to_string();
         details.push(
-            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty).await?,
+            snapshot_task_detail(
+                store,
+                item,
+                Some(task),
+                recommended,
+                probe_pr_empty,
+                &checkouts,
+                &local_home.id,
+            )
+            .await?,
         );
     }
     details.sort_by(|left, right| {
@@ -1023,6 +1044,8 @@ async fn snapshot_task_detail(
     task: Option<&Task>,
     recommended: String,
     probe_pr_empty: bool,
+    checkouts: &[crate::store::sqlite::TaskCheckout],
+    local_home: &crate::durable::HomeId,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
         Some(task) => store.task_prs(&task.id).await?,
@@ -1048,7 +1071,10 @@ async fn snapshot_task_detail(
         }
         None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
     };
-    let reference = task_reference(&item, task, active, &prs);
+    let home_id = task
+        .and_then(|task| checkouts.iter().find(|row| row.task_id == task.id))
+        .and_then(|row| row.home_id.clone());
+    let reference = task_reference(&item, task, active, &prs, home_id, local_home);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
@@ -1404,16 +1430,28 @@ fn task_reference(
     task: Option<&Task>,
     active_pr: Option<&TaskPr>,
     prs: &[TaskPr],
+    home_id: Option<crate::durable::HomeId>,
+    local_home: &crate::durable::HomeId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.map(|task| {
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
+        let local = home_id.as_ref() == Some(local_home);
+        let worktree = if local {
+            crate::engine::git::worktree_root(&task.worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task.worktree.clone())
+        } else {
+            task.worktree.clone()
+        };
         TaskWorkspaceSnapshot {
+            home_id,
             slug: task.workspace_slug.clone(),
             branch,
-            worktree: task.worktree.display().to_string(),
-            local_exists: task.worktree.try_exists().ok(),
+            worktree: worktree.display().to_string(),
+            local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
         }
     });
     TaskReferenceSnapshot {

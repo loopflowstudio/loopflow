@@ -72,6 +72,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "completed",
         "branch": "jack/completed",
         "worktree": "/src/loopflow.completed"
@@ -144,6 +145,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "stale",
         "branch": "jack/stale",
         "worktree": "/src/loopflow.stale"
@@ -299,7 +301,163 @@
               ],
               "paths": []
             }
-          ]
+          ],
+          "interactions": {
+            "stages": [
+              "4"
+            ],
+            "transitions": [
+              {
+                "from": "@start",
+                "to": "4",
+                "nodes": [
+                  "0",
+                  "1",
+                  "2",
+                  "3"
+                ],
+                "routes": [
+                  {
+                    "from": "@start",
+                    "to": "0",
+                    "condition": null
+                  },
+                  {
+                    "from": "0",
+                    "to": "1",
+                    "condition": null
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "4",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "@end",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5",
+                  "6",
+                  "6/fix/0",
+                  "7"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "6",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "6",
+                    "to": "6/fix/0",
+                    "condition": "fix"
+                  },
+                  {
+                    "from": "6",
+                    "to": "7",
+                    "condition": "skip"
+                  },
+                  {
+                    "from": "7",
+                    "to": "@end",
+                    "condition": null
+                  },
+                  {
+                    "from": "6/fix/0",
+                    "to": "7",
+                    "condition": null
+                  }
+                ]
+              }
+            ]
+          }
         },
         "current": "3",
         "completed": [
@@ -370,6 +528,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "unavailable",
         "branch": "jack/unavailable",
         "worktree": "/missing/loopflow.unavailable"
@@ -441,6 +600,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "user",
         "branch": "jack/user",
         "worktree": "/src/loopflow.user"
@@ -596,7 +756,163 @@
               ],
               "paths": []
             }
-          ]
+          ],
+          "interactions": {
+            "stages": [
+              "4"
+            ],
+            "transitions": [
+              {
+                "from": "@start",
+                "to": "4",
+                "nodes": [
+                  "0",
+                  "1",
+                  "2",
+                  "3"
+                ],
+                "routes": [
+                  {
+                    "from": "@start",
+                    "to": "0",
+                    "condition": null
+                  },
+                  {
+                    "from": "0",
+                    "to": "1",
+                    "condition": null
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "4",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "@end",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5",
+                  "6",
+                  "6/fix/0",
+                  "7"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "6",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "6",
+                    "to": "6/fix/0",
+                    "condition": "fix"
+                  },
+                  {
+                    "from": "6",
+                    "to": "7",
+                    "condition": "skip"
+                  },
+                  {
+                    "from": "7",
+                    "to": "@end",
+                    "condition": null
+                  },
+                  {
+                    "from": "6/fix/0",
+                    "to": "7",
+                    "condition": null
+                  }
+                ]
+              }
+            ]
+          }
         },
         "current": "4",
         "completed": [
@@ -668,6 +984,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "dirty",
         "branch": "jack/dirty",
         "worktree": "/src/loopflow.dirty"
@@ -739,6 +1056,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
+        "home_id": "home_00000000000000000000000000000001",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits"
@@ -923,7 +1241,163 @@
               ],
               "paths": []
             }
-          ]
+          ],
+          "interactions": {
+            "stages": [
+              "4"
+            ],
+            "transitions": [
+              {
+                "from": "@start",
+                "to": "4",
+                "nodes": [
+                  "0",
+                  "1",
+                  "2",
+                  "3"
+                ],
+                "routes": [
+                  {
+                    "from": "@start",
+                    "to": "0",
+                    "condition": null
+                  },
+                  {
+                    "from": "0",
+                    "to": "1",
+                    "condition": null
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "4",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "4",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  }
+                ]
+              },
+              {
+                "from": "4",
+                "to": "@end",
+                "nodes": [
+                  "1",
+                  "2",
+                  "3",
+                  "5",
+                  "6",
+                  "6/fix/0",
+                  "7"
+                ],
+                "routes": [
+                  {
+                    "from": "4",
+                    "to": "5",
+                    "condition": null
+                  },
+                  {
+                    "from": "5",
+                    "to": "6",
+                    "condition": "advance"
+                  },
+                  {
+                    "from": "5",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "1",
+                    "to": "2",
+                    "condition": null
+                  },
+                  {
+                    "from": "2",
+                    "to": "3",
+                    "condition": null
+                  },
+                  {
+                    "from": "3",
+                    "to": "1",
+                    "condition": "repeat"
+                  },
+                  {
+                    "from": "6",
+                    "to": "6/fix/0",
+                    "condition": "fix"
+                  },
+                  {
+                    "from": "6",
+                    "to": "7",
+                    "condition": "skip"
+                  },
+                  {
+                    "from": "7",
+                    "to": "@end",
+                    "condition": null
+                  },
+                  {
+                    "from": "6/fix/0",
+                    "to": "7",
+                    "condition": null
+                  }
+                ]
+              }
+            ]
+          }
         },
         "current": "2",
         "completed": [

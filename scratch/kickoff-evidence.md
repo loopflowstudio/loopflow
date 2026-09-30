@@ -411,7 +411,7 @@ build-for-testing passed again. These are local model,
 simulated-transport, and compilation proofs; the configured desktop/provider gap
 below remains open.
 
-Remaining Unit 1 implementation: Home/worktree-keyed retained workspace ownership,
+Remaining Unit 1 implementation at the first-cut checkpoint: Home/worktree-keyed retained workspace ownership,
 collapse and focus/restore, reassociation without surface destruction, replacement
 of the old Task terminal owner, participatory graph/navigation and indications,
 raw Ask keys, and the configured desktop/provider walkthrough. Do not publish this
@@ -428,9 +428,75 @@ names this dependency. The unintegrated collapse draft was removed; production
 code remains at the verified first-cut checkpoint. No new worktree or worker was
 created, and no PR was published.
 
-Required configured proof remains blocked by the run's supplied lack of a
-rendering environment: `uv run python scripts/test.py --ui-host` and the opening
-real-provider Ask/Flow handoff must run on the configured desktop host. The
-implement skill requires stopping dependent work when required proof cannot run.
-The completed compilation and fixture proofs above do not release this boundary
-or make Unit 1 ready to ship.
+Jack Heart's later supervising direction assigns the configured desktop/provider
+proof to the final demo step and explicitly permits implementation to continue.
+The earlier proof stop does not govern that accepted sequencing. Shipping still
+requires the configured demo.
+
+## Remaining Unit 1 implementation — 2026-09-30
+
+Implemented in the supplied checkout, without additional workers or worktrees:
+
+- Window workspace and outer-slot identity now includes Home and resolved checkout.
+  Planning snapshots and `task checkout` receipts carry Home evidence. A failed
+  local Home read retains the known identity. Successful inventory reconciliation
+  removes old layout membership without destroying a moved Session's native view.
+- The Task entry uses the retained workspace. Collapse preserves layout leaves,
+  ratios and shell commands; focus retains file visibility and width for Restore.
+  Task details remain reachable beside conversation, shell and file controls.
+  `TaskWorkspaceView`, its separate terminal store/section and terminal identity
+  are deleted. Wave inspection uses the same retained workspace.
+- Rust projects interactive occurrence keys and bounded background-route references,
+  including XOR alternatives and repeats. Swift offers the compact view, detailed
+  disclosure and edge inspection. Current stages select an exact invocation,
+  occurrence and pass; future stages only inspect. Direct Ask/current Flow counts
+  roll up to collapsed Wave rows, retaining stale readings without focus changes.
+- `lf ask --key` scopes explicit keys to the caller Run, joining pending questions
+  or returning retained answers. Failed provider-start receipts read as recovery,
+  while an explicit ready summary retains its completion meaning. Ask rows link
+  to the exact caller conversation when present, otherwise its Task activity,
+  retaining the waiting Run ID in the shared reading.
+
+Review findings fixed: path-only preparation receipts could recreate ambiguous
+workspace ownership; an unconditional refresh reveal could expand a collapsed
+pane; the removed Wave sheet needed a direct local navigation callback; failed
+provider starts were indistinguishable from preparing conversations; and the new
+projection grew the captured Flow enum enough to require boxed projection storage.
+No compatibility layer or second terminal/document registry was introduced.
+
+Executed local proof (simulated providers/transports unless noted):
+
+- `cargo test -p loopflow --lib ops::human_session::`: 24 passed, including raw-key
+  concurrent retries, retained answers, separate caller Runs and failed-start state. The shared Ask fixture preserves the exact waiting caller
+  separately from the conversation Run.
+- `cargo test -p loopflow --lib engine::flow_graph::tests`: 7 passed, including
+  branches, repeated labels, loops, background-only spans and shared projections.
+- `cargo test -p loopflow --lib lf::commands::waves::tests`: 10 passed.
+- `cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1`:
+  3 passed; exact saved feedback and recovery remain intact.
+- `cargo test -p loopflow --lib cli_separates_ask_completion_from_flow_decisions`:
+  1 passed, including the keyed Ask parser.
+- `cargo test -p loopflow --test dto_fixtures`: 11 passed, including the full
+  prepared-checkout receipt and its owning Home.
+- Focused Swift command selecting `WorktreeWorkspaceTests|MultiplexerStoreTests|
+  TaskFilesTests|WorkspaceNavigationTests|TaskFlowTests|TaskFlowProofTests|
+  LocalWaveAgentLauncherTests`: 80 passed before the final added shared-receipt
+  case. Subsequent focused runs passed 39 cases after focus restoration, 75 after
+  caller-link/navigation integration, 9 receipt cases, and 12 Session-store cases
+  including the shared Ask caller fixture. Includes actual Ghostty surfaces running local fixture shells and retained
+  input across Flow controls; this is not real-provider or hosted UI proof.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and whitespace checks
+  passed. The Xcode fallback `build-for-testing` command recorded above passed.
+
+The new `retained_workspace_action` signpost measures collapse/expand/focus/restore
+through the existing next-main-callback scheduling proxy. Its purpose is to detect
+layout latency separately from provider opening and Task readiness. The producer
+is local workspace input plus layout observation; configured sampling, presentation
+latency, p95 and CPU/process counts remain unmeasured. Do not report this proxy as
+a compositor fence or live acceptance result.
+
+Required final demo remains unchanged. In particular, remote Flow association is
+explicitly unavailable on the observing Home; no new remote query or local path
+canonicalization has been substituted for owning-Home evidence. Verify that case
+on the configured Homes before claiming complete remote association. No PR was
+published and no provider Ask was opened by this implementation pass.

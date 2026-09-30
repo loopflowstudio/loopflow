@@ -657,6 +657,9 @@ pub enum FlowCommand {
 
 #[derive(Args, Debug, Default)]
 pub struct AskArgs {
+    /// Reuse this question and its retained answer within the caller Run
+    #[arg(long)]
+    pub key: Option<String>,
     /// Named skill for the session
     #[arg(long)]
     pub skill: Option<String>,
@@ -2639,6 +2642,11 @@ mod tests {
             Some(Commands::Ask { ask }) if ask.skill.as_deref() == Some("unblock")
                 && ask.question == ["Resolve", "this blocker"]
         ));
+
+        let keyed = Cli::try_parse_from(["lf", "ask", "--key", "policy", "Choose policy"]).unwrap();
+        assert!(
+            matches!(keyed.command, Some(Commands::Ask { ask }) if ask.key.as_deref() == Some("policy") && ask.question == ["Choose policy"])
+        );
 
         let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
             .expect("parse session readiness");

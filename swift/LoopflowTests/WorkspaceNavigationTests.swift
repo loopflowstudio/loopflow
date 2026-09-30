@@ -8,6 +8,22 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkspaceNavigationTests {
+    @Test("A collapsed Wave exposes direct participation without counting idle conversations")
+    func collapsedWaveParticipation() throws {
+        let snapshot = try roadmap()
+        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("ask", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
+        value["kind"] = "ask"
+        value["state"] = "waiting"
+        let ask = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+        let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
+        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [idle, ask])
+        let wave = try #require(projection.waves.first)
+        let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
+        let waveRow = try #require(rows.first { $0.workKey == wave.id })
+        #expect(waveRow.inlineSessions.map(\.id) == ["ask"])
+        #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "ask" }) })
+    }
+
     @Test("Checkout association groups independent Sessions despite different attribution")
     func checkoutOwnsGroupingWithoutGrantingFlowMembership() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
@@ -39,7 +55,7 @@ struct WorkspaceNavigationTests {
         }
         #expect(roots.count == 1)
         #expect(try roots.first?.accessibilityIdentifier() == "workspace-repository-/src/loopflow")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review") }
     }
 
     @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
@@ -184,7 +200,7 @@ struct WorkspaceNavigationTests {
         model.sessionResolved("demo", repo: "/src/loopflow")
         #expect(model.workspace.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review") }
     }
 
     @Test("Hierarchy rows open their Task; the Session list opens the exact Session")
@@ -323,8 +339,8 @@ struct WorkspaceNavigationTests {
     func navigationRetainsWorkspace() async throws {
         let model = try model()
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/src/loopflow")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "human")
         let sessionPane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
@@ -353,7 +369,7 @@ struct WorkspaceNavigationTests {
         #expect(model.navigation.content == .terminals)
         #expect(model.navigation.selectedSessionId == "human")
         #expect(!model.navigation.isExpanded(group))
-        #expect(registry.workspace(for: "/src/loopflow") === workspace)
+        #expect(registry.workspace(for: fixtureWorkspace("/src/loopflow")) === workspace)
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focused)
         workspace.multiplexer.load(sessionId: "human")

@@ -296,3 +296,22 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
+
+#[test]
+fn prepared_checkout_retains_owning_home_without_starting_execution() {
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
+    let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        snapshot.home_id.as_ref().unwrap().as_str(),
+        "home_00000000000000000000000000000001"
+    );
+    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.execution.state,
+        loopflow::ops::task_execution::TaskExecutionState::Idle
+    );
+    assert_eq!(
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

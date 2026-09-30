@@ -70,8 +70,11 @@ An invalid flow reports its error instead of falling back to the skill.
 
 Skills that need another Work's perspective launch it directly with
 `lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
-`lf ask "<request>"`; the Run blocks while a durable session works in the
-same checkout, then resumes when the user completes that conversation.
+`lf ask --key <question-key> "<request>"`; the Run blocks while a durable session
+works in the same checkout, then resumes when the user completes it. Reuse the
+key when retrying that question: it joins the same Session or returns its retained
+answer. Keys are scoped to the caller Run. Ask in the current conversation when
+the participant is already present.
 
 Run a step interactively with `human: true`. Give it an `id` stable within
 its expanded Flow so the conversation can be reopened:

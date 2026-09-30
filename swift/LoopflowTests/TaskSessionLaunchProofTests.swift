@@ -97,7 +97,7 @@ struct TaskSessionLaunchProofTests {
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         try JSONSerialization.data(withJSONObject: ["lf_path": helper.path]).write(to: config)
         try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
-        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path]).write(
+        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "home_id": fixtureHomeId]).write(
             to: directory.appendingPathComponent("receipt.json"))
 
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -134,8 +134,8 @@ struct TaskSessionLaunchProofTests {
         let model = PodiumModel(query: query, repoPath: repo)
         await model.refresh()
         let origin = model.navigation
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: repo)
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(repo))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId
         let terminal = registry.surfaces.view(for: .shell(pane))
@@ -190,7 +190,7 @@ struct TaskSessionLaunchProofTests {
             } else {
                 #expect(origin.taskSessionErrors.isEmpty)
                 #expect(model.selection == .task(id: "issue-review"))
-                #expect(origin.preparedTaskWorktrees["issue-review"] == checkout.path)
+                #expect(origin.preparedTaskWorktrees["issue-review"] == fixtureWorkspace(checkout.path))
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
                     .text().string() == checkout.lastPathComponent)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
@@ -202,7 +202,7 @@ struct TaskSessionLaunchProofTests {
             }
             #expect(terminal.surface == surface)
         }
-        registry.layout(for: repo).select(repo)
+        registry.layout(for: fixtureWorkspace(repo)).select(fixtureWorkspace(repo))
         model.navigation.content = .terminals
         try await settle(window)
         ghostty_surface_text(surface, "\n", 1)

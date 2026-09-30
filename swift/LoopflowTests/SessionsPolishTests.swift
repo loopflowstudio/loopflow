@@ -9,10 +9,10 @@ import Testing
 struct SessionsPolishTests {
     @Test("One window's registry retains a repo workspace across visits")
     func registryRetainsWorkspacePerRepo() {
-        let registry = SessionsWorkspaceRegistry()
-        let first = registry.workspace(for: "/tmp/repo")
-        let again = registry.workspace(for: "/tmp/repo")
-        let other = registry.workspace(for: "/tmp/other")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let first = registry.workspace(for: fixtureWorkspace("/tmp/repo"))
+        let again = registry.workspace(for: fixtureWorkspace("/tmp/repo"))
+        let other = registry.workspace(for: fixtureWorkspace("/tmp/other"))
         #expect(first === again)
         #expect(first !== other)
         #expect(first.multiplexer === again.multiplexer)
@@ -20,10 +20,10 @@ struct SessionsPolishTests {
 
     @Test("Separate windows never share a multiplexer or surface pool")
     func separateWindowsGetSeparateWorkspaces() {
-        let windowA = SessionsWorkspaceRegistry()
-        let windowB = SessionsWorkspaceRegistry()
-        let a = windowA.workspace(for: "/tmp/repo")
-        let b = windowB.workspace(for: "/tmp/repo")
+        let windowA = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let windowB = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let a = windowA.workspace(for: fixtureWorkspace("/tmp/repo"))
+        let b = windowB.workspace(for: fixtureWorkspace("/tmp/repo"))
         #expect(a !== b)
         #expect(a.multiplexer !== b.multiplexer)
         #expect(a.surfaces !== b.surfaces)
@@ -31,11 +31,11 @@ struct SessionsPolishTests {
 
     @Test("A shell exit closes its retained pane while SessionsView is absent")
     func shellExitSurvivesNavigation() {
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/tmp/repo")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/tmp/repo"))
         workspace.multiplexer.newShell()
         let paneId = workspace.multiplexer.focusedPaneId
-        let other = registry.workspace(for: "/tmp/other")
+        let other = registry.workspace(for: fixtureWorkspace("/tmp/other"))
         other.multiplexer.newShell()
 
         NotificationCenter.default.post(
@@ -46,7 +46,7 @@ struct SessionsPolishTests {
             name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId)
         )
 
-        #expect(registry.workspace(for: "/tmp/repo").multiplexer.focusedPane.content == .empty)
+        #expect(registry.workspace(for: fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
         #expect(other.multiplexer.focusedPane.content == .shell)
     }
 

@@ -70,8 +70,8 @@ struct DesktopPerformanceTests {
         await model.refresh()
         try #require(model.workspace.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: "/src/loopflow")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0")
         let sessionPane = multiplexer.focusedPaneId

@@ -215,7 +215,8 @@ extension WorkspaceProjection {
             let omitWave = flat || (presentation == .compact && waves.count == 1 && complete
                 && waveHasChildren && expanded(wave.id))
             let waveStart = rows.count
-            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren) }
+            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren,
+                                      sessions: wave.tasks.flatMap(\.sessions).filter(\.offersParticipation)) }
             if flat || expanded(wave.id) {
                 let waveDepth = omitWave ? 0 : 1
                 for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
@@ -330,7 +331,7 @@ final class WorkspaceNavigation {
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
-    var preparedTaskWorktrees: [String: String] = [:]
+    var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
     /// Tasks whose recent Runs are disclosed; the Runs are read only then.

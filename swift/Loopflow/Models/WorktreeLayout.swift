@@ -1,13 +1,27 @@
 import Foundation
 import Observation
 
+public struct WorkspaceIdentity: Decodable, Hashable, Sendable {
+    enum CodingKeys: String, CodingKey {
+        case homeId = "home_id"
+        case worktree
+    }
+    public let homeId: String
+    public let worktree: String
+
+    public init(homeId: String, worktree: String) {
+        self.homeId = homeId
+        self.worktree = worktree
+    }
+}
+
 /// Worktree slots surround complete terminal layouts. Neither tree contains
 /// leaves belonging to the other level.
 public indirect enum WorktreeLayout: Equatable {
-    case leaf(id: String, path: String?)
+    case leaf(id: String, path: WorkspaceIdentity?)
     case split(SplitAxis, first: WorktreeLayout, second: WorktreeLayout)
 
-    public var slots: [(id: String, path: String?)] {
+    public var slots: [(id: String, path: WorkspaceIdentity?)] {
         switch self {
         case .leaf(let id, let path): [(id, path)]
         case .split(_, let first, let second): first.slots + second.slots
@@ -38,16 +52,16 @@ public indirect enum WorktreeLayout: Equatable {
 public final class WorktreeLayoutStore {
     public private(set) var layout: WorktreeLayout
     public private(set) var focusedSlotId: String
-    public private(set) var knownPaths: Set<String>
+    public private(set) var knownPaths: Set<WorkspaceIdentity>
 
-    public init(path: String) {
+    public init(path: WorkspaceIdentity) {
         let id = UUID().uuidString
         layout = .leaf(id: id, path: path)
         focusedSlotId = id
         knownPaths = [path]
     }
 
-    public var focusedPath: String? {
+    public var focusedPath: WorkspaceIdentity? {
         layout.slots.first { $0.id == focusedSlotId }?.path
     }
 
@@ -56,7 +70,7 @@ public final class WorktreeLayoutStore {
         focusedSlotId = id
     }
 
-    public func select(_ path: String, in slotId: String? = nil) {
+    public func select(_ path: WorkspaceIdentity, in slotId: String? = nil) {
         knownPaths.insert(path)
         if let existing = layout.slots.first(where: { $0.path == path }) {
             focusedSlotId = existing.id

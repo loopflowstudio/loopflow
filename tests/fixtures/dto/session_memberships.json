@@ -53,7 +53,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -115,7 +116,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -169,7 +171,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -218,7 +221,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -277,7 +281,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -331,7 +336,8 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -392,6 +398,7 @@
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
-    }
+    },
+    "caller_run_id": null
   }
 ]

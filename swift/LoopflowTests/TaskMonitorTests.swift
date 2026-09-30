@@ -93,8 +93,8 @@ struct TaskMonitorTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry()
-        let store = registry.workspace(for: repo).multiplexer
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let store = registry.workspace(for: fixtureWorkspace(repo)).multiplexer
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             store.newShell()

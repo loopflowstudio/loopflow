@@ -180,6 +180,7 @@ fn session_surface(run: &FlowRun, token: &StepToken) -> Result<SessionRecord> {
     let state =
         human_session::native_session_state(Some(&run_id), boundary.ready_summary.as_deref())?;
     Ok(SessionRecord {
+        caller_run_id: None,
         open_argv: human_session::human_open_argv(None, Some(&run.cwd), &id)?,
         id,
         kind: SessionKind::Flow,

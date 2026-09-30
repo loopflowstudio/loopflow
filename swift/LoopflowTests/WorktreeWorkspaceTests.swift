@@ -4,42 +4,109 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
+let fixtureHomeId = "home_00000000000000000000000000000001"
+func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
+    WorkspaceIdentity(homeId: fixtureHomeId, worktree: path)
+}
+
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
+    @Test("Equal paths on different Homes retain separate layouts and documents")
+    func homesAreDistinct() {
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let local = fixtureWorkspace("/repo")
+        let remote = WorkspaceIdentity(homeId: "remote", worktree: "/repo")
+        let first = registry.workspace(for: local)
+        let other = registry.workspace(for: remote)
+        first.multiplexer.newShell(command: ["server"])
+        first.showsFiles = true
+        let files = first.files(taskId: "task", issue: "TASK", cwd: "/repo")
+        let document = files.document("note.txt")
+        document.editor.string = "draft"
+        let outer = registry.layout(for: local)
+        outer.split(outer.focusedSlotId, axis: .vertical)
+        outer.select(remote)
+        #expect(outer.layout.slots.compactMap(\.path) == [local, remote])
+        #expect(other.multiplexer.focusedPane.content == .empty)
+        #expect(other.files(taskId: "task", issue: "TASK", cwd: "/repo") !== files)
+        first.toggleFocus(first.multiplexer.focusedPaneId)
+        #expect(!first.showsFiles)
+        outer.select(local)
+        first.toggleFocus(first.multiplexer.focusedPaneId)
+        #expect(first.showsFiles)
+        #expect(first.files(taskId: "task", issue: "TASK", cwd: "/repo").document("note.txt") === document)
+        #expect(document.editor.string == "draft")
+    }
+
+    @Test("A failed Home refresh retains the same workspace identity")
+    func failedHomeRefresh() async {
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/repo"))
+        await registry.refreshHome(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") })
+        #expect(registry.localHomeId == fixtureHomeId)
+        #expect(registry.homeError == "offline")
+        #expect(registry.workspace(for: fixtureWorkspace("/repo")) === workspace)
+    }
+
+    @Test("Reassociation removes only old placement and reuses the window-owned terminal")
+    func reassociationKeepsSurface() throws {
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let source = registry.workspace(for: fixtureWorkspace("/first"))
+        let target = registry.workspace(for: fixtureWorkspace("/second"))
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/session.json"))
+        var record = try JSONDecoder().decode(SessionRecord.self, from: data)
+        record.workspace = SessionWorkspace(homeId: fixtureHomeId, worktree: "/second", taskId: "task", unavailable: nil)
+        source.multiplexer.reveal(sessionId: record.id)
+        source.multiplexer.newShell(command: ["server"])
+        let shell = source.multiplexer.focusedPaneId
+        #if GHOSTTY_ENABLED
+        let view = registry.surfaces.view(for: .session(record.id))
+        #endif
+        registry.reconcileMembership([record])
+        target.multiplexer.reveal(sessionId: record.id)
+        #expect(source.multiplexer.pane(forSessionId: record.id) == nil)
+        #expect(source.multiplexer.shellCommands[shell] == ["server"])
+        #expect(target.multiplexer.pane(forSessionId: record.id) != nil)
+        #if GHOSTTY_ENABLED
+        #expect(target.surfaces.view(for: .session(record.id)) === view)
+        #endif
+    }
+
     @Test("Switching worktrees restores companion terminals, layout and focus")
     func restoresWholeWorkspace() {
-        let registry = SessionsWorkspaceRegistry()
-        let outer = registry.layout(for: "/repo")
-        outer.select("/repo.design")
-        let design = registry.workspace(for: "/repo.design")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let outer = registry.layout(for: fixtureWorkspace("/repo"))
+        outer.select(fixtureWorkspace("/repo.design"))
+        let design = registry.workspace(for: fixtureWorkspace("/repo.design"))
         design.multiplexer.load(sessionId: "design")
         design.multiplexer.newShell()
         design.multiplexer.newShell()
         let original = design.multiplexer.layout
         let focus = design.multiplexer.focusedPaneId
 
-        outer.select("/repo.other")
-        registry.workspace(for: "/repo.other").multiplexer.newShell()
-        outer.select("/repo.design")
+        outer.select(fixtureWorkspace("/repo.other"))
+        registry.workspace(for: fixtureWorkspace("/repo.other")).multiplexer.newShell()
+        outer.select(fixtureWorkspace("/repo.design"))
 
         #expect(registry.workspace(for: outer.focusedPath!) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
-        #expect(registry.path(containingShell: focus) == "/repo.design")
+        #expect(registry.path(containingShell: focus) == fixtureWorkspace("/repo.design"))
     }
 
     @Test("Both split levels are independent and closing an outer slot retains its workspace")
     func independentSplits() {
-        let registry = SessionsWorkspaceRegistry()
-        let outer = registry.layout(for: "/repo")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let outer = registry.layout(for: fixtureWorkspace("/repo"))
         let firstSlot = outer.focusedSlotId
-        let first = registry.workspace(for: "/repo")
+        let first = registry.workspace(for: fixtureWorkspace("/repo"))
         first.multiplexer.newShell()
         outer.split(firstSlot, axis: .vertical)
-        outer.select("/repo.other")
+        outer.select(fixtureWorkspace("/repo.other"))
         let secondSlot = outer.focusedSlotId
-        let second = registry.workspace(for: "/repo.other")
+        let second = registry.workspace(for: fixtureWorkspace("/repo.other"))
         second.multiplexer.newShell()
         let secondLayout = second.multiplexer.layout
         first.multiplexer.newShell()
@@ -47,22 +114,22 @@ struct WorktreeWorkspaceTests {
         #expect(outer.layout.slots.count == 2)
         #expect(second.multiplexer.layout == secondLayout)
         outer.close(firstSlot)
-        outer.select("/repo")
+        outer.select(fixtureWorkspace("/repo"))
         #expect(first.multiplexer.layout.allPanes.count == 2)
         #expect(second.multiplexer.layout == secondLayout)
         #expect(outer.focusedSlotId == secondSlot)
-        #expect(registry.workspace(for: "/repo") === first)
+        #expect(registry.workspace(for: fixtureWorkspace("/repo")) === first)
     }
 
     @Test("Selecting an already visible worktree focuses it without duplicating its surfaces")
     func focusesExistingSlot() {
-        let outer = WorktreeLayoutStore(path: "/repo")
+        let outer = WorktreeLayoutStore(path: fixtureWorkspace("/repo"))
         let first = outer.focusedSlotId
         outer.split(first, axis: .horizontal)
         let empty = outer.focusedSlotId
-        outer.select("/repo", in: empty)
+        outer.select(fixtureWorkspace("/repo"), in: empty)
         #expect(outer.focusedSlotId == first)
-        #expect(outer.layout.slots.filter { $0.path == "/repo" }.count == 1)
+        #expect(outer.layout.slots.filter { $0.path == fixtureWorkspace("/repo") }.count == 1)
         #expect(outer.layout.slots.first { $0.id == empty }?.path == nil)
     }
 

@@ -51,12 +51,25 @@ private func state(of node: FlowNode, pinned: PinnedTaskFlow?) -> FlowNodeState 
     return node.human ? .pendingHuman : .pending
 }
 
+/// Match a current captured occurrence and pass; skill labels never select a conversation.
+func participationSession(node: String, pinned: PinnedTaskFlow, sessions: [SessionRecord]) -> SessionRecord? {
+    sessions.first { session in
+        guard session.kind == .flow,
+              case let .step(_, invocation, _, occurrence, iterations, .current) = session.flowMembership
+        else { return false }
+        return invocation == pinned.invocationId && occurrence == node && iterations == pinned.iterations
+    }
+}
+
 struct TaskFlowView: View {
     @Bindable var model: PodiumModel
     let task: RoadmapTask
     let wave: WaveSnapshot
+    var onOpenSession: ((SessionRecord) -> Void)?
 
     @Environment(\.palette) private var palette
+    @State private var showsDetailedFlow = false
+    @State private var inspectedTransition: InteractionTransition?
     @State private var hovering = false
     /// Clock for the running status line's elapsed time; ticks while running.
     @State private var now = Date()
@@ -355,9 +368,9 @@ struct TaskFlowView: View {
     @ViewBuilder
     private var diagram: some View {
         if let pinned {
-            FlowDiagram(graph: pinned.graph, pinned: pinned, delivery: deliveryState, inspected: inspected)
+            participation(pinned.graph, pinned: pinned)
         } else if let graph = previewGraph {
-            FlowDiagram(graph: graph, pinned: nil, delivery: deliveryState, inspected: inspected)
+            participation(graph, pinned: nil)
         } else if let entry = catalog.value?.first(where: { $0.name == previewName }), let reason = entry.unavailable {
             Text("\(previewName) cannot be previewed: \(reason)")
                 .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
@@ -370,6 +383,74 @@ struct TaskFlowView: View {
         } else {
             Text("Reading Flows…").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
         }
+    }
+
+    @ViewBuilder
+    private func participation(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ScrollView(.horizontal) {
+                HStack(spacing: Spacing.sm) {
+                    Text("Start").font(Typography.meta)
+                    ForEach(["@start"] + graph.interactions.stages, id: \.self) { source in
+                        if let node = graph.node(source) {
+                            Button(node.label) {
+                                if let pinned, let session = participationSession(node: source, pinned: pinned,
+                                    sessions: model.sessions.value ?? []) {
+                                    onOpenSession?(session)
+                                } else {
+                                    inspected.wrappedValue = source
+                                    showsDetailedFlow = true
+                                }
+                            }.buttonStyle(.bordered)
+                            .accessibilityIdentifier("flow-stage-\(source)")
+                        }
+                        ForEach(Array(graph.interactions.transitions.filter { $0.from == source }.enumerated()), id: \.offset) { _, transition in
+                            Button {
+                                inspectedTransition = transition
+                            } label: {
+                                Text(edgeLabel(transition, graph: graph))
+                                    .font(Typography.meta)
+                            }.buttonStyle(.plain)
+                            .help("Inspect automated steps and routes")
+                        }
+                    }
+                    Text("End").font(Typography.meta)
+                }
+            }
+            DisclosureGroup("Detailed Flow", isExpanded: $showsDetailedFlow) {
+                FlowDiagram(graph: graph, pinned: pinned, delivery: deliveryState, inspected: inspected)
+            }
+        }
+        .popover(isPresented: Binding(get: { inspectedTransition != nil }, set: { if !$0 { inspectedTransition = nil } })) {
+            if let edge = inspectedTransition {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        Text("\(stageLabel(edge.from, graph: graph)) → \(stageLabel(edge.to, graph: graph))")
+                            .font(Typography.textStrong)
+                        ForEach(edge.nodes, id: \.self) { key in
+                            if let node = graph.node(key) {
+                                Text("\(node.parents.joined(separator: " / ")) · \(node.label) [\(key)]")
+                            }
+                        }
+                        ForEach(Array(edge.routes.enumerated()), id: \.offset) { _, route in
+                            Text("\(route.from) → \(route.to)\(route.condition.map { " · " + $0 } ?? "")")
+                                .font(Typography.code(11))
+                        }
+                        if let pinned { Text(pinned.reason); Text(flowIterationLabel(pinned.iterations) ?? "First pass") }
+                    }.padding()
+                }.frame(minWidth: 340, idealWidth: 480, maxHeight: 420)
+            }
+        }
+    }
+
+    private func stageLabel(_ key: String, graph: FlowGraph) -> String {
+        graph.node(key)?.label ?? (key == "@start" ? "Start" : "End")
+    }
+
+    private func edgeLabel(_ edge: InteractionTransition, graph: FlowGraph) -> String {
+        let contexts = Set(edge.nodes.flatMap { graph.node($0)?.parents ?? [] }).sorted()
+        let label = contexts.isEmpty ? (edge.nodes.isEmpty ? "Continue" : graph.name) : contexts.joined(separator: " / ")
+        return "→ \(label) → \(stageLabel(edge.to, graph: graph))"
     }
 
     /// The delivery operation's real state, from the Task's active PR record.

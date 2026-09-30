@@ -285,9 +285,9 @@ struct TaskFilesTests {
         }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry()
-        let generic = registry.layout(for: "/src/loopflow")
-        generic.select("/another-checkout")
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let generic = registry.layout(for: fixtureWorkspace("/src/loopflow"))
+        generic.select(fixtureWorkspace("/another-checkout"))
         generic.split(generic.focusedSlotId, axis: .vertical)
         let original = generic.layout
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
@@ -306,9 +306,9 @@ struct TaskFilesTests {
     }
 
     @Test func finishingSessionKeepsOtherRepositoryPanes() {
-        let registry = SessionsWorkspaceRegistry()
-        let first = registry.workspace(for: "/repo-one/task").multiplexer
-        let other = registry.workspace(for: "/repo-two/task").multiplexer
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let first = registry.workspace(for: fixtureWorkspace("/repo-one/task")).multiplexer
+        let other = registry.workspace(for: fixtureWorkspace("/repo-two/task")).multiplexer
         first.load(sessionId: "finished")
         other.load(sessionId: "still-running")
         let retained = other.layout
@@ -460,8 +460,8 @@ struct TaskFilesTests {
     @Test func draftsKeepUndoSelectionExternalChangesAndGhostty() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: NSTemporaryDirectory())
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
         workspace.multiplexer.newShell()
         let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId)
         let terminal = registry.surfaces.view(for: identity)
@@ -509,25 +509,6 @@ struct TaskFilesTests {
         #expect(document.text == original.content)
         editor.undoManager?.redo()
         #expect(document.text == edited)
-
-        // The sheet and Sessions both resolve the same window/checkout/Task owner.
-        let planning = TaskPlanningSnapshot(id: "task-files", identifier: "TEST-1", name: "Files",
-                                             description: "", rank: 0, completed: false, assignee: nil)
-        let reference = TaskReferenceSnapshot(issueUrl: nil, workspace: TaskWorkspaceSnapshot(
-            slug: "files", branch: nil, worktree: NSTemporaryDirectory(), localExists: true))
-        let runtime = TaskRuntimeSnapshot(workId: "different-runtime-id", status: .ready, reason: "",
-                                           updatedAt: "", provider: "codex", started: true)
-        let sheet = NSHostingView(rootView: TaskWorkspaceView(task: planning, reference: reference,
-            runtime: runtime, prURL: nil, terminalStore: TaskTerminalStore())
-            .environment(registry))
-        sheet.frame = CGRect(x: 400, y: 0, width: 700, height: 500)
-        root.addSubview(sheet)
-        sheet.layoutSubtreeIfNeeded()
-        #expect(document.scroll.isDescendant(of: sheet))
-        #expect(editor.window === window)
-        #expect(document.text == edited)
-        #expect(document.editor === editor)
-        sheet.removeFromSuperview()
 
         // Mount, hide and reopen the actual browser; its documents belong to the checkout.
         for _ in 0..<2 {

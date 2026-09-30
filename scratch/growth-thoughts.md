@@ -2,12 +2,10 @@
 
 Implementation plan drafted through kickoff, 2026-09-30. Jack Heart supplied the
 product decisions; mechanisms and sequencing below are kickoff recommendations.
-Jack selected local kickoff in this conversation. No Task or worker launch is
-part of this step, and draft mechanisms remain subject to design review.
+Status: the design is accepted for implementation. Build Unit 1 first, then
+Unit 2. Change the plan only when implementation finds a counterexample.
 Placement: Product, matching its shared workspace/user-contract responsibility.
-Its current chapter is unavailable in the selected Home; this does not block local
-planning or justify creating a chapter. [Evidence](kickoff-evidence.md) records
-the shared read and Product memory's Home-selection caveat.
+[Evidence](kickoff-evidence.md) records the source findings behind the plan.
 
 ## Problem and accepted direction
 

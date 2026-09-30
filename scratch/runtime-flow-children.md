@@ -1,5 +1,12 @@
 # Runtime loop ownership
 
+**Superseded by Jack Heart's 2026-09-30 decision.** One started Flow is one
+FlowSession; passes are node/iteration positions and history lenses. Item 2 in
+[remaining work](remaining-work.md) removes child-pass storage with a preserving
+forward migration. The implementation and review below remain historical evidence.
+Keep their behavioral proofs, rewrite assertions around positions, and delete
+tests whose only claim is that child rows exist.
+
 LOO-298 · Implementation boundary, 2026-09-29.
 
 Jack's accepted contract requires durable children for runtime loop passes. The

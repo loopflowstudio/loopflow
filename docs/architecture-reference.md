@@ -44,6 +44,7 @@ consumers without their coordinated migration.
 | One Exec per actual lf process | Ordinary commands record process ancestry and outcome. Help, rejected arguments, screenshot and installation entry use an existing compatible ledger without initialization; unavailable storage remains an explicit gap. Installed startup acceptance and final discovery/wire coverage remain open. |
 | Stable AgentSession with separate driver and engine | Admission/publication and Session readers use AgentSession directly; ordinary automatic retry retains both outcomes with zero Run rows in the native fixture. Complete recorded account/native Home, public restart, stale-client exclusion and shared-engine preservation across every provider path. |
 | Flow consumes exact successful native history | Selection/publication and exact consumption use Session/Exec/Flow history. Mechanical operations use Flow history. Structured native results close the earlier Codex decision-retry transport failure in the real-Codex/synthetic-Responses fixture; configured-provider acceptance remains unproven. OpenCode batch and managed launches share native user-message selection/history and permission ordering; its public retry fixture preserves earlier-caller rejection. All-provider recovery and final retired-owner deletion remain required. |
+| One started Flow is one FlowSession | Jack Heart's 2026-09-30 decision replaces runtime child-pass Sessions with node/iteration positions. Current source still stores child passes. Fold their history and current selection into the root by forward migration, then remove child claims, parent links and root/deepest-child indirection while preserving retry and next-pass behavior. |
 | Complete recovery | Six standalone native fixtures use real Codex with synthetic Responses/private Homes, including driver/engine loss and automatic retry. Managed dispatch has synthetic successor-history proof; configured managed provider/account continuity remains unproven. |
 | Lossless import and final owner deletion | The offline importer exists but complete four-origin/headless/command import, repeated attempts, conflict/interruption preservation and final Run removal remain required. Ordinary reads must not import or reconstruct identity from old files. |
 | Indexed discovery and usage | Runs/usage/telemetry/activity and landing conclusions select AgentSession input history before payload decoding, preserving per-input attribution and windows. Native receipts without a captured input/start remain discoverable with unknown ownership and partial usage coverage. Complete full historical import and dense cold/warm measurements. History uses captured event sequences and exact native references. |
@@ -195,7 +196,7 @@ attempt object. History entries have stable references, not independent lifecycl
 | --- | --- |
 | `execs` | ID, immutable parent Exec, incoming direct/agent bit and calling AgentSession/provider generation when known; command, cwd, start/end and observed outcome/exit/signal; admit, finish, filter/page |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave/Flow ancestry, native identity, nullable driver Exec and separate driver/provider generations; reserve, connect, restart, bind, rename, ready, complete |
-| `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, runtime parent, claim/version/generation, selected conversation/completion reference, pending review and status; capture, claim, checkpoint, settle, recover |
+| `flow_sessions` | Nullable Task/Wave, captured graph and launch context, cursor/return counts, claim/version/generation, selected conversation/completion reference, pending review and status; capture, claim, checkpoint, settle, recover |
 | `tasks` | Project, issue, durable disposition, worktree/delivery facts, managed FlowSession selection and set-once `started_at` |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
 | `waves` | Stable repository identity; authored objective/memory/instruments stay in repository files |
@@ -252,9 +253,10 @@ and conversation rows before provider launch, even when earlier observation fail
 
 A FlowSession is the existing invocation owner evolved, not a parallel cursor.
 Task and taskless execution share it. A Task selects one managed FlowSession
-without excluding other attributed Flows. Template composition expands the graph;
-only runtime loop entry creates a child FlowSession. Parent/child nullable Task
-ancestry must agree. Captured definitions survive source deletion or edits.
+without excluding other attributed Flows. Template composition expands the graph.
+One started Flow is one FlowSession; loop passes are node/iteration positions and
+lenses over its history. They have no separate claim or lifecycle. Captured
+definitions survive source deletion or edits.
 
 A boundary is the Session, node and iteration tuple. It may fail or be interrupted
 several times before succeeding. Preserve each outcome in its owning history.
@@ -516,8 +518,8 @@ Task trigger -> claim current invocation -> execute captured node
                                          -> settle, stop, or await Session
 ```
 
-A Task selects one managed FlowSession; runtime loop entry can create child
-FlowSessions. Claims fence session identity, cursor version, worker generation
+A Task selects one managed FlowSession; repeated passes retain that identity.
+Claims fence session identity, cursor version, worker generation
 and exact selected native completion. A late result cannot advance a replacement
 even if numeric versions repeat. Successful native history and its consumption
 are retained; failed turns cannot donate navigation to a successful retry.
@@ -594,17 +596,17 @@ cursor and return counts. Definition changes affect new Sessions, never saved
 execution. Backward edges stay finite graph structure; future loop passes are
 not preallocated. Node IDs are local typed identities, not path strings.
 
-Taking an Iterate edge creates a child FlowSession for that repeated pass with
-the same nullable Task. Initial forward execution stays in the original session;
-template composition and XOR routing alone create no child. The parent waits at
-its deciding boundary. The child returns there, and another Iterate creates a
-sibling pass. This also preserves overlapping backward edges.
+Taking an Iterate edge updates the cursor and return counters in the same
+FlowSession. Its node and iteration tuple identify the pass in AgentSession and
+Flow history, including overlapping backward edges. Retry retains that position;
+another Iterate selects the next pass. Neither loop passes nor authored subflows
+create FlowSessions, claims or lifecycles.
 
-Parent wait, exact child completion and continuation settle in the existing
-version/claim transaction. Retry retains the child. A Task's one managed pointer
-continues to name the root, while execution and review reads follow its active
-child. All passes share the root's driver lock. Task and taskless launch use one
-driver and need no synthetic planning records.
+Exact completion and continuation settle in the existing version/claim
+transaction. Execution, review and driver locking use the same FlowSession that
+the Task selects. Task and taskless execution use one driver and need no synthetic
+planning records. The cutover-status table tracks removal of the current child
+representation; existing history must survive that forward migration.
 
 A decision records Advance or Iterate for its selected successful agent completion.
 Failure or interruption cannot submit a verdict. A keyed unblock Ask returns

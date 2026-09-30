@@ -19,10 +19,9 @@ proposals remain in [committed history](https://github.com/loopflowstudio/loopfl
   with sequence identity for current selection and publication. Unclassified SQL
   goes to immutable `import_evidence`, never a fabricated AgentSession. This is
   an import archive with no runtime reservation or lifecycle writer.
-- **Runtime passes:** each taken backward edge starts a child pass; initial
-  forward execution stays in the root. Returning Iterate creates a sibling;
-  an inner edge creates a nested child. This interpretation of Jack's contract
-  remains explicit for final review, with recorded source/canonical/public proofs.
+- **Runtime passes: decided, not built.** Jack Heart removed child pass
+  FlowSessions on 2026-09-30 (entry below). A pass is a node and iteration
+  position. The earlier child-pass interpretation and its proofs are superseded.
 - **Whole-Flow binding:** outside Session bind scope. A taskless Flow and its
   member Sessions cannot acquire incompatible Tasks piecemeal.
 - **Wave without a current Project:** automatic creation on Task start remains
@@ -88,6 +87,100 @@ provider and shell processes in between are not Execs and are skipped.
 Implementation choice under Jack Heart's accepted Exec-per-step direction:
 `__flow-step ID VERSION` is a hidden entry for captured boundaries. Internal
 children use the invoking driver's executable and inherited store, so a PATH or
-selected-installation change cannot silently swap schemas during a Flow. The
+selected-installation change cannot silently swap schemas during a Flow.
+**Tension, open for Jack:** this keeps a Flow on one binary for its whole run,
+while LOO-334's accepted direction is that each step picks up the official
+installed lf. Safe schema handling across steps is what reconciles them. The
 existing full Task claim travels as launch context and remains owned by the
 driver; no second durable authority is added. Agent conversion is still pending.
+
+2026-09-29 · **Close the leak fully.** Jack Heart: "The thing we're fixing where
+lf flows invoked skills without an exec is a big leak to me and suggests we
+likely reimplemented some skill machinery inside flow. Let's make sure that gets
+fully closed." Finish line for item 1 is therefore stronger than moving the
+provider spawn: a Flow step runs a skill only by executing the same `lf` skill
+command a person would run, and no skill machinery remains inside Flow or the
+Task controller. Anything a Flow needs beyond that is passed to the command as
+input, not reimplemented beside it.
+
+2026-09-29 · **Step kinds.** Jack Heart, correcting the operator's skill-only
+framing: "Flows can have ops OR skills OR subflows." The Exec-per-step finish
+line covers every step kind, not only skills. Open, for Jack: whether a subflow
+step runs as its own `lf flow` child with its own FlowSession, or stays expanded
+into the parent's captured graph as the accepted contract currently says
+("template composition expands the graph; only runtime loop nesting creates
+parents").
+
+2026-09-29 · **Subflows: decided.** Jack Heart: "Flow invocations should be fully
+rolled out when they are run actually, so it's all skills and ops." A subflow is
+an authoring construct. At capture it is expanded into the one FlowSession's
+graph; at run time every executed step is a skill or an op, each its own Exec.
+No nested driver, no FlowSession per subflow. This confirms the accepted
+contract and closes the open question above. Runtime loop passes still create
+child FlowSessions.
+
+2026-09-29 · **Vocabulary: compile.** Jack Heart: "the flow definitions /
+templates can have flows, but those get 'compiled'." A Flow definition may
+reference other Flows. Starting it compiles the definition into the
+FlowSession's graph of skills and ops. Use "compile" for that act in names and
+docs, in place of expand, flatten, concretize or roll out.
+
+2026-09-29 · **Subflow is a lens.** Jack Heart: "i still think you could
+coherently talk about a subflow but it would be more of a lens than an
+operational entity." Each compiled step keeps which definition it came from, so
+a view can group steps by subflow. A subflow has no FlowSession, no Exec, no
+claim and no lifecycle. The label is display provenance and grants nothing.
+
+2026-09-29 · **"Parent" is the wrong word twice.** Jack Heart, on the loop parent
+and the template provenance: "Neither parent definition looks like what i would
+think of really but worth coming up with different language." Reserve "parent"
+for the one thing that is a parent: an Exec's parent Exec in the process tree.
+Operator candidates, not Jack's choices: a loop pass names the Flow it is a
+`pass_of`; a compiled step names the definition it is `from`.
+
+2026-09-29 · **Direct behavior wins.** Jack Heart, on the differences between
+running a skill directly and running it as a Task step: "Run directly seems like
+it wins there always." Decided for the seven differences shown to him: agent
+precedence, transient retry and failover, raw provider recording, journal skill
+events, the Git-operation fence, context flags, and the printed context summary.
+Operator assumption for the four he was not shown in that table: they are Task
+input passed to the same command, not a second behavior. Those are the Task seed
+with live steers, the user name, the worktree write scope with its execution
+boundary, and capability blocker detection.
+
+2026-09-30 · **Loop passes are not FlowSessions: decided.** Jack Heart asked
+what child FlowSessions per loop pass were for, was shown that a pass is already
+identified by its node and iteration tuple, and said: "yeah, lets remove them."
+One started Flow is one FlowSession. A loop pass is a position in it and a lens
+over its history, like a subflow. This reverses the earlier contract line "only
+runtime loop nesting creates parents" and the runtime-children slice built on
+2026-09-29.
+
+2026-09-30 · **Which lf a child runs: decided.** Jack Heart: "i like the default
+behavior being pick up new lf, but i do think it should be possible to lock an
+lf binary so that all children get that lf, but it should be sort of recursive
+so that we somehow manipulate the path so that the locked lf is what you get
+when you use `lf` within there." Default: every child lf, including Flow steps,
+resolves the currently installed lf. Lock: an explicit choice that puts a
+directory holding the locked binary as `lf` first on PATH, so every descendant,
+including commands an agent types, gets the locked lf. This resolves the tension
+recorded above in favor of the default. The lock mechanism belongs to LOO-334;
+LOO-298's step entry must stop using the driver's own executable and resolve
+`lf` the same way an agent's shell does.
+
+2026-09-30 · **Jack Heart's answers to the six open items.**
+- **Usage after bind: prospective, decided for now.** "prospective is ok for
+  now, maybe follow-up task in intelligence to re-evaluate." A follow-up Task
+  in the intelligence Wave re-evaluates it.
+- **Blocked is a decision value: decided.** "i think blocked should be one of
+  the possible values of the decision structured type? not sure where else it
+  would make sense." Remove `lf flow blocked`; a decision step returns
+  advance, iterate or blocked, with its reason. The person's answer starts the
+  next turn.
+- **Template provenance: likely unneeded.** "dont know that we even really need
+  this to exist." Delete the compiled step's source-definition field unless a
+  real consumer needs it; report any that does. The subflow lens stays a
+  description, not a stored field.
+- **The four Task-input assumptions: held.** "hold this to discuss again." Not
+  decided; do not treat the operator's assumptions as accepted.
+- **LOO-335: deleted** at Jack's direction.

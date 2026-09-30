@@ -244,3 +244,15 @@ connection transition or cross-repository planning migration. Conflicting stored
 observations remain a transaction failure; no merge policy was selected.
 Populated planning during explicit cross-repository Wave relocation remains
 unproven. The full acceptance matrix and LOO-298 execution-contract blocker remain.
+
+
+## Migration integration choice — 2026-09-30
+
+The repair recognizes only the exact recorded LOO-334 and LOO-298 draft histories,
+keeps their applied SQL/checksums, and uses temporary reader inputs only within
+one migration transaction. An execution-branch database that already discarded
+chapter predecessor receipts supplies no archive evidence to recover; do not
+infer it from list omission or recreate it. The populated source/canonical proofs
+and Docker blocker are recorded in the working design. This implementation choice
+changes no relationship-ordering, outage-admission or connection-transition policy;
+the independent pending decision remains open.

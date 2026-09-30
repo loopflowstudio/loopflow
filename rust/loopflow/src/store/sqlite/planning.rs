@@ -354,15 +354,19 @@ fn put_project(
     observed_at: i64,
     project: &PmProject,
 ) -> StoreResult<()> {
-    let previous: Option<(String, i64)> = conn
+    let previous: Option<(String, i64, bool)> = conn
         .query_row(
-            "SELECT body,observed_at FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT body,observed_at,archived FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
             params![repo, provider, project.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
+    // A later list/detail response cannot undo a confirmed archive receipt.
+    if previous.as_ref().is_some_and(|(_, _, archived)| *archived) {
+        return Ok(());
+    }
     let revision = revision_nanos(project.revision.as_deref())?;
-    if let Some((previous, acquired)) = previous {
+    if let Some((previous, acquired, _)) = previous {
         let previous: PmProject = serde_json::from_str(&previous)?;
         let previous_revision = revision_nanos(previous.revision.as_deref())?;
         if revision.is_some() && revision < previous_revision {
@@ -492,7 +496,7 @@ mod tests {
         }]});
         {
             let conn = Connection::open(&database).unwrap();
-            crate::store::migrations::apply_sqlite(&conn).unwrap();
+            crate::store::migrations::apply_released_planning_fixture(&conn);
             conn.execute(
                 "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'product','/repo',1)",
                 [wave.as_str()],

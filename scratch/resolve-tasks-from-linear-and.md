@@ -17,6 +17,95 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+
+### Current slice — preserving migration integration, 2026-09-30
+
+Jack Heart's completed unblock is implemented for the migration boundary. This
+supersedes the earlier documentation-only preflight as current implementation
+status; the failed observations below remain evidence. The full design, cases
+1–15, the decoy-PATH regression and the independent relationship decision remain
+open. No publication, host promotion, Task completion or Flow verdict follows.
+
+The causal conflict is verified: normalization drops `pm_snapshots` before chapter
+conversion reads it; chapter conversion first would discard the archive receipts
+consumed by `pm_project_evidence`. Three forward drafts preserve the reader inputs
+inside the existing migration transaction, convert current and archived Project
+bodies, and remove the temporary inputs. Runtime still has one normalized planning
+owner. Applied SQL bodies and checksums are unchanged; only two dependency headers
+change the order for new stores.
+
+The ordinary migrator now recognizes the exact ordered receipts from `b1719ea6c`
+(three planning drafts) and `b21f657fc` (37 execution drafts). It verifies the
+historical schema, executes missing SQL, and checks the final common schema. Draft
+append preserves existing receipt IDs, timestamps and checksums; canonical adoption
+consumes the same unchanged bodies. Unknown IDs, changed checksums, reordered
+history and schema drift remain rejected. This is a bounded import of recorded
+histories, not a schema-equality shortcut or another upgrade command.
+
+The populated fixture starts at released `0.12.24` and runs the ordinary full
+migration chain from that schema and both original draft histories. It retains
+Task/Project/PR identity, worktree, exact Flow/captured-input identity, review
+feedback, cursor/version and Started evidence. Archive receipts retain their
+observation time and custom Flow. The execution-only history had already removed
+its predecessor receipts; the proof explicitly rejects inventing an archive fact
+for that missing evidence. A failing subsequent draft rolls back schema, all
+retained rows and both ledgers for all three origins.
+
+The full-chain consumer fixture exposed a second counterexample: delayed Project
+list input failed with `unordered or conflicting Project facts for retired-project`
+after archived bodies correctly gained Completed status. `put_project` now retains
+confirmed archive facts when later list/detail data arrives. The existing delayed
+list/removal test passes through the full chain. The first rollback probe used a
+nullable Project slug and did not fail; the replacement injects a failing next
+draft after integration and proves complete rollback instead. Neither observation
+has been counted as a pass.
+
+**Verified locally, without installed-Home access:**
+
+- Source: `cargo test -p loopflow --lib planning_integration -- --nocapture`
+  **3 passed**; `cargo test -p loopflow --lib
+  migration_preserves_planning_identity_and_removes_snapshot_storage` **1 passed**.
+- Disposable exact-source copy at `.lf/tmp/loo334-materialized`, materialized with
+  `scripts/canonicalize_migrations.py 0.12.25 --materialize-for-tests`: the same
+  **3 + 1 passed**, plus `cargo test -p loopflow --lib installed_development_
+  -- --nocapture` **5 passed**. Canonical construction no longer fails on
+  `pm_snapshots`. These are local Rust/SQLite proofs, not installation acceptance.
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`,
+  `uv run ruff check scripts/test_task_installation.py`, `git diff --check` and
+  `uv run python scripts/check_migrations.py` passed. The migration checker reports
+  all **55 shipped migrations unchanged**.
+- Logs: `.lf/tmp/loo334-migration-source.log`,
+  `loo334-planning-fixture-source.log`, `loo334-canonical-planning_integration.log`,
+  `loo334-canonical-migration_preserves_planning_identity_and_removes_snapshot_storage.log`,
+  `loo334-canonical-installed_development_.log`, `loo334-clippy.log`, and
+  `loo334-materialize.log`, all under `.lf/tmp/`.
+
+**Required proof blocked:** `uv run python scripts/test_task_installation.py`
+returned `Docker did not respond within 10 seconds; no proof container was created.`
+Log: `.lf/tmp/loo334-installation-migration.log`. No promotion or worker test ran.
+The harness now checks the full materialized migration path before installation.
+Its normal-promotion case is extended through exact review readiness/completion,
+a second actual worker, one Flow completion, retained predecessor-store state,
+and command paths tied to verified selected-runtime SHA-256 evidence. This
+extension compiles under all-target Clippy but remains **authored, not executed**.
+The terminal transport is simulated; even a future pass does not prove configured
+provider or Desktop acceptance.
+
+**Review and measurement:** relative to incoming-notes checkpoint `08e70e45c`,
+**+142 / −29 production Rust lines**, excluding tests/test helpers, scripts,
+docs and inherited parent changes. Three new migration bodies/files add 62 lines;
+two existing dependency headers change, and 40 immutable historical receipts are
+retained as import data. The shared migration owner replaces the failed combined
+prefix traversal for these known histories. No parallel runtime store is added.
+Review caught and fixed the archived-body conversion/late-list interaction; the
+import's explicit retirement boundary is documented in `store/MIGRATIONS.md`.
+
+Next run the required harness when Docker responds, inspect any next public-path
+counterexample, and establish case 15 through both worker boundaries. Session-owner
+discovery, genuine divergent-copy handling, chapter completion/archive integration,
+recursive runtime/decoy PATH and the remaining full-design obligations are not
+settled by these migration checks. Keep the pending relationship decision separate.
+
 ### Decision protocol and agent PATH defect — 2026-09-30
 
 Jack Heart's steer `8b3c44a1-7a68-4e4d-8c11-88f5dc60f303` adds a required

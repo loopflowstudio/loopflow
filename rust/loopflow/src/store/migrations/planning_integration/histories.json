@@ -1,0 +1,212 @@
+[
+  {
+    "revision": "b1719ea6c",
+    "drafts": [
+      {
+        "id": "7592b9b9b359b10acb87112bcc86772e",
+        "name": "normalize_pm_planning",
+        "checksum": "a53c8fc0b4fdea8f5e2ac0411db4628c889c7f557d8057890b725ff94fb74683"
+      },
+      {
+        "id": "bdb7accd9f894beebd79223f5ba26f5f",
+        "name": "pm_issue_revisions",
+        "checksum": "9dc523bf87cfbe41c239fa14f1a750fda68dfed6d5802fdcf63203861f92783f"
+      },
+      {
+        "id": "9f9a5c34c488ce217dbdf71f12bbd7c5",
+        "name": "pm_project_evidence",
+        "checksum": "68d4cc1801438da5e95a23026f4c1b8f7eb0a0ea71acabfbe6943e1871f9c9ac"
+      }
+    ]
+  },
+  {
+    "revision": "b21f657fc",
+    "drafts": [
+      {
+        "id": "3ddf67770302639aa5d3833354d71645",
+        "name": "drop_task_flow_step_projection",
+        "checksum": "d3d3ba14ce87c9f3a42a2c5b21c5a9203b78a724ae9463dc85e9f40371ab6072"
+      },
+      {
+        "id": "b85b73f238426ffa86687ee09c801a0d",
+        "name": "retain_flow_invocations",
+        "checksum": "99b48fa7d5a949bef39c94254995d43a0162748706474eefaa137a19b30e763c"
+      },
+      {
+        "id": "60c1dd27bd0474a7cecf89527353aced",
+        "name": "own_sessions_and_runs",
+        "checksum": "a177cb4e3669db91c496c9e88e86a362376afa85a63b8899b28274c7ee5fcfa5"
+      },
+      {
+        "id": "6efd345d9a6d381e3e6a3888651f406f",
+        "name": "record_run_work_source",
+        "checksum": "f4811daa94bb435276cb3b1700fe854675f6b7d61b71c9392e9f5b627d55149d"
+      },
+      {
+        "id": "b00a8bb58c57bf79085aba8e56c3f43b",
+        "name": "record_task_first_run",
+        "checksum": "628af3be4271203b5cc08c0d6dc0593249db9feef393f872411179395e88f271"
+      },
+      {
+        "id": "3c5ad598265e88c1f90e9426c7e54aa7",
+        "name": "record_invocation_attempts",
+        "checksum": "a51caf14253c0b7cbaf9070fc8cc819a64f145597c2de4229d5f49d70fb8f87c"
+      },
+      {
+        "id": "6ba466cd248b5f305c7b24acd7bc63e7",
+        "name": "record_session_kind",
+        "checksum": "42adfdfb9d911dbf1bd1c6f70ecbac3702fc7f5f980bb0235897867fbd2a0ec5"
+      },
+      {
+        "id": "ec6d1b7d0212a1de5be053d42b6d7721",
+        "name": "record_ask_sessions",
+        "checksum": "5583cd487dc0ff370b74f80bf0dda2e55210fb721ff824bc0f0a9f3073a5c259"
+      },
+      {
+        "id": "8e1f10371bfa03133ea590b179afc4cf",
+        "name": "record_execs",
+        "checksum": "7633548a700c3f4d18b47c465bcc04432da413445f33b24a5b1ff511187da329"
+      },
+      {
+        "id": "d2b08e73a45147e3b99c078dd60496a2",
+        "name": "conversation_mode",
+        "checksum": "255213ede01c7605bbd5da8d279ffebe4272c31359c27347b56975042df20ead"
+      },
+      {
+        "id": "87b194c675ad48d5af917c2728b3349f",
+        "name": "record_conversation_connection",
+        "checksum": "7650cf67c3381118ed0a008b891c8e296418beef6b10f92d12379364fa7ec2a5"
+      },
+      {
+        "id": "bfe6920a245554ca8d02021c414a9d38",
+        "name": "record_run_end",
+        "checksum": "7046c98fe287e6a44a1a2b1f628074c60e0a161240469e8fd1e286837f810be6"
+      },
+      {
+        "id": "24f1227c06793e7da8da1d1c286089b6",
+        "name": "name_tasks_on_flow_step_runs",
+        "checksum": "774ca3d504d10df6513ab62dd1ba047ff628f02580c94b67d0efcfe278af43a4"
+      },
+      {
+        "id": "ef3fa1278026a9a2f7bdf0f19fd32209",
+        "name": "point_task_at_invocation",
+        "checksum": "4c5debcb47fc63871cbbf740d406a24d2f3db83a77c5e9b4ace02c31b151e9af"
+      },
+      {
+        "id": "cf154ede27536f017b48d0b212f23c73",
+        "name": "own_flow_launch",
+        "checksum": "1c432da28d918f8fcde161ab8388b5061bccf33a847d7589972663c9c0c9a03d"
+      },
+      {
+        "id": "aa92827cf174386a754dcebb910303a5",
+        "name": "one_flow_driver",
+        "checksum": "7eef52b78a6f338712f19981d5fe31253636767d1c7605925b671f55893f0dd8"
+      },
+      {
+        "id": "355d8c5fd2e34f6c8833f276c6ba0422",
+        "name": "drop_wave_services",
+        "checksum": "2c72356eeb92d955d82c9e65b507e7227455011236690e3003580d4631607599"
+      },
+      {
+        "id": "9bea0388aa854e46a9db2d1e5c86ddfb",
+        "name": "project_status_chapters",
+        "checksum": "da4aa2a2bcfa30c104328872599da651467c9a79d777329caf508f34a6b8db85"
+      },
+      {
+        "id": "b3d8bbde097141a596c4562954131457",
+        "name": "record_session_events",
+        "checksum": "6f5534bb8a3436e4891b30c12d6a542a4b74bf6221e827a35e7e94e75a48fa9f"
+      },
+      {
+        "id": "66bf43043eb242ca93a9e4427afef334",
+        "name": "name_conversation_and_flow_owners",
+        "checksum": "6cb9fe7a4fe83e44ae3d7ae5a01b178a3b3f475ba0d5ce60e129a1ac48ddc44c"
+      },
+      {
+        "id": "7a5cbe8208b34af886d520986a378458",
+        "name": "own_conversation_ancestry",
+        "checksum": "c5ef98bb5214ee1db994c7d6d55c8fcf599a8ba2b1fe6c6a1e36dee3b594a758"
+      },
+      {
+        "id": "c52db0bb8d2b4d6b848d8974fca2a7be",
+        "name": "retain_conversation_engine",
+        "checksum": "e1a196ec7f835880416bea53601abfb4a3895b92ed7f32e8060a6445bb6686ee"
+      },
+      {
+        "id": "abb59c97154347cfac291e7529bed420",
+        "name": "select_flow_history",
+        "checksum": "046a1c8fb6c9be9340addbe0b5c2406096628f9da5312ab9761df54aa9d1e972"
+      },
+      {
+        "id": "8a533c4383974c1599d1ccf076665c63",
+        "name": "flow_operation_history",
+        "checksum": "0fd7a9788a4bdc12bef60ea8afd83f52ee20554f4f22872287a69f91155e2152"
+      },
+      {
+        "id": "c62d3a026776492ea7218689087df653",
+        "name": "record_flow_turn_caller",
+        "checksum": "ebcbd17fc5b1d87dffe17687a0c627a4cbc7aae451142434e8fd9499166391d7"
+      },
+      {
+        "id": "a89e13f5c5d2439da777324d31101db8",
+        "name": "agent_session_admission",
+        "checksum": "c65c52c64325eb76cfb83485771e40a249adaea17d733977a0cc7207d0e2c12e"
+      },
+      {
+        "id": "eea16f37a14f41e2b5d8767d7e206598",
+        "name": "index_session_process_owners",
+        "checksum": "e9ef1dc0bf61b7c1053d6731862d06477734c60f683f539c27cfd7b8a88bd911"
+      },
+      {
+        "id": "4a7eb8b1d3e14f7c8e925db0134fd9b8",
+        "name": "retain_imported_session_evidence",
+        "checksum": "03b3aec1de075026688b410cb5cc08398744683cfe0236acfceff777c298ba95"
+      },
+      {
+        "id": "899bb8f4ca3d4437b450e5a206e02bbb",
+        "name": "retain_task_start_evidence",
+        "checksum": "11a4aaac4fa3820a74292f8ce3b4fdc33ab6b48a90e42d23eac2be8ddf1e5d50"
+      },
+      {
+        "id": "3704bb0dbb1b462fa165973072c5309d",
+        "name": "retain_named_operation_history",
+        "checksum": "235d959a695663568e2f62d4836b7164dd1a27b6a37ad8c978912418887b7e82"
+      },
+      {
+        "id": "08eb814a9a324ef38c09ed1c7958f65e",
+        "name": "retain_input_sql_evidence",
+        "checksum": "96a71aa3c0a8d89ac7303c3b915d4c5afecb61c57d1436bb182d386c5791ff47"
+      },
+      {
+        "id": "e2670f219b194c2698e8a9c310b6bd31",
+        "name": "record_native_input",
+        "checksum": "8a63f7ff86758e594559ce797ed41e17ca3aa4205563e3b7fdac7fdeaf3a1c11"
+      },
+      {
+        "id": "ad34a971951e43b3ab72c983cc2d2dd8",
+        "name": "index_session_metadata",
+        "checksum": "2a27d12fd2c1d1cf030cf5328e082152cfdce85d27a3601066fe5994c9a2b301"
+      },
+      {
+        "id": "cfd282b86492452a8e94988d08625962",
+        "name": "runtime_flow_children",
+        "checksum": "9b6a2fe86e3f166acf278061962142bfd348fa81e7f35b2a235e89680d298a79"
+      },
+      {
+        "id": "98630201d91945deac760c629972912d",
+        "name": "record_session_output",
+        "checksum": "577f5f5351ccd116719b520db9924cb5f46a6fd1f33578d715e598690ddfaa3b"
+      },
+      {
+        "id": "76852b62431d481188c741fc4dd8999a",
+        "name": "capture_session_events",
+        "checksum": "2c117440d856fd0bc160b24fcabeb0526adb74207d0e783830c75bafa7d6f67c"
+      },
+      {
+        "id": "9a25318e934745ca8b87d6a57eb4e54c",
+        "name": "record_flow_repository",
+        "checksum": "c7537d55cad08a74f25ec7929d02f7d3b27c616d1f4e28c90fa32560de8eaa4e"
+      }
+    ]
+  }
+]

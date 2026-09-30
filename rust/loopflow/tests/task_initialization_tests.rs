@@ -421,6 +421,17 @@ fn normal_promotion_preserves_pending_task_review() {
         String::from_utf8_lossy(&installed.stdout),
         String::from_utf8_lossy(&installed.stderr)
     );
+    let MachineInstallState::Settled(predecessor) =
+        machine_install::read_state(&machine_install::root().unwrap()).unwrap()
+    else {
+        panic!("published installation did not settle")
+    };
+    let original_cli = predecessor
+        .selection
+        .artifact_set
+        .artifact(&ArtifactRole::Cli)
+        .unwrap();
+    original_cli.verify().unwrap();
     let task = register_unrun_task(
         &home,
         repo.path(),
@@ -575,6 +586,106 @@ fn normal_promotion_preserves_pending_task_review() {
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["id"], before["id"]);
     assert_eq!(reopened["cwd"], before["cwd"]);
+
+    let resumed = runtime
+        .block_on(copied.task_flow(&task.task.id))
+        .unwrap()
+        .unwrap();
+    let step = resumed.current();
+    let loopflow::engine::ConcreteStep::Skill(planned) = resumed.current_plan() else {
+        panic!("pending review")
+    };
+    let token = serde_json::json!({"kind":"flow","token":{
+        "task_id":task.task.id, "invocation_id":resumed.invocation.id,
+        "flow":step.flow, "node_id":step.policy.id, "skill":planned.skill,
+        "iteration":resumed.cursor.iteration,
+    }});
+    let ready = command(
+        &public_cli,
+        &["session", "ready", "Continue the preserved review"],
+    )
+    .env(
+        "LF_RUN_ID",
+        resumed
+            .review_artifact_key()
+            .expect("review has a captured input"),
+    )
+    .env("LF_HUMAN_SESSION", token.to_string())
+    .output()
+    .unwrap();
+    assert!(
+        ready.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ready.stderr)
+    );
+    let complete = command(&public_cli, &["session", "complete", review])
+        .output()
+        .unwrap();
+    assert!(
+        complete.status.success(),
+        "{}",
+        String::from_utf8_lossy(&complete.stderr)
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while runtime
+        .block_on(copied.task_flow(&task.task.id))
+        .unwrap()
+        .is_some()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "second worker did not finish: {}",
+            fs::read_to_string(&log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let selected_cli = active
+        .selection
+        .artifact_set
+        .artifact(&ArtifactRole::Cli)
+        .unwrap();
+    selected_cli.verify().unwrap();
+    let conn =
+        Connection::open_with_flags(&active.selection.store, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let commands = conn
+        .prepare("SELECT command FROM execs WHERE command LIKE '%__worker%' ORDER BY started_at,id")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        commands.len(),
+        2,
+        "one worker before and one after selection: {commands:?}"
+    );
+    assert!(
+        commands[0].contains(original_cli.path.to_str().unwrap()),
+        "{}",
+        commands[0]
+    );
+    assert!(
+        commands[1].contains(selected_cli.path.to_str().unwrap()),
+        "{}",
+        commands[1]
+    );
+    assert_eq!(
+        hex::encode(Sha256::digest(fs::read(&selected_cli.path).unwrap())),
+        selected_cli.sha256
+    );
+    assert_eq!(runtime.block_on(copied.task_events_after(&task.task.id,0)).unwrap().iter()
+        .filter(|e|matches!(&e.kind,TaskEventKind::FlowFinished{invocation_id,..} if invocation_id==&position.invocation.id)).count(),1);
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .as_ref(),
+        Some(&position),
+        "continuation must not rewrite the retained predecessor store"
+    );
+    eprintln!("promotion worker evidence: predecessor={} sha256={} selected={} sha256={} commands={commands:?}",
+        original_cli.path.display(),original_cli.sha256,selected_cli.path.display(),selected_cli.sha256);
 }
 
 #[test]

@@ -59,6 +59,19 @@ pub(crate) fn migration_is_applied_for_test(
         .any(|version| version == &migration.version()))
 }
 
+#[cfg(test)]
+#[path = "migrations/planning_integration/tests.rs"]
+mod planning_integration_tests;
+
+#[cfg(test)]
+pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
+    let count = MIGRATIONS
+        .iter()
+        .take_while(|m| (m.id.major, m.id.minor, m.id.patch.unwrap_or(0)) <= (0, 12, 24))
+        .count();
+    apply_set(conn, &MIGRATIONS[..count]).unwrap();
+}
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that
@@ -152,8 +165,8 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 ///
 /// Drafts are durable only in the disposable installed-development store. The
 /// release ledger adopts only byte-identical drafts packaged by a later release.
-/// Reuse otherwise accepts only an exact applied prefix; changed, unmatched or
-/// reordered SQL requires a compatible build, preserving the existing store.
+/// Reuse accepts an exact applied prefix or one of the recorded planning-branch
+/// histories. Changed or unmatched SQL preserves the existing store.
 pub(crate) fn apply_installed_development_sqlite(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
@@ -167,8 +180,8 @@ pub(crate) fn apply_installed_development_sqlite(
         }
         _validate_canonical_history_for_development(conn)?;
         let applied = _applied_development_migrations(conn)?;
-        _validate_applied_draft_prefix(&applied, drafts)?;
-        _validate_development_schema(conn, &drafts[..applied.len()])?;
+        let ordered = _ordered_development_drafts(&applied, drafts)?;
+        _validate_development_schema(conn, &ordered[..applied.len()])?;
         Ok(applied.len() == drafts.len())
     })?;
     if current {
@@ -217,8 +230,8 @@ fn _apply_development_in(
     }
 
     let applied = _applied_development_migrations(conn)?;
-    _validate_applied_draft_prefix(&applied, drafts)?;
-    _validate_development_schema(conn, &drafts[..applied.len()])?;
+    let ordered = _ordered_development_drafts(&applied, drafts)?;
+    _validate_development_schema(conn, &ordered[..applied.len()])?;
     if applied.len() < drafts.len() {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS development_migrations (
@@ -229,7 +242,7 @@ fn _apply_development_in(
                  applied_at INTEGER NOT NULL
              );",
         )?;
-        for (position, draft) in drafts.iter().enumerate().skip(applied.len()) {
+        for (position, draft) in ordered.iter().enumerate().skip(applied.len()) {
             conn.execute_batch(draft.sql)?;
             conn.execute(
                 "INSERT INTO development_migrations (
@@ -251,7 +264,7 @@ pub(crate) fn validate_installed_development_sqlite(
         _validate_draft_manifest(drafts)?;
         _validate_canonical_history_for_development(conn)?;
         let applied = _applied_development_migrations(conn)?;
-        _validate_applied_draft_prefix(&applied, drafts)?;
+        _ordered_development_drafts(&applied, drafts)?;
         if applied.len() != drafts.len() {
             return Err(StoreError::IncompatibleDevelopment(format!(
                 "store has {} applied draft(s), candidate requires {}",
@@ -264,7 +277,7 @@ pub(crate) fn validate_installed_development_sqlite(
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 struct AppliedDevelopmentMigration {
     id: String,
     name: String,
@@ -293,19 +306,56 @@ fn adopt_released_development_drafts(
                 migration.version()
             )));
         };
-        for block in sql.split("\n\n-- draft: ") {
-            let Some((name, body)) = block.split_once('\n') else {
-                return Err(StoreError::IncompatibleDevelopment(format!(
-                    "release {} has incomplete draft provenance",
-                    migration.version()
-                )));
-            };
-            // The release packer separates blocks with a blank line and emits
-            // exactly one final newline. Only identical draft bytes are adopted.
-            let body = format!("{}\n", body.trim_end_matches('\n'));
-            let checksum = hex::encode(Sha256::digest(body.as_bytes()));
+        let blocks = sql
+            .split("\n\n-- draft: ")
+            .map(|block| {
+                let (name, body) = block.split_once('\n').ok_or_else(|| {
+                    StoreError::IncompatibleDevelopment(format!(
+                        "release {} has incomplete draft provenance",
+                        migration.version()
+                    ))
+                })?;
+                let body = format!("{}\n", body.trim_end_matches('\n'));
+                let checksum = hex::encode(Sha256::digest(body.as_bytes()));
+                Ok((name, body, checksum))
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
+        let names: Vec<_> = blocks.iter().map(|(name, _, _)| *name).collect();
+        let integration = _planning_integration_order(&development[consumed..], &names);
+        let order = integration
+            .clone()
+            .unwrap_or_else(|| names.iter().map(|name| (*name).to_string()).collect());
+        let ordered = order
+            .iter()
+            .map(|name| {
+                blocks
+                    .iter()
+                    .find(|(candidate, _, _)| candidate == name)
+                    .expect("integration order contains only release blocks")
+            })
+            .collect::<Vec<_>>();
+        if integration.is_some() {
+            // Verify the actual old schema before effects, using its original
+            // SQL order rather than the newly combined release order.
+            let count = (development.len() - consumed).min(ordered.len());
+            let index = MIGRATIONS
+                .iter()
+                .position(|candidate| candidate.id == migration.id)
+                .expect("pending migration belongs to the catalog");
+            let expected = rusqlite::Connection::open_in_memory()?;
+            apply_set(&expected, &MIGRATIONS[..index])?;
+            for (_, body, _) in &ordered[..count] {
+                expected.execute_batch(body)?;
+            }
+            if product_schema(conn)? != product_schema(&expected)? {
+                return Err(StoreError::IncompatibleDevelopment(
+                    "schema does not match recorded planning integration history".to_string(),
+                ));
+            }
+        }
+        for (name, body, checksum) in ordered {
             if let Some(draft) = development.get(consumed) {
-                if draft.name != name || draft.checksum != checksum {
+                if draft.name != *name || draft.checksum != *checksum {
                     return Err(StoreError::IncompatibleDevelopment(format!(
                         "release {} does not match applied draft {name}",
                         migration.version()
@@ -313,10 +363,7 @@ fn adopt_released_development_drafts(
                 }
                 consumed += 1;
             } else {
-                // This Home stopped at an earlier verified development prefix.
-                // Apply the remaining release bytes in the same transaction;
-                // existing names/checksums are never replaced or replayed.
-                conn.execute_batch(&body)?;
+                conn.execute_batch(body)?;
             }
         }
     }
@@ -418,6 +465,81 @@ fn _applied_development_migrations(
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+// Only these two recorded pre-stack histories may depart from the ordinary
+// prefix rule. Original SQL, receipt identities and order still have to match;
+// final schema equality never substitutes for that history. Remove this import
+// path only after the corresponding development stores have been converted.
+fn _planning_integration_order(
+    applied: &[AppliedDevelopmentMigration],
+    names: &[&str],
+) -> Option<Vec<String>> {
+    if !names.contains(&"finish_planning_integration") {
+        return None;
+    }
+    #[derive(serde::Deserialize)]
+    struct History {
+        drafts: Vec<AppliedDevelopmentMigration>,
+    }
+    let histories: Vec<History> = serde_json::from_str(include_str!(
+        "migrations/planning_integration/histories.json"
+    ))
+    .expect("recorded planning integration histories are valid");
+    for history in histories {
+        let count = applied.len().min(history.drafts.len());
+        if count == 0 || applied[..count] != history.drafts[..count] {
+            continue;
+        }
+        let mut order: Vec<String> = history
+            .drafts
+            .iter()
+            .map(|draft| draft.name.clone())
+            .collect();
+        if !order.iter().all(|name| names.contains(&name.as_str())) {
+            continue;
+        }
+        for name in names {
+            if !order.iter().any(|existing| existing == name) {
+                order.push((*name).to_string());
+            }
+        }
+        if applied
+            .iter()
+            .zip(&order)
+            .any(|(draft, name)| &draft.name != name)
+        {
+            continue;
+        }
+        return Some(order);
+    }
+    None
+}
+
+fn _ordered_development_drafts(
+    applied: &[AppliedDevelopmentMigration],
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<Vec<crate::build_info::MigrationDraft>> {
+    if _validate_applied_draft_prefix(applied, drafts).is_ok() {
+        return Ok(drafts.to_vec());
+    }
+    let names: Vec<_> = drafts.iter().map(|draft| draft.name).collect();
+    if let Some(order) = _planning_integration_order(applied, &names) {
+        let ordered: Vec<_> = order
+            .iter()
+            .map(|name| {
+                drafts
+                    .iter()
+                    .find(|draft| draft.name == name)
+                    .expect("integration order contains only candidate drafts")
+                    .clone()
+            })
+            .collect();
+        _validate_applied_draft_prefix(applied, &ordered)?;
+        return Ok(ordered);
+    }
+    _validate_applied_draft_prefix(applied, drafts)?;
+    Ok(drafts.to_vec())
 }
 
 fn _validate_applied_draft_prefix(

@@ -634,12 +634,16 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 
 This copies source into a disposable Linux container, materializes its draft
 migrations and builds release-provenance and development CLIs with
-two Cargo jobs. The promotion case starts with real published promotion into an
+two Cargo jobs. Before promotion it checks populated planning upgrades from the
+released schema and both recorded pre-stack draft histories, including rollback
+and rejection of altered history. The promotion case starts with real published promotion into an
 empty disposable account, runs an operation to a pending Task review, then invokes
 local promotion through `install promote --from-build`. It requires ordinary
 status and Session continuation to retain that review after the database copy.
-Normal-copy continuation remains an unpassed regression; two-worker succession
-remains additional acceptance work.
+It then completes that exact review and requires a second real worker, one Flow
+completion, and journal command paths matching the verified installation digests.
+The terminal transport is simulated. Until this case passes, normal-copy
+continuation and two-worker succession remain unproven.
 
 The other cases author installation records selecting the compiled CLI.
 An ELF trailer gives the installed CLI a distinct identity: byte-identical copies

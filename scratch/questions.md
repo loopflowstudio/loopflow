@@ -23,3 +23,10 @@
   loopflow.keep-account-status-live-and; its plan now implements live status,
   replaces --verify with --cached, and explicitly forbids per-step overrides.
   One per-provider selection is captured for the whole launch and its children.
+
+- 2026-09-30 integration: use `lf rebase --manual` onto committed LOO-340
+  `32b6eef00` for its independent live-status/browser slices. Preserve this
+  branch's Account spelling and LOO-339 identity checks. No PR base change,
+  sibling edit, installed-store conversion or account repair is authorized.
+  LOO-298/334 remain unfinished; their model is not replaced or relabeled here.
+  LOO-340's remaining store/bundle/reset work still requires later integration.

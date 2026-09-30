@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use super::{format_relative_delta, parse_provider};
+use super::format_relative_delta;
 use crate::profile::{AccessProfile, AuthBrowserBinding, LocalChromeProfile};
 use crate::provider_account::{account_login, acquire_managed_login_lock, open_account_store};
 use crate::provider_auth::{Provider, ProviderAuthService};
@@ -62,12 +62,11 @@ struct BrowserDetails {
 }
 
 pub(super) async fn run(
-    provider: Option<&str>,
+    provider: Option<Provider>,
     verify: bool,
     details: bool,
     json: bool,
 ) -> Result<()> {
-    let provider = provider.map(parse_provider).transpose()?;
     let store = if verify {
         Some(open_account_store().await?)
     } else {
@@ -424,15 +423,15 @@ fn next_action(row: &AccountRow, now: i64) -> String {
         };
     }
     if row.routing.as_deref() == Some("disabled") {
-        return "lf account route show (account disabled for routing)".into();
+        return "lf account route (account disabled for routing)".into();
     }
     if row.cooldown_until.is_some_and(|until| until > now) {
-        return format!("wait for cooldown, then lf account status {provider} --verify");
+        return format!("wait for cooldown, then lf account {provider}");
     }
     if row.routing.as_deref() == Some("explicit_only") {
         return "select this login with --account; launch checks required access".into();
     }
-    format!("lf account status {provider} --verify (refresh credential and capacity evidence)")
+    format!("lf account {provider} (refresh credential and capacity evidence)")
 }
 
 fn render(report: &AccountReport, width: usize, now: i64) -> String {
@@ -664,8 +663,8 @@ mod tests {
                 "reset passed; refresh needed",
                 "reset unknown",
                 "usage: unknown",
-                "next: lf account status claude --verify",
-                "wait for cooldown, then lf account status claude --verify",
+                "next: lf account claude",
+                "wait for cooldown, then lf account claude",
                 "inspect lf account on the origin Home",
                 "needs login (identity or credential rejected)",
                 "verification unavailable",

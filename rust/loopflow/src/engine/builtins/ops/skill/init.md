@@ -21,7 +21,7 @@ The launch prompt identifies the reviewer.
   creation require the present User. When absent, report the exact blocker and
   next commands; do not manufacture a session.
 
-Never expose credential values. Use Loopflow's auth commands; do not read
+Never expose credential values. Use Loopflow's account commands; do not read
 tokens from dotfiles or environment variables.
 
 ## 1. Discover the existing system
@@ -33,9 +33,9 @@ failures.
 git rev-parse --show-toplevel
 uname -s
 lf --version
-lf account status --cached          # cached; no provider request
-lf account status --json            # inspect accepted managed evidence
-lf account route show
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
 lf id --json
 lf wave list --json
 command -v claude
@@ -130,15 +130,15 @@ Ask the user what they want to make operational now:
 This answer determines the minimum accounts and files. Do not turn init into a
 questionnaire.
 
-For durable planning and delivery, inspect `lf account status` and offer only the
+For durable planning and delivery, inspect `lf account` and offer only the
 missing connections:
 
 ```bash
 lf account connect github
 lf account connect linear
 lf account connect claude
-lf account status --cached          # cached; no provider request
-lf account status --json            # inspect accepted managed evidence
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
 ```
 
 OAuth client credentials resolve from environment first, with a Doppler fallback
@@ -149,7 +149,7 @@ manager and the exact missing variable names. Never print credential values.
 Account connection is an external side effect. The user must choose it and
 complete the provider flow. Claim a new connection only after connect completes;
 cached status is retained evidence, not a fresh authorization check. Managed
-verification requires an accepted managed row from `auth status --json`.
+verification requires an accepted managed row from `lf account --json`.
 Direct skills can proceed with a local agent even
 when Linear is absent; do not block that path on PM setup.
 
@@ -251,8 +251,8 @@ actual ids observed from the commands:
 ```bash
 lf ssh <host> home id --json
 lf observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> auth status
-lf ssh <home-id> route show
+lf ssh <home-id> account --cached
+lf ssh <home-id> account route
 lf wave list --json
 lf wave place <wave-id> <home-id>
 lf wave status <wave> --json
@@ -275,9 +275,9 @@ changing placement, or starting a Wave; each changes durable execution state.
 Run the smallest checks that prove the selected path:
 
 ```bash
-lf account status --cached          # cached; no provider request
-lf account status --json            # inspect accepted managed evidence
-lf account route show
+lf account --cached          # cached; no provider request
+lf account --json            # inspect accepted managed evidence
+lf account route
 lf id --json
 lf wave list --json
 ```

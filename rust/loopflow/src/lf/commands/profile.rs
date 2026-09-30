@@ -9,14 +9,19 @@ use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
-pub(super) async fn run_route_async(cmd: &RouteCommand) -> Result<()> {
+pub(super) async fn run_route_async(
+    cmd: Option<&RouteCommand>,
+    repo: Option<&str>,
+    default: bool,
+    json: bool,
+) -> Result<()> {
     match cmd {
-        RouteCommand::Set {
+        Some(RouteCommand::Set {
             provider,
             accounts,
             repo,
             default,
-        } => {
+        }) => {
             let scope = if *default {
                 RouteScope::Default
             } else {
@@ -27,20 +32,16 @@ pub(super) async fn run_route_async(cmd: &RouteCommand) -> Result<()> {
             let store = open_account_store().await?;
             set_route(&store, scope, provider, accounts).await
         }
-        RouteCommand::Show {
-            repo,
-            default,
-            json,
-        } => {
-            let repo_id = if *default {
+        None => {
+            let repo_id = if default {
                 None
             } else {
-                resolve_repo_id(repo.as_deref())?
+                resolve_repo_id(repo)?
             };
             show_routes(
                 crate::provider_account::read_account_store()?.as_ref(),
                 repo_id.as_ref(),
-                *json,
+                json,
             )
             .await
         }

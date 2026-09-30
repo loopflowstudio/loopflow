@@ -77,8 +77,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["pr", "land", "--help"],
         ],
         vec![
-            vec!["help", "account", "show"],
-            vec!["account", "route", "show", "--help"],
+            vec!["help", "account", "rou"],
+            vec!["account", "route", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -199,6 +199,17 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["wave", "status", "--no-sync"],
         &["task", "wt", "list", "--format", "json"],
         &["task", "commit", "--push"],
+        &["account", "status"],
+        &["account", "--verify"],
+        &["account", "route", "show"],
+        &[
+            "account",
+            "--cached",
+            "connect",
+            "codex",
+            "work@example.com",
+        ],
+        &["account", "route", "--json", "set", "codex", "work@"],
         &["task", "wt", "rm", "unused"],
         &["-M", "unused", "run", "solo"],
         &["-C", "run", "solo"],
@@ -351,8 +362,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "show"]),
-        ["lf", "account", "route", "show"]
+        normalized(&["lf", "account", "rou"]),
+        ["lf", "account", "route"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--next", "show"]),

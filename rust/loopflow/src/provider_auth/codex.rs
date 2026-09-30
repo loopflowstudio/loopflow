@@ -117,7 +117,7 @@ impl Connection {
                 return if message["params"]["success"] == true {
                     Ok(())
                 } else {
-                    Err(failed("Codex login failed; retry lf auth connect codex"))
+                    Err(failed("Codex login failed; retry lf account connect codex"))
                 };
             }
         })

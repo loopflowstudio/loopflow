@@ -51,16 +51,19 @@ No competing model migration belongs here.
 
 ## This slice
 
-Jack Heart's September 30 steers stop further owner moves. Redo concept verdicts
-against ongoing work before implementation resumes. The destination audit and
-per-view `runs` comparison now live in `cli-command-catalog.md`; every baseline
-command and argument names its concept and following Work. Open demo decisions
-remain marked instead of being silently implemented.
+Integrate committed LOO-340 account behavior, then remove duplicate Account
+readers (C045 and C051). Bare Account refreshes identity/capacity; --cached is
+explicitly offline. Bare route owns route inspection; set remains the mutation.
+Preserve LOO-339 identity rejection and LOO-340 browser/cancellation behavior.
+Migrate callers and prove the public CLI in disposable Homes with fake providers.
 
-Next apply Jack's independently selected corrections: retain `wt`, shorten guide
-and skill commands through actual unique resolution, and add a CI ambiguity proof.
-Then integrate LOO-298/334/340 and apply the concept merges/deletions vertically.
-The complete target, real provider journey and Jack's demo remain required.
+LOO-298 remains an unfinished architectural cut at `a0c919803`, with independent
+fixes extracted to PRs #1358/#1359. LOO-334 is stacked there at `5a2e54b79` and
+still records a copied-Flow preservation failure. Their model integration and
+added Clap inventory remain required before Monitor and discovery work. LOO-340
+at `32b6eef00` has live-status and browser slices only; shared storage, per-provider
+launch bundles, Claude cached identity and resets remain its unfinished work.
+No prefix-only move or retirement of their unreplaced consumers belongs here.
 
 ## Slice ledger
 
@@ -598,3 +601,83 @@ and unlinked-work discovery, child readiness preserving restrictions, the real
 first-provider-result walkthrough, preview-doc reconciliation and Jack Heart's
 demo remain required. No publication, landing, Task completion or Flow
 navigation follows from this review.
+
+### Account integration and duplicate reader removal · 2026-09-30
+
+Starting revision `0667fb0ce`. Read destination branches without editing them:
+LOO-298 `a0c919803` retains its unfinished model while extracting independent
+fixes; LOO-334 `5a2e54b79` retains a copied-Flow preservation counterexample;
+LOO-340 `32b6eef00` has committed live-status and Codex-browser slices. The
+read-only open-PR list showed #1296/#1354 and the two extracted #1358/#1359 PRs.
+These observations do not establish shipment or authorize installed conversion.
+
+`lf rebase --plan jack-heart/keep-account-status-live-and` selected direct rebase.
+`lf rebase --manual jack-heart/keep-account-status-live-and` and four
+`lf rebase --continue` calls integrated its committed work here. Conflicts in
+Account source, tests and instructions retained LOO-339's identity rejection,
+LOO-340's live/default and browser behavior, and this branch's Account spelling.
+The local rebase ended at `365142efe`; no push or PR retarget occurred. The copied
+sibling scratch plan is removed from this checkout's prompt context; its complete
+proof remains at `32b6eef00:scratch/keep-account-status-live-and.md`.
+
+Implemented C045/C051: `lf account [provider]` is the single account reader;
+`lf account route` is the single route reader. Removed Status and Show parser
+variants and their dispatch, retained mutation children, and moved cached,
+details, provider, scope and JSON inputs to the surviving operations. Provider
+parsing happens before effects. No alias, account store, credential writer or
+execution authority was added. Migrated scripts, reconnect hints, builtin
+instructions, guide/reference and tests. There is no Desktop Account caller or
+typed Flow account operation. Shared account storage, launch-wide provider bundles
+and reset redemption remain LOO-340 integration obligations.
+
+Review found inherited identity/browser recovery strings still naming auth and
+remote init examples still using auth/status and route/show. They now name the
+surviving commands. Cached usage JSON preserves the expired 73% observation;
+text correctly says usage unknown after reset. Rejected identity remains distinct
+from service unavailability. Default overview uses existing live verification;
+it does not claim live verification for local credentials, whose unavailable
+server checks remain explicit. Removed-input tests also reject mixing inspection
+flags with a mutation before any state write.
+
+Proof uses inherited LF_* removal and LF_BIN pinned to this checkout's source
+binary, with disposable Homes, fake providers and browsers. No source binary
+opened installed data; no real login, reset, provider result or publication was
+attempted. The first focused pass passed auth_tests (8), cli_discovery (13) and
+documented_commands (3). After adding retired-input assertions, discovery (13)
+and documentation (3) passed again. Public account proofs cover default refresh,
+expired/omitted/unavailable usage, cached broker non-contact, identity mismatch,
+duplicate-login refusal, retained credentials and route JSON/state preservation.
+A final targeted status_refreshes_by_default_and_cached_preserves_evidence pass
+also exercises bare Account text/JSON with no provider filter (1 passed).
+
+Additional focused checks: account_report_fixture (1), provider_auth::codex::tests
+(3: matching completion, failure, EOF, cancellation and simulated timeout),
+lf::commands::account::account_first_tests (12: browser selection, staged reconnect,
+identity rejection and refresh preservation), init_connects_the_distributed_system
+(1), and global_commands machine_commands_and_catalog_work_without_git_or_a_repository
+(1) passed. Skill alignment (4), changed-script Ruff, shell syntax and architecture
+inventory passed. Website docs and architecture HTML regenerated. These are
+public-CLI/fixture and static proofs, not a full gate or live acceptance.
+
+Measured production Rust and builtin instruction changes: **+86 / −81** against
+rebased `365142efe`; **+1,058 / −437** against pre-integration `0667fb0ce`, including
+imported identity/browser work. Counts compare physical lines with difflib after
+removing test modules; exclude test-only files, integration tests, examples,
+scripts, generated files, docs, Wave memory and scratch. Imported work is not
+claimed as newly authored here. Account reader consolidation removes two actual
+command leaves; passing operations do not establish whole-Task completion.
+
+Monitor/Exec/Session integration, LOO-334 discovery, LOO-340 remaining ownership
+and child selection, other catalog cuts, the real first-local-result walkthrough,
+final doc reconciliation and Jack Heart's demo remain required. Open monitor
+view cuts remain Jack's demo choices. No landing or Task completion is authorized.
+
+Final static checks: `cargo fmt --all -- --check`,
+`cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed.
+Final `documented_commands` passed 3 tests after instruction reconciliation.
+`cargo run -p loopflow --example cli_catalog` produced valid JSON before replacing
+its retained extraction: **137 commands below root, 17 hidden, 433 flags,
+92 positionals, zero aliases**, versus pre-slice 139/17/436/92/0 and original
+141/18/440/95/10. The three fewer flag entries are two removed help flags and
+one duplicate JSON option. --cached replaces --verify without adding a second
+live toggle. These are intermediate implemented counts, not final demo counts.

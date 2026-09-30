@@ -304,14 +304,14 @@ mod tests {
         let init = get_builtin_skill("init").expect("init skill");
 
         for command in [
-            "lf account status",
-            "lf account route show",
-            "lf home id --json",
+            "lf account",
+            "lf account route",
+            "lf id --json",
             "lf wave list --json",
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
-            "lf home observe <home-id>",
+            "lf observe <home-id>",
             "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");

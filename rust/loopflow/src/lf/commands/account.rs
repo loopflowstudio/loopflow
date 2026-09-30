@@ -59,25 +59,24 @@ struct AccountLifecycleUpdate<'a> {
     clear_paid_through: bool,
 }
 
-pub fn run(cmd: Option<&AccountCommand>, json: bool) -> Result<()> {
-    let overview = AccountCommand::Status {
-        provider: None,
-        verify: false,
-        details: false,
-        json,
-    };
+pub fn run(
+    cmd: Option<&AccountCommand>,
+    provider: Option<Provider>,
+    cached: bool,
+    details: bool,
+    json: bool,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(run_async(cmd.unwrap_or(&overview)))
+    rt.block_on(async {
+        match cmd {
+            Some(cmd) => run_async(cmd).await,
+            None => account_status::run(provider, !cached, details, json).await,
+        }
+    })
 }
 
 async fn run_async(cmd: &AccountCommand) -> Result<()> {
     match cmd {
-        AccountCommand::Status {
-            provider,
-            cached,
-            details,
-            json,
-        } => account_status::run(provider.as_deref(), !*cached, *details, *json).await,
         AccountCommand::Disconnect { provider, email } => match email {
             Some(email) => disconnect_account(provider, email).await,
             None => disconnect(provider).await,
@@ -101,7 +100,12 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 None => connect(provider, chrome_profile.as_deref()).await,
             }
         }
-        AccountCommand::Route { cmd } => super::profile::run_route_async(cmd).await,
+        AccountCommand::Route {
+            cmd,
+            repo,
+            default,
+            json,
+        } => super::profile::run_route_async(cmd.as_ref(), repo.as_deref(), *default, *json).await,
         AccountCommand::Set {
             provider,
             email,
@@ -312,7 +316,7 @@ async fn connect_account(
     };
     if account.login_email.is_none() {
         return Err(anyhow!(
-            "account '{}' needs an expected email first: lf auth set {} {} --login-email <email>",
+            "account '{}' needs an expected email first: lf account set {} {} --login-email <email>",
             account.account_id,
             provider,
             account.account_id
@@ -933,7 +937,7 @@ async fn set_account_lifecycle(
             };
             if let Some(observed) = observed {
                 if !observed.eq_ignore_ascii_case(login_email.as_str()) {
-                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf auth connect {provider} {login_email}"));
+                    return Err(anyhow!("credential reports {observed}; cannot relabel it as {login_email}. Reconnect with lf account connect {provider} {login_email}"));
                 }
             }
         }
@@ -1634,7 +1638,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
                 fs::write(&replace_path, &replace_bytes).unwrap();
             })
             .await;
-        super::account_status::run(Some("claude"), true, false, false)
+        super::account_status::run(Some(Provider::Claude), true, false, false)
             .await
             .unwrap();
         server.await.unwrap();

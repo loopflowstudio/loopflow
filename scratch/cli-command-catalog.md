@@ -5,7 +5,7 @@ Jack Heart requested this catalog before implementation on 2026-09-30. Baseline:
 ## Counts and reproduction
 
 - Before: **141 commands below the root**, 18 hidden; 142 rows including the root. **440 flag entries** (including automatic help/version), **95 positional arguments**, **10 extra aliases** (one command alias, nine flag aliases).
-- Current slice: **139 commands below root**, 17 hidden; **436 flag entries**, **92 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
+- Current slice: **137 commands below root**, 17 hidden; **433 flag entries**, **92 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
 - `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-before.json` — passed against the unchanged parser.
 - `target/debug/lf help --all` in a disposable Home — exit 0, 125 lines, no Home state created; public help omits hidden commands and options by design.
 - Raw [Clap metadata](cli-catalog-before.json) and [public help](cli-help-before.txt) accompany this catalog. Stable C/A identifiers below link research to rows.
@@ -154,6 +154,30 @@ the open demo choices, and make the accepted cull real in vertical consumer cuts
 The next independently authorized correction is `wt` plus shortest unique docs
 and the CI resolver test. No more prefix-only cut is justified by this audit.
 
+## Integrated Account cut · 2026-09-30
+
+LOO-340 `32b6eef00` is integrated through local `lf rebase --manual`, retaining
+LOO-339 identity validation and the Account rename. Its two committed slices
+add no commands: live observation replaces `--verify` with `--cached`; Codex
+browser ownership changes its existing connect implementation. Later shared-store,
+per-provider child selection and reset-credit additions are not yet integrated.
+
+C045 and C051 are implemented: bare Account owns status, and bare account route
+owns route inspection. Existing provider/details/JSON and route-scope inputs move
+to these readers. The current Clap extraction measures **139 → 137 commands**,
+**436 → 433 flags**, **92 → 92 positionals**, with zero aliases. Two removed help
+flags and the duplicate overview/status JSON option account for the flag decrease.
+From the original baseline: **141 → 137**, **440 → 433**, **95 → 92**, **10 → 0**.
+`--cached` is the newly named input absent from the baseline; it explicitly avoids
+provider/broker contact and writes. No other newly integrated CLI inputs exist.
+
+Public CLI proofs preserve identity rejection, current/expired/missing capacity,
+read-only routing and absent-Home cached reads. Removed leaves and --verify reject
+before effects. Provider/browser proof is synthetic. Full execution-model and
+planning integration, all remaining verdicts and Jack Heart's demo remain open;
+this is not the final compiled surface. Detailed commands and integration conflicts
+are recorded in the existing working design's Account integration slice.
+
 ## Commands
 
 P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.
@@ -205,13 +229,13 @@ P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstu
 | C042 | lf rebase | lf task | Integration of the current checkout with its selected Git base | runtime/source reference: [E086]; runtime/source reference: [E087]; runtime/source reference: [E088]; P:277 | N042 | rename → lf task rebase | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C043 | lf commit | lf task | Local Git checkpoint of current changes | agent instructions: [E089]; agent instructions: [E090]; agent instructions: [E091]; P:297 | N043 | rename → lf task commit | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C044 | lf auth | lf | Provider access, identity and capacity | script: [E092]; runtime/source reference: [E093]; runtime/source reference: [E094]; P:306 | N044 | rename → lf account | LOO-339; LOO-340; adopted target; implementation not implied |
-| C045 | lf auth status | lf account | Provider access, identity and capacity | script: [E092]; script: [E095]; script: [E096]; P:1493 | N045 | merge into → lf account | LOO-339; LOO-340; adopted target; implementation not implied |
+| C045 | lf auth status | lf account | Provider access, identity and capacity | script: [E092]; script: [E095]; script: [E096]; P:1493 | N045 | merge into → lf account | LOO-339; LOO-340; implemented in Account integration slice; public CLI fixture proof; full Task incomplete |
 | C046 | lf auth disconnect | lf account | Revocation of local or managed provider credentials | documented public use: [E097]; P:1503 | N046 | rename → lf account disconnect | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C047 | lf auth connect | lf account | Acquisition of local or managed provider credentials | runtime/source reference: [E093]; runtime/source reference: [E094]; runtime/source reference: [E098]; P:1508 | N047 | rename → lf account connect | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C048 | lf auth set | lf account | Account metadata and remembered browser venues | script: [E099]; documented public use: [E100]; test: [E101]; P:1521 | N048 | rename → lf account set | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C049 | lf auth route | lf account | Explanation of ordered account selection for a routing scope | script: [E102]; runtime/source reference: [E103]; agent instructions: [E104]; P:1545 | N049 | rename → lf account route | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C050 | lf auth route set | lf account route | Replacement of the ordered accounts in a routing scope | script: [E102]; runtime/source reference: [E103]; documented public use: [E105]; P:1554 | N050 | rename → lf account route set | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
-| C051 | lf auth route show | lf account route | Configured account routing | script: [E106]; agent instructions: [E104]; documented public use: [E107]; P:1564 | N051 | merge into → lf account route | LOO-340; adopted target; implementation not implied |
+| C051 | lf auth route show | lf account route | Configured account routing | script: [E106]; agent instructions: [E104]; documented public use: [E107]; P:1564 | N051 | merge into → lf account route | LOO-340; implemented in Account integration slice; public CLI fixture proof; full Task incomplete |
 | C052 | lf release | lf repo | Repository release lifecycle namespace | script: [E108]; script: [E109]; script: [E110]; P:311 | N052 | rename → lf repo release | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C053 | lf release run | lf repo release | Recovery or completion of a verified repository release | script: [E108]; script: [E111]; runtime/source reference: [E112]; P:1577 | N053 | rename → lf repo release run | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C054 | lf release check | lf repo release | Unreleased changes eligible for the next repository release | runtime/source reference: [E113]; documented public use: [E114]; P:1584 | N054 | rename → lf repo release check | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
@@ -1535,7 +1559,7 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 
 ## Required additions and cross-cutting work
 
-- `monitor` overview and `account` overview reuse existing evidence readers; include missingness and next action. Neither creates a second scheduler or credential store. Account now uses its cached status reader; its added `--json` overview flag emits the existing report schema. Monitor remains required.
+- `monitor` overview and `account` overview reuse existing evidence readers; include missingness and next action. Neither creates a second scheduler or credential store. Account now uses its integrated live reader with explicit `--cached`; `--json` emits the existing report schema. Monitor remains required.
 - `monitor show ID` and `monitor active` replace the multiplexed `runs` path using LOO-298 Exec/Session owners. History filters, parent identity and DTOs follow that model.
 - `task list` adds unlinked checkout/PR evidence; `wave list` includes locally authored goals without requiring planning credentials. These carry earlier omitted recommendations forward.
 - First local result uses existing direct execution in a fresh directory before planning connection. Verify a real provider result; fix actual setup obstacles rather than introduce synthetic Tasks.

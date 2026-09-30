@@ -14,18 +14,18 @@ lf account
 
 lf account route set claude personal@
 lf account route set codex work@ personal@
-lf account show
+lf account route
 ```
 
 Loopflow manages Claude and Codex subscription logins as separate identities.
 OpenCode Zen, GitHub, and Linear each use one effective credential instead of a
 routable subscription catalog.
 
-`lf account` reads cached access, routing and capacity with next actions. It
-never launches providers or contacts a forwarded account broker. Unknown
-capacity stays unknown; retained percentages keep their observation age and
-reset time. `lf account --json` and `lf account status --json` share one schema.
-Use `lf account status PROVIDER --verify` for fresh supported evidence.
+`lf account` refreshes managed identity and capacity, then reports next actions.
+Use `lf account --cached` for offline inspection with no provider or broker
+contact and no state writes. Unknown capacity stays unknown. JSON retains dated
+observations and reset times; expired observations do not prove current capacity.
+`lf account PROVIDER` limits the report to one provider.
 
 ## Connect an identity
 
@@ -105,7 +105,7 @@ An access profile records which Chrome profile can authenticate an identity:
 ```bash
 lf account set claude personal@ --chrome-profile Personal --chrome-profile Work
 lf account set linear --chrome-profile Work
-lf account status --details
+lf account --details
 ```
 
 The profile is an authentication venue, not the identity that spends provider
@@ -119,10 +119,10 @@ same account ID so fallback and resume do not silently change identities.
 ## Inspect account state
 
 ```bash
-lf account status                       # refresh managed identity and usage
-lf account status claude                # refresh one provider
-lf account status --cached              # offline managed and local evidence
-lf account status --details --json      # sources, saved browsers, full timestamps
+lf account                       # refresh managed identity and usage
+lf account claude                # refresh one provider
+lf account --cached              # offline managed and local evidence
+lf account --details --json      # sources, saved browsers, full timestamps
 ```
 
 Status lists stable account IDs beside full usable logins. Codex rows show the
@@ -139,7 +139,7 @@ account, route or conversation. An inherited account lease carries no cached ide
 origin broker. Local token metadata is cached evidence, not server acceptance;
 live status reports local server verification unavailable.
 
-`auth status` persists recognized managed subscription windows before
+`account` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
@@ -161,7 +161,7 @@ does not imply successful authentication. Cron-host requires accepted managed
 evidence:
 
 ```bash
-lf account status --json |
+lf account --json |
   jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")'
 ```
 
@@ -222,7 +222,7 @@ one provider in one repository:
 lf account route set claude personal@ work@
 lf account route set codex work@ personal@
 lf account route set codex work@ --default
-lf account show --json
+lf account route --json
 ```
 
 Show lists eligible launch candidates in order without selecting one. Explicit

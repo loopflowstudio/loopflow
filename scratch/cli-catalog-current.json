@@ -2245,69 +2245,20 @@
     "short_aliases": []
   },
   {
-    "about": "Inspect cached account access and capacity, or manage logins and routing",
+    "about": "Refresh account access and capacity, or manage logins and routing",
     "aliases": [],
     "hidden": false,
     "kind": "command",
     "path": [
       "lf",
       "account"
-    ]
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": "Emit the cached account overview as one JSON document",
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Inspect cached credentials and subscription windows; verify explicitly",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "account",
-      "status"
     ]
   },
   {
     "action": "Set",
     "defaults": [],
     "global": false,
-    "help": null,
+    "help": "Limit observations to one provider",
     "hidden": false,
     "id": "provider",
     "kind": "argument",
@@ -2315,8 +2266,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "account",
-      "status"
+      "account"
     ],
     "required": false,
     "short": null,
@@ -2328,16 +2278,15 @@
       "false"
     ],
     "global": false,
-    "help": null,
+    "help": "Inspect cached evidence without contacting providers or the origin broker",
     "hidden": false,
-    "id": "verify",
+    "id": "cached",
     "kind": "argument",
-    "long": "verify",
+    "long": "cached",
     "long_aliases": [],
     "path": [
       "lf",
-      "account",
-      "status"
+      "account"
     ],
     "required": false,
     "short": null,
@@ -2349,7 +2298,7 @@
       "false"
     ],
     "global": false,
-    "help": null,
+    "help": "Include credential sources, browser choices, and timestamps",
     "hidden": false,
     "id": "details",
     "kind": "argument",
@@ -2357,8 +2306,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "account",
-      "status"
+      "account"
     ],
     "required": false,
     "short": null,
@@ -2370,7 +2318,7 @@
       "false"
     ],
     "global": false,
-    "help": null,
+    "help": "Emit the account overview as one JSON document",
     "hidden": false,
     "id": "json",
     "kind": "argument",
@@ -2378,8 +2326,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "account",
-      "status"
+      "account"
     ],
     "required": false,
     "short": null,
@@ -2397,8 +2344,7 @@
     "long_aliases": [],
     "path": [
       "lf",
-      "account",
-      "status"
+      "account"
     ],
     "required": false,
     "short": "h",
@@ -2849,7 +2795,7 @@
     "short_aliases": []
   },
   {
-    "about": "Configure and inspect managed account routing",
+    "about": "Explain configured and automatic account selection, or replace a route",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -2858,6 +2804,67 @@
       "account",
       "route"
     ]
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "repo",
+    "kind": "argument",
+    "long": "repo",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "account",
+      "route"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "default",
+    "kind": "argument",
+    "long": "default",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "account",
+      "route"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "json",
+    "kind": "argument",
+    "long": "json",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "account",
+      "route"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
   },
   {
     "action": "Help",
@@ -2987,102 +2994,6 @@
       "account",
       "route",
       "set"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Explain configured and automatic account selection",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "account",
-      "route",
-      "show"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "repo",
-    "kind": "argument",
-    "long": "repo",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account",
-      "route",
-      "show"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "default",
-    "kind": "argument",
-    "long": "default",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account",
-      "route",
-      "show"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account",
-      "route",
-      "show"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "account",
-      "route",
-      "show"
     ],
     "required": false,
     "short": "h",

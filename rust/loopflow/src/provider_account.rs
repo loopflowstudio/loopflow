@@ -1967,7 +1967,7 @@ mod account_first_tests {
         assert!(
             error.contains("first")
                 && error.contains("second")
-                && error.contains("lf auth connect")
+                && error.contains("lf account connect")
         );
     }
 

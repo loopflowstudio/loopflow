@@ -1339,7 +1339,7 @@
       "target": "lf account",
       "concept": "Provider access, identity and capacity",
       "follows": "LOO-339; LOO-340",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in Account integration slice; public CLI fixture proof; full Task incomplete"
     },
     {
       "row_id": "C046",
@@ -1521,7 +1521,7 @@
       "target": "lf account route",
       "concept": "Configured account routing",
       "follows": "LOO-340",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in Account integration slice; public CLI fixture proof; full Task incomplete"
     },
     {
       "row_id": "C052",

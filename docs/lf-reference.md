@@ -1,9 +1,8 @@
 # lf command reference
 
 > Design preview: the target CLI for this branch, not the installed binary.
-> Discovery is implemented; owner moves remain a preview. Session, FlowSession,
-> and history sections use current spellings and the accepted
-> [ownership contract](architecture-reference.md#cutover-status).
+> Task delivery, Account with live and cached inspection, and Repo release/tokens/CI are implemented;
+> the remaining owner moves and Monitor overview are still in progress.
 
 For examples ordered by workflow, see [lf CLI](lf.md). This page lists
 individual controls, arguments, and effects.
@@ -97,7 +96,7 @@ owner is visible; omitted-owner shortcuts are derived from that tree.
 ```bash
 lf monitor top                         # full name
 lf mon top                             # unique command prefix
-lf account status
+lf account
 ```
 
 Commands have one canonical name. `monitor` also has the selected short spelling
@@ -1051,28 +1050,27 @@ target error remain the actionable evidence.
 
 ## Account: connections, capacity, and routing
 
-Run `lf account` to inspect cached credential state, routing, observed capacity
-and next actions per provider and managed login. It shares the `account status`
-reader; `lf account --json` emits the same single JSON document. Cached presence
-is not proof of current server acceptance. Ordinary launches check required
-access; explicit verification refreshes supported observations.
-
 ```bash
-lf account status
-lf account status codex --verify
-lf account connect codex work@example.com --chrome-profile Work
+lf account                             # refresh managed identity and usage
+lf account codex                        # refresh one provider
+lf account --cached --json              # offline evidence as one JSON document
+lf account route                       # inspect configured and automatic selection
 lf account route set codex work@ personal@
-lf account route show
 ```
 
-Connect an existing provider login,
-inspect its credential state and observed capacity, and choose which accounts
-a repository may use. Account selection does not change the selected model.
-An incompatible explicit account/model combination reports an error.
+Account reports credential state, routing, capacity and next actions per provider
+and managed login. The default refreshes supported provider observations;
+`--cached` starts no provider, contacts no origin broker and writes no state.
+`--details --json` includes sources, browser choices and timestamps.
 
-Status uses cached evidence by default. `--verify` requests fresh supported
-observations; `--details --json` includes sources and timestamps. Unknown or
-stale capacity is labeled rather than treated as zero or unlimited.
+JSON retains dated observations after an unavailable refresh. Check each window's
+reset and observation times; an expired window does not establish current
+capacity. Text labels expired capacity unknown. Identity rejection, unavailable
+verification and cached credential presence remain distinct.
+
+Account selection does not change the selected model. An incompatible explicit
+account/model combination reports an error. Route inspection is read-only;
+`route set` replaces the selected repository or default route.
 
 ### Connect and configure
 
@@ -1112,7 +1110,7 @@ the managed credential rather than creating a competing login.
 lf account route set codex work@ personal@
 lf account route set codex personal@ --default
 lf account route set codex work@ --repo owner/repository
-lf account route show --json
+lf account route --json
 ```
 
 Repository routes override the default route. Where automatic selection is
@@ -1247,7 +1245,7 @@ to the Task workflow; the signing secret is supplied through Doppler.
 lf task status DES-123 --json
 lf wave status designer --json
 lf mon list --task DES-123 --json
-lf account status --details --json
+lf account --details --json
 ```
 
 Use `--json` on read commands that advertise it. Help lists the supported

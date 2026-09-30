@@ -148,12 +148,12 @@ def main() -> int:
             "personal@example.com",
         )
 
-        _print_step("Access profiles", _run(binary, env, "account", "status", "--details"))
+        _print_step("Access profiles", _run(binary, env, "account", "--cached", "--details"))
         _print_step(
             "Provider routes",
-            _run(binary, env, "account", "route", "show"),
+            _run(binary, env, "account", "route"),
         )
-        _print_step("Account lifecycle", _run(binary, env, "account", "status"))
+        _print_step("Account lifecycle", _run(binary, env, "account", "--cached"))
 
         print("\nLook for:")
         print("  1. Claude and Codex have independent account orders.")

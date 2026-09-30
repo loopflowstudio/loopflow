@@ -90,8 +90,10 @@ canonical ownership stays in reference/help. Keep `wt`, `top` and `ps`.
 command must own a real concept; callers alone do not justify retention. The
 catalog must follow LOO-298's Exec/AgentSession/FlowSession model, LOO-334's
 Linear/Git Task existence and LOO-339/340's account work. `runs` merges into
-Monitor, with view-by-view cuts left for Jack at demo. Current cached Account
-behavior does not replace LOO-340's live-default requirement.
+Monitor, with view-by-view cuts left for Jack at demo. LOO-338 integrates LOO-340's committed live-default and explicit `--cached`
+behavior. Account and route each have one reader; their duplicate status/show
+leaves are removed. Public CLI fixtures prove this boundary, not live account
+acceptance or the unfinished shared account store and child account bundles.
 
 
 ## CLI guide decisions (2026-09-29)
@@ -107,7 +109,7 @@ reference and capabilities in scope. Existing page addresses remain valid.
 The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
 are design previews. Local discovery now supports help without launching,
 flow-first untyped selection, strict typed definitions, and unique command
-shorthand. LOO-338 now implements Task delivery ownership and the cached
+shorthand. LOO-338 now implements Task delivery ownership and the live/cached
 Account overview on its branch; remaining owner moves and Monitor remain future
 work. Fixture and read-only CLI evidence does not demonstrate the first local
 result, a live app walkthrough, or a complete autonomous lifecycle. Keep those

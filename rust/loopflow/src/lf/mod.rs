@@ -318,12 +318,20 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Inspect cached account access and capacity, or manage logins and routing
+    /// Refresh account access and capacity, or manage logins and routing
     #[command(args_conflicts_with_subcommands = true)]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
-        /// Emit the cached account overview as one JSON document
+        /// Limit observations to one provider
+        provider: Option<crate::provider_auth::Provider>,
+        /// Inspect cached evidence without contacting providers or the origin broker
+        #[arg(long)]
+        cached: bool,
+        /// Include credential sources, browser choices, and timestamps
+        #[arg(long)]
+        details: bool,
+        /// Emit the account overview as one JSON document
         #[arg(long)]
         json: bool,
     },
@@ -1424,17 +1432,6 @@ pub enum HomeCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
-    /// Refresh managed account status and subscription windows
-    Status {
-        provider: Option<String>,
-        /// Inspect cached evidence without contacting providers or the origin broker
-        #[arg(long)]
-        cached: bool,
-        #[arg(long)]
-        details: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Disconnect local credentials or one managed login
     Disconnect {
         provider: String,
@@ -1477,10 +1474,17 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_chrome_profiles: bool,
     },
-    /// Configure and inspect managed account routing
+    /// Explain configured and automatic account selection, or replace a route
+    #[command(args_conflicts_with_subcommands = true)]
     Route {
         #[command(subcommand)]
-        cmd: RouteCommand,
+        cmd: Option<RouteCommand>,
+        #[arg(long, conflicts_with = "default")]
+        repo: Option<String>,
+        #[arg(long)]
+        default: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1495,15 +1499,6 @@ pub enum RouteCommand {
         repo: Option<String>,
         #[arg(long)]
         default: bool,
-    },
-    /// Explain configured and automatic account selection
-    Show {
-        #[arg(long, conflicts_with = "default")]
-        repo: Option<String>,
-        #[arg(long)]
-        default: bool,
-        #[arg(long)]
-        json: bool,
     },
 }
 

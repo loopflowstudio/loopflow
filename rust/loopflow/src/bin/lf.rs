@@ -1556,8 +1556,14 @@ fn execute_command(
         Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
         Some(Commands::Ask { ask }) => loopflow::lf::commands::ask::run(ask),
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
-        Some(Commands::Account { cmd, json }) => {
-            loopflow::lf::commands::account::run(cmd.as_ref(), *json)
+        Some(Commands::Account {
+            cmd,
+            provider,
+            cached,
+            details,
+            json,
+        }) => {
+            loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
         }
         Some(Commands::Repo { cmd }) => match cmd {
             loopflow::lf::RepoCommand::Release { .. } => {

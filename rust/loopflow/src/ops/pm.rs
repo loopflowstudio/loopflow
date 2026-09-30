@@ -1672,12 +1672,7 @@ pub(crate) async fn read_task_planning_async(
     refresh: PmRefresh,
 ) -> OpsResult<PmTaskRecord> {
     let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    let soft_failure = read.observation.state == PlanningState::Unavailable
-        && matches!(
-            plan_snapshot_read(refresh, read.age()),
-            SnapshotPlan::Refresh { hard: false }
-        );
-    if read.observation.state == PlanningState::Available || soft_failure {
+    if read.observation.state == PlanningState::Available {
         if let Some(record) = read.observation.record {
             return Ok(record);
         }

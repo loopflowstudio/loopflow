@@ -1247,6 +1247,39 @@ fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
     Ok(())
 }
 
+pub(crate) async fn resolve_managed_task_planning(
+    store: &SharedStore,
+    task: &Task,
+    refresh: crate::ops::pm::PmRefresh,
+) -> OpsResult<crate::ops::task_pm::ResolvedTask> {
+    if task_work_status(store, task).await? != WorkStatus::Ready {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot advance its managed Flow",
+            task.plan.identifier
+        )));
+    }
+    let resolved =
+        crate::ops::task_pm::resolve_task_async(&task.worktree, task.plan.id.as_str(), refresh)
+            .await?;
+    require_startable_issue(&resolved.item)?;
+    let project = store
+        .get_project(&task.project_id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task Project is missing"))?;
+    let wave = owning_wave(store, task).await?;
+    if resolved.item.id != task.plan.id.as_str()
+        || resolved.project.id != project.plan.id.as_str()
+        || resolved.wave != wave.name()
+    {
+        return Err(task_error(format!(
+            "Task {} planning no longer matches its managed execution; its saved Flow is preserved",
+            task.plan.identifier
+        )));
+    }
+    Ok(resolved)
+}
+
 fn select_task_worker_flow_from_project(
     repo: &Path,
     project: &crate::pm::PmProject,
@@ -5113,16 +5146,12 @@ async fn restart_task_async(
         load_task_flow(&task.worktree, flow)?;
     }
 
-    let resolved = crate::ops::task_pm::resolve_task_async(
-        &task.worktree,
-        task.plan.id.as_str(),
-        crate::ops::pm::PmRefresh::Force,
-    )
-    .await?;
+    let resolved =
+        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Force).await?;
     let selected_flow =
         select_task_worker_flow_from_project(&task.worktree, &resolved.project, flow.as_deref())?;
     let mut project = store
-        .get_project_by_project(&resolved.project.id)
+        .get_project(&task.project_id)
         .await
         .map_err(|error| task_error(format!("failed to resolve refreshed Project: {error}")))?
         .ok_or_else(|| {
@@ -5131,12 +5160,6 @@ async fn restart_task_async(
                 resolved.item.identifier, resolved.project.slug
             ))
         })?;
-    if project.wave_id != task.wave_id {
-        return Err(task_error(format!(
-            "refreshed Task {} moved to Project {} outside its registered Wave",
-            resolved.item.identifier, resolved.project.slug
-        )));
-    }
     project.plan = crate::ops::project::project_plan(&resolved.project, resolved.observed_at)?;
     project.updated_at = time::OffsetDateTime::now_utc();
     store
@@ -5160,7 +5183,6 @@ async fn restart_task_async(
         description: resolved.item.description.clone(),
         pm_snapshot_synced_at: resolved.observed_at,
     };
-    task.project_id = project.id;
     task.pm_writeback = PmWritebackState::Current;
     task.updated_at = now;
 
@@ -5193,6 +5215,8 @@ pub(crate) async fn continue_task_async(
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     let saved = store.task_flow(&task.id).await.map_err(task_error)?;
+    let resolved =
+        resolve_managed_task_planning(&store, &task, crate::ops::pm::PmRefresh::Auto).await?;
     let selected_flow = match saved.as_ref() {
         Some(position) => {
             if let Some(flow) = requested_flow
@@ -5207,20 +5231,11 @@ pub(crate) async fn continue_task_async(
             }
             None
         }
-        None => {
-            let resolved = crate::ops::task_pm::resolve_task_async(
-                &task.worktree,
-                issue,
-                crate::ops::pm::PmRefresh::Auto,
-            )
-            .await?;
-            require_startable_issue(&resolved.item)?;
-            Some(select_task_worker_flow_from_project(
-                &task.worktree,
-                &resolved.project,
-                requested_flow.as_deref(),
-            )?)
-        }
+        None => Some(select_task_worker_flow_from_project(
+            &task.worktree,
+            &resolved.project,
+            requested_flow.as_deref(),
+        )?),
     };
     select_task_agent(&store, &mut task, agent.as_deref()).await?;
     if task_worker_live(&store, &task).await? {

@@ -3,12 +3,13 @@ mod installation;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::FlowSession;
+use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::engine::ExecutionCursor;
-use loopflow::id::WaveId;
+use loopflow::id::{ExecId, TraceId, WaveId};
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectId};
@@ -160,24 +161,27 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         // Git and worktree operations are real; only GitHub's read is simulated.
         fs::write(&gh, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nif [ \"$1 $2\" = 'pr list' ]; then\n  printf '%s\\n' '[{{\"url\":\"https://example.test/pull/42\",\"number\":42,\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{head}\"}}]'\nelse\n  exit 1\nfi\n")).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
-        let invoke = |op: &str| {
+        let command = |cwd: &Path, args: &[&str]| {
             let mut command = Command::new(&installed.cli);
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("LF_") {
                     command.env_remove(key);
                 }
             }
-            let output = command
-                .current_dir(repo.path())
-                .args(["task", op, "FIX-1", "--json"])
+            command
+                .current_dir(cwd)
+                .args(args)
                 .env("LF_HOME", home.path())
                 .env("LF_DB_PATH", home.path().join("loopflow.db"))
                 .env(
                     "PATH",
                     format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
-                )
-                .output()
-                .unwrap();
+                );
+            command
+        };
+        let run = |cwd: &Path, args: &[&str]| command(cwd, args).output().unwrap();
+        let invoke = |op: &str| {
+            let output = run(repo.path(), &["task", op, "FIX-1", "--json"]);
             assert!(
                 output.status.success(),
                 "{op}: {}",
@@ -268,7 +272,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         // Catalog changes must not replace the saved graph or reset its cursor.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
-            "- op: session list\n",
+            "- op: rebase --plan\n",
         )
         .unwrap();
         invoke("checkout");
@@ -312,6 +316,148 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .len(),
             2
         );
+        if operation == "checkout" && !remote_only {
+            let scope = repo.path().canonicalize().unwrap().display().to_string();
+            let original = runtime
+                .block_on(store.pm_task_observation(&scope, "linear", "FIX-1"))
+                .unwrap()
+                .record
+                .unwrap();
+            let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
+            let pr_before = runtime.block_on(store.active_task_pr(&task.id)).unwrap();
+            for (index, condition) in ["canceled", "moved", "connection", "removed"]
+                .into_iter()
+                .enumerate()
+            {
+                let mut observed = original.clone();
+                observed.item.revision = Some(format!("2026-09-30T12:00:0{index}Z"));
+                if condition == "canceled" {
+                    observed.item.state = Some("canceled".into());
+                }
+                if condition == "moved" {
+                    observed.item.project_id = Some("project-2".into());
+                    observed.project.as_mut().unwrap().id = "project-2".into();
+                }
+                runtime
+                    .block_on(store.put_pm_task(&scope, "linear", observed))
+                    .unwrap();
+                if condition == "connection" {
+                    fs::write(
+                        checkout.join(".lf/config.yaml"),
+                        "agent: claude\npm:\n  provider: linear\n  linear_team: another-team\n",
+                    )
+                    .unwrap();
+                }
+                if condition == "removed" {
+                    runtime
+                        .block_on(store.observe_pm_issue_change("issue-1", None, true))
+                        .unwrap();
+                }
+                let output = run(repo.path(), &["task", "run", "FIX-1", "--json"]);
+                assert!(
+                    !output.status.success(),
+                    "{condition} allowed managed continuation"
+                );
+                let error = String::from_utf8_lossy(&output.stderr);
+                let expected = match condition {
+                    "canceled" => "terminal",
+                    "moved" => "no longer matches",
+                    "connection" => "Team",
+                    "removed" => "Removed",
+                    _ => unreachable!(),
+                };
+                assert!(error.contains(expected), "{condition}: {error}");
+                assert_eq!(
+                    runtime
+                        .block_on(store.task_flow(&task.id))
+                        .unwrap()
+                        .unwrap(),
+                    saved
+                );
+                assert_eq!(
+                    runtime.block_on(store.get_task(&task.id)).unwrap(),
+                    task_before
+                );
+                assert_eq!(
+                    runtime.block_on(store.active_task_pr(&task.id)).unwrap(),
+                    pr_before
+                );
+                if condition == "connection" {
+                    fs::write(
+                        checkout.join(".lf/config.yaml"),
+                        "agent: claude\npm:\n  provider: linear\n  linear_team: team-1\n",
+                    )
+                    .unwrap();
+                }
+            }
+            // A worker rechecks planning independently of the initiating command.
+            // Review positions correctly cannot claim a worker, so use a captured
+            // mechanical boundary for this separate admission check.
+            let mut worker = saved.clone();
+            worker.invocation = QueuedInvocation::load(&checkout, "adoption").unwrap();
+            worker.cursor = Default::default();
+            worker.version = 0;
+            worker.current_attempt = None;
+            worker.pending_session_id = None;
+            worker.ready_summary = None;
+            let worker = runtime
+                .block_on(store.start_task_flow(&task.id, worker))
+                .unwrap();
+            let TaskWorkerClaimOutcome::Claimed(claim) = runtime
+                .block_on(store.claim_task_worker(
+                    &task.id,
+                    worker.id(),
+                    worker.version,
+                    &TaskWorkerOwner {
+                        trace_id: TraceId::new(),
+                        exec_id: ExecId::new(),
+                        pid: std::process::id(),
+                        started_at: now.unix_timestamp(),
+                    },
+                    now,
+                ))
+                .unwrap()
+            else {
+                panic!("worker claim was not acquired")
+            };
+            let output = command(&checkout, &["task", "__worker", task.id.as_str()])
+                .env(
+                    loopflow::durable::TASK_WORKER_CLAIM_ENV,
+                    serde_json::to_string(&claim).unwrap(),
+                )
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("Removed"),
+                "worker refusal: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stopped = runtime
+                .block_on(store.task_flow(&task.id))
+                .unwrap()
+                .unwrap();
+            assert!(stopped.claim.is_none());
+            assert_eq!(stopped.invocation, worker.invocation);
+            assert_eq!(stopped.cursor, worker.cursor);
+            assert_eq!(stopped.pending_session_id, worker.pending_session_id);
+            assert_eq!(stopped.current_attempt, worker.current_attempt);
+            assert_eq!(stopped.failure, worker.failure);
+            // Independent execution keeps working after the planning Task is gone.
+            let output = run(&checkout, &["flow", "adoption"]);
+            assert!(
+                output.status.success(),
+                "independent Flow: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                runtime
+                    .block_on(store.task_flow(&task.id))
+                    .unwrap()
+                    .unwrap(),
+                stopped
+            );
+        }
         fs::remove_dir_all(&checkout).unwrap();
     }
 }

@@ -435,6 +435,29 @@ async fn drive_loop(
     let mut owned_claim = claim;
     loop {
         let selected = store.sqlite.active_flow(&root)?;
+        if let Some(task_id) = &selected.task_id {
+            if store
+                .task_flow(task_id)
+                .await?
+                .is_some_and(|managed| managed.id() == selected.id())
+            {
+                let task = store.get_task(task_id).await?.context("Task disappeared")?;
+                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
+                    &store,
+                    &task,
+                    crate::ops::pm::PmRefresh::Auto,
+                )
+                .await
+                {
+                    if owned_claim.is_some() {
+                        store
+                            .release_flow(selected.id(), selected.version, owned_claim.as_ref())
+                            .await?;
+                    }
+                    return Err(error.into());
+                }
+            }
+        }
         let id = selected.id().to_owned();
         let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;
         if flow.finished {

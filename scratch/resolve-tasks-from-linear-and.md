@@ -26,6 +26,61 @@ cursor; no progress is invented from either. Prove adoption from a store with
 planning but no Task row, then repeated checkout/continuation preservation.
 No source binary touches the installed Home. Integration merges main; no rebase.
 
+### Managed validity — current implementation, 2026-09-30
+
+Saved continuation previously skipped planning lookup whenever a Flow existed.
+Continuation/restart now use one managed-planning resolver before execution
+mutations; the shared driver repeats it before each boundary of the Task's selected
+Flow. It rejects terminal planning and mismatched Project/Wave/Team, retaining
+execution history rather than adopting a new plan. A driver stopped by planning
+releases its own claim without resetting the cursor or creating a provider-failure
+recovery Ask. Independent attributed Flows do not acquire this managed restriction.
+Completion evidence from already executing work remains history; this is admission
+at boundaries, not distributed exclusion of concurrent provider changes.
+
+Outage policy accepts the existing fresh-cache interval. A due refresh that fails
+refuses managed work; inspection still exposes the retained observation and age.
+Connection changes select current configuration without copying/publishing old
+planning. These choices resolve the corresponding questions under Jack Heart's
+headless direction.
+
+Proof and review:
+
+- `uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_saved_progress`
+  passed in `.lf/tmp/task-validity-public-5.log`, including its four populated
+  migration prerequisites. All three public adoption cases still pass. The
+  existing-worktree case additionally proves canceled, moved, changed-Team and
+  removed planning refuse public continuation without changing the Task, saved
+  review/graph/cursor or PR. An internal worker entry independently refuses
+  removed planning, releases its claim and retains the captured boundary. An
+  independent Flow then finishes in the same checkout without advancing the
+  managed Flow. Its mechanical `rebase --plan` operation performs no rebase.
+- The focused `automatic_refresh_reports_failure_with_retained_observation_age`
+  test passed in `.lf/tmp/task-validity-focused.log`: a simulated provider outage
+  refuses a due automatic refresh while inspection keeps the original facts/age.
+- Formatting, all-target Clippy with two workers, and diff checks passed;
+  `.lf/tmp/task-validity-clippy-final.log` retains Clippy. Resource preflight
+  passed at 37.6 GiB free; the later observation was 46 GiB. Builds used at most
+  four workers total. No full gate ran in this implementation pass.
+
+The first four public attempts remain failed evidence. They exposed a PR
+comparison taken before a legitimate observation, a review position correctly
+refusing a worker claim, the internal command spelling `__worker`, and an
+unsupported mechanical `session list` fixture. The corrected proof preserves
+those boundaries instead of weakening production admission. All proof containers
+were removed. Planning, GitHub and terminal transport remain simulated; Git and
+CLI execution are real. No live Linear mutation or installed acceptance is claimed.
+
+Review removed restart's obsolete Project reassignment and corrected documentation
+that had described `task run --flow` as replacing saved progress. The selected
+Project identity now survives restart, and replacement remains explicit.
+
+Merge integration is still blocked: installed `lf` help exposes no merge command
+under the root, `wt`, or `rebase`. The last-fetched `origin/main` at `e14a1d035`
+has eleven commits absent from this branch. No fetch, merge, rebase, publication,
+Task completion or Flow navigation was performed in this pass. The caller retains
+integration and delivery; a passing isolated proof does not establish either.
+
 ### Adoption proof and review — 2026-09-30
 
 Implemented Linear `branchName` in shared list/detail planning and the wire model.

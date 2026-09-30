@@ -405,12 +405,11 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
             assert!(read.is_stale());
             assert!(read.refresh_error.unwrap().contains("provider unavailable"));
             assert_eq!(read.observation.record.as_ref(), Some(&record));
-            assert_eq!(
-                read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
-                    .await
-                    .unwrap(),
-                record
-            );
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("provider unavailable"));
             assert_eq!(
                 read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await

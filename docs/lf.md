@@ -448,9 +448,15 @@ and record its open PR. Without a provider branch, the normal title-based branch
 is reused when it exists. No PR is created or edited by adoption. Existing Task
 identity and captured progress remain authoritative; Git and PR state do not
 supply a Flow cursor. `task run` resumes the saved Flow or starts
-one when none is active. Selecting a different `--flow` replaces the unclaimed
-managed invocation; stop an active worker before changing its Flow. Other Flows
+one when none is active. Use `task restart ISSUE --flow FLOW` to replace the
+captured invocation. Other Flows
 attributed to the Task keep their own invocations.
+Managed continuation and each new driver boundary require a nonterminal Task
+whose current planning still matches its recorded Project and Wave. A fresh
+cached observation is sufficient; once refresh is due, a failed refresh stops
+managed execution and preserves the saved Flow. Status retains dated evidence.
+Changing the repository Team does not reassign existing work. Independent
+Flows can still run in the checkout, including after its Task is removed.
 `task restart` waits for its captured worker to exit before replacing the Flow.
 Unknown process identity, a worker that remains live, or a concurrent replacement
 leaves the Flow intact and reports the unresolved execution. Retry after resolving

@@ -121,14 +121,18 @@ decision or duplicate Ask is needed merely to record this technical blocker.
   Loopflow operations; reading definitions must not itself reset files. When edits
   to mapped definitions should write Linear remains open.
 
-- **Unavailable Linear:** the design retains dated cached planning for inspection
-  and refuses uncached/unresolved selectors. Decide whether a cached Task can
-  start/resume managed execution while Linear is unreachable, or must wait for
-  fresh validation. Neither policy should manufacture deletion or local authority.
-- **Connection transition:** repository-originated Waves supersede automatic
-  Initiative discovery. Exact preview/apply/import controls, existing company
-  Project selection, disconnect and Wave deletion remain unresolved. Connecting
-  must explicitly map private plans; login/pull/read never publishes them.
+- **Unavailable Linear — implementation choice, 2026-09-30:** under Jack Heart's
+  direction to resolve this choice, a valid fresh cache can authorize managed
+  execution. Once the shared reader requires refresh, acquisition failure refuses
+  new managed execution. Dated observations remain inspectable; failure never
+  means deletion. Ordinary Flows remain usable independently of Task validity.
+- **Connection transition — implementation choice, 2026-09-30:** reads use the
+  configured provider and Team; changing configuration never copies, publishes
+  or reassigns retained planning/execution. Existing Tasks must match their
+  recorded Project and Wave and the selected Team before managed continuation.
+  Repository Wave definitions and explicit provider bindings remain authoritative;
+  login/pull/read never adopt unrelated Initiatives or publish private plans.
+  Destructive disconnect/deletion and new import controls are outside this cut.
 
 - **Existing provider hierarchy:** `A/B` naming and optional native parent links
   are selected. Adoption of existing names that disagree with native hierarchy,

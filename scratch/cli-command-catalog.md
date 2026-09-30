@@ -5,7 +5,7 @@ Jack Heart requested this catalog before implementation on 2026-09-30. Baseline:
 ## Counts and reproduction
 
 - Before: **141 commands below the root**, 18 hidden; 142 rows including the root. **440 flag entries** (including automatic help/version), **95 positional arguments**, **10 extra aliases** (one command alias, nine flag aliases).
-- Current slice: **137 commands below root**, 17 hidden; **433 flag entries**, **92 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
+- Current slice: **136 commands below root**, 17 hidden; **431 flag entries**, **91 positionals**, **0 extra aliases**. Compiled [current extraction](cli-catalog-current.json). This is an intermediate measurement, not completion of the owner tree. Final demo counts must be regenerated after all verdicts.
 - `cargo run -p loopflow --example cli_catalog > scratch/cli-catalog-before.json` — passed against the unchanged parser.
 - `target/debug/lf help --all` in a disposable Home — exit 0, 125 lines, no Home state created; public help omits hidden commands and options by design.
 - Raw [Clap metadata](cli-catalog-before.json) and [public help](cli-help-before.txt) accompany this catalog. Stable C/A identifiers below link research to rows.
@@ -178,6 +178,21 @@ planning integration, all remaining verdicts and Jack Heart's demo remain open;
 this is not the final compiled surface. Detailed commands and integration conflicts
 are recorded in the existing working design's Account integration slice.
 
+## Task changed-file merge · 2026-09-30
+
+C101 is implemented as `task diff --files`, with Desktop, reference documentation
+and public CLI tests moved together. The Changes parser leaf is deleted. Files
+mode retains TaskChangesSnapshot; patch mode retains TaskDiffSnapshot and draft
+comparison. No wire field, file revision or storage owner changes. Path and draft
+inputs select patches and conflict with files mode before effects.
+
+Compiled counts: **137 → 136 commands below root**, **433 → 431 flags**,
+**92 → 91 positionals**, **zero aliases** (17 hidden commands unchanged).
+From baseline: **141 → 136**, **440 → 431**, **95 → 91**, **10 → 0**.
+The new `diff --files` input replaces the Changes leaf's help, base and JSON
+flag entries; its issue positional is shared with Diff. This is an implemented
+concept merge, not completion of the remaining catalog or destination work.
+
 ## Commands
 
 P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstudio/loopflow/blob/a6b1bc3dff4f826291ec094d7720adbf125777a8/rust/loopflow/src/lf/mod.rs). E references are caller/source evidence. N references expand in the rationale section. Option caller references inherit the named command row; they do not claim every optional input is passed by that caller.
@@ -285,7 +300,7 @@ P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstu
 | C098 | lf task run | lf task | Execution of a Task-selected Flow | Desktop: [E200]; Desktop: [E193]; runtime/source reference: [E201]; P:989 | N098 | merge into → lf --as task:TASK flow | LOO-298; Jack Heart 2026-09-30; demo/integration choice open; see destination audit |
 | C099 | lf task create | lf task | Creation of a planning Task with optional execution | Desktop: [E202]; runtime/source reference: [E203]; runtime/source reference: [E204]; P:1008 | N099 | keep → lf task create | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C100 | lf task status | lf task | One Task's disposition, execution evidence and available actions | runtime/source reference: [E205]; runtime/source reference: [E206]; runtime/source reference: [E207]; P:1033 | N100 | keep → lf task status | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
-| C101 | lf task changes | lf task | Checkout comparison against a selected base | Desktop: [E208]; documented public use: [E209]; test: [E210]; P:1040 | N101 | merge into → lf task diff --files | LOO-327; LOO-338; adopted target; implementation not implied |
+| C101 | lf task changes | lf task | Checkout comparison against a selected base | Desktop: [E208]; documented public use: [E209]; test: [E210]; P:1040 | N101 | merge into → lf task diff --files | LOO-327; LOO-338; implemented in Task diff files slice; public CLI and Desktop consumer proof; full Task incomplete |
 | C102 | lf task diff | lf task | Inspection of checkout changes against a Task's base | Desktop: [E211]; documented public use: [E212]; test: [E213]; P:1048 | N102 | keep → lf task diff | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C103 | lf task file | lf task | Revision-bearing content of one file and its recovery versions | Desktop: [E214]; Desktop: [E194]; documented public use: [E215]; P:1060 | N103 | keep → lf task file | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | C104 | lf task save | lf task | Conditional replacement of file content with retained recovery bytes | Desktop: [E216]; documented public use: [E217]; P:1070 | N104 | keep → lf task save | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
@@ -744,10 +759,10 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 | A375 | lf task status <issue> | C100 | One Task's disposition, execution evidence and available actions: Task issue identity. | N281; P:1035 | keep → <issue> | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A376 | lf task status --json | C100 | Shared json protocol applied to one task's disposition, execution evidence and available actions. | N174; P:1037 | keep → --json | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A377 | lf task status --help / -h | C100 | Shared help protocol applied to one task's disposition, execution evidence and available actions. | N164; P:1033 | keep → --help | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
-| A378 | lf task changes <issue> | C101 | Checkout comparison against a selected base: Task issue identity. | N286; P:1041 | merge into → lf task diff --files <issue> | LOO-327; LOO-338; adopted target; implementation not implied |
-| A379 | lf task changes --base | C101 | Checkout comparison against a selected base: commit baseline for checkout inspection. | N286; P:1043 | merge into → lf task diff --files --base | LOO-327; LOO-338; adopted target; implementation not implied |
-| A380 | lf task changes --json | C101 | Shared json protocol applied to checkout comparison against a selected base. | N286; P:1045 | merge into → lf task diff --files --json | LOO-327; LOO-338; adopted target; implementation not implied |
-| A381 | lf task changes --help / -h | C101 | Shared help protocol applied to checkout comparison against a selected base. | N286; P:1040 | merge into → lf task diff --files --help | LOO-327; LOO-338; adopted target; implementation not implied |
+| A378 | lf task changes <issue> | C101 | Checkout comparison against a selected base: Task issue identity. | N286; P:1041 | merge into → lf task diff --files <issue> | LOO-327; LOO-338; implemented on task diff --files; existing DTO preserved |
+| A379 | lf task changes --base | C101 | Checkout comparison against a selected base: commit baseline for checkout inspection. | N286; P:1043 | merge into → lf task diff --files --base | LOO-327; LOO-338; implemented on task diff --files; existing DTO preserved |
+| A380 | lf task changes --json | C101 | Shared json protocol applied to checkout comparison against a selected base. | N286; P:1045 | merge into → lf task diff --files --json | LOO-327; LOO-338; implemented on task diff --files; existing DTO preserved |
+| A381 | lf task changes --help / -h | C101 | Shared help protocol applied to checkout comparison against a selected base. | N286; P:1040 | merge into → lf task diff --files --help | LOO-327; LOO-338; implemented on task diff --files; existing DTO preserved |
 | A382 | lf task diff <issue> | C102 | Inspection of checkout changes against a Task's base: Task issue identity. | N281; P:1049 | keep → <issue> | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A383 | lf task diff <path> | C102 | Inspection of checkout changes against a Task's base: command/definition path or checkout file path. | N287; P:1050 | keep → <path> | LOO-338 catalog and primary-source research; adopted target; implementation not implied |
 | A384 | lf task diff --base | C102 | Inspection of checkout changes against a Task's base: commit baseline for checkout inspection. | N288; P:1052 | keep → --base | LOO-338 catalog and primary-source research; adopted target; implementation not implied |

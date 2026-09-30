@@ -1891,13 +1891,13 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
 /// a root PR, or the live parent's branch tip for a stacked child), `H` = HEAD,
 /// and `M = merge-base(O, H)`. The parity invariant is `M == B`, which
 /// guarantees GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
-/// `lf task changes`:
+/// `lf diff --files`:
 /// - `M == B` — parity holds; publish.
 /// - `M` ancestor of `B` — the recorded base itself carries commits absent from
 ///   `O` (inherited foreign ancestry, the #877/#882 shape). Refuse before any
 ///   push, naming the foreign commits/files and the safe rebase.
 /// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
-///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
+///   heal `base_commit → M` so the durable evidence and `lf diff --files` stay
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
 ///   both sides (`M..B` and `B..M`) plus the safe rebase.
@@ -2121,7 +2121,7 @@ async fn verify_task_pr_range_mode(
 
     if crate::engine::git::is_ancestor(repo, &base, &merge_base)? {
         // B < M: the upstream advanced past a stale or squash-merged base.
-        // Heal the recorded base to the true fork point so lf task changes and
+        // Heal the recorded base to the true fork point so lf diff --files and
         // the durable evidence report the minimal M..HEAD range.
         match stale_base {
             StaleBaseAction::Accept => return Ok(()),

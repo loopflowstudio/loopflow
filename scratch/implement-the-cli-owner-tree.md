@@ -51,19 +51,21 @@ No competing model migration belongs here.
 
 ## This slice
 
-Integrate committed LOO-340 account behavior, then remove duplicate Account
-readers (C045 and C051). Bare Account refreshes identity/capacity; --cached is
-explicitly offline. Bare route owns route inspection; set remains the mutation.
-Preserve LOO-339 identity rejection and LOO-340 browser/cancellation behavior.
-Migrate callers and prove the public CLI in disposable Homes with fake providers.
+Merge C101 into C102: `task diff --files` owns changed-path inspection, while
+ordinary diff retains patches and stdin drafts. Remove the Changes parser leaf;
+migrate Desktop and documentation. Preserve the existing TaskChangesSnapshot
+and TaskDiffSnapshot wire shapes, exact base/head and rename evidence, and file
+revision/save behavior. Files mode excludes path/draft inputs, which select patch
+content. Prove real disposable Git comparisons through the public CLI and the
+native consumer's decoding, with retired input rejected before effects.
 
-LOO-298 remains an unfinished architectural cut at `a0c919803`, with independent
-fixes extracted to PRs #1358/#1359. LOO-334 is stacked there at `5a2e54b79` and
-still records a copied-Flow preservation failure. Their model integration and
-added Clap inventory remain required before Monitor and discovery work. LOO-340
-at `32b6eef00` has live-status and browser slices only; shared storage, per-provider
-launch bundles, Claude cached identity and resets remain its unfinished work.
-No prefix-only move or retirement of their unreplaced consumers belongs here.
+Dependency refresh at `1735f4e94`: LOO-298 `c7fcd31ec` records its independent
+fixes landed but retains the architectural cutover and acceptance on #1296.
+LOO-334 `2d63d6488` still records the copied-Flow failure: resolving original
+execution under selected development bytes conflicts with the production-store
+boundary. Do not weaken isolation or import that unfinished cut here. LOO-340
+remains `32b6eef00`, already integrated; no new account slice is available.
+The independent changed-file merge follows the supplied iteration direction.
 
 ## Slice ledger
 
@@ -736,3 +738,63 @@ restrictions, the real first-provider-result walkthrough, remaining catalog and
 R01–R10 requirements, final documentation and Jack Heart's demo remain required.
 Open Monitor view choices remain for Jack. Whole-design Done when claims do not
 hold; this review does not publish, land, complete the Task or choose navigation.
+
+### Task changed-file projection merge · 2026-09-30
+
+Starting revision `1735f4e94`. Refreshed committed destination evidence:
+LOO-298 `c7fcd31ec` records landed independent PRs #1358/#1359 but leaves its
+Exec/Session/FlowSession cut, import and configured acceptance on #1296.
+LOO-334 `2d63d6488` retains a failed copied-Flow continuation proof: selected
+development bytes refuse the preserved production directory after both Flow
+comparisons pass. LOO-340 remains the already-integrated `32b6eef00`. These are
+local committed-source observations; this pass performs no provider refresh,
+integration rebase, sibling edit or installed-store access. The required model
+integration is still unavailable under its preservation contract, so this pass
+implements the independent concept merge named in the preceding direction.
+
+C101 now merges into C102. `task diff --files` owns changed-path inventory;
+ordinary Diff retains patches, optional path and stdin draft comparison. Removed
+TaskCommand::Changes and its separate dispatch selection. Desktop's taskChanges
+reader invokes Diff's files projection and decodes its existing DTO. Updated
+current docs and code comments; remaining predecessor strings outside scratch
+are the negative test and historical release notes. No typed Flow mechanical
+Task-files operation exists to migrate. No alias or parallel model was added.
+
+Focused proof, with inherited LF_* cleared and LF_BIN pinned to this checkout's
+source binary for Rust checks:
+
+- `cargo test -p loopflow --test task_diff_tests --test cli_discovery --test documented_commands --jobs 4`:
+  1 + 13 + 3 passed. Public CLI on real disposable Git data preserves recorded,
+  head and pinned comparison bases; committed rename paths; staged, unstaged and
+  untracked states; patch rename evidence; draft non-mutation and file revision;
+  and revision-checked save. Removed Changes and incompatible files/path/draft
+  inputs exit 2 with empty stdout and no Home state creation. No planning/provider
+  service is contacted; Task registration is a fixture, not live discovery.
+- `swift test --package-path swift --filter taskWorkspaceQueriesDecode`: 1 passed,
+  proving native reader decoding through the new argv. Existing Ghostty linker
+  symbol warnings remain; no rendered desktop acceptance is claimed.
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`
+  and `git diff --check`: passed. No affected-suite or full gate ran.
+- `uv run python website/dev.py sync-docs --source docs`: regenerated 21 website
+  copies. No architecture page source changed.
+- `cargo run -p loopflow --example cli_catalog --jobs 4`: valid JSON captured before
+  replacing the retained extraction. Counts **137 → 136 commands below root,
+  433 → 431 flags, 92 → 91 positionals, zero aliases**, with 17 hidden commands.
+  New --files replaces three flag entries on Changes (base, JSON, help); Diff
+  already owns its issue positional. Catalog verdict and argument rows updated.
+
+Review retained separate TaskChangesSnapshot and TaskDiffSnapshot wire shapes:
+these are consumed projections of one comparison, not competing storage owners.
+It also retained the no-lifecycle file dispatch and prohibited meaningless
+files-plus-draft combinations at parsing, before stdin reads. The underlying
+file/revision functions and DTO fields stay unchanged. Measured against
+`1735f4e94`: **+16 / −17 production Rust lines**, plus **+1 / −1 Swift consumer
+line**. Counts use physical-line difflib comparison excluding cfg(test) modules,
+integration tests, scripts/examples, docs/generated output and scratch.
+
+Whole-design Done when remains unmet: LOO-298/334 integration, the remaining
+LOO-340 store/provider-bundle work, Monitor, discovery, destination child readiness,
+other catalog cuts and the live first-provider-result walkthrough still precede
+Jack Heart's demo. Preserve all explicit demo choices and public deferral labels
+until their proofs hold. This slice does not publish, land, complete the Task or
+choose Flow navigation.

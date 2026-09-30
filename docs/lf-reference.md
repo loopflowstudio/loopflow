@@ -484,7 +484,7 @@ identifies the retained state and the command to retry.
 ### Read and edit another Task's files
 
 ```bash
-lf task changes DES-123 --base head --json
+lf task diff DES-123 --files --base head --json
 lf task diff DES-123 src/parser.rs --base parent
 lf task file DES-123 src/parser.rs --json
 lf task save DES-123 src/parser.rs --revision REVISION --json < draft.rs
@@ -492,7 +492,10 @@ lf task save DES-123 src/parser.rs --revision REVISION --json < draft.rs
 
 File reads use recorded placement without starting a Run. Comparisons default
 to the recorded PR base (`parent`); use `head` for the current commit or a
-returned base SHA for a pinned comparison. `diff --draft` compares stdin
+returned base SHA for a pinned comparison. `diff --files --json` returns the
+changed-path inventory with base/head revisions, rename paths and working-tree
+states; ordinary `diff --json` returns the patch with binary/truncation evidence.
+`--files` excludes a file path and `--draft`. `diff --draft` compares stdin
 without writing it.
 
 Save requires the revision returned by file inspection. A detected conflict

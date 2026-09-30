@@ -253,7 +253,8 @@ codebase tree, and registry health.
 - **Tasks** own implementation worktrees and PR delivery and report directly
   to their Wave. The internal Project retains chapter planning and history;
   it has no separate operator.
-- **Task workspace presentation** reads `lf task changes/diff/file --json`.
+- **Task workspace presentation** reads `lf diff --files --json`,
+  `lf diff --json` and `lf file --json`.
   Lifecycle mutations remain `lf task run/interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs

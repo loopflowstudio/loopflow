@@ -976,18 +976,13 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List files changed from this Task's recorded base commit
-    Changes {
-        issue: String,
-        #[arg(long, default_value = "parent")]
-        base: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show this Task's patch, optionally limited to one changed file
+    /// Show this Task's patch or list its changed files
     Diff {
         issue: String,
         path: Option<String>,
+        /// List changed paths and comparison revisions instead of a patch
+        #[arg(long, conflicts_with_all = ["path", "draft"])]
+        files: bool,
         #[arg(long, default_value = "parent")]
         base: String,
         /// Compare a UTF-8 draft read from stdin without writing the worktree
@@ -2450,12 +2445,12 @@ mod tests {
 
     #[test]
     fn task_workspace_commands_address_the_task_then_optional_file() {
-        let changes = Cli::try_parse_from(["lf", "task", "changes", "INF-123", "--json"])
-            .expect("parse task changes");
+        let changes = Cli::try_parse_from(["lf", "task", "diff", "INF-123", "--files", "--json"])
+            .expect("parse changed files");
         assert!(matches!(
             changes.command,
             Some(Commands::Task {
-                cmd: TaskCommand::Changes { issue, json: true, .. }
+                cmd: TaskCommand::Diff { issue, files: true, json: true, .. }
             }) if issue == "INF-123"
         ));
 

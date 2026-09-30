@@ -8568,98 +8568,7 @@
     "short_aliases": []
   },
   {
-    "about": "List files changed from this Task's recorded base commit",
-    "aliases": [],
-    "hidden": false,
-    "kind": "command",
-    "path": [
-      "lf",
-      "task",
-      "changes"
-    ]
-  },
-  {
-    "action": "Set",
-    "defaults": [],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "issue",
-    "kind": "argument",
-    "long": null,
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "task",
-      "changes"
-    ],
-    "required": true,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Set",
-    "defaults": [
-      "parent"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "base",
-    "kind": "argument",
-    "long": "base",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "task",
-      "changes"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "SetTrue",
-    "defaults": [
-      "false"
-    ],
-    "global": false,
-    "help": null,
-    "hidden": false,
-    "id": "json",
-    "kind": "argument",
-    "long": "json",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "task",
-      "changes"
-    ],
-    "required": false,
-    "short": null,
-    "short_aliases": []
-  },
-  {
-    "action": "Help",
-    "defaults": [],
-    "global": false,
-    "help": "Print help",
-    "hidden": false,
-    "id": "help",
-    "kind": "argument",
-    "long": "help",
-    "long_aliases": [],
-    "path": [
-      "lf",
-      "task",
-      "changes"
-    ],
-    "required": false,
-    "short": "h",
-    "short_aliases": []
-  },
-  {
-    "about": "Show this Task's patch, optionally limited to one changed file",
+    "about": "Show this Task's patch or list its changed files",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -8697,6 +8606,27 @@
     "id": "path",
     "kind": "argument",
     "long": null,
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "diff"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": "List changed paths and comparison revisions instead of a patch",
+    "hidden": false,
+    "id": "files",
+    "kind": "argument",
+    "long": "files",
     "long_aliases": [],
     "path": [
       "lf",

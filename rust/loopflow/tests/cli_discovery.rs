@@ -195,7 +195,10 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
-        &["task", "wt", "list", "--full"][..],
+        &["task", "changes", "INF-123", "--json"][..],
+        &["task", "diff", "INF-123", "src.rs", "--files"],
+        &["task", "diff", "INF-123", "src.rs", "--files", "--draft"],
+        &["task", "wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
         &["task", "wt", "list", "--format", "json"],
         &["task", "commit", "--push"],

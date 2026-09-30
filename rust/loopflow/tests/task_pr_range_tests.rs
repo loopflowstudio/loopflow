@@ -5,8 +5,7 @@
 //! tested there. These tests drive the *real* `submit`/`land` publication path
 //! over a bare-origin fixture to prove the observable acceptance property the
 //! design demands: a contaminated range is refused **before any push or
-//! `gh pr`**, and a stale serial base heals so GitHub's range, `lf task
-//! changes`, and the recorded `base_commit` agree. W2-255 extends the proof
+//! `gh pr`**, and a stale serial base heals so GitHub's range, `lf diff --files`, and the recorded `base_commit` agree. W2-255 extends the proof
 //! matrix to divergent ancestry (both sides named), squash-merged parents,
 //! no-remote refusal, and serial rotation.
 
@@ -193,7 +192,7 @@ fn submit_refuses_a_contaminated_range_before_any_push() {
 /// The serial / dogfood shape: a continuation PR's recorded base sits behind the
 /// current `origin/main` because a sibling landed. `land` rebases, heals the
 /// base to the true fork point, and publishes a minimal range — proving the
-/// three views (recorded base, `lf task changes`, GitHub range) agree.
+/// three views (recorded base, `lf diff --files`, GitHub range) agree.
 #[test]
 fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -245,7 +244,7 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
     );
 
     // The three views agree. The recorded base is exactly the fork point
-    // GitHub would compute for the PR range — proving `lf task changes`
+    // GitHub would compute for the PR range — proving `lf diff --files`
     // (base..HEAD), the GitHub range (merge-base(origin/main, HEAD)..HEAD), and
     // the recorded base all describe the same commits.
     let github_fork_point = git_out(&repo, &["merge-base", "origin/main", "HEAD"]);

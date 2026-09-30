@@ -2952,7 +2952,7 @@
       "target": "lf task diff --files",
       "concept": "Checkout comparison against a selected base",
       "follows": "LOO-327; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented in Task diff files slice; public CLI and Desktop consumer proof; full Task incomplete"
     },
     {
       "row_id": "C102",
@@ -20976,7 +20976,7 @@
       "target": "lf task diff --files <issue>",
       "concept": "Checkout comparison against a selected base: Task issue identity.",
       "follows": "LOO-327; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on task diff --files; existing DTO preserved"
     },
     {
       "action": "Set",
@@ -21025,7 +21025,7 @@
       "target": "lf task diff --files --base",
       "concept": "Checkout comparison against a selected base: commit baseline for checkout inspection.",
       "follows": "LOO-327; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on task diff --files; existing DTO preserved"
     },
     {
       "action": "SetTrue",
@@ -21074,7 +21074,7 @@
       "target": "lf task diff --files --json",
       "concept": "Shared json protocol applied to checkout comparison against a selected base.",
       "follows": "LOO-327; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on task diff --files; existing DTO preserved"
     },
     {
       "action": "Help",
@@ -21121,7 +21121,7 @@
       "target": "lf task diff --files --help",
       "concept": "Shared help protocol applied to checkout comparison against a selected base.",
       "follows": "LOO-327; LOO-338",
-      "decision_state": "adopted target; implementation not implied"
+      "decision_state": "implemented on task diff --files; existing DTO preserved"
     },
     {
       "action": "Set",

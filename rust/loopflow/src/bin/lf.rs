@@ -1026,7 +1026,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             let task = loopflow::ops::task::task_status(issue.as_deref())?;
             print_task(&task, *json)
         }
-        TaskCommand::Changes { issue, base, json } => {
+        TaskCommand::Diff {
+            issue,
+            base,
+            json,
+            files: true,
+            ..
+        } => {
             let snapshot = loopflow::ops::task::task_changes(issue, base)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -1058,6 +1064,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             base,
             draft,
             json,
+            files: false,
         } => {
             let content = draft.then(read_task_draft).transpose()?;
             let snapshot =
@@ -1637,14 +1644,11 @@ fn execute_command(
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
             cmd:
-                cmd @ (TaskCommand::Changes { .. }
-                | TaskCommand::Diff { .. }
-                | TaskCommand::File { .. }
-                | TaskCommand::Save { .. }),
+                cmd @ (TaskCommand::Diff { .. } | TaskCommand::File { .. } | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd, cli),
-        Some(Commands::Task { cmd }) => {
-            in_repo_runtime(args, |repo| run_task_command(repo, cmd, cli))
-        }
+        Some(Commands::Task { cmd }) => in_repo_runtime(args, |repo| {
+            run_task_command(repo, cmd, cli)
+        }),
         Some(Commands::Usage {
             json,
             days,

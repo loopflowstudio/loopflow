@@ -31,6 +31,9 @@ pub(crate) fn is_steer(body: &str) -> bool {
 }
 
 pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
+    if body.contains("<!-- loopflow-progress:") {
+        return false;
+    }
     if is_steer(body) {
         return true;
     }
@@ -49,7 +52,7 @@ pub(crate) async fn publish_task_steer(
     text: &str,
 ) -> OpsResult<String> {
     let client = super::pm::issue_client(&task.worktree).await?;
-    let comment_id = publish_issue_comment(&client, task.plan.id.as_str(), text).await?;
+    let comment_id = publish_direction(&client, task.plan.id.as_str(), text).await?;
     refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
         "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
     )))?;
@@ -60,7 +63,25 @@ pub(crate) async fn publish_issue_comment(
     client: &LinearClient,
     issue: &str,
     text: &str,
+    steer: bool,
 ) -> OpsResult<String> {
+    if steer {
+        return publish_direction(client, issue, text).await;
+    }
+    if let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) {
+        let run_id = run_id.to_string_lossy();
+        let run_id = crate::session_record::parse_artifact_key(&run_id)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let marker = format!(
+            "<!-- loopflow-progress:{run_id}:{} -->",
+            uuid::Uuid::new_v4()
+        );
+        return publish_comment(client, issue, text, &marker).await;
+    }
+    publish_direction(client, issue, text).await
+}
+
+async fn publish_direction(client: &LinearClient, issue: &str, text: &str) -> OpsResult<String> {
     let text = text.trim();
     if text.is_empty() {
         return Err(OpsError::Message("Task direction cannot be empty".into()));
@@ -303,6 +324,36 @@ pub(crate) mod tests {
     }
 
     const VIEWER: &str = "user-loopflow";
+
+    #[test]
+    fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {
+        let obs = observation(
+            "title",
+            "body",
+            vec![
+                comment(
+                    "progress",
+                    "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
+                    Some(VIEWER),
+                ),
+                comment("person", "keep the API", Some(VIEWER)),
+                comment(
+                    "explicit",
+                    "new instruction <!-- loopflow-steer:explicit -->",
+                    None,
+                ),
+            ],
+        );
+        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
+        assert_eq!(
+            apply
+                .follow_ups
+                .iter()
+                .map(|follow| follow.comment_id.as_str())
+                .collect::<Vec<_>>(),
+            ["person", "explicit"]
+        );
+    }
 
     #[test]
     fn request_authors_survive_linear_direction_rendering() {

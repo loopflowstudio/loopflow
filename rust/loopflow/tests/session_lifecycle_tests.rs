@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 struct Fixture {
     home: tempfile::TempDir,
@@ -907,7 +908,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: rebase --plan\n",
+        "- cmd: sync --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -1661,11 +1662,9 @@ raise SystemExit(1 if failed else 0)
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     let account_home = fixture.home.path().join("accounts/claude/fixture");
     std::fs::create_dir_all(&account_home).unwrap();
-    std::fs::write(
-        account_home.join(".credentials.json"),
-        r#"{"claudeAiOauth":{"accessToken":"synthetic-fixture-token","expiresAt":4102444800000}}"#,
-    )
-    .unwrap();
+    let credential =
+        r#"{"claudeAiOauth":{"accessToken":"synthetic-fixture-token","expiresAt":4102444800000}}"#;
+    std::fs::write(account_home.join(".credentials.json"), credential).unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1675,9 +1674,15 @@ raise SystemExit(1 if failed else 0)
             provider: "claude".into(),
             account_id: account_id.clone(),
             home: Some(account_home),
-            login_email: None,
-            observed_email: None,
-            observed_subject: None,
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: Some("fixture@example.com".into()),
+            observed_subject: Some("fixture".into()),
+            observed_credential_digest: Some(format!(
+                "{:x}",
+                Sha256::digest(credential.as_bytes())
+            )),
             observed_plan: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,

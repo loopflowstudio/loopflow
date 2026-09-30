@@ -10,7 +10,7 @@ import GhosttyKit
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Unified workspace navigation proof")
+@Suite("Unified workspace navigation proof", .requiresDisplay)
 @MainActor
 struct WorkspaceNavigationProofTests {
     @Test("The work list retains its viewport through presentations, refresh and repository return")

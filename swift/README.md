@@ -406,3 +406,15 @@ and clears its evidence before starting the new one. Pipes drain off the main
 actor, frames are limited to 16 MiB, and pending delivery retains only the latest
 snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
 closes stdin, then terminates and reaps only the owned reader if necessary.
+
+## Headless checks
+
+```bash
+scripts/test_desktop.sh --filter DesktopHeadlessTests
+uv run python scripts/test.py --swift
+```
+
+Gate and CI build the app and inspect production views and controls without
+launching a window. Display/terminal integration is opt-in with
+`LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
+See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.

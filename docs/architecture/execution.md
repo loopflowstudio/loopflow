@@ -100,12 +100,13 @@ Session state. The continuing engine retains its provider generation while the
 new driver receives a new driver generation. Engine ownership and driver ownership
 must not be collapsed into one counter.
 
-Explicit restart stops only the exact conversation owner, preserves its recorded
-native identity and history, and excludes late writes from the replaced provider.
-Graceful stop precedes force termination of an exclusively owned process. A shared
-engine and sibling conversations survive a thread-specific restart. Mere process
-silence, tmux visibility, causal ancestry or a stored active label grants no
-termination authority.
+`session connect --replace` stops the exact owned clients and reconnects to the
+live engine, preserving the active turn and sibling conversations. Flow retry
+can resume the recorded native conversation after confirmed engine exit;
+the replacement provider generation excludes late writes from the old provider.
+There is no separate Session engine-restart operation. Mere process silence,
+tmux visibility, causal ancestry or a stored active label grants no termination
+authority, and recovery never authorizes killing a shared engine for one thread.
 
 ## Outcomes, retries and usage
 
@@ -135,8 +136,8 @@ The shared typed history reader selects captured events and unlinked native turn
 before decoding payloads. Native receipts without a start stay discoverable with
 unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
 separate from provider completion and Exec exit.
-Binding affects later work and preserves earlier usage ownership, as Jack Heart
-decided on 2026-09-30. The history reader owns this single attribution choice. Active-turn allocation uses recorded
+Binding affects later work and preserves earlier usage ownership. The history
+reader owns this single attribution choice. Active-turn allocation uses recorded
 start/assignment evidence; uncertainty never becomes an invented token split.
 
 ## Read indexed history
@@ -156,22 +157,20 @@ no selected occurrence keeps its membership with an unknown position; missing
 historical membership never becomes Independent. Unknown or corrupt detail remains
 available for exact inspection instead of preventing unrelated rows from listing.
 
-Current Session contains-search, title/ID ordering, offset/limit and Desktop's
-complete-inventory reconciliation are unchanged. Final paging and dense discovery
-measurements remain separate work. Metadata selection still returns variable-size
-recorded names, readiness text and iteration tuples and checks exact client receipts;
-it is not a constant-byte or constant-time query guarantee.
+Session lists support contains-search and title/ID ordering; stable ID pages serve
+Desktop's complete-inventory reconciliation. Names, readiness text and iteration
+tuples vary in size, and listing checks exact client receipts. The query therefore
+has no constant-byte or constant-time guarantee. Measurement status belongs in
+the [cutover status](../architecture-reference.md#cutover-status).
 
 Typed Task/Wave links survive landing and provider/driver replacement. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.
 Default interactive visibility does not hide headless history from explicit queries
 or make it impossible to resume. Desktop and CLI consume the same fields.
 
-Historical Run IDs, captures, sidecars, command journal rows and repeated outcomes
-are one-time import inputs. Preserve unknown membership and original attribution;
-do not infer an actual process from a provider-launch record alone. Ordinary reads
-neither import nor fall back to those files. After verified conversion, the separate
-Run product owner and its competing readers are removed.
+Current-state conversion and its preservation boundary belong in
+[Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
+owners, with no legacy import or file fallback.
 
 [Planning](planning.md) owns captured Flow progression and planning ancestry.
 [Data and persistence](data.md) distinguishes record ownership from payload storage.

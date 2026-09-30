@@ -163,7 +163,7 @@ struct TaskFlowTests {
 }
 
 #if canImport(GhosttyKit)
-@Suite("Task Flow native proof", .serialized)
+@Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
     @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")

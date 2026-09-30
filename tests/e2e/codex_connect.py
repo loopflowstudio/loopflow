@@ -409,6 +409,8 @@ def _provider_entry() -> None:
         (Path(os.environ["LF_PROBE_ENGINES"]) / f"{pid}.json").write_text(json.dumps([pid, stamp]))
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if "--remote" not in sys.argv:
+        if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
+            raise RuntimeError("public connect bypassed the retained engine relay")
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     # A controlled native-protocol client exercises public lf connect. This is
     # deliberately not evidence of the rendered Codex TUI or Desktop.
@@ -478,6 +480,7 @@ def _public_connection_contract(
 ) -> None:
     session = results["session_id"]
     processes = []
+    replaced = []
     controls = []
     inspectors = []
 
@@ -486,7 +489,11 @@ def _public_connection_contract(
         while not path.exists():
             assert time.monotonic() < deadline, f"timed out: {path}"
             for child in processes:
-                assert child.poll() is None, f"connect exited: {child.returncode}"
+                if child in replaced:
+                    continue
+                if child.poll() is not None:
+                    _, error = child.communicate(timeout=5)
+                    raise AssertionError(f"connect exited: {child.returncode}: {error.decode()}")
             time.sleep(0.02)
 
     def call(index: int, sequence: int, method: str, params: dict, rejected: bool = False):
@@ -497,6 +504,24 @@ def _public_connection_contract(
         output = root / f"{sequence}.response"
         wait(output)
         return json.loads(output.read_text())
+
+    def _connect(label: str, *, replace: bool = False) -> None:
+        control = work.parent / f"{session}-{label}"
+        control.mkdir()
+        controls.append(control)
+        argv = [str(binary), "session", "connect", session]
+        if replace:
+            argv.append("--replace")
+        processes.append(
+            subprocess.Popen(
+                argv,
+                cwd=work,
+                env={**env, "LF_PROBE_CLIENT": str(control)},
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        )
+        wait(control / "ready")
 
     try:
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
@@ -514,18 +539,7 @@ def _public_connection_contract(
         engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
-            control = work.parent / f"{session}-{label}"
-            control.mkdir()
-            controls.append(control)
-            child = subprocess.Popen(
-                [str(binary), "session", "connect", session],
-                cwd=work,
-                env={**env, "LF_PROBE_CLIENT": str(control)},
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            processes.append(child)
-            wait(control / "ready")
+            _connect(label)
             if label == "first":
                 call(0, 0, "thread/read", {"threadId": thread})
                 with sqlite3.connect(env["LF_DB_PATH"]) as database:
@@ -574,7 +588,47 @@ def _public_connection_contract(
             engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
             == "active"
         )
+        # Explicit client replacement must use the same live-engine path as
+        # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
+            before_prepare = database.execute(
+                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
+                "provider_generation FROM agent_sessions WHERE id=?",
+                (session,),
+            ).fetchone()
+        prepared = _command(
+            [str(binary), "session", "connect", session, "--replace", "--json"],
+            work,
+            env,
+            timeout=15,
+        )
+        assert prepared.returncode == 0, prepared.stderr
+        assert "--replace" in json.loads(prepared.stdout)["open_argv"]
+        assert all(previous.poll() is None for previous in processes)
+        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+            after_prepare = database.execute(
+                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
+                "provider_generation FROM agent_sessions WHERE id=?",
+                (session,),
+            ).fetchone()
+        assert after_prepare == before_prepare
+        replaced.extend(processes)
+        _connect("replacement", replace=True)
+        for previous in replaced:
+            previous.communicate(timeout=10)
+        assert (
+            engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
+        )
+        assert (
+            engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
+            == "active"
+        )
+        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+            retained_connection = database.execute(
+                "SELECT provider_endpoint,provider_thread,provider_generation "
+                "FROM agent_sessions WHERE id=?",
+                (session,),
+            ).fetchone()
             driver, observed_generation, interactive = database.execute(
                 "SELECT driver_exec_id,provider_generation,interactive "
                 "FROM agent_sessions WHERE id=?",
@@ -582,6 +636,8 @@ def _public_connection_contract(
             ).fetchone()
             before = {row[0] for row in database.execute("SELECT id FROM execs")}
         assert observed_generation == generation and interactive == 1
+        assert retained_connection == (endpoint, thread, generation)
+        assert driver != before_prepare[0]
         server.release.set()
         engine.wait_turn(active)
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
@@ -595,7 +651,7 @@ def _public_connection_contract(
         assert (child_parent, child_session, child_generation) == (driver, session, generation), (
             children
         )
-        call(1, 0, "thread/read", {"threadId": thread, "includeTurns": True})
+        call(2, 0, "thread/read", {"threadId": thread, "includeTurns": True})
         history_command = [str(binary), "session", "history", session, "--json", "--limit", "0"]
         recorded = _command(history_command, work, env, timeout=15)
         assert recorded.returncode == 0, recorded.stderr
@@ -610,7 +666,7 @@ def _public_connection_contract(
             if event["kind"] == "usage" and event["provider_turn"] == active
         ]
         assert usage and usage[-1]["payload"]["total"]["inputTokens"] > 0, history
-        call(1, 1, "thread/read", {"threadId": thread, "includeTurns": True})
+        call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
         replay = _command(history_command, work, env, timeout=15)
         assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
         results["history"] = history
@@ -619,6 +675,7 @@ def _public_connection_contract(
             driver=driver,
             retained_client_rejected=True,
             active_turn_and_sibling_survived=True,
+            replaced_clients_exited=True,
             nested_child_id=child_id,
             nested_child_parent=child_parent,
             nested_child_session=child_session,

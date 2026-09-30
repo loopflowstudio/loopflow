@@ -701,11 +701,13 @@ impl Store {
         email: &str,
         subject: &str,
         plan: Option<&str>,
+        credential_digest: Option<&str>,
     ) -> StoreResult<()> {
         let provider = provider.to_string();
         let account_id = account_id.clone();
         let email = email.to_string();
         let subject = subject.to_string();
+        let credential_digest = credential_digest.map(str::to_string);
         let plan = plan.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
             store.record_provider_account_identity(
@@ -714,6 +716,7 @@ impl Store {
                 &email,
                 &subject,
                 plan.as_deref(),
+                credential_digest.as_deref(),
             )
         })
         .await
@@ -1068,6 +1071,7 @@ pub struct ProviderAccount {
     pub login_email: Option<EmailAddress>,
     pub observed_email: Option<String>,
     pub observed_subject: Option<String>,
+    pub observed_credential_digest: Option<String>,
     pub observed_plan: Option<String>,
     pub credential_state: CredentialState,
     pub routing_state: RoutingState,
@@ -2952,7 +2956,7 @@ mod tests {
         // A parent update moves the child's durable fork without changing its
         // ownership or parent link.
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "parent-tip-2",
                 false,
@@ -2960,16 +2964,16 @@ mod tests {
             )
             .await
             .unwrap();
-        let rebased = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
-        assert_eq!(rebased.base_commit, "parent-tip-2");
-        assert_eq!(rebased.parent_pr_id, Some(parent.id.clone()));
+        let synced = store.get_task_pr(&child_pr.id).await.unwrap().unwrap();
+        assert_eq!(synced.base_commit, "parent-tip-2");
+        assert_eq!(synced.parent_pr_id, Some(parent.id.clone()));
 
         // The parent merges; the child collapses onto main, dropping the link.
         parent.merge_commit = Some("merge-200".to_string());
         parent.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&parent).await.unwrap();
         store
-            .rebase_task_pr(
+            .sync_task_pr(
                 &child_pr.id,
                 "main-after-200",
                 true,
@@ -3033,7 +3037,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_pr_is_skipped_when_task_completes() {
+    async fn empty_pr_is_retired_with_cleanup_identity_when_task_completes() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             dir.path().join("registry.db"),
@@ -3058,7 +3062,12 @@ mod tests {
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
-        assert!(stored.is_empty());
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, pr.id);
+        assert_eq!(stored[0].branch, pr.branch);
+        assert_eq!(stored[0].base_commit, pr.base_commit);
+        assert_eq!(stored[0].phase(), PrPhase::Abandoned);
+        assert!(store.active_task_pr(&task.id).await.unwrap().is_none());
     }
 
     async fn run_store_basic_suite(store: &super::Store) {
@@ -3310,6 +3319,7 @@ mod tests {
             login_email: Some(EmailAddress::parse(&format!("{account_id}@example.com")).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
@@ -3467,5 +3477,93 @@ mod tests {
             .expect("query provider token");
         assert_ne!(raw_access, "gho_plaintext");
         assert!(encrypted);
+    }
+    #[tokio::test]
+    async fn task_abandonment_fences_claims_and_removes_waiting_flow_without_erasing_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("store.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
+        let position = store
+            .start_task_flow(
+                &task.id,
+                task_flow(
+                    &task,
+                    crate::durable::test_flow_invocation("code", 0, "implement", None, false),
+                    Default::default(),
+                ),
+            )
+            .await
+            .unwrap();
+        let owner = TaskWorkerOwner {
+            trace_id: TraceId::new(),
+            exec_id: ExecId::new(),
+            pid: 502,
+            started_at: 1_700_000_000,
+        };
+        let TaskWorkerClaimOutcome::Claimed(claim) = store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("claimed worker")
+        };
+        let work = WorkRef::Task(task.id.clone());
+        assert!(store.begin_task_abandon(&task.id).await.is_err());
+        assert!(store.abandon(&work, "canceled").await.is_err());
+        assert_eq!(
+            store.task_flow(&task.id).await.unwrap().unwrap().claim,
+            Some(claim.clone())
+        );
+        let held = store.task_flow(&task.id).await.unwrap().unwrap();
+        let position = store
+            .release_flow(held.id(), held.version, Some(&claim))
+            .await
+            .unwrap();
+        store.begin_task_abandon(&task.id).await.unwrap();
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
+
+        store.abandon(&work, "canceled").await.unwrap();
+        assert!(store.task_flow(&task.id).await.unwrap().is_none());
+        assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+        assert!(store
+            .get_task_by_issue(&task.plan.identifier)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .claim_task_worker(
+                &task.id,
+                &position.invocation.id,
+                position.version,
+                &owner,
+                time::OffsetDateTime::now_utc()
+            )
+            .await
+            .is_err());
     }
 }

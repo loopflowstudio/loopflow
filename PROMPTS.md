@@ -35,6 +35,24 @@ this file, and a compile-time test protects its load-bearing sections. The
 bundled `prompt` skill is self-contained; it does not depend on customer repos
 having this file.
 
+## Persisted plans survive their authoring session
+
+Record named, dated decisions, explicit draft or acceptance status, remaining
+work, and a one-line check result. Do not persist session/step instructions or facts about the
+current Home in plans. Report failed lookups as dated evidence separately.
+Historical skill invocations use plain names; dollar-prefixed mentions can
+activate installed native skills even inside Markdown quotes or code blocks.
+Keep verbatim transcripts as reference evidence, without silently editing quotes.
+
+Prompt assembly labels scratch as reference material and encodes dollar signs
+in references as `&#36;`, with an explicit notation key. Original files and
+gathered source components stay unchanged; Run context captures the submitted
+bytes with source attribution. Direct skill requests remain active.
+Scratch gathering warns with path and line about relative execution framing,
+ambient Home claims, and skill-shaped mentions, including nested/untracked
+Markdown. Warnings are review signals, not a claim that every quoted example
+is wrong; they never block launch or rewrite a source file.
+
 ## Keep instructions with their consumer
 
 Builtin prompts ship to customers. Write them for a repository that has none of
@@ -108,11 +126,13 @@ to judge well; the review should supply them without choosing the navigation
 outcome. Avoid duplicating the plan or accumulating reports by default.
 
 Keep evidence that changes a decision, unresolved counterexamples, accepted
-constraints, and consequential rationale. Link durable proof instead of copying
-it. When working notes are needed, use topic-named Markdown under `scratch/`
+constraints, and consequential rationale. Keep one command/result line in scratch;
+link logs only when needed to diagnose a failure. Gate owns automated acceptance
+once; implement/compress only build and run focused tests. Generate headless
+checks only. A missing environment goes to capable gate/CI, and judgment goes
+to demo/review; neither blocks earlier work. When working notes are needed, use topic-named Markdown under `scratch/`
 that makes sense without the producing conversation. Handoffs link the current
-artifacts and summarize enough evidence for the next decision, including proof
-limits. They do not grant execution authority. Update an existing summary when
+artifacts and name any remaining decision or deferred check owner. They do not grant execution authority. Update an existing summary when
 it serves the handoff; a no-op needs no new artifact.
 
 Define the finish line before the procedure. A strong prompt makes five things
@@ -418,8 +438,8 @@ branch convention, Task binding, or report filename is usually incidental.
 For example, realign needs intent and work to reconcile. It edits the plan,
 code, and identified Wave's memory after implementation, upstream integration,
 or during a conversation. Work without a Wave still has useful inputs. A caller
-can compose rebase → realign or implement → compress → realign → loop-decide.
-Rebasing, publication, and navigation stay explicit in that composition.
+can compose sync → realign or implement → compress → realign → loop-decide.
+Synchronization, publication, and navigation stay explicit in that composition.
 
 Keep real domain constraints and authority boundaries. A release skill still
 needs a release target; an interactive product decision still needs the person

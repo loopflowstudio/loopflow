@@ -128,6 +128,13 @@ pub(super) fn execute(
             command.env_remove(name);
         }
     }
+    if let Some(selection) = std::env::var_os(crate::provider_account::lease::ACCOUNT_SELECTION_ENV)
+    {
+        command.env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            selection,
+        );
+    }
     if let Some(declaration) = std::env::var_os(crate::lf::WORK_DECLARATION_ENV) {
         command.env(crate::lf::WORK_DECLARATION_ENV, declaration);
     }

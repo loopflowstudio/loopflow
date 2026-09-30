@@ -9,6 +9,12 @@ import yaml
 from scripts.check_ci_proof import find_merge_proof
 
 
+@pytest.fixture(scope="module")
+def _ci_jobs() -> dict[str, dict]:
+    workflow = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
+    return yaml.safe_load(workflow.read_text())["jobs"]
+
+
 def _run(**changes: object) -> dict[str, object]:
     return dict(
         {
@@ -84,17 +90,75 @@ def test_unavailable_github_keeps_full_matrix(
     [
         ("", {}, 0),
         ("", {"PYTHON_TEST": "skipped"}, 1),
+        ("", {"SCRATCH_CLEAR": "failure"}, 1),
+        ("", {"SCRATCH_CLEAR": "cancelled"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"PYTHON_TEST": "skipped"}, 0),
+        ("https://github.com/owner/repo/actions/runs/42", {"SCRATCH_CLEAR": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"RUST_TEST": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"SWIFT_TEST": "cancelled"}, 1),
     ],
 )
 def test_actual_workflow_gate_requires_proof_and_successful_warming(
-    proof: str, changes: dict[str, str], expected: int
+    _ci_jobs: dict[str, dict], proof: str, changes: dict[str, str], expected: int
 ) -> None:
-    workflow = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
-    gate = yaml.safe_load(workflow.read_text())["jobs"]["tests-result"]["steps"][0]
+    gate = _ci_jobs["tests-result"]["steps"][0]
     env = {**os.environ, **dict.fromkeys(gate["env"], "success")}
     env.update(REUSED_PROOF=proof, **changes)
     result = subprocess.run(["bash", "-c", gate["run"]], env=env, capture_output=True, text=True)
     assert result.returncode == expected, result.stdout
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+@pytest.mark.parametrize("scratch", ["clear", "notes", "nested", "missing"])
+def test_checkpoint_defers_proof_but_queue_requires_clear_scratch(
+    _ci_jobs: dict[str, dict], tmp_path: Path, event: str, scratch: str
+) -> None:
+    if scratch != "missing":
+        (tmp_path / "scratch").mkdir()
+        (tmp_path / "scratch/.gitkeep").touch()
+    if scratch == "notes":
+        (tmp_path / "scratch/design.md").write_text("Work in progress")
+    if scratch == "nested":
+        (tmp_path / "scratch/proofs").mkdir()
+        (tmp_path / "scratch/proofs/.hidden").touch()
+    step = _ci_jobs["scratch-clear"]["steps"][1]
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "EVENT_NAME": event,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        text=True,
+    )
+    if scratch == "clear":
+        assert result.returncode == 0, result.stdout
+        assert output.read_text() == "candidate=true\n"
+    elif event == "pull_request" and scratch != "missing":
+        assert result.returncode == 0, result.stdout
+        assert output.read_text() == "candidate=false\n"
+        assert "hosted proof is deferred" in summary.read_text()
+    else:
+        assert result.returncode == 1, result.stdout
+        assert not output.exists()
+
+
+def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
+    _ci_jobs: dict[str, dict],
+) -> None:
+    jobs = _ci_jobs
+    matrix = set(jobs) - {"merge-proof", "scratch-clear", "tests-result"}
+    assert set(jobs["tests-result"]["needs"]) == matrix | {"merge-proof", "scratch-clear"}
+    for name in matrix:
+        assert set(jobs[name]["needs"]) == {"merge-proof", "scratch-clear"}
+        assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
+    assert jobs["tests-result"]["if"] == (
+        "${{ always() && (github.event_name != 'pull_request' || "
+        "needs.scratch-clear.result != 'success' || "
+        "needs.scratch-clear.outputs.candidate != 'false') }}"
+    )

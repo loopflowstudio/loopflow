@@ -48,7 +48,7 @@ Write findings and the change design to `scratch/testing-audit.md`.
      or implementation structure unless they protect a concrete safety rule.
    - Replace broad inner-loop runs with focused behavior, affected-suite gates,
      and exact-tree evidence reuse.
-   - Give implement, compress, rebase, gate, CI/release, and realign distinct
+   - Give implement, compress, sync, gate, CI/release, and realign distinct
      proof ownership so a phase transition does not trigger a redundant run.
    - Prefer real configured/deployed product proof when it is safe and
      observable. Never mutate production solely for an audit or review.

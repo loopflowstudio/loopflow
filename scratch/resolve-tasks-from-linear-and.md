@@ -111,6 +111,56 @@ recursive locking and decoy agent PATH, Session-owner discovery, chapter archive
 integration and the separate pending relationship Ask remain open. No publication,
 host promotion, Task completion or Flow navigation follows from this cut.
 
+### Slice review — receipt-pinned continuation, 2026-09-30
+
+Reviewed `3b4cd6592..5a2e54b79` and the bounded fixture correction below.
+The installation continuation reuses the receipt, exclusive coordinator lock and
+exact candidate verification. Recovery checks its caller against the receipt's
+database read-only; ordinary promotion also checks the selected store. This fixes
+the first-install selection cycle without deleting Task-owned refusal. Production
+Rust is **+57 / −40 physical lines** across three files (net +17), excluding
+tests, docs, scratch and inherited parent work. Shared executable fallback removes
+the duplicated current/sibling lookup; no runtime owner or migration is added.
+
+The required full harness at `5a2e54b79` reproduced the copied-Flow mismatch after
+all four migration checks and both executable builds passed. Log:
+`.lf/tmp/loo334-review-receipt-installation.log`. Resource preflight passed at
+47.4 GiB free. The writer is `publish_review_run`, called by the separately
+launched review skill: its transaction increments the Flow version and publishes
+the selected Session input. Parking the worker and `session open --json` do not
+wait for that child. The fixture now waits for publication before promotion and
+checks that the selected review, captured event and cursor remain unchanged;
+both full copied-store and predecessor-store comparisons remain in place.
+
+The focused rerun,
+`uv run python scripts/test_task_installation.py --test normal_promotion_preserves_pending_task_review`,
+logged **version 2 → 3, published false → true, captured 1 before either promotion
+command**. Both full Flow preservation assertions then passed. This resolves the
+prior mismatch as concurrent review publication, not a demonstrated copy mutation.
+First-install advance/recovery inside Git, both Task-owned refusals, the first
+worker and unmanaged development promotion also passed. Log:
+`.lf/tmp/loo334-review-published-review.log`.
+
+**Continuation remains blocked.** The next public `task status INF-123 --json`
+failed with `execution exists in multiple distinct locations`, naming the ordinary
+promotion copy and its retained predecessor. `task_destination::existing_execution`
+rejects every pair of distinct matching stores; it cannot recognize this supported
+installation succession. Next implementation must resolve normal-copy succession
+from retained installation/execution evidence while keeping genuine divergence
+explicit. Neither equal Home IDs, timestamps nor an unconditional preference for
+the selected store establishes ownership. Do not weaken that refusal globally.
+
+Exact post-switch review continuation/completion and the second worker/digest
+assertions were not reached. The normal-promotion fixture still lacks poisoned
+PATH/LF_BIN/LF_CONTROL_BIN; the separate fixture cannot substitute for that combined
+proof. Recursive locks and decoy agent PATH, Session-owner discovery, chapter
+archive integration, the pending relationship-repair Ask and full cases 1–15 stay
+open. This required failing proof stops the slice review; no publication or Flow
+navigation follows. No host installation was touched. Both proof containers were
+independently confirmed absent after cleanup. Fresh formatting, all-target Clippy
+(`.lf/tmp/loo334-review-receipt-clippy.log`) and diff checks passed. The review changes
+only fixture synchronization and this section; it adds no production behavior.
+
 ### Slice review — migration integration, 2026-09-30
 
 Reviewed `08e70e45c..d6f71dcc2` against Jack Heart's completed migration unblock.

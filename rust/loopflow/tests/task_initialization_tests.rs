@@ -554,11 +554,39 @@ fn normal_promotion_preserves_pending_task_review() {
         String::from_utf8_lossy(&before.stderr)
     );
     let before: serde_json::Value = serde_json::from_slice(&before.stdout).unwrap();
-    // Preserve the exact review state immediately before promotion.
-    let position = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
+    // The parked worker launches the review in a separate process. Observe its
+    // publication before copying a pending review, not while it is still starting.
+    let reserved = &position;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let position = loop {
+        let position = runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .unwrap();
+        if position.review_artifact_key().is_some() {
+            break position;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "review did not publish before promotion: {}",
+            fs::read_to_string(&log).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(position.pending_session_id, reserved.pending_session_id);
+    assert_eq!(position.cursor, reserved.cursor);
+    assert_eq!(
+        position.current_attempt.as_ref().unwrap().captured,
+        reserved.current_attempt.as_ref().unwrap().captured
+    );
+    eprintln!(
+        "review publication before promotion: version {} -> {}, published {} -> {}, captured {}",
+        reserved.version,
+        position.version,
+        reserved.current_attempt.as_ref().unwrap().published,
+        position.current_attempt.as_ref().unwrap().published,
+        position.current_attempt.as_ref().unwrap().captured,
+    );
 
     // Both installations use real promotion. The development switch includes
     // preflight, SQLite backup, activation and settlement.

@@ -17,6 +17,87 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
+### This slice — predecessor completion, 2026-09-30
+
+Continued from `44b2ec74e`, preserving the supplied unfinished chapter/Linear
+edits before extending them. `apply_rotation` now completes each predecessor
+Project after transfer/backlog disposition, then archives it through the existing
+retryable chapter operation. The former archive-only adapter entry point is
+removed. Completion selects the first completed status by provider position and
+ID within the current status's team/workspace scope, acquiring every status page.
+Confirmed completion and archive acknowledgement remain separate evidence.
+No schema or execution ownership changes are introduced.
+
+Self-review against the pinned [Linear SDK schema](https://github.com/linear/linear/blob/b37823be308a42f837277671f3ded66d33d92e6c/packages/sdk/src/schema.graphql)
+found that `ProjectPayload.project` is nullable. The adapter
+now reports an unconfirmed completion for null or non-completed mutation results,
+even with `success: true`; it cannot continue to archive. The existing stateful
+chapter proof covers refused completion, lost completion response, lost archive
+response, normal completion on the following chapter, and retries preserving
+Task/PR identity and dated KR/metric history. Statuses on another team or workspace
+cannot supply a completion status for the fixture's team-scoped Project.
+Previously completed chapter receipts are not rewritten or treated as proof that
+historical provider Projects received the newly added completion mutation.
+
+The full single-PR design remains unfinished. This slice does not establish Task
+discovery, official-runtime switching, recursive locks, local lifecycle or the
+command story. `task_destination.rs`, `engine/process.rs`, and installed-store
+resolution still couple the runtime to its installation's database. Normal Task
+and Session operations must remove that need for manual routing; a diagnostic
+reach command alone no longer meets Jack's clarified acceptance requirement.
+
+Proof for this slice:
+
+- `cargo test -p loopflow --lib chapter_rotation_previews_retries_and_preserves_dated_history -- --nocapture`
+  passed (one stateful chapter test, including the new failure/retry paths).
+- `cargo test -p loopflow --lib complete_and_archive_project` passed (two adapter
+  tests, including success-with-null/non-completed results and archive refusal).
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and
+  `git diff --check` passed. No affected-suite or repository gate ran.
+- Compared with `44b2ec74e`, production Rust is +153 / -6 lines across
+  `ops/chapter.rs` and `pm/linear.rs`, excluding test modules, docs, scratch and
+  generated files. This includes the preserved incoming edits; it is not all new
+  authorship in this pass. The archive-only public adapter and its caller were
+  replaced, with no remaining `archive_project` method/call.
+- Full-design command `uv run python scripts/test_task_installation.py` was not
+  run in this slice: its existing cases still do not implement the required
+  installation-switch/Session/recursive-lock acceptance matrix. The new chapter
+  proof uses a simulated provider and disposable database; no configured Linear
+  mutation or installed-Home source execution occurred. The full Done When is
+  unfulfilled. Relationship-repair and outage/transition decisions remain open.
+
+### Execution contract and recursive locks — 2026-09-30
+
+Jack supplied successful LOO-298 coordination from a bounded read-only contribution
+at `4f4edff9b` through `d61295196`; the intervening change was documentation only.
+The earlier unregistered response below is historical, not a current coordination
+blocker. Task owns stable identity/Project/Wave/checkout/PR evidence. AgentSession
+and session_events own conversation/captured input/native execution/usage;
+FlowSession and flow_events own captured graph/cursor/claims/review; Exec owns
+process evidence. Runtime Run storage is removed there. The approved removal of
+runtime child FlowSessions and preserving migration are still outstanding. Put
+neither discovery nor lock policy on child FlowSession identity.
+
+Use WorkCatalog/work_identities for discovery, TaskExecutionSnapshot for claim and
+process evidence, task_run for continuation, and the shared skill-command executor.
+Local planning must preserve Task and PR/Session/Flow/event/import identities.
+Keep forward draft checksums and prove released-history and draft-Session frontiers
+separately. Claim acquisition alone is not Started, and driver death does not prove
+provider death. The contribution establishes a source contract, not tests, provider
+acceptance or integration. This branch still has the earlier execution model;
+LOO-298 remains unfinished and unaccepted, and its checkout must remain untouched.
+
+Jack's recursive-lock steer requires PATH propagation through all descendants,
+including commands typed by an agent. Source tracing here finds all three provider
+launchers calling `configure_vendor_std_env`; development launches currently rebuild
+PATH from the parent process, potentially replacing `AgentConfig.env`'s PATH.
+Codex additionally disables login shells and shell snapshots. Those findings do not
+prove recursive lock behavior. The selected contract and new acceptance cases
+below require real child/shell evidence for Codex, Claude and OpenCode. Jack reports
+that LOO-298 is moving its Flow children to PATH lookup to honor this contract.
+
+### Earlier planning checkpoint
+
 Reconciled against `01f7814ef`, including the planning-evidence implementation
 at `3508257b0` and its subsequent compression. The connected
 planning slice is implemented; the full approved single-PR outcome remains open.
@@ -252,12 +333,13 @@ single-PR acceptance matrix and all other remaining scope below are retained.
    launch/resume/worker boundary. Prove ordinary Flow and Session independence
    from invalid/terminal managed Tasks. Do not infer execution permission from
    retained inspection or cache invalidation.
-4. Obtain LOO-298's execution contract, then implement bounded cross-store
+4. Integrate against LOO-298's received execution contract, then implement bounded cross-store
    discovery, independent official-runtime selection, deliberate pins and delayed
    startup. Preserve existing identities, claims and captured invocations.
 5. Implement contextual Wave imports and the remote-main baseline, explicit
-   create/link operations, portable Initiative hierarchy and predecessor
-   completion after transfer. Resolve remaining baseline/transition choices in
+   create/link operations and portable Initiative hierarchy. Predecessor completion
+   after transfer is implemented with simulated-provider proof; configured provider
+   acceptance remains open. Resolve remaining baseline/transition choices in
    [questions.md](questions.md) before dependent behavior.
 6. Finish design auto-placement, launch-plan artifact handoff, full execution/action
    DTO fixtures and the two-store public-CLI command story. The complete acceptance
@@ -591,9 +673,9 @@ the active plan. Chapter rollover transfers started unfinished Tasks with their
 identity intact, settles backlog under the existing cancellation policy, then
 completes the predecessor Project and retains its history. Completion closes the
 chapter; it does not claim that every KR succeeded or complete transferred Tasks.
-Keep the existing archival behavior after closure. Current source archives
-predecessors in `ops/chapter.rs` but does not explicitly set their provider status
-to completed there; integrate this requirement in that existing operation.
+Keep the existing archival behavior after closure. `ops/chapter.rs` now completes
+predecessors before archival through the same operation; its focused stateful
+proof does not establish configured Linear acceptance.
 
 For 100 Waves over 12 chapters, the settled result is 100 current Projects and
 1,100 historical Projects, not 1,200 active Projects. Current-plan reads must
@@ -732,7 +814,10 @@ The exact treatment of cached planning during an outage remains a review questio
 Planning and execution have different placement needs. Connected stores can each
 sync the same Linear planning without creating duplicate workers. Local-mode
 planning stays with its owning store. Locate existing execution before allocating
-new execution, and report its directory and how to reach it when necessary.
+new execution. Ordinary status, run and Session review continuation follow the
+same Task automatically after installation changes; they must not require database
+paths, environment variables or manual repair. Diagnostic details can identify
+locations, but database location is never Task identity.
 
 Build transient candidates from the selected directory, existing installation
 selections/retained receipts, known Home routes and Loopflow's known development
@@ -744,8 +829,9 @@ Home ID. Report uninspected locations and the bounded search scope.
 
 Inspect minimal identity/location facts without requiring complete historical
 parents. Unsupported schemas are uninspected, not empty. Detailed reads use a
-compatible executable at the owning location. Reach commands address executable,
-`LF_HOME` and `LF_DB_PATH` explicitly; remote paths use existing transport.
+compatible executable at the resolved location. Internal dispatch addresses
+executable, `LF_HOME` and `LF_DB_PATH` explicitly; remote paths use existing
+transport. This routing happens behind ordinary Task and Session commands.
 Recommend a retained historical pair only when its artifact/store is verified.
 
 If multiple divergent records exist, show locations and require explicit selection
@@ -766,9 +852,10 @@ of execution-store placement. Official does not mean an HTTP check for the newes
 release. Inherited `LF_BIN`, PATH and the parent's retained installation do not
 constitute deliberate pins.
 
-Capture one verified artifact/digest for each child and record it in existing Run
-evidence. Keep that process's executable stable; choose again at the next boundary.
-Same-Run tool wrappers use that Run's executable/store pair. Preserve exact
+Capture one verified artifact/digest for each child and record it in existing
+Session/Exec evidence under LOO-298's received contract. Keep that process's
+executable stable; choose again at the next boundary. Same-Session tool wrappers
+use that Session's executable/store pair. Preserve exact
 invocation, claim and pending review while changing runtime bytes.
 
 Proposed controls in existing Task run options:
@@ -780,11 +867,21 @@ lf task run DEM-334 --official-lf
 lf task status DEM-334 --json
 ```
 
-Pin/clear flags are mutually exclusive and persist on the existing execution
-owner without replacing its Flow. A pin contains canonical artifact path/digest;
+Pin/clear flags are mutually exclusive and persist on the stable Task owner
+without replacing its Flow or depending on runtime child FlowSession identity.
+A pin contains canonical artifact path/digest;
 changed or missing bytes fail explicitly. Status distinguishes policy, pin,
 last attempted runtime and next resolved runtime. Default migrated policy is
 official; inherited environment never becomes a recorded pin.
+
+An explicit lock is recursive: prepend a directory whose `lf` resolves to the
+locked artifact to PATH for the locked process and every descendant. This includes
+Flow children and bare `lf` commands in agent shells, not only direct worker execs.
+Provider environment reconstruction must preserve that directory for Codex,
+Claude and OpenCode. Preserve the remaining PATH so provider binaries and ordinary
+tools remain reachable. Inherited LF_BIN/LF_CONTROL_BIN or an arbitrary ambient
+PATH entry alone cannot manufacture explicit lock policy. A normal unlocked child
+boundary reselects the official runtime; a lock remains until explicitly cleared.
 
 Installed startup must honor an explicitly addressed compatible execution store
 independently of its default store. Share path canonicalization with launch.
@@ -802,7 +899,7 @@ After the bounded startup observation deadline, report starting and retain the
 exact claim. Release on proven spawn failure or process death using existing
 process fencing, not elapsed time. Concurrent retry observes the same child; a
 late worker can publish under the retained claim. Proven-death replacement must
-still reject stale late children. Coordinate this boundary with LOO-298's Run/Exec
+still reject stale late children. Coordinate this boundary with LOO-298's Session/Exec
 ownership rather than building a parallel liveness mechanism.
 
 ## Integration and deletion path
@@ -834,12 +931,13 @@ a second design or Task to make the story appear continuous.
 6. Persist runtime policy on the surviving execution owner and repair startup
    admission. Update CLI, planning/Homes docs and TESTING.md alongside consumers.
 
-Before shared execution migrations, obtain LOO-298's current contract through the
-authorized ordinary Work Run. The kickoff attempt through official
-`lf --as task:LOO-298 -b : ...` failed as unregistered before launch. No owner reply
-exists. Supplied Wave memory is prior design evidence, not integration agreement.
-Do not edit its branch, repair auth or copy stores. Planning work can proceed
-without shared execution migrations; use `lf rebase` when integrated work exists.
+LOO-298's current contract arrived through the authorized read-only contribution
+summarized above; the kickoff's unregistered failure is historical. Integrate
+against its stable Task, AgentSession, FlowSession and Exec owners, preserving
+both migration frontiers. Do not edit its branch, repair auth, copy stores or add
+policy to runtime child FlowSessions scheduled for removal. Use `lf rebase` when
+integrated work exists. Coordination success does not establish integrated bytes
+or waive the public continuity proof.
 
 ## Proof and finish line
 
@@ -850,7 +948,8 @@ host installation or credentials. Provider simulation is not configured live pro
 
 1. A owns execution; B starts without planning snapshots or a chapter. Public
    status by identifier/UUID in both syncs the same provider Task, finds its exact
-   branch/PR and locates A. The reach command works. B gains planning, not a second
+   branch/PR and locates A. Ordinary Task/Session commands route there automatically
+   without user-supplied database settings. B gains planning, not a second
    worker/invocation. Source-private lookup does not modify foreign DB/WAL bytes.
 2. Planning-only and Project-less issues are stored and inspectable. Unresolved
    relationships prevent only operations requiring them. Permission denial,
@@ -876,6 +975,10 @@ host installation or credentials. Provider simulation is not configured live pro
 7. Pin R1, change official selection and prove execution/status retain the pin.
    Clear it and prove R2 runs next. Modified/missing pin and incompatible store
    preserve the pending boundary and report failure.
+   Verify recursive PATH resolution through Codex, Claude and OpenCode agent shells
+   and nested `lf` children. The locked directory precedes a conflicting official
+   installation on PATH, without hiding unrelated tools. A provider-launch env map
+   or successful direct exec alone does not prove agent shell behavior.
 8. Delay an actual child beyond ten seconds. The caller reports starting and the
    late child consumes the same claim. Concurrent retry launches no duplicate.
    Separate proven-death/replacement evidence rejects a stale child.
@@ -910,6 +1013,16 @@ host installation or credentials. Provider simulation is not configured live pro
     branch switches and Linear refresh cannot overwrite another view or resurrect
     locally removed Waves. Context-free reads use the remote-main baseline.
     No provider mutation or execution allocation follows from definition import.
+
+15. Replay Jack's LOO-334/LOO-298 installation-switch incident in disposable
+    locations: planning and execution exist before the switch; a design review is
+    pending. After selecting another installation, ordinary `task status`,
+    `task run` and Session review continuation find the same Task, checkout and
+    exact review. Preserve claims, captured Flow, attribution and history, launch
+    no duplicate worker, and use the selected runtime at the next child boundary.
+    Include an obsolete saved `open_argv` that would reject `session` as a skill.
+    No manual database paths, environment repair or owning-store selection counts
+    as a pass. Genuine divergent execution conflicts remain explicit.
 
 Primary end-to-end command after extension:
 `uv run python scripts/test_task_installation.py`. Use one focused behavioral proof

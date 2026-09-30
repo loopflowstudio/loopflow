@@ -90,11 +90,18 @@ relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty; acquiring ordered relationship evidence remains future work.
 
-Chapter rollover records the provider's successful archive acknowledgement before
-refreshing the current plan. Archived predecessors leave current views, retain
-history, and cannot return through a delayed list. Completed chapter receipts
-preserve this evidence on migration. This does not implement provider Project
-completion or restoration semantics.
+Chapter rollover transfers unfinished work and settles backlog before completing
+each predecessor Project in Linear, then archiving it. Completion uses the first
+completed status in the current status's team or workspace scope. A refused or
+unconfirmed completion leaves the operation unfinished; retry reads the provider's
+state before repeating an effect whose response was lost. Closing the Project
+does not complete transferred Tasks or change historical KR results.
+
+The successful archive acknowledgement is recorded before refreshing the current
+plan. Archived predecessors leave current views, retain history, and cannot return
+through a delayed list. Completed chapter receipts preserve archival evidence on
+migration; they do not assert that older operations completed the provider Project.
+External archive acquisition and restoration remain unimplemented.
 
 ## Capture a Flow once
 

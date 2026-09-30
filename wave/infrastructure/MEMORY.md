@@ -35,6 +35,10 @@ Accepted contracts below exceed the implemented planning slice:
   of the execution store, with deliberate visible pins. This supersedes the
   coupled runtime/store target in the LOO-321 branch notes below, while retaining
   source isolation and verified historical pairs. It is not implemented yet.
+  On 2026-09-30 Jack required explicit locks to propagate recursively through
+  PATH into Flow children and Codex/Claude/OpenCode agent shells. Ordinary
+  installation changes must preserve Task/review continuity automatically;
+  user-supplied database paths or an owning-store choice do not satisfy acceptance.
 
 Branch `01f7814ef` implements normalized connected planning, revision-ordered
 issue and Project facts, webhook receipts and planning-only status. Inspection
@@ -65,8 +69,13 @@ Durable lessons from this slice:
   chapter receipt owns frozen history. Failed assertions expecting stale snapshot
   resurrection or never-acquired entities did not establish lost history.
   Confirmed chapter archive acknowledgements exclude predecessors from current
-  reads, including after migration or delayed lists. This does not implement
-  provider Project completion, external archive acquisition or restoration.
+  reads, including after migration or delayed lists. The September 30 slice now
+  completes predecessors before archival, using the current status's team or
+  workspace scope. Refused or unconfirmed completion cannot archive; retry reads
+  provider state after lost responses. Its stateful local proof preserves Task/PR
+  identity and frozen KR/metric results. Existing historical receipts are not
+  retroactive proof of provider completion. External archive acquisition,
+  restoration and configured Linear completion remain unproven.
 - Repository alias repair must move Waves and normalized planning atomically.
   Moving only the Wave stranded its planning in the old scope. Conflicts fail
   without merging observations; this canonicalization is not cross-repository
@@ -80,11 +89,20 @@ Durable lessons from this slice:
 Recorded lookup, mutation, receiver, migration, Rust/Swift planning and five
 installation-container proofs are local/simulated evidence, not live Linear or
 the full command story. The working design retains exact receipts and limits.
-The last-fetched `origin/main` remains `a3820bf7e`. LOO-298 coordination previously
-failed as unregistered before any Run launched; no new owner contract is available.
-Its older model notes are not integration agreement. Shared execution migrations
-must wait, while independent planning work can continue. This curation does not
-select outage/transition policy or authorize Task completion or Flow navigation.
+Jack supplied successful LOO-298 coordination on 2026-09-30 from a bounded read-only
+contribution at `4f4edff9b` through `d61295196` (documentation-only difference).
+Task retains identity/Project/Wave/checkout/PR evidence; AgentSession/session_events
+owns conversation/native execution/usage; FlowSession/flow_events owns graph,
+cursor, claims and review; Exec owns process evidence. Runtime Run storage is
+removed there. Runtime child FlowSession removal and preserving migration remain
+outstanding: discovery and locks must not depend on those children. Reuse the
+narrow WorkCatalog reader, TaskExecutionSnapshot, task_run and shared skill-command
+executor. Claim acquisition is not Started; driver death is not provider death.
+Prove released and draft-Session migration frontiers separately without rewriting
+applied checksums. This contract supersedes the unregistered coordination blocker,
+but LOO-298 remains unfinished and unaccepted; its execution model is not integrated
+into this branch. Neither coordination nor the chapter proof establishes the full
+continuity acceptance, Task completion or Flow navigation.
 
 ## Session launch continuity (branch evidence, 2026-09-28)
 

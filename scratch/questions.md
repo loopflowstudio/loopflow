@@ -55,6 +55,14 @@ loop-decide owns navigation; this review supplies approval and feedback only.
 - Ordinary Flows must remain runnable in a worktree regardless of Task status.
 - Official installed lf is the requested default at each worker boundary;
   deliberate visible pinning remains available.
+- Jack clarified on 2026-09-30 that ordinary installation changes must never
+  require selecting a Task's database. Status, run and review continuation must
+  find the same work automatically. Paths and environment overrides are internal
+  routing details, not user-facing Task identity or the acceptance workaround.
+- Jack selected recursive explicit locks on 2026-09-30: prepend a directory whose
+  `lf` is the locked binary to PATH and preserve it into every descendant,
+  including agent shell commands. Report the lock in Task status. Verify Codex,
+  Claude and OpenCode launch environments; inherited `LF_BIN` alone is not a lock.
 
 ## Still open
 
@@ -124,15 +132,28 @@ Retain bounded cross-store location and official-runtime proof from the Task.
 Do not consolidate provider accounts, routes or quota readings. No branch binary
 may touch the installed host Home.
 
-## Coordination blocker
+## Execution coordination received — 2026-09-30
 
-The authorized ordinary request through official
-`lf --as task:LOO-298 -b : ...` failed with `Task "LOO-298" is not registered`.
-No Run launched or owner reply established the latest execution schema. Retry
-coordination before shared migrations; do not edit that branch, copy stores,
-repair auth or treat prior Wave memory as current agreement.
+Jack supplied the successful read-only LOO-298 contribution from its retained
+installation (source `4f4edff9b` through `d61295196`, documentation-only difference).
+This supersedes the earlier unregistered coordination attempt. Task retains
+identity, Project/Wave, checkout and PR evidence; AgentSession/session_events owns
+conversation, captured input, native execution and usage; FlowSession/flow_events
+owns graph, cursor, claims and review; Exec owns process evidence. Runtime Run
+storage is removed there. Runtime child FlowSession deletion and preserving
+migration remain outstanding. Discovery and locks must not depend on those children.
 
-## Implementation evidence and limits — 2026-09-29
+Reuse WorkCatalog/work_identities, TaskExecutionSnapshot, task_run and the shared
+skill-command executor. Preserve IDs and PR/Session/Flow/event/import references
+when introducing local planning. Prove released and draft-Session migration
+frontiers separately without rewriting applied checksums. Claim acquisition does
+not prove Started; driver death does not prove provider death. LOO-298 is still
+unfinished and unaccepted. Its code is not integrated into this branch, whose
+Task claims still refer to the older Run/position model. Do not edit its checkout
+or recreate that replacement schema here. Jack also reports that LOO-298 is
+moving Flow children to PATH resolution so they can honor explicit recursive locks.
+
+## Implementation evidence and limits — 2026-09-29 (historical checkpoint)
 
 At `01f7814ef`, issue revisions, UUID-scoped webhook invalidation/removal receipts,
 Project fact revisions and retained planning inspection are implemented. Missing
@@ -142,7 +163,7 @@ resolved by an isolated process/subscriber. The
 [working design](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
 owns proof receipts and the full remaining acceptance matrix.
 
-The last-fetched `origin/main` remains `a3820bf7e`; no new execution contract was
+At that checkpoint, last-fetched `origin/main` was `a3820bf7e`; no new execution contract was
 available there. This reconciliation made no coordination retry, fetch, provider
 mutation or installation promotion. The recorded LOO-298 unregistered response
 remains a blocker only for dependent execution migrations. Reuse local planning

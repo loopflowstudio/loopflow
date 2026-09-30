@@ -223,13 +223,13 @@ history and the existing archival behavior. Completion marks the chapter closed,
 not all KRs achieved or unfinished Tasks successful. Current-plan reads select
 current Projects; historical reads remain explicit.
 
-Source observation: `ops/chapter.rs` already calls `archive_project` on predecessors
-after checking for newly filed Tasks. The Linear adapter implements that as
-`projectArchive`; this path does not explicitly set a completed provider status.
-Implement the accepted completion behavior within that existing retryable chapter
-operation, preserving its transfer and uncertainty rules, rather than adding a
-second cleanup mechanism. Verify provider completion as well as exclusion from
-current reads and preserved history. No live Project was completed in this review.
+At review, `ops/chapter.rs` archived predecessors without setting completed status.
+The September 30 implementation now calls `complete_and_archive_project` after
+transfer/disposition and the check for newly filed Tasks. The existing retryable
+operation owns both effects. Its stateful local proof covers refused completion,
+lost completion/archive responses and preservation of Task identity and dated
+results. Configured provider completion remains unproven; no live Project was
+completed during review or that implementation proof.
 
 Linear distinguishes completion from archival: automatic archiving requires a
 closed Project, inactivity and eligible issues. Completion alone therefore does

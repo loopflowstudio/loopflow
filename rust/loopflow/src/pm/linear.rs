@@ -150,6 +150,27 @@ const ARCHIVE_PROJECT_MUTATION: &str = r#"mutation ArchiveProject($id: String!) 
   }
 }"#;
 
+const PROJECT_LIFECYCLE_QUERY: &str = r#"query ProjectLifecycle($id: String!) {
+  project(id: $id) {
+    archivedAt
+    status { id type teamId }
+  }
+}"#;
+
+const PROJECT_STATUSES_QUERY: &str = r#"query ProjectStatuses($after: String, $first: Int!) {
+  projectStatuses(after: $after, first: $first) {
+    nodes { id type teamId position }
+    pageInfo { hasNextPage endCursor }
+  }
+}"#;
+
+const COMPLETE_PROJECT_MUTATION: &str = r#"mutation CompleteProject($id: String!, $statusId: String!) {
+  projectUpdate(id: $id, input: { statusId: $statusId }) {
+    success
+    project { status { id type teamId } }
+  }
+}"#;
+
 const ATTACH_PROJECT_MUTATION: &str = r#"mutation AttachProject($initiativeId: String!, $projectId: String!) {
   initiativeToProjectCreate(input: { initiativeId: $initiativeId, projectId: $projectId }) {
     initiativeToProject {
@@ -947,8 +968,33 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn archive_project(&self, project_id: &str) -> PmResult<()> {
-        if self.project_node(project_id).await?.archived_at.is_some() {
+    pub async fn complete_and_archive_project(&self, project_id: &str) -> PmResult<()> {
+        let response: ProjectLifecycleData = self
+            .graphql(PROJECT_LIFECYCLE_QUERY, json!({ "id": project_id }))
+            .await?;
+        let project = response.project.ok_or_else(|| {
+            PmError::Message(format!("Linear Project {project_id} is unavailable"))
+        })?;
+        if project.status.r#type != COMPLETED_STATE_TYPE {
+            let status = self.completed_project_status(&project.status).await?;
+            let response: ProjectCompleteData = self
+                .graphql(
+                    COMPLETE_PROJECT_MUTATION,
+                    json!({ "id": project_id, "statusId": status }),
+                )
+                .await?;
+            if !response.project_update.success
+                || !response
+                    .project_update
+                    .project
+                    .is_some_and(|project| project.status.r#type == COMPLETED_STATE_TYPE)
+            {
+                return Err(PmError::Message(format!(
+                    "Linear did not complete Project {project_id}"
+                )));
+            }
+        }
+        if project.archived_at.is_some() {
             return Ok(());
         }
         let response: ProjectArchiveData = self
@@ -965,6 +1011,50 @@ impl LinearClient {
             )));
         }
         Ok(())
+    }
+
+    async fn completed_project_status(&self, current: &ProjectStatusRef) -> PmResult<String> {
+        let mut after = None;
+        let mut statuses = Vec::new();
+        loop {
+            let response: ProjectStatusesData = self
+                .graphql(
+                    PROJECT_STATUSES_QUERY,
+                    json!({ "after": after, "first": LIST_PROJECTS_PAGE_SIZE }),
+                )
+                .await?;
+            let page = response.project_statuses;
+            statuses.extend(page.nodes.into_iter().filter(|status| {
+                status.status.r#type == COMPLETED_STATE_TYPE
+                    && status.status.team_id == current.team_id
+            }));
+            if !page.page_info.has_next_page {
+                break;
+            }
+            let cursor = page.page_info.end_cursor.ok_or_else(|| {
+                PmError::Message("Linear Project statuses have no next-page cursor".into())
+            })?;
+            if after.as_ref() == Some(&cursor) {
+                return Err(PmError::Message(
+                    "Linear Project statuses repeated a page cursor".into(),
+                ));
+            }
+            after = Some(cursor);
+        }
+        statuses
+            .into_iter()
+            .min_by(|left, right| {
+                left.position
+                    .total_cmp(&right.position)
+                    .then_with(|| left.status.id.cmp(&right.status.id))
+            })
+            .map(|status| status.status.id)
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "Linear has no completed Project status in the scope of status {}",
+                    current.id
+                ))
+            })
     }
 
     pub async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
@@ -1992,6 +2082,65 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
     Ok(converted)
 }
 
+#[derive(Deserialize)]
+struct ProjectLifecycleData {
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<ProjectLifecycle>,
+}
+
+#[derive(Deserialize)]
+struct ProjectLifecycle {
+    #[serde(rename = "archivedAt", deserialize_with = "Option::deserialize")]
+    archived_at: Option<String>,
+    status: ProjectStatusRef,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatusRef {
+    id: String,
+    r#type: String,
+    #[serde(rename = "teamId", deserialize_with = "Option::deserialize")]
+    team_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatusCandidate {
+    #[serde(flatten)]
+    status: ProjectStatusRef,
+    position: f64,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatusesData {
+    #[serde(rename = "projectStatuses")]
+    project_statuses: ProjectStatusesConnection,
+}
+
+#[derive(Deserialize)]
+struct ProjectStatusesConnection {
+    nodes: Vec<ProjectStatusCandidate>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Deserialize)]
+struct ProjectCompleteData {
+    #[serde(rename = "projectUpdate")]
+    project_update: ProjectCompletePayload,
+}
+
+#[derive(Deserialize)]
+struct ProjectCompletePayload {
+    success: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    project: Option<ProjectWithStatus>,
+}
+
+#[derive(Deserialize)]
+struct ProjectWithStatus {
+    status: ProjectStatusRef,
+}
+
 impl ProjectNode {
     fn into_pm_project(self) -> PmResult<PmProject> {
         let content = parse_project_content(self.content.as_deref().unwrap_or_default())?;
@@ -2637,11 +2786,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_project_reports_provider_refusal() {
+    async fn complete_and_archive_project_reports_provider_refusal() {
         let (base_url, _requests) = test_server::spawn(vec![
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "project": { "id": "project-1", "name": "Chapter one", "archivedAt": null, "status": {"type":"started"} } } }),
+                json!({ "data": { "project": { "archivedAt": null,
+                    "status": { "id": "done", "type": "completed", "teamId": null } } } }),
             ),
             json_response(
                 StatusCode::OK,
@@ -2656,12 +2806,47 @@ mod tests {
         );
 
         let error = client
-            .archive_project("project-1")
+            .complete_and_archive_project("project-1")
             .await
             .expect_err("provider refused archive");
         assert!(error
             .to_string()
             .contains("Linear did not archive Project project-1"));
+    }
+
+    #[tokio::test]
+    async fn complete_and_archive_project_requires_confirmed_completion() {
+        for project in [
+            Value::Null,
+            json!({"status":{"id":"started", "type":"started", "teamId":null}}),
+        ] {
+            let (base_url, _) = test_server::spawn(vec![
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"project":{"archivedAt":null,
+                        "status":{"id":"started", "type":"started", "teamId":null}}}}),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"projectStatuses":{"nodes":[
+                        {"id":"done", "type":"completed", "teamId":null, "position":0.0}
+                    ], "pageInfo":{"hasNextPage":false, "endCursor":null}}}}),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({"data":{"projectUpdate":{"success":true, "project":project}}}),
+                ),
+            ])
+            .await;
+            let client = LinearClient::with_base_url("fixture".into(), None, base_url);
+            let error = client
+                .complete_and_archive_project("project-1")
+                .await
+                .unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("did not complete Project project-1"));
+        }
     }
 
     #[tokio::test]

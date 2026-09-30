@@ -250,3 +250,40 @@ Compression passes named `RebaseArgs` through CLI/Flow dispatch and removes
 redundant commit defaults (29 net Rust lines removed). Rebase parser (1), ordinary
 branch delivery (1), discovery (10), formatting, all-target Clippy and diff checks
 passed; the compiled catalog is byte-identical. Remaining requirements are unchanged.
+
+### Task delivery owner review · 2026-09-30
+
+Reviewed the active PR diff from `a6b1bc3df` through `db20b06b1`, with the
+delivery slice compared against `590541b9a`. **Pass for this slice; gap for
+whole-Task readiness.** No bounded production defect found. CLI dispatch,
+typed Flow commands, Desktop review argv, builtin instructions and current
+documentation use Task delivery owners. The root Pr/Wt/Commit/Rebase parser
+variants, retired-op rejection shim, commit push option and worktree format
+option are removed. Unique owner omission uses the existing Clap navigation;
+saved PR command bytes remain unchanged. No storage writer, Task admission
+rule, recovery identity or process authority moved.
+
+Fresh executed evidence:
+
+- `cargo test -p loopflow --test pr_tests task_delivery_works_on_an_ordinary_branch_without_registration --jobs 4`: 1 passed. Real disposable Git repository and bare remote; commit does not push, rebase preview preserves HEAD, worktree stdout is one JSON array, draft open becomes ready on publish, and no Task is created. GitHub and browser responses are simulated; no hosted publication or provider result is proved.
+- `cargo test -p loopflow --test cli_discovery command_targets_compose_and_captured_operations_remain_readable --jobs 4`: 1 passed. Canonical authored commands and retained predecessor PR bytes resolve together without rewriting the retained record.
+- `git diff --check`: passed. Reuse the recorded unchanged-source parser,
+  discovery, typed Flow, Swift, prompt, formatting and Clippy passes above;
+  this review adds no code or broader-suite claim.
+
+Measured `590541b9a..db20b06b1`: **+156 / −240 production Rust and builtin
+instruction lines**. Excludes test modules/helpers, integration tests, catalog
+tooling, generated artifacts, docs/style, scratch and the external skill copy.
+The internal commit/push/draft composition still has a release-preparation
+caller in `ops/release.rs`; deleting it with the public flag would break that
+distinct consumer.
+
+Convergence holds: `5205c8388` replaced duplicate inspection and removed ignored
+inputs; `52816c03b` replaced delivery parser/dispatch consumers; `db20b06b1`
+compressed their argument forwarding. These are not consecutive passes replacing
+nothing. Next implement the remaining Account/Repo/Home/Wave/Session owner cuts
+and integrate LOO-298 before Monitor identity readers. Both overviews, local
+Wave/unlinked-work discovery, child readiness and the real first-provider-result
+walkthrough remain required before Jack Heart's demo. Full Done when claims do
+not hold: no publication, landing, Task completion or Flow navigation follows
+from this review.

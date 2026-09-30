@@ -170,13 +170,21 @@ fn failed_draft_promotion_stays_draft_and_can_retry() {
         fs::read_to_string(state.with_extension("body")).unwrap(),
         draft_body
     );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let retained = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        retained.publication.unwrap().presentation.unwrap().body,
+        draft_body
+    );
 
     fs::remove_file(failure).unwrap();
     create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
     assert_eq!(current_pr(repo.path()).unwrap().unwrap().state, "open");
     let ready_body = fs::read_to_string(state.with_extension("body")).unwrap();
     assert!(ready_body.contains("published for review"));
-    let runtime = tokio::runtime::Runtime::new().unwrap();
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
         .unwrap()
@@ -189,6 +197,58 @@ fn failed_draft_promotion_stays_draft_and_can_retry() {
 
 fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
+}
+
+#[test]
+fn existing_draft_without_local_publication_retains_identity_when_promotion_fails() {
+    let home = tempfile::TempDir::new().unwrap();
+    let state = home.path().join("pr-state");
+    let failure = state.with_extension("fail-ready");
+    let gh = draft_pr_script(&state);
+    let _env = EnvGuard::with_lf_home(&[("gh", &gh)], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    create_changed_branch(&repo, "feature");
+    let task = register_task(home.path(), repo.path(), "feature", &base);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let options = PrOptions {
+        title: Some("Adopt existing work".into()),
+        body: Some("Current work.".into()),
+        agent: None,
+        draft: false,
+    };
+    fs::write(&state, "draft").unwrap();
+    fs::write(&failure, "fail").unwrap();
+
+    let error = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap_err();
+    assert!(error.to_string().contains("promotion failed"), "{error}");
+    let retained = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap()
+        .publication
+        .unwrap();
+    assert_eq!(retained.github.unwrap().number, 1);
+    assert!(retained.presentation.is_none());
+    assert!(retained.merge.is_none());
+    assert_eq!(current_pr(repo.path()).unwrap().unwrap().state, "draft");
+
+    fs::remove_file(failure).unwrap();
+    create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
+    assert_eq!(current_pr(repo.path()).unwrap().unwrap().state, "open");
+    let published = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .unwrap()
+        .unwrap()
+        .publication
+        .unwrap();
+    assert_eq!(published.github.unwrap().number, 1);
+    assert!(published
+        .presentation
+        .unwrap()
+        .body
+        .contains("published for review"));
+    assert!(published.merge.is_none());
 }
 
 fn reviewer_copy(head_sha: &str) -> PrPresentation {

@@ -2336,22 +2336,25 @@ pub(crate) fn attach_task_github_pr(
         let opened = pr
             .github()
             .is_none_or(|github| github.number != number || github.url != url);
-        let publication = pr.publication.as_mut().ok_or_else(|| {
-            task_error(format!(
-                "Task {} has no durable PR publication request",
-                task.plan.identifier
-            ))
-        })?;
+        // An existing GitHub PR may predate local publication. Retain its
+        // identity now; reviewer copy is recorded only after promotion succeeds.
+        let publication = pr.publication.get_or_insert_with(|| PrPublication {
+            requested_at: time::OffsetDateTime::now_utc(),
+            presentation: None,
+            github: None,
+            merge: None,
+        });
+        // A known identity can carry a head-pinned merge request. Revoke it
+        // before replacing its head; the previously acknowledged identity
+        // remains stored if that reconciliation fails. First attachment has
+        // no merge request and can be saved immediately.
         invalidate_stale_merge_request(repo, publication, github_pr)?;
         publication.github = Some(GithubPr {
             number,
             url: url.clone(),
             head_sha: github_pr.head_sha.clone(),
         });
-        // Idempotently link the PR on its owning Linear issue. This never fails
-        // the attach: a degraded writeback is recorded on the PR and retried by
-        // the next publication command.
-        link_pr_to_linear(&store, &task, &mut pr).await;
+        // Persist acknowledged identity before any further provider operation.
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)
@@ -2359,7 +2362,7 @@ pub(crate) fn attach_task_github_pr(
             .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
         if opened {
             let event = TaskEventKind::PrOpened {
-                pr_id: pr.id,
+                pr_id: pr.id.clone(),
                 sequence: pr.sequence,
                 number,
                 url,
@@ -2369,6 +2372,14 @@ pub(crate) fn attach_task_github_pr(
                 .await
                 .map_err(task_error)?;
         }
+        // Linear linkage is idempotent. A failed or interrupted writeback cannot
+        // erase the GitHub identity already committed above.
+        link_pr_to_linear(&store, &task, &mut pr).await;
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        store
+            .update_task_pr(&pr)
+            .await
+            .map_err(|error| task_error(format!("failed to record PR linkage: {error}")))?;
         Ok(true)
     })
 }

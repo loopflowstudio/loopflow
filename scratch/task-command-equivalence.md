@@ -71,3 +71,15 @@ blanket launch refusal was a side effect of inheriting Work, not a causal-tree r
 The pass migration, dead `caller_flow_turn` column, retained Flow membership
 provenance and separate recorder naming cut remain open. Current scope deletes
 new Task attribution through parent Sessions, claims and Task-origin bytes.
+
+Compression on 2026-09-30 removes the launch function's second attribution-source
+argument: `WorkBinding.source` now supplies it for direct, implicit and channel
+execution. Task worker startup consumes its environment directly, deleting the
+single-use forwarding function and clone. Bound messages share one Work envelope
+formatter. Net production change: 26 lines removed. Review confirmed that explicit
+and channel bindings already resolve as Declared, while implicit bindings retain
+their resolved source; claims, installation selection and provider policy keep
+their existing owners. The 31 prompt/binding tests pass in an isolated source run
+(`.lf/tmp/cut-i/compress-binding-proof.log`); formatting, diff checks and all-target
+Clippy also pass (`compress-binding-clippy.log` beside it). This establishes no
+new configured provider, managed-worker or migration acceptance.

@@ -7,7 +7,7 @@ Run release as a one-shot operation that owns the full lifecycle.
 
 ## Input
 
-`lf release-run <version>` passes `<version>` as message text. Interpret the
+`lf skill release-run <version>` passes `<version>` as message text. Interpret the
 first token as:
 
 - `patch` / `minor` / `major` (bump from latest tag)

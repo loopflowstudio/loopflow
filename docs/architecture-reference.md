@@ -59,7 +59,7 @@ boundary executors remain domain-specific because their settlement rules differ.
 
 - **Skill runner:** execute one reusable instruction set through one provider
   harness and leave local evidence.
-- **Flow composition:** sequence Skill and mechanical Op nodes, route Xor
+- **Flow composition:** sequence Skill and mechanical Command nodes, route Xor
   branches, follow backward edges, and persist exact human boundaries.
 - **Durable planning:** preserve Wave, Project, and Task intent across crashes;
   Task execution adds a versioned worker claim to its saved Flow position.
@@ -109,7 +109,7 @@ Wave
   `-- Task
               `-- one active remote branch, worktree, and PR
 
-Flow = ordered Skill | Op | Xor | human boundaries, with optional backward edges
+Flow = ordered Skill | Command | Xor | human boundaries, with optional backward edges
 Run  = evidence for one mediated harness launch
 
 WorkRef = Wave | Project | Task
@@ -123,7 +123,7 @@ WorkStatus = Ready | Done | Abandoned
 | Task | One concrete implementation, investigation, or document with one active remote branch, worktree, and PR | `TaskId` plus Linear identifier | Linear Issue, local delivery state, Git, and GitHub |
 | Work | Shared planning state and input surface for a Wave, Project, or Task | `WorkRef` | The selected Wave/Task row and domain facts |
 | Skill | Reusable prompt instructions | Skill name and source | Repository override, builtin, or installed Skill file |
-| Flow | Ordered Skill/Op nodes, Xor routing, and human boundaries | Flow name and stable node ids | Repository or builtin Flow YAML; ordinary and Task invocations capture definitions and persist an `ExecutionCursor` under separate owners |
+| Flow | Ordered Skill/Command nodes, Xor routing, and human boundaries | Flow name and stable node ids | Repository or builtin Flow YAML; ordinary and Task invocations capture definitions and persist an `ExecutionCursor` under separate owners |
 | Run | Evidence from one mediated provider launch | `RunId` | One Home-local append-only record |
 | Human session | One unresolved human boundary and its provider-native conversation | Exact Task boundary token, ordinary invocation/boundary UUIDs, or Ask id | `FlowPosition`, Home-local `FlowRun`, or Ask record plus exact Run id |
 | Home | Stable machine authority whose network route may change | `HomeId` | Home row and observed SSH route |
@@ -183,8 +183,8 @@ provider, and literal subprocess edge must appear exactly once.
 | Concept | Truth and authority | Data structure | Persistence | Process owner | Public surface | External edge |
 | --- | --- | --- | --- | --- | --- | --- |
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
-| **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf sync-skills`, `lf catalog` (Skill/Flow catalog) | `exec:python3` |
-| **Flow** — an authored graph with optional backward edges | Expansion captures Skills and all Xor routers/paths. `ExecutionCursor::finish` owns traversal; ordinary file locks and Task transactions retain their separate settlement authority. | [`Flow`](../rust/loopflow/src/engine/flow.rs), [`ExecutionCursor`](../rust/loopflow/src/engine/execution.rs), [`FlowRun`](../rust/loopflow/src/ops/flow_run.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | `.lf/flows/`; ordinary Home `flows/<UUID>/position.json`; Task invocation and full cursor in its existing position row | Ordinary CLI driver or hidden `lf task __worker` | `lf flow`, `lf task run --flow` | — |
+| **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
+| **Flow** — an authored graph with optional backward edges | Expansion captures Skills and all Xor routers/paths. `ExecutionCursor::finish` owns traversal; ordinary file locks and Task transactions retain their separate settlement authority. | [`Flow`](../rust/loopflow/src/engine/flow.rs), [`ExecutionCursor`](../rust/loopflow/src/engine/execution.rs), [`FlowRun`](../rust/loopflow/src/ops/flow_run.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | `.lf/flows/`; ordinary Home `flows/<UUID>/position.json`; Task invocation and full cursor in its existing position row | Ordinary CLI driver or hidden `lf task __worker` | `lf flow`, `lf run` (flow-first definition execution), `lf task run --flow` | — |
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable readable locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`, `observation_outbox` (deferred Wave observations); `wave/<name>/`; `.lf/journal/waves/<name>/journal.jsonl`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | `lf __chat-connect` opens chat through the Home daemon; `lf __resident` behind the Wave listener; listener and relocation share the repository locator lock | `lf wave`, `lf chat`, `lf reply`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf wave relocate`; `wave GET /health`, `wave GET /channel`, `wave GET /conversation`, `wave GET /events`, `wave POST /messages`, `wave POST /observations`, `wave POST /stop`, `wave POST /resident/attach`, `wave POST /resident/deltas`, `wave GET /resident/context` | Discord when configured |
 | **Chapter** — one replaceable Wave plan | Linear owns its KRs, metric targets, Flow recommendation, and Tasks; the chapter binding selects the current plan. | [`Chapter`](../rust/loopflow/src/work/chapter.rs), [`Project`](../rust/loopflow/src/work/project.rs) | `wave_chapters`, `projects`, `project_events` (retained chapter history), Linear Project content | deterministic resumable rotation | `lf wave new-chapter`, `lf wave history` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/controller/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/controller/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/controller/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/controller/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground and resident Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
@@ -291,7 +291,7 @@ Task/Wave-bound helper Runs ---------> shared Skill execution components
 
 | Surface | Responsibility | Scope |
 | --- | --- | --- |
-| `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Home |
+| `lf <name>`, `lf run`, `lf skill`, and `lf flow` | Shared flow-first definition selection; typed forms select only their named kind | Current process and Home |
 | `lf wave`, `project`, `task`, `work` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf ask`, `session` | Sessions and explicit resolution | Current Home plus Task FlowPositions in the planning store |
 | `lf wt`, `commit`, `rebase`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |

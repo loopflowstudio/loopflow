@@ -4,7 +4,7 @@ use clap::Parser;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use crate::engine::flow::Op;
+use crate::engine::flow::Command as FlowCommand;
 use crate::engine::git::get_default_branch;
 use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
 use crate::ops::error::{OpsError, OpsResult};
@@ -15,12 +15,15 @@ use crate::ops::{
     submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
 
-pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
-    let mut argv = vec!["lf".to_string(), item.command.clone()];
-    argv.extend(item.args.iter().cloned());
-
+pub fn execute_flow_command(
+    repo: &Path,
+    item: &FlowCommand,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let argv = crate::lf::navigation::normalize_args(item.argv())
+        .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
     let cli = Cli::try_parse_from(argv)
-        .map_err(|err| OpsError::Message(format!("invalid op item: {err}")))?;
+        .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
     match cli.command {
         Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
@@ -362,11 +365,11 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
     }
 }
 
-/// Flow `op:` items drive the mechanical verbs only; anything that launches an
+/// Flow `cmd:` items drive the mechanical verbs only; anything that launches an
 /// agent, reads interactively, or manages waves has no place in a flow step.
 fn unsupported() -> OpsError {
     OpsError::Message(
-        "op item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
+        "cmd item must be one of pr open, pr submit, pr arm, pr land, pr abandon, rebase, commit, release, doctor, or the internal telemetry scorecard"
             .to_string(),
     )
 }
@@ -377,9 +380,9 @@ mod tests {
 
     use time::OffsetDateTime;
 
-    use super::{execute_flow_ops, TelemetryScorecardEnvelope};
+    use super::{execute_flow_command, TelemetryScorecardEnvelope};
     use crate::controller::wave::metrics::MetricEvidenceDto;
-    use crate::engine::flow::Op;
+    use crate::engine::flow::Command as FlowCommand;
     use crate::engine::stream::StreamEvent;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
@@ -389,14 +392,14 @@ mod tests {
 
     #[test]
     fn authored_flow_cannot_dispatch_evidence_receipt_command() {
-        let item = Op {
+        let item = FlowCommand {
             command: "receipt".to_string(),
             args: vec!["show".to_string(), "chat_turn:turn-3".to_string()],
         };
 
-        let error = execute_flow_ops(Path::new("."), &item, &NullProgress)
+        let error = execute_flow_command(Path::new("."), &item, &NullProgress)
             .expect_err("removed evidence command must not dispatch");
-        assert!(error.to_string().contains("op item must be one of"));
+        assert!(error.to_string().contains("cmd item must be one of"));
     }
 
     #[test]
@@ -439,12 +442,12 @@ print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "sc
 "#,
         )
         .expect("write scorecard fixture");
-        let item = Op {
+        let item = FlowCommand {
             command: "__telemetry-scorecard".to_string(),
             args: vec!["--json".to_string()],
         };
 
-        execute_flow_ops(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
+        execute_flow_command(repo.path(), &item, &NullProgress).expect("run telemetry scorecard");
 
         let runs: Vec<crate::run_record::RunSnapshot> = serde_json::from_str(
             &std::fs::read_to_string(repo.path().join("scorecard-ran")).unwrap(),
@@ -537,9 +540,9 @@ print(json.dumps({
         drop(store);
         drop(runtime);
 
-        execute_flow_ops(
+        execute_flow_command(
             repo.path(),
-            &Op {
+            &FlowCommand {
                 command: "__telemetry-scorecard".to_string(),
                 args: Vec::new(),
             },

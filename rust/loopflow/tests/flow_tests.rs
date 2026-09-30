@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::durable::{FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
-use loopflow::engine::flow::{ConcreteStep, Skill, SkillStep, Step};
+use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::invocation::QueuedInvocation;
 use loopflow::engine::transitions::FlowDecision;
 use loopflow::engine::{expand_flow, load_flow};
@@ -218,7 +218,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["--tui", "identity-proof", "--no-loopflow"],
+            &["--tui", "skill", "identity-proof", "--no-loopflow"],
             Some(&path),
         );
         assert!(
@@ -276,31 +276,23 @@ fn flow_parsing_parity() {
     let flow = load_flow("sample", repo).unwrap();
     assert_eq!(flow.name, "sample");
     assert_eq!(flow.items.len(), 2);
-    assert_eq!(
-        flow.items[0],
-        Step::Skill(SkillStep {
-            skill: Skill {
-                name: "implement".to_string(),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-                content: None,
-            },
-            policy: Default::default(),
-        })
+    assert!(
+        matches!(&flow.items[0].target, loopflow::engine::target::Target::Skill(skill) if skill.name == "implement")
     );
     assert_eq!(
         flow.items[1],
-        Step::Skill(SkillStep {
-            skill: Skill {
+        Step {
+            target: loopflow::engine::target::Target::Skill(Skill {
                 name: "review".to_string(),
                 agent: None,
                 default_agent: None,
                 action_style: None,
                 content: None,
-            },
-            policy: Default::default(),
-        })
+            }),
+            id: None,
+            human: false,
+            repeat: None,
+        }
     );
 }
 
@@ -738,8 +730,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
         write_skill(repo.path(), skill, &format!("Execute {skill}."));
     }
     write_flow(repo.path(), "contribution", "- first\n- second\n");
-    // A real collision: bare and explicit skill must choose the skill, explicit
-    // flow must execute both steps, including when Work-bound.
+    // A real collision: bare and explicit run select the flow; typed skill
+    // selects the single skill, including when Work-bound.
     write_skill(
         repo.path(),
         "contribution",
@@ -790,6 +782,8 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     write_flow(repo.path(), "two-steps", "- first\n- second\n");
     for args in [
         vec!["--task", "INF-123", "two-steps"],
+        vec!["--task", "INF-123", "contribution"],
+        vec!["--task", "INF-123", "run", "contribution"],
         vec!["--task", "INF-123", "flow", "contribution"],
         vec!["--as", "task:INF-123", "flow", "contribution"],
     ] {
@@ -844,7 +838,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
     let output = run_lf(repo.path(), home.path(), &["runs", "--json"], None);
     assert!(output.status.success());
     let runs: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(runs.len(), 6);
+    assert_eq!(runs.len(), 10);
     for run in runs {
         assert!(run["subjects"]
             .as_array()
@@ -853,11 +847,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
             .any(|subject| subject["selector"] == format!("task:{}", task.task.plan.identifier)));
         assert_eq!(run["outcome"], "completed");
     }
-    for invocation in [
-        vec!["contribution"],
-        vec!["skill", "contribution"],
-        vec!["design"],
-    ] {
+    for invocation in [vec!["skill", "contribution"], vec!["design"]] {
         let _ = fs::remove_file(home.path().join("prompts"));
         let mut args = vec!["--task", "INF-123"];
         args.extend(invocation);
@@ -956,7 +946,7 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
 }
 
 #[test]
-fn flow_ref_parses_into_items() {
+fn flow_names_load_into_targets() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -977,12 +967,21 @@ fn flow_ref_parses_into_items() {
 
     let flow = load_flow("parent", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
-    assert!(matches!(flow.items[0], Step::FlowRef(_)));
-    assert!(matches!(flow.items[1], Step::Skill(_)));
+    assert!(matches!(
+        &flow.items[0].target,
+        loopflow::engine::target::Target::Flow(_)
+    ));
+    assert!(matches!(
+        flow.items[1],
+        Step {
+            target: loopflow::engine::target::Target::Skill(_),
+            ..
+        }
+    ));
 }
 
 #[test]
-fn ops_item_parses_and_expands() {
+fn command_item_parses_and_expands() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     write_flow(
@@ -990,22 +989,25 @@ fn ops_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- op: pr land
+- cmd: pr land
 "#,
     );
 
     let flow = load_flow("ship-ish", repo).unwrap();
     assert_eq!(flow.items.len(), 2);
     match &flow.items[1] {
-        Step::Op(item) => {
+        Step {
+            target: loopflow::engine::target::Target::Command(item),
+            ..
+        } => {
             assert_eq!(item.command, "pr");
             assert_eq!(item.args, vec!["land"]);
         }
-        other => panic!("expected ops item, got {other:?}"),
+        other => panic!("expected command item, got {other:?}"),
     }
 
     let expanded = expand_flow(&flow, repo).unwrap();
-    assert!(matches!(&expanded[1], ConcreteStep::Op(_)));
+    assert!(matches!(&expanded[1], ConcreteStep::Command(_)));
 }
 
 #[test]
@@ -1089,7 +1091,7 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     write_skill(repo, "skill-b", "Second captured skill.");
     write_flow(repo, "publish", "- skill-a\n- skill-b");
     write_skill(repo, "review", "Review the supplied evidence.");
-    write_flow(repo, "parent", "- review\n- publish");
+    write_flow(repo, "parent", "- step: review\n- publish");
 
     let items = expand_named_flow(repo, "parent");
 
@@ -1111,26 +1113,19 @@ fn expand_flow_resolves_plain_string_as_subflow() {
     }
 }
 
-/// A plain string that is both a skill name AND a flow name should NOT
-/// be expanded as a sub-flow (skill takes priority to avoid ambiguity).
 #[test]
-fn expand_flow_prefers_skill_over_single_skill_flow() {
+fn adding_a_flow_changes_an_untyped_reference_but_not_an_explicit_skill() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
-
-    write_skill(repo, "review", "Review the code.");
-    write_flow(repo, "parent", "- review");
-
-    let items = expand_named_flow(repo, "parent");
-
-    assert_eq!(items.len(), 1);
-    match &items[0] {
-        ConcreteStep::Skill(s) => {
-            assert_eq!(s.skill.name, "review");
-            assert_eq!(s.flow_parents, vec!["parent"]);
-        }
-        _ => panic!("expected skill"),
-    }
+    write_skill(repo, "custom-review", "Review the code.");
+    write_skill(repo, "replacement", "Follow the new review workflow.");
+    write_flow(repo, "parent", "- custom-review\n- step: custom-review");
+    let initial = expand_named_flow(repo, "parent");
+    assert_skill_name(&initial[0], "custom-review");
+    write_flow(repo, "custom-review", "- step: replacement");
+    let changed = expand_named_flow(repo, "parent");
+    assert_skill_name(&changed[0], "replacement");
+    assert_skill_name(&changed[1], "custom-review");
 }
 
 #[test]
@@ -1140,7 +1135,7 @@ fn builtin_deploy_uses_ops_land_item() {
 
     let items = expand_named_flow(repo, "deploy");
     assert!(!items.is_empty());
-    assert!(matches!(&items[1], ConcreteStep::Op(_)));
+    assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
 fn roadmap_flow(repo: &Path, home: &Path) -> serde_json::Value {
@@ -1198,7 +1193,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_projects_a_blocker() {
     ] {
         write_skill(repo.path(), skill, "Fixture step.");
     }
-    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- op: pr land -c\n";
+    let two_loops = "- step:\n    id: design\n    name: design-proof\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- step:\n    id: demo\n    name: demo-proof\n    human: true\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: pr land -c\n";
     write_flow(repo.path(), "two-loops", two_loops);
 
     // Before any Flow: the recommendation, Start, and no invented history.

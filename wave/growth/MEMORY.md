@@ -73,6 +73,32 @@ Jack Heart set these in one design session. Wording in quotes is his.
   jack works is probably more of like a blog post." Docs teach the
   product; his own practice is told in his voice, elsewhere.
 
+## CLI guide decisions (2026-09-29)
+
+Jack asked the CLI guide to lead with complete workflows and the outcomes
+Loopflow owns, keeping individual controls available for intervention and
+recovery. Jack then rejected narrative and sales-like prose: ordered command
+examples with brief explanations carry this guide. That correction changes its
+presentation; it preserves the audience and hands-on/hands-off direction above.
+Jack cut the dedicated Wave showcase section for now, while keeping its detailed
+reference and capabilities in scope. Existing page addresses remain valid.
+
+The [CLI guide](../../docs/lf.md) and [reference](../../docs/lf-reference.md)
+are design previews. Local discovery now supports help without launching,
+flow-first untyped selection, strict typed definitions, and unique command
+shorthand. Owner moves and proposed monitor/identity overviews remain future
+work. Fixture and read-only CLI evidence does not demonstrate the first local
+result, a live app walkthrough, or a complete autonomous lifecycle. Keep those
+proof obligations before publishing a walkthrough; compact help alone does not
+resolve first-project setup or planning-account requirements.
+
+Jack's subsequent authoring decisions use `cmd:` for command steps and one
+Target model for commands, skills, flows, and XOR composition. Local source
+implements these decisions and direct review/repeat fields on steps. Saved
+execution plans still capture instruction bodies before running. These internal
+changes do not establish any additional newcomer journey; the guide's proposed
+owner tree and walkthrough proof obligations remain unchanged.
+
 ## Docs rewrite plan (2026-09-26)
 
 - On every page: open with when you need it, say each term plainly once

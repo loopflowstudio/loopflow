@@ -11,7 +11,7 @@ use crate::controller::wave::journal::{
 };
 use crate::controller::wave::playhead::Playhead;
 use crate::controller::wave::relocate::WaveLocatorLock;
-use crate::engine::{ConcreteStep, OccurrencePolicy};
+use crate::engine::ConcreteStep;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -51,7 +51,7 @@ fn classify(snapshot: &Playhead, open_turn: bool) -> FlowDisposition {
         && matches!(snapshot.stack[0].steps.as_slice(), [ConcreteStep::Skill(skill)]
             if skill.skill.name == "wave/operate"
                 && skill.skill.content.is_some()
-                && skill.policy == OccurrencePolicy::default());
+                && skill.id.is_none() && !skill.human && skill.repeat.is_none());
     if default_root {
         FlowDisposition::Retired
     } else {

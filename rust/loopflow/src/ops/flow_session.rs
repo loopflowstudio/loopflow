@@ -361,7 +361,7 @@ pub(crate) async fn open(token: &StepToken, mode: OpenMode, resume: bool) -> Res
             command.args([flag, value]);
         }
     }
-    command.args(["skill", &skill.name, &review_message(&run, token)]);
+    command.args(["skill", "--", &skill.name, &review_message(&run, token)]);
     let run_id = boundary
         .run_id
         .clone()
@@ -414,8 +414,7 @@ mod tests {
     };
     use crate::durable::RunId;
     use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, OccurrencePolicy, RepeatPolicy,
-        Skill,
+        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
     };
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
     use crate::engine::{ExecutionCursor, NestedCursor};
@@ -482,9 +481,9 @@ mod tests {
             }
         }
 
-        async fn run_op(
+        async fn run_command(
             &self,
-            _op: &crate::engine::ConcreteOp,
+            _op: &crate::engine::ConcreteCommand,
             _ctx: crate::engine::ExecutionContext,
         ) -> anyhow::Result<()> {
             anyhow::bail!("review recovery must not execute an operation")
@@ -511,11 +510,9 @@ mod tests {
         skill.content = Some(format!("Pinned {name} instructions"));
         ConcreteStep::Skill(ConcreteSkill {
             skill,
-            policy: OccurrencePolicy {
-                id: Some(name.to_string()),
-                human,
-                repeat,
-            },
+            id: Some(name.to_string()),
+            human,
+            repeat,
             flow_parents: Vec::new(),
         })
     }

@@ -55,7 +55,7 @@ impl FlowRun {
     }
 
     pub(crate) fn is_human(&self) -> Result<bool> {
-        Ok(matches!(self.current_step()?, ConcreteStep::Skill(skill) if skill.policy.human))
+        Ok(matches!(self.current_step()?, ConcreteStep::Skill(skill) if skill.human))
     }
 }
 
@@ -269,7 +269,7 @@ pub(crate) fn record_decision(
             "an interactive review returns feedback; its following decision step owns navigation"
         );
         ensure!(
-            matches!(run.current_step()?, ConcreteStep::Skill(skill) if skill.policy.repeat.is_some()),
+            matches!(run.current_step()?, ConcreteStep::Skill(skill) if skill.repeat.is_some()),
             "this Flow step does not own a decision"
         );
         ensure!(
@@ -329,7 +329,7 @@ pub(crate) fn require_active(token: &StepToken, run_id: &RunId) -> Result<String
     );
     ensure!(
         matches!(run.current_step()?, ConcreteStep::Skill(skill)
-            if skill.policy.repeat.is_some() && !skill.policy.human)
+            if skill.repeat.is_some() && !skill.human)
             && !active.completed
             && !run.finished
             && run.failure.is_none(),
@@ -353,7 +353,7 @@ pub(crate) fn recover(id: &str) -> Result<()> {
         let name = match run.current_step()? {
             ConcreteStep::Skill(skill) => skill.skill.name.clone(),
             ConcreteStep::Xor(branch) => branch.router.name.clone(),
-            ConcreteStep::Op(op) => format!("op: {}", op.item.display_name()),
+            ConcreteStep::Command(op) => format!("cmd: {}", op.item.display_name()),
         };
         let active = run.active.as_mut().expect("active boundary checked above");
         if let Some(dir) = &active.run_dir {
@@ -474,7 +474,7 @@ mod tests {
     use crate::durable::RunId;
     use crate::engine::flow::RepeatPolicy;
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
-    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, OccurrencePolicy, Skill};
+    use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
     use crate::lf::Cli;
     use crate::run_record::{CaptureHandle, RunSpec};
     use std::ffi::OsString;
@@ -559,11 +559,9 @@ mod tests {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
             flow_parents: vec![],
-            policy: OccurrencePolicy {
-                id: Some(id.into()),
-                human: false,
-                repeat: from.map(|from| RepeatPolicy { from: from.into() }),
-            },
+            id: Some(id.into()),
+            human: false,
+            repeat: from.map(|from| RepeatPolicy { from: from.into() }),
         })
     }
     fn verdict(decision: FlowDecision) -> FlowVerdict {
@@ -636,8 +634,8 @@ mod tests {
             let ConcreteStep::Skill(skill) = &mut run.steps[1] else {
                 unreachable!();
             };
-            skill.policy.human = true;
-            skill.policy.repeat = None;
+            skill.human = true;
+            skill.repeat = None;
             Ok(())
         })
         .unwrap();
@@ -679,8 +677,8 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let home = Home::new();
         let steps = ["publish", "deliver"].map(|command| {
-            ConcreteStep::Op(crate::engine::ConcreteOp {
-                item: crate::engine::Op {
+            ConcreteStep::Command(crate::engine::ConcreteCommand {
+                item: crate::engine::Command {
                     command: command.into(),
                     args: vec![],
                 },
@@ -713,8 +711,8 @@ mod tests {
             let ConcreteStep::Skill(skill) = &mut run.steps[1] else {
                 unreachable!();
             };
-            skill.policy.human = true;
-            skill.policy.repeat = None;
+            skill.human = true;
+            skill.repeat = None;
             Ok(())
         })
         .unwrap();

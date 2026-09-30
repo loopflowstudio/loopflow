@@ -4733,7 +4733,7 @@ mod tests {
             panic!("migration retains the human Skill");
         };
         assert_eq!(step.skill.name, "review-design");
-        assert!(step.policy.human);
+        assert!(step.human);
         assert_eq!(iteration, 3);
         assert_eq!(session_run_id.as_deref(), Some("run_human"));
         assert_eq!(ready_summary.as_deref(), Some("ready to approve"));

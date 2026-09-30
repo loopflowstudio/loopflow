@@ -165,7 +165,7 @@ def test_hidden_flow_command_is_internal_not_public(repo: Path) -> None:
     assert "public API missing from map: lf __telemetry-scorecard" not in errors
     assert "process boundary missing from map: lf __telemetry-scorecard" in errors
 
-    _write(repo, ".lf/flows/telemetry-daily.yaml", "- op: __telemetry-scorecard\n")
+    _write(repo, ".lf/flows/telemetry-daily.yaml", "- cmd: __telemetry-scorecard\n")
 
     assert architecture.check_repository(repo).ok
 

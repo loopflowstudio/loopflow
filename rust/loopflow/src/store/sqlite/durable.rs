@@ -36,7 +36,7 @@ impl SqliteStore {
             .as_ref()
             .and_then(|claim| claim.worker_run_id.as_ref())
             != Some(run_id)
-            || position.current().policy.repeat.is_none()
+            || position.current().repeat.is_none()
         {
             return Err(StoreError::InvalidAuthority(
                 "only the current claimed loop reviewer may record a verdict".to_string(),
@@ -994,8 +994,8 @@ pub(super) fn set_flow_position_in(
                 serde_json::to_string(&position.invocation)?,
                 step.flow,
                 step.step,
-                step.policy.id,
-                step.policy.human,
+                step.id,
+                step.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
@@ -1019,8 +1019,8 @@ pub(super) fn set_flow_position_in(
                 serde_json::to_string(&position.invocation)?,
                 step.flow,
                 step.step,
-                step.policy.id,
-                step.policy.human,
+                step.id,
+                step.human,
                 position.session_run_id.as_ref().map(RunId::as_str),
                 position.ready_summary,
                 i64::try_from(position.cursor.index).map_err(invalid_durable)?,
@@ -1135,8 +1135,8 @@ pub(super) fn settle_task_worker_in(
             serde_json::to_string(&next.invocation)?,
             step.flow,
             step.step,
-            step.policy.id,
-            step.policy.human,
+            step.id,
+            step.human,
             next.session_run_id.as_ref().map(RunId::as_str),
             next.ready_summary,
             i64::try_from(next.cursor.index).map_err(invalid_durable)?,
@@ -1302,8 +1302,8 @@ fn decode_flow_position(
         .ok_or_else(|| StoreError::InvalidData("Flow position has no current step".to_string()))?;
     if current.flow != flow
         || current.step != step
-        || current.policy.id != node_id
-        || current.policy.human != human
+        || current.id != node_id
+        || current.human != human
     {
         return Err(StoreError::InvalidData(
             "stored Flow position projection does not match its invocation".to_string(),
@@ -1327,7 +1327,7 @@ fn validate_flow_position(task_id: &TaskId, position: &FlowPosition) -> StoreRes
             "flow and step cannot be empty".to_string(),
         ));
     }
-    if step.policy.human && step.policy.id.is_none() {
+    if step.human && step.id.is_none() {
         return Err(StoreError::InvalidData(
             "review flow positions require a stable node id".to_string(),
         ));
@@ -1611,9 +1611,7 @@ mod durable_store_tests {
     fn find_decision_index(steps: &[ConcreteStep]) -> usize {
         steps
             .iter()
-            .position(
-                |step| matches!(step, ConcreteStep::Skill(skill) if skill.policy.repeat.is_some()),
-            )
+            .position(|step| matches!(step, ConcreteStep::Skill(skill) if skill.repeat.is_some()))
             .expect("fixture Flow has a repeating decision")
     }
 

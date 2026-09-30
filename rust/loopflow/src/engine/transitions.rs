@@ -52,10 +52,9 @@ pub fn finish_step(
         .get(index)
         .ok_or_else(|| anyhow!("flow cursor {index} is outside {} steps", steps.len()))?;
     let edge = match step {
-        ConcreteStep::Skill(skill) => match &skill.policy.repeat {
+        ConcreteStep::Skill(skill) => match &skill.repeat {
             Some(repeat) => {
                 let id = skill
-                    .policy
                     .id
                     .as_deref()
                     .filter(|id| !id.trim().is_empty())
@@ -68,7 +67,7 @@ pub fn finish_step(
                     .iter()
                     .position(|step| {
                         matches!(step, ConcreteStep::Skill(target)
-                            if target.policy.id.as_deref() == Some(&repeat.from))
+                            if target.id.as_deref() == Some(&repeat.from))
                     })
                     .ok_or_else(|| {
                         anyhow!(
@@ -80,7 +79,7 @@ pub fn finish_step(
             }
             None => None,
         },
-        ConcreteStep::Op(_) | ConcreteStep::Xor(_) => None,
+        ConcreteStep::Command(_) | ConcreteStep::Xor(_) => None,
     };
 
     let decision = match &progress.verdict {
@@ -134,7 +133,7 @@ pub fn finish_step(
 #[cfg(test)]
 mod tests {
     use crate::engine::flow::{
-        ConcreteOp, ConcreteSkill, ConcreteStep, OccurrencePolicy, Op, RepeatPolicy, Skill,
+        Command, ConcreteCommand, ConcreteSkill, ConcreteStep, RepeatPolicy, Skill,
     };
     use crate::engine::transitions::{
         finish_step, FlowDecision, FlowProgress, FlowTransition, FlowVerdict,
@@ -143,13 +142,11 @@ mod tests {
     fn step(id: &str, edge: Option<&str>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
-            policy: OccurrencePolicy {
-                id: Some(id.to_owned()),
-                human: false,
-                repeat: edge.map(|from| RepeatPolicy {
-                    from: from.to_owned(),
-                }),
-            },
+            id: Some(id.to_owned()),
+            human: false,
+            repeat: edge.map(|from| RepeatPolicy {
+                from: from.to_owned(),
+            }),
             flow_parents: vec![],
         })
     }
@@ -165,8 +162,8 @@ mod tests {
     fn ordinary_steps_advance_and_finish_without_decisions() {
         let steps = [
             step("start", None),
-            ConcreteStep::Op(ConcreteOp {
-                item: Op {
+            ConcreteStep::Command(ConcreteCommand {
+                item: Command {
                     command: "finish".to_owned(),
                     args: vec![],
                 },
@@ -193,7 +190,7 @@ mod tests {
         for human in [false, true] {
             let mut review = step("review", None);
             if let ConcreteStep::Skill(skill) = &mut review {
-                skill.policy.human = human;
+                skill.human = human;
             }
             let steps = [step("work", None), review];
             let mut progress = FlowProgress::default();

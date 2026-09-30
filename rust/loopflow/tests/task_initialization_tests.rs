@@ -508,7 +508,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(repo.head_sha(), head, "no restart checkpoint was committed");
     let step = position.current();
-    let node = step.policy.id.as_ref().unwrap();
+    let node = step.id.as_ref().unwrap();
     let boundary = format!(
         "{}:{}:{}:{}:{}",
         task.task.id, position.invocation.id, step.flow, node, position.cursor.iteration
@@ -684,7 +684,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             .iter()
             .position(|step| {
                 matches!(step, loopflow::engine::ConcreteStep::Skill(skill)
-                    if skill.policy.id.as_deref() == Some("decide"))
+                    if skill.id.as_deref() == Some("decide"))
             })
             .expect("pursue has an implementation decision boundary");
         let position = FlowPosition {

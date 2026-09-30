@@ -188,7 +188,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     fs::create_dir_all(home.path().join("scripts")).unwrap();
     fs::write(
         home.path().join(".lf/flows/telemetry-daily.yaml"),
-        "- op: doctor\n- op: __telemetry-scorecard\n",
+        "- cmd: doctor\n- cmd: __telemetry-scorecard\n",
     )
     .unwrap();
     fs::create_dir_all(home.path().join("performance")).unwrap();

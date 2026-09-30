@@ -1,2 +1,2 @@
 - gate
-- op: pr land -c
+- cmd: pr land -c

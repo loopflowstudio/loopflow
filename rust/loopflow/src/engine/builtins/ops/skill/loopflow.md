@@ -23,7 +23,7 @@ prompt.
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
-repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf
+repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
 status` is already single-Wave and repo-resolved.
 
 When the User selects a Session, run `lf session open <session-id> --json`.

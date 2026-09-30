@@ -548,3 +548,53 @@ the separate root argument-table type; prompt tests check the included guide
 instead of duplicating command spellings. Discovery/documentation (13 + 2),
 CLI argument handling (30), focused prompt/launch (40), formatting, all-target
 Clippy (four jobs) and diff checks passed. Remaining scope is unchanged.
+
+### Short-command slice review · 2026-09-30
+
+Reviewed the active branch against `a6b1bc3df`, focusing on
+`91ed67b9c..257b360db` and the repairs below. **Pass after bounded repair;
+gap for whole-Task readiness.** `task wt` replaces `task worktree` through
+parser, dispatch and callers. Exact commands and unique prefixes share Clap
+navigation; hidden callbacks remain exact-only. Removed alias handling, table
+cloning and the separate root argument table have no competing replacement.
+No persistence writer, execution identity or authority boundary changed.
+
+Review found the documentation scanner skipped wrapped inline commands. After
+extending extraction across inline-code newlines, `cargo test -p loopflow
+--test documented_commands --jobs 4` failed 1/3 tests: builtin Loopflow guidance
+recommended wrapped `lf status`, ambiguous across five commands. Corrected it
+to `lf wave status`; the new regression preserves this counterexample. Also
+shortened generated Task/CI-repair instructions and the website Task example,
+which the earlier Markdown-only pass missed. The scanner proves ambiguity
+handling, not validity of every option, external definition or preview command.
+
+Executed final proof, with inherited `LF_*` removed from Rust checks:
+
+- `cargo test -p loopflow --test documented_commands --test cli_discovery --jobs 4`:
+  3 + 13 passed. Public CLI help uses disposable directories without providers;
+  canonical/short paths agree, ambiguous commands fail without launch effects,
+  reserved definitions and captured command bytes remain readable.
+- `cargo test -p loopflow --lib ci_fix_arm_preserves_task_completion_and_rotation --jobs 4`
+  and `cargo test -p loopflow --lib task_seed_uses_the_current_chapter_plan --jobs 4`:
+  1 each passed; local fixture evidence, not hosted repair or Task execution.
+- `uv run pytest python/tests/test_loopflow_skill_alignment.py -q`: 4 passed.
+  All-target Clippy (four jobs), formatting and diff checks passed. CI's existing
+  `cargo nextest run --all` includes the documentation integration tests.
+
+Measured production Rust and builtin instructions: `91ed67b9c..257b360db`
+**+115 / −154**; with review repairs **+122 / −161**. Git line differences
+exclude top-level test modules/functions/helpers, integration tests, scripts,
+examples, external skills, generated files, website content, docs, memory and
+scratch. Review alone changes **+7 / −7** counted lines. Parser metadata is
+unchanged: retained extraction remains 139 commands below root, 17 hidden,
+436 flags, 92 positionals and zero registered aliases.
+
+Convergence holds: `23c588154` replaced Repo dispatch consumers; `43fa2059a`
+switched wt callers and documentation to derived navigation; `257b360db`
+removed duplicate argument metadata. These are not two consecutive passes
+replacing nothing. Next integrate LOO-298/334/340 and re-extract their command
+additions before applying the catalog's concept cuts. Monitor, authored Wave
+and unlinked-work discovery, child readiness preserving restrictions, the real
+first-provider-result walkthrough, preview-doc reconciliation and Jack Heart's
+demo remain required. No publication, landing, Task completion or Flow
+navigation follows from this review.

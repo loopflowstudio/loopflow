@@ -48,6 +48,30 @@ fn words(example: &str) -> Vec<String> {
     words
 }
 
+fn examples(text: &str) -> Vec<(usize, &str)> {
+    let invocation = Regex::new(r"(?m)(?:^|[\s`])(?P<command>lf\s+)").unwrap();
+    invocation
+        .captures_iter(text)
+        .filter_map(|capture| {
+            let command = capture.name("command").unwrap();
+            let start = command.start();
+            let inline = text[..start].ends_with('`');
+            if !inline && command.as_str().contains('\n') {
+                return None;
+            }
+            let example = if inline {
+                text[start..].split('`').next().unwrap()
+            } else {
+                text[start..].split(['`', '\n']).next().unwrap()
+            };
+            Some((
+                text[..start].bytes().filter(|byte| *byte == b'\n').count() + 1,
+                example,
+            ))
+        })
+        .collect()
+}
+
 #[test]
 fn documented_invocations_have_no_ambiguous_command_shorthand() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -56,38 +80,33 @@ fn documented_invocations_have_no_ambiguous_command_shorthand() {
         markdown_files(&repo.join(directory), &mut files);
     }
     files.sort();
-    let invocation = Regex::new(r"(?:^|[\s`])(?P<command>lf[ \t]+)").unwrap();
     let mut failures = Vec::new();
     let mut checked = 0;
     for path in files {
         let text = fs::read_to_string(&path).unwrap();
-        for (line_index, line) in text.lines().enumerate() {
-            for capture in invocation.captures_iter(line) {
-                let start = capture.name("command").unwrap().start();
-                let example = line[start..].split('`').next().unwrap();
-                let mut args = words(example);
-                // Help resolves its path in the inspection layer after normalization.
-                if args.get(1).is_some_and(|word| word == "help") {
-                    args.remove(1);
-                }
-                let result = normalize_args(args);
-                // The reference deliberately demonstrates ambiguity and its error.
-                let expect_ambiguous = line.contains("# lf-doc: ambiguous");
-                if result.is_err() != expect_ambiguous {
-                    failures.push(format!(
-                        "{}:{}: {example}\n{}",
-                        path.strip_prefix(&repo).unwrap().display(),
-                        line_index + 1,
-                        result
-                            .err()
-                            .map(|error| error.to_string())
-                            .unwrap_or_else(|| {
-                                "expected the documented ambiguity, but command now resolves".into()
-                            })
-                    ));
-                }
-                checked += 1;
+        for (line_number, example) in examples(&text) {
+            let mut args = words(example);
+            // Help resolves its path in the inspection layer after normalization.
+            if args.get(1).is_some_and(|word| word == "help") {
+                args.remove(1);
             }
+            let result = normalize_args(args);
+            // The reference deliberately demonstrates ambiguity and its error.
+            let expect_ambiguous = example.contains("# lf-doc: ambiguous");
+            if result.is_err() != expect_ambiguous {
+                failures.push(format!(
+                    "{}:{}: {example}\n{}",
+                    path.strip_prefix(&repo).unwrap().display(),
+                    line_number,
+                    result
+                        .err()
+                        .map(|error| error.to_string())
+                        .unwrap_or_else(|| {
+                            "expected the documented ambiguity, but command now resolves".into()
+                        })
+                ));
+            }
+            checked += 1;
         }
     }
     assert!(
@@ -121,4 +140,25 @@ fn another_owner_makes_a_documented_shortcut_fail() {
         .unwrap(),
         ["pr", "land"]
     );
+}
+
+#[test]
+fn wrapped_inline_commands_are_checked_for_ambiguity() {
+    let text = "Read `lf\nstatus` or `lf help\nstatus`.\n\n```sh\nlf land --help\n```\n";
+    let extracted = examples(text);
+    assert_eq!(
+        extracted,
+        [
+            (1, "lf\nstatus"),
+            (2, "lf help\nstatus"),
+            (6, "lf land --help")
+        ]
+    );
+    for (_, example) in &extracted[..2] {
+        let mut args = words(example);
+        if args[1] == "help" {
+            args.remove(1);
+        }
+        assert!(normalize_args(args).is_err(), "{example}");
+    }
 }

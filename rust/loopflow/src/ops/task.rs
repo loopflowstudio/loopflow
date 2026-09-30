@@ -665,7 +665,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf rebase` in {} to integrate it.",
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
         task.plan.identifier, parent.id, task.worktree.display()
     );
     Ok(())

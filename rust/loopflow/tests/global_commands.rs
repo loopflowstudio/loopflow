@@ -187,7 +187,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         .unwrap();
     assert_eq!(
         commands, 2,
-        "the failed rebase and Home read each own an Exec"
+        "the failed sync and Home read each own an Exec"
     );
     let output = command(
         home.path(),

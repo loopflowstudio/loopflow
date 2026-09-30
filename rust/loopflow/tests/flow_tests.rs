@@ -426,6 +426,7 @@ fn register_codex_account(home: &Path) {
             login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,
@@ -2701,8 +2702,9 @@ case "$1" in --version) exit 0;; esac
 printf 'claude:%s\n' "$CLAUDE_CONFIG_DIR" >> "$LF_HOME/selected"
 if [ -f "$LF_HOME/first-claude" ] && [ ! -f "$LF_HOME/retry" ]; then exit 23; fi
 touch "$LF_HOME/first-claude"
-cat >/dev/null
-echo done
+read -r input
+echo '{"type":"system","subtype":"init","session_id":"account-fixture"}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"account-fixture"}'
 "#,
     );
     write_executable(
@@ -2747,11 +2749,21 @@ case "$*" in *app-server*) ;; *)
         .unwrap();
     assert_eq!(cursor, 2, "{}", String::from_utf8_lossy(&output.stderr));
     fs::write(home.path().join("retry"), "").unwrap();
-    // A new CLI has no broker and no account flags. It must recover saved intent.
+    // A new CLI has no broker. New flags must not replace saved invocation intent.
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["-b", "flow", "resume", &id, "--retry"],
+        &[
+            "--account",
+            "claude=claude-other@",
+            "--account",
+            "codex=codex-other@",
+            "-b",
+            "flow",
+            "resume",
+            &id,
+            "--retry",
+        ],
         Some(&path),
     );
     assert!(!output.status.success());

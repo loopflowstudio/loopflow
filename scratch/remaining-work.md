@@ -85,7 +85,10 @@ will not run that proof.
    no tests were added and no further redundant case was established. All 14
    focused Rust and 18 Swift DTO checks passed, with formatting, Clippy and Ruff;
    the integrated gate and configured acceptance remain separate.
-4. **Integrated gate.** After remaining repairs and any merge from main, build
+4. **Integrated gate — next.** The owned sync has merged main through
+   `12013dae4` (v0.12.27); [integration evidence](sync-resolution.md) records
+   translated account/steer behavior and focused proof. The waiting sync caller
+   owns postcondition verification and push. After remaining repairs, build
    `lf`, run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
    `uv run python scripts/check_migrations.py` and
    `uv run python scripts/check_architecture.py`. Use the affected-suite plan in

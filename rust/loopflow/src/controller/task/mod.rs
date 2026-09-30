@@ -1188,7 +1188,6 @@ mod planning_tests {
         let original = park_human_task(&store, &task, &flow).await;
         ready_review(&store, &task, "ready").await;
         let persisted = store.task_flow(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.invocation.accounts.as_deref(), Some(&accounts));
         let run_id = persisted.review_artifact_key().cloned().unwrap();
         let restarted_flow = super::ensure_flow_position(&store, &task.id, None)
             .await

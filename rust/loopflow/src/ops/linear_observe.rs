@@ -70,7 +70,7 @@ pub(crate) async fn publish_issue_comment(
     }
     if let Some(run_id) = std::env::var_os(crate::durable::RUN_ID_ENV) {
         let run_id = run_id.to_string_lossy();
-        let run_id = crate::durable::RunId::parse(&run_id)
+        let run_id = crate::session_record::parse_artifact_key(&run_id)
             .map_err(|error| OpsError::Message(error.to_string()))?;
         let marker = format!(
             "<!-- loopflow-progress:{run_id}:{} -->",

@@ -1983,7 +1983,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn skill_launch_seed_activates_only_the_selected_skill_from_references() {
-        let seed = skill_launch_seed(
+        let seed = skill_exec_seed(
             "codex",
             Surface::Headless,
             "implement",

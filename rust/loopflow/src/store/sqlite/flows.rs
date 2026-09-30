@@ -2704,7 +2704,7 @@ mod tests {
             vec![
                 ConcreteStep::Command(ConcreteCommand {
                     item: Command {
-                        command: "rebase".into(),
+                        command: "sync".into(),
                         args: vec!["--plan".into()],
                     },
                     sources: vec![],

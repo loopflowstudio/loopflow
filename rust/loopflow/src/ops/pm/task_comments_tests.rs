@@ -278,7 +278,7 @@ async fn task_comments_read_and_publish_without_placement() {
             let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(confirmed.comments.len(), 2);
             assert_eq!(provider.lock().await.posted.len(), 2);
-            std::env::set_var(crate::durable::RUN_ID_ENV, crate::durable::RunId::new().as_str());
+            std::env::set_var(crate::durable::RUN_ID_ENV, crate::session_record::new_artifact_key());
             let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
             let body = &progress.comments.last().unwrap().body;
             assert!(body.contains("<!-- loopflow-progress:"));

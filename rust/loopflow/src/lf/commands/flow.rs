@@ -93,8 +93,15 @@ fn execute(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut invocation = QueuedInvocation::new(flow_name, items.to_vec())?;
+    invocation.accounts = Some(Box::new(
+        crate::provider_account::lease::AccountSelection::from_flags_or_env(
+            &cli.account,
+            &cli.only_account,
+        )?,
+    ));
     let flow = FlowSession {
-        invocation: QueuedInvocation::new(flow_name, items.to_vec())?,
+        invocation,
         cursor: ExecutionCursor::default(),
         version: 0,
         task_id: binding.and_then(|binding| match &binding.work {
@@ -859,7 +866,10 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
     } else {
-        command.args(cli.step_args());
+        let mut step_cli = cli.exec_options();
+        step_cli.account.clear();
+        step_cli.only_account.clear();
+        command.args(step_cli.step_args());
         command.args([
             "--__flow-step",
             &flow_run::ActiveStep::of(flow).env_value()?,

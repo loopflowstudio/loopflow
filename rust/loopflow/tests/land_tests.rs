@@ -1812,7 +1812,7 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
   export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" sync --manual >"$LF_TEST_REBASE_LOG" 2>&1 || exit 1
+  "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
@@ -1898,7 +1898,7 @@ fi"#;
             .env("LF_HOME", &lf_home)
             .env("LF_DB_PATH", &database)
             .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env("LF_TEST_REBASE_LOG", &sync_log)
+            .env("LF_TEST_SYNC_LOG", &sync_log)
             .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
             .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
             .env(
@@ -1923,9 +1923,9 @@ fi"#;
             assert_eq!(
                 parent.1,
                 i64::from(blocked),
-                "repair={repair} blocked={blocked} flow={flow}: {}\nNested rebase: {}",
+                "repair={repair} blocked={blocked} flow={flow}: {}\nNested sync: {}",
                 String::from_utf8_lossy(&output.stderr),
-                fs::read_to_string(&rebase_log).unwrap_or_default(),
+                fs::read_to_string(&sync_log).unwrap_or_default(),
             );
             let owners: Vec<String> = db
                 .prepare("SELECT DISTINCT exec_id FROM session_events WHERE kind='started'")
@@ -1965,7 +1965,7 @@ fi"#;
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert!(via_agent, "the repair agent invokes the nested rebase");
+            assert!(via_agent, "the repair agent invokes the nested sync");
             let completions: i64 = db
                 .query_row(
                     "SELECT count(*) FROM execs WHERE id=?1 AND completed_at IS NOT NULL",

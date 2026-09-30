@@ -131,6 +131,8 @@ pub struct PmItem {
     pub revision: Option<String>,
     pub id: String,
     pub identifier: String,
+    /// Provider branch name used to find existing Git work.
+    pub branch_name: Option<String>,
     /// Provider-owned issue URL captured during PM sync. `None` stays explicit
     /// when the provider did not return one; status and roadmap reads never
     /// fetch it on demand.

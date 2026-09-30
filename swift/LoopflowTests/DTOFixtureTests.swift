@@ -7,6 +7,15 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Task planning retains the provider branch before execution exists")
+    func taskPlanningBranchFixture() throws {
+        let states = try JSONDecoder().decode([TaskStatus].self, from: loadFixtureData("task_status.json"))
+        #expect(states[0].planning?.item.branchName == "dev/fix-1-existing")
+        #expect(states[0].execution == nil)
+        #expect(states[0].planning?.project?.flow == "feature")
+        #expect(states[0].planning?.project?.status == .started)
+    }
+
     @Test("Session page retains complete enumeration and requires entries")
     func sessionPageFixture() throws {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

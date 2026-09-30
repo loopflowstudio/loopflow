@@ -442,7 +442,12 @@ Task Work has stable identities and small state:
 `ready`, `done`, or `abandoned`. Process liveness, Task condition, Sessions,
 PR state, FlowSession, and command/conversation history stay separate. `task checkout` ensures the
 Project and Task Work records, one stable Task worktree, and its first serial PR
-identity without starting execution. `task run` resumes the saved Flow or starts
+identity without starting execution. When Linear supplies a branch name, checkout
+and run reuse that branch and its existing Git worktree, including dirty work,
+and record its open PR. Without a provider branch, the normal title-based branch
+is reused when it exists. No PR is created or edited by adoption. Existing Task
+identity and captured progress remain authoritative; Git and PR state do not
+supply a Flow cursor. `task run` resumes the saved Flow or starts
 one when none is active. Selecting a different `--flow` replaces the unclaimed
 managed invocation; stop an active worker before changing its Flow. Other Flows
 attributed to the Task keep their own invocations.
@@ -967,26 +972,8 @@ target/debug/lf task run LOO-321       # continues through the selected installa
 target/debug/lf task status LOO-321    # reads the independent branch copy
 ```
 
-Installed `task status <issue>`, `task run <issue>` and Task review/provider Session open/complete
-locate existing execution in the selected and retained installation records.
-After an installation switch, use the same Task or Session identifier. The
-selected CLI continues the recorded invocation and review in place; it does not
-copy execution into the new database. Forwarded Session commands retain the
-caller's terminal so provider conversations can receive input and display output.
-Session discovery reads the recorded conversation and captured-input identity.
-Local promotion records its backup source and the copied Task execution in the
-installation receipt. An unchanged backup routes back to the original execution
-directory using the selected CLI. A missing source, changed copy, or copies
-without that provenance remain explicit conflicts, even when Task IDs match.
-Incompatible data reports the location and preserves pending work without
-migration. Taskless conversation copies still require an unambiguous location.
-The development CLI's production-database restriction still applies. Switching
-from published execution to a development installation therefore locates the
-original Task but cannot continue it in that production database. Automatic
-succession across that boundary remains unfinished.
-
 New `create --run` operations use the selected installation. Source `task run`
-delegates there or to a discovered retained execution; non-launching source
+delegates there; non-launching source
 data commands keep using the private branch copy. A Task that exists only in the
 branch is preserved there; these commands do not register it in installation.
 Review completion names the

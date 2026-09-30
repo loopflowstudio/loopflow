@@ -1073,16 +1073,22 @@ pub fn create_named_worktree(
 }
 
 pub fn plan_placement(repo: &Path, segment: WorktreeSegment) -> Result<PlacementPlan, GitError> {
-    let default_branch = get_default_branch(repo)?;
-    let user = git_user(repo)?;
+    plan_branch_placement(repo, segment, None)
+}
 
+pub(crate) fn plan_branch_placement(
+    repo: &Path,
+    segment: WorktreeSegment,
+    branch: Option<&str>,
+) -> Result<PlacementPlan, GitError> {
+    let user = git_user(repo)?;
     let id = WorktreeName::new(&user, segment).ok_or_else(|| GitError::CommandFailed {
         command: "git worktree add".to_string(),
         stderr: format!("invalid worktree author: {user}"),
     })?;
-    let base_ref = default_branch;
-    let branch = id.branch();
+    let branch = branch.map(str::to_string).unwrap_or_else(|| id.branch());
     let planned_path = worktree_dir(repo, &id);
+    let base_ref = get_default_branch(repo)?;
 
     let existing_worktree_path =
         list_porcelain(repo)?

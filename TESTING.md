@@ -635,22 +635,18 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 Pass several names after `--test` to share one disposable build across related proofs.
 
 This copies source into a disposable Linux container, materializes its draft
-migrations and builds release-provenance and development CLIs with
-two Cargo jobs. Before promotion it checks populated planning upgrades from the
+migrations and builds the development CLI with two Cargo jobs. It checks
+populated planning upgrades from the
 released schema and both recorded pre-stack draft histories, including rollback
-and rejection of altered history. The promotion case starts with real published promotion into an
-empty disposable account, runs an operation to a pending Task review, then invokes
-local promotion through `install promote --from-build`. It requires ordinary
-status, run and Session continuation to retain that review in its original
-execution directory after the database copy, with predecessor bytes poisoning
-PATH, LF_BIN and LF_CONTROL_BIN. It then completes that exact review and requires
-a second real worker, one Flow completion, and journal command paths matching the
-verified installation digests. The backup must remain untouched; independent
-feedback written to its review must make subsequent lookup report a conflict.
-The terminal transport is simulated. Until this case passes, normal-copy
-continuation and two-worker succession remain unproven.
+and rejection of altered history. Installation-copy succession is no longer a
+product contract; its two cross-store promotion/continuation cases were removed.
 
-The other cases author installation records selecting the compiled CLI.
+The adoption case starts with planning and no Task row. Public checkout/run
+reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
+retain the PR identity, and preserve a saved later Flow cursor after source
+changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
+
+The installation cases author installation records selecting the compiled CLI.
 An ELF trailer gives the installed CLI a distinct identity: byte-identical copies
 are installed too, regardless of path. No host Home, credentials or installation
 is mounted.
@@ -661,21 +657,6 @@ acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 The installation-authority tests run only through this harness (`task-installation`
 in CI); ordinary Rust runs mark those cases ignored.
-The installation-switch regression prepares a review under A, selects distinct
-CLI bytes and empty execution data under B, and continues through ordinary Task
-and Session commands without data overrides. It poisons PATH and inherited binary
-variables with an obsolete CLI, checks the preserved review, and completes one
-actual worker operation through B against A's execution. Tmux transport is
-simulated; the child runs the real CLI with `rebase --plan`. A retained provider
-Session also opens through a real pseudoterminal; simulated OpenCode requires
-terminal stdin/stdout and records input from that terminal. This proves forwarding
-preserves interactive I/O, not configured provider acceptance. Incompatible drafts
-must leave execution DB/WAL bytes untouched. The conflict case captures a
-different invocation in the second copy before requiring ambiguous continuation
-to refuse; an identical backup alone is not divergent execution. This extension
-remains unverified. These selection receipts are fixture-authored;
-the separate promotion case owns actual installation proof. Neither covers
-provider shells, recursive locks or delayed-child startup.
 The remaining cases cover Task continuation’s auto-merge revocation and review
 continuity, installed agent selection while branch reads remain private, and
 direct-open refusal without changing the owned development database/WAL bytes. Review

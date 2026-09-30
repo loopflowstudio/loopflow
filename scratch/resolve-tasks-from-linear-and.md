@@ -1,19 +1,83 @@
 # Resolve Tasks through a synced local store and use the official worker runtime
 
-Status: design review approved by Jack Heart on 2026-09-29. Jack requested
-“mark review approved and complete / proceed with the flow”. Approval covers the
-current design, including repository-owned, worktree-sensitive Wave definitions,
-remote main as the shared baseline, per-Wave Initiatives and portable `A/B` names.
-It authorizes completion of this review Session and continuation through the saved
-Flow, not an Advance/Iterate verdict, Task completion or installation promotion.
-Remaining policy choices stay explicit in questions.md. The first planning slice
-is implemented locally; the complete design is not finished. Review source
-inspection was against `a3820bf7e`; implementation evidence follows below.
+Status: implementation follows Jack Heart's 2026-09-30 scope cut below. The
+2026-09-29 approval and older installation-continuation plans remain historical
+context; they do not reinstate multi-store succession. Main integration and the
+caller's subsequent delivery steps remain outstanding.
 Review feedback: [repository connection and Task validity](repository-planning-connection-review.md).
 Open choices: [questions](questions.md).
 Research: [Apollo, Relay, Realm and PowerSync](planning-store-sync-research.md).
 Command walkthrough: [Dave takes an idea to running work](idea-to-task-command-story.md).
 Wave mapping and remaining migration details: [Wave existence and Linear migration](wave-existence-and-linear-migration.md).
+
+## Current implementation scope — 2026-09-30
+
+Jack Heart superseded installation-copy continuation: one main Home owns work;
+custom test Homes are disposable. LOO-342 owns the broader installation/promotion
+cut. This Task removes its cross-installation execution discovery and copied-Task
+fingerprints instead of extending that superseded contract. Historical receipts
+below describe prior attempts, not remaining acceptance requirements.
+
+Finish Task adoption through public `task checkout` and `task run`: consume
+Linear's branch name, reuse Git's existing worktree without altering authored
+bytes, and retain an observed open PR. Existing Task identity and saved Flow use
+the existing continuation path. An open PR or checkout cannot establish a Flow
+cursor; no progress is invented from either. Prove adoption from a store with
+planning but no Task row, then repeated checkout/continuation preservation.
+No source binary touches the installed Home. Integration merges main; no rebase.
+
+### Adoption proof and review — 2026-09-30
+
+Implemented Linear `branchName` in shared list/detail planning and the wire model.
+Task preparation reuses the existing Git placement strategies, retains an observed
+open PR, and fetches its branch when a fresh clone has not seen it. Its base is
+the existing branch's merge base with the selected base, not a new branch tip.
+Stack parent selection still uses `--stack-on`; no parent Task is inferred from
+a PR title. Checkout preserves dirty state; run retains normal Flow behavior,
+including checkpointing when entering review. Existing Task Flows retain their
+captured graph, node, pass, review reservation and version.
+
+Removed copied-Task fingerprints, receipt copy fields, cross-installation Task
+and Session discovery/forwarding, two superseded succession proofs, and their
+unused release-provenance fixture build. LOO-342 retains the wider installation
+simplification. No source SQL migration or installed Home was changed.
+
+Review found and fixed three integration assumptions: initial Task insertion
+required an unpublished PR rather than an active PR; equal-revision planning
+could not enrich a previously unknown branch name; and Task-status fixtures and
+Swift still carried the retired Project `flows` shape. Existing ownership,
+terminal-state and conflicting-known-revision checks remain in their owners.
+
+Proof:
+
+- `uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_saved_progress`
+  passed in `.lf/tmp/task-adoption-public-5.log`: three real CLI/Git scenarios,
+  same-revision branch enrichment, checkout bytes/identity and open PR retained,
+  public run adoption, remote branch recovery, and exact saved later Flow/review
+  preservation after catalog edits. The harness also passed its four populated
+  migration prerequisites. Planning/GitHub/terminal transport are fixtures;
+  no live provider turn, published release or installed acceptance is claimed.
+- `.lf/tmp/task-adoption-focused-2.log` records the passing shared Linear
+  lookup/cache proof. `.lf/tmp/task-adoption-focused-3.log` records passing Rust
+  Task-status wire and dirty-checkout recovery proofs and the Swift
+  `DTOFixtureTests/taskPlanningBranchFixture` check (one Swift Testing test).
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -j 2 -- -D warnings`,
+  Ruff and `git diff --check` passed. Final Clippy log:
+  `.lf/tmp/task-adoption-clippy-final.log`. No full gate ran in implement.
+
+Earlier failures are retained: public proof 1 had a GitHub stub rejecting
+`--version`; proof 2 exposed the production initial-PR restriction; proof 3
+lacked stable review IDs; proof 4 reached review preparation without tmux.
+The final proof supplies a simulated terminal and does not reinterpret those
+failures as successful provider execution. The initial local lookup and DTO
+checks exposed stale Project status/Flow fixtures; corrected checks passed.
+Every proof container was removed. Resource preflight initially passed at
+46.3 GiB and the final observed free space was 41 GiB; builds used two workers
+per independent check and nice +10.
+
+Main was not rebased or merged. The supplied installed `lf` has no merge command
+or merge option; the requested merge-only integration remains with the caller.
+Publication, Flow navigation and Task completion were not performed.
 
 ## Implementation checkpoint — 2026-09-29
 

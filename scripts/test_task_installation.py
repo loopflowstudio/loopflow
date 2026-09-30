@@ -6,10 +6,7 @@ import tarfile
 from pathlib import Path
 
 PROOFS = {
-    "normal_promotion_preserves_pending_task_review": "task_initialization_tests",
-    "installation_switch_preserves_task_review_without_store_overrides": (
-        "task_initialization_tests"
-    ),
+    "task_adopts_linear_checkout_and_preserves_saved_progress": "task_adoption_tests",
     "flow_step_executable_falls_back_without_losing_its_store": "flow_tests",
     "declared_agent_can_start_another_tasks_flow": "session_cutover_tests",
     "task_resume_revokes_auto_merge_before_returning_to_human_review": "pr_tests",
@@ -94,11 +91,6 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         nice -n 10 cargo test -p loopflow --lib planning_integration -- --nocapture
         nice -n 10 cargo test -p loopflow --lib \
             migration_preserves_planning_identity_and_removes_snapshot_storage
-        LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published \
-            cargo build -p loopflow --bin lf
-        mkdir /tmp/task-proof-published
-        cp target/debug/lf /tmp/task-proof-published/
-        export TASK_PROOF_PUBLISHED_DIR=/tmp/task-proof-published
         nice -n 10 cargo test -p loopflow TARGETS --no-run
         CHECKS'
 """

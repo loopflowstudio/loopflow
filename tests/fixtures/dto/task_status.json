@@ -14,16 +14,14 @@
         "team_id": "team-loo",
         "assignee": null,
         "state": "unstarted",
-        "revision": "2026-09-29T12:00:00.123Z"
+        "revision": "2026-09-29T12:00:00.123Z",
+        "branch_name": "dev/fix-1-existing"
       },
       "project": {
         "id": "project-gmail",
         "slug": "gmail",
         "name": "Gmail",
         "summary": "Keep mail flowing.",
-        "flows": {
-          "recommended": null
-        },
         "krs": [
           {
             "text": "Mail processing survives restart",
@@ -37,7 +35,9 @@
           "team-loo"
         ],
         "metric_targets": [],
-        "revision": "2026-09-29T11:00:00Z"
+        "revision": "2026-09-29T11:00:00Z",
+        "flow": "feature",
+        "status": "started"
       },
       "observed_at": 1790683200
     },
@@ -61,16 +61,14 @@
         "team_id": "team-loo",
         "assignee": null,
         "state": "unstarted",
-        "revision": "2026-09-29T12:00:00.123Z"
+        "revision": "2026-09-29T12:00:00.123Z",
+        "branch_name": "dev/fix-1-existing"
       },
       "project": {
         "id": "project-gmail",
         "slug": "gmail",
         "name": "Gmail",
         "summary": "Keep mail flowing.",
-        "flows": {
-          "recommended": null
-        },
         "krs": [
           {
             "text": "Mail processing survives restart",
@@ -84,7 +82,9 @@
           "team-loo"
         ],
         "metric_targets": [],
-        "revision": "2026-09-29T11:00:00Z"
+        "revision": "2026-09-29T11:00:00Z",
+        "flow": "feature",
+        "status": "started"
       },
       "observed_at": 1790683200
     },
@@ -115,16 +115,14 @@
         "team_id": "team-loo",
         "assignee": null,
         "state": "unstarted",
-        "revision": "2026-09-29T12:00:00.123Z"
+        "revision": "2026-09-29T12:00:00.123Z",
+        "branch_name": "dev/fix-1-existing"
       },
       "project": {
         "id": "project-gmail",
         "slug": "gmail",
         "name": "Gmail",
         "summary": "Keep mail flowing.",
-        "flows": {
-          "recommended": null
-        },
         "krs": [
           {
             "text": "Mail processing survives restart",
@@ -138,7 +136,9 @@
           "team-loo"
         ],
         "metric_targets": [],
-        "revision": "2026-09-29T11:00:00Z"
+        "revision": "2026-09-29T11:00:00Z",
+        "flow": "feature",
+        "status": "started"
       },
       "observed_at": 1790683200
     },
@@ -162,16 +162,14 @@
         "team_id": "team-loo",
         "assignee": null,
         "state": "unstarted",
-        "revision": "2026-09-29T12:00:00.123Z"
+        "revision": "2026-09-29T12:00:00.123Z",
+        "branch_name": "dev/fix-1-existing"
       },
       "project": {
         "id": "project-gmail",
         "slug": "gmail",
         "name": "Gmail",
         "summary": "Keep mail flowing.",
-        "flows": {
-          "recommended": null
-        },
         "krs": [
           {
             "text": "Mail processing survives restart",
@@ -185,7 +183,9 @@
           "team-loo"
         ],
         "metric_targets": [],
-        "revision": "2026-09-29T11:00:00Z"
+        "revision": "2026-09-29T11:00:00Z",
+        "flow": "feature",
+        "status": "started"
       },
       "observed_at": 1790683200
     },
@@ -209,16 +209,14 @@
         "team_id": "team-loo",
         "assignee": null,
         "state": "unstarted",
-        "revision": "2026-09-29T12:00:00.123Z"
+        "revision": "2026-09-29T12:00:00.123Z",
+        "branch_name": "dev/fix-1-existing"
       },
       "project": {
         "id": "project-gmail",
         "slug": "gmail",
         "name": "Gmail",
         "summary": "Keep mail flowing.",
-        "flows": {
-          "recommended": null
-        },
         "krs": [
           {
             "text": "Mail processing survives restart",
@@ -232,7 +230,9 @@
           "team-loo"
         ],
         "metric_targets": [],
-        "revision": "2026-09-29T11:00:00Z"
+        "revision": "2026-09-29T11:00:00Z",
+        "flow": "feature",
+        "status": "started"
       },
       "observed_at": 1790683200
     },

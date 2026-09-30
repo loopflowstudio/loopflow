@@ -289,3 +289,18 @@ only verified selected installation bytes and a compatible no-migration open.
 The waiting command has not returned feedback. Opening the Session establishes
 neither a decision nor authorization to change the production-store boundary.
 The earlier failed Ask and the separate relationship-repair Ask remain distinct.
+
+## Task adoption scope — 2026-09-30
+
+Jack Heart's latest scope cut supersedes installation-copy continuation. LOO-342
+owns the main-Home installation/promotion simplification; this branch removes
+its copied-execution fingerprints, cross-store discovery and superseded tests.
+A retained local Task supplies the exact captured Flow. An existing Git worktree
+or open PR supplies no Flow cursor; adoption must never infer completed steps
+from either. Planning without a Task row creates local execution identity only.
+
+The installed `lf rebase --help` exposes rebase only, with no merge option, and
+`lf --help` has no merge operation. Jack requested merging main, never rebasing;
+Loopflow owns Git mutations. No rebase or raw Git merge was performed. Main
+integration remains with the delivery caller until a supported merge path is
+available.

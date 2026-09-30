@@ -325,6 +325,16 @@ fn task_status_preserves_planning_freshness_without_execution() {
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
     let states: Vec<TaskStatus> = serde_json::from_str(json).unwrap();
     assert_eq!(
+        states[0]
+            .planning
+            .as_ref()
+            .unwrap()
+            .item
+            .branch_name
+            .as_deref(),
+        Some("dev/fix-1-existing")
+    );
+    assert_eq!(
         states
             .iter()
             .map(|state| state.planning_state)

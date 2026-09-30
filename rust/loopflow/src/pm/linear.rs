@@ -185,6 +185,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
       nodes {
         id
         identifier
+        branchName
         updatedAt
         url
         title
@@ -217,6 +218,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
   issue(id: $id) {
     id
     identifier
+    branchName
     updatedAt
     url
     title
@@ -1810,6 +1812,8 @@ struct IssueFields {
     updated_at: String,
     id: String,
     identifier: String,
+    #[serde(rename = "branchName")]
+    branch_name: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     url: Option<String>,
     title: String,
@@ -1860,6 +1864,7 @@ impl IssueFields {
             revision: Some(self.updated_at),
             id: self.id,
             identifier,
+            branch_name: self.branch_name,
             url: self.url,
             name: self.title,
             description: self.description.unwrap_or_default(),

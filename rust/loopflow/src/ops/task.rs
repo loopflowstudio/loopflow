@@ -21,7 +21,8 @@ use crate::engine::git::{
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::tmux_session_slug;
 use crate::engine::worktrees::{
-    create_from_placement_plan, plan_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
+    create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
+    WorktreeSegment,
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
@@ -378,10 +379,7 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
 }
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSnapshot> {
-    let destination = match super::task_destination::existing_task(issue).map_err(task_error)? {
-        Some(found) => Some(found),
-        None => super::task_destination::destination().map_err(task_error)?,
-    };
+    let destination = super::task_destination::destination().map_err(task_error)?;
     if let Some(destination) = destination {
         super::task_destination::check_task(&destination, issue).map_err(task_error)?;
         if let Some(parent) = &options.stack_on {
@@ -502,7 +500,7 @@ fn prepare_task(
     let prepared = block_on_task(prepare_new_task(
         &main_repo,
         &resolved.item.name,
-        Some(&resolved.item.id),
+        Some(&resolved.item),
         &resolved.project,
         &TaskLaunchOptions {
             retry,
@@ -666,6 +664,7 @@ struct PreparedTask {
     plan: PlacementPlan,
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
+    github: Option<GithubPr>,
     selected_flow: Option<String>,
     requested_agent: Option<String>,
     directive: Option<String>,
@@ -674,7 +673,7 @@ struct PreparedTask {
 async fn prepare_new_task(
     main_repo: &Path,
     title: &str,
-    issue: Option<&str>,
+    item: Option<&crate::pm::PmItem>,
     project: &crate::pm::PmProject,
     options: &TaskLaunchOptions,
     launch: bool,
@@ -695,15 +694,11 @@ async fn prepare_new_task(
         None => derive_workspace_slug(title)?,
     };
     let workspace_slug = segment.as_str().to_string();
-    let mut plan = plan_placement(main_repo, segment)
+    let branch = item
+        .and_then(|item| item.branch_name.as_deref())
+        .filter(|branch| !branch.is_empty());
+    let mut plan = plan_branch_placement(main_repo, segment, branch)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
-    if plan.strategy != PlacementStrategy::Create || plan.worktree_path.exists() {
-        return Err(task_error(format!(
-            "task worktree or branch already exists without a Task: {} ({})",
-            plan.worktree_path.display(),
-            plan.branch
-        )));
-    }
     let default_branch = get_default_branch(main_repo).map_err(task_error)?;
     let stack_parent = options.stack_on.as_deref().map(|parent_issue| async move {
         let store = task_store().await?;
@@ -716,7 +711,7 @@ async fn prepare_new_task(
                     "stack parent {parent_issue:?} has no Task; run it first"
                 ))
             })?;
-        if Some(parent_task.plan.id.as_str()) == issue {
+        if Some(parent_task.plan.id.as_str()) == item.map(|item| item.id.as_str()) {
             return Err(task_error("a Task cannot stack on itself"));
         }
         let parent = store
@@ -736,7 +731,7 @@ async fn prepare_new_task(
         Some(parent) => Some(parent.await?),
         None => None,
     };
-    let base_commit = match &stack_parent {
+    let mut base_commit = match &stack_parent {
         Some(parent) => {
             fetch(main_repo, "origin", &parent.branch).map_err(|error| {
                 task_error(format!(
@@ -754,6 +749,40 @@ async fn prepare_new_task(
             base_commit
         }
     };
+    let github = if branch.is_some() || plan.strategy != PlacementStrategy::Create {
+        super::pr::branch_pr(main_repo, &plan.branch)?
+            .map(|pr| {
+                Ok::<_, OpsError>(GithubPr {
+                    number: u32::try_from(pr.number).map_err(task_error)?,
+                    url: pr.url,
+                    head_sha: pr.head_sha,
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    if plan.strategy == PlacementStrategy::Create && github.is_some() {
+        // A fresh clone may know the PR before fetching its branch.
+        fetch(
+            main_repo,
+            "origin",
+            &format!(
+                "refs/heads/{}:refs/remotes/origin/{}",
+                plan.branch, plan.branch
+            ),
+        )
+        .map_err(task_error)?;
+        plan.strategy = PlacementStrategy::CheckoutExisting;
+    }
+    if plan.strategy != PlacementStrategy::Create {
+        let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
+            format!("refs/heads/{}", plan.branch)
+        } else {
+            format!("refs/remotes/origin/{}", plan.branch)
+        };
+        base_commit = merge_base(main_repo, &base_commit, &branch_ref).map_err(task_error)?;
+    }
     // Provider creation can yield while another fetch advances the branch.
     // Place the checkout on the same commit recorded by its first PR.
     plan.base_ref = base_commit;
@@ -761,6 +790,7 @@ async fn prepare_new_task(
         plan,
         workspace_slug,
         stack_parent,
+        github,
         selected_flow,
         requested_agent: options.agent.clone(),
         directive,
@@ -776,6 +806,7 @@ fn create_prepared_task(
         plan,
         workspace_slug,
         stack_parent,
+        github,
         selected_flow,
         requested_agent,
         directive,
@@ -846,7 +877,12 @@ fn create_prepared_task(
             branch: plan.branch.clone(),
             base_commit: plan.base_ref.clone(),
             parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
-            publication: None,
+            publication: github.map(|github| PrPublication {
+                requested_at: now,
+                presentation: None,
+                github: Some(github),
+                merge: None,
+            }),
             merge_commit: None,
             abandoned_at: None,
             ci_observation: None,
@@ -1054,7 +1090,7 @@ async fn prepare_task_creation(
     let prepared = prepare_new_task(
         repo,
         existing.as_ref().map_or(title, |item| item.name.as_str()),
-        existing.as_ref().map(|item| item.id.as_str()),
+        existing.as_ref(),
         &project,
         options,
         true,
@@ -3826,26 +3862,6 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
-    // Installed inspection follows retained execution. A source-private read
-    // must not open another installation's data for writable status refreshes.
-    if crate::machine_install::selection_for_current_executable()
-        .map_err(task_error)?
-        .is_some()
-    {
-        if let Some(issue) = issue {
-            if let Some(destination) =
-                super::task_destination::existing_task(issue).map_err(task_error)?
-            {
-                return super::task_destination::json(
-                    &destination,
-                    repo,
-                    vec!["task".into(), "status".into(), issue.into()],
-                    None,
-                )
-                .map_err(task_error);
-            }
-        }
-    }
     let task = task_execution_status(repo, issue)?;
     let selector = task
         .as_ref()
@@ -7025,6 +7041,7 @@ mod tests {
             .to_string()
             .contains("open the parent PR"));
         let existing = crate::pm::PmItem {
+            branch_name: None,
             revision: None,
             id: fixture.task.plan.id.as_str().to_string(),
             identifier: fixture.task.plan.identifier.clone(),

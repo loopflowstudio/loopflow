@@ -35,6 +35,7 @@ public struct PlanningItem: Decodable, Sendable {
     public let id: String
     public let revision: String?
     public let identifier: String
+    public let branchName: String?
     public let url: String?
     public let name: String
     public let description: String
@@ -48,6 +49,7 @@ public struct PlanningItem: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, revision, identifier, url, name, description, rank, completed, state, project, assignee
+        case branchName = "branch_name"
         case projectId = "project_id"
         case teamId = "team_id"
     }
@@ -60,13 +62,14 @@ public struct PlanningProject: Decodable, Sendable {
     public let name: String
     public let summary: String
     public let metricTargets: [ChapterMetricTarget]
-    public let flows: ProjectFlowPlanSnapshot?
+    public let flow: String
+    public let status: ProjectStatus
     public let krs: [PlanningKeyResult]
     public let initiativeIds: [String]
     public let teamIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case id, revision, slug, name, summary, flows, krs
+        case id, revision, slug, name, summary, flow, status, krs
         case metricTargets = "metric_targets"
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"

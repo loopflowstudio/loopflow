@@ -1,10 +1,10 @@
-//! Resolve retained execution before selecting the installed runtime that continues it.
+//! Route managed Task operations through the selected installation.
 
 use std::collections::BTreeSet;
 use std::io::{Seek, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context, Result};
@@ -41,135 +41,6 @@ pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
             .context("installed store has no parent directory")?
             .to_path_buf(),
         db_path: selection.store,
-    }))
-}
-
-/// Locate retained execution through installation receipts, without opening a
-/// foreign store for migration or copying its records into the current store.
-pub(crate) fn existing_task(issue: &str) -> Result<Option<ChildExecutionContext>> {
-    existing_execution(|database| {
-        let ids = task_ids(database, issue)?;
-        Ok((!ids.is_empty()).then_some(ids))
-    })
-}
-
-pub(crate) fn existing_session(id: &str) -> Result<Option<ChildExecutionContext>> {
-    if let Some((task, _)) = id
-        .split_once(':')
-        .filter(|(task, _)| task.starts_with("task_"))
-    {
-        return existing_task(task);
-    }
-    existing_execution(|database| {
-        let store = crate::store::sqlite::SqliteStore::open_read_only(database)?;
-        let session = store.session(id)?.or(store.session_for_artifact(id)?);
-        Ok(session.map(|session| {
-            session
-                .task_id
-                .into_iter()
-                .map(|id| id.to_string())
-                .collect()
-        }))
-    })
-}
-
-fn existing_execution(
-    contains: impl Fn(&Path) -> Result<Option<BTreeSet<String>>>,
-) -> Result<Option<ChildExecutionContext>> {
-    #[cfg(test)]
-    let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
-        Some(root) => PathBuf::from(root),
-        None => return Ok(None),
-    };
-    #[cfg(not(test))]
-    let root = machine_install::root()?;
-    let Some(selected) = machine_install::current_selection(&root)? else {
-        return Ok(None);
-    };
-    let mut stores: Vec<PathBuf> = Vec::new();
-    let mut found = Vec::new();
-    for installation in machine_install::known_installations(&root)? {
-        if stores.iter().any(|path| {
-            crate::store::same_database_file(path, &installation.store).unwrap_or(false)
-        }) {
-            continue;
-        }
-        stores.push(installation.store.clone());
-        if !installation.store.exists() {
-            continue;
-        }
-        if let Some(tasks) = contains(&installation.store).with_context(|| {
-            format!(
-                "execution location {} could not be inspected",
-                installation.store.display()
-            )
-        })? {
-            found.push((installation.store, tasks));
-        }
-    }
-    // A retained backup is not another execution owner until it has changed.
-    // The source must also be present; provenance never manufactures missing work.
-    let receipts = machine_install::retained_receipts(&root)?;
-    let mut locations = found.iter().map(|(path, _)| path).collect::<Vec<_>>();
-    for (database, tasks) in &found {
-        if tasks.is_empty() {
-            continue;
-        }
-        for receipt in &receipts {
-            let (Some(source), Some(baseline)) = (&receipt.copied_from, &receipt.copied_tasks)
-            else {
-                continue;
-            };
-            if receipt.phase != machine_install::SwitchPhase::Settled
-                || !crate::store::same_database_file(database, &receipt.target.store)?
-                || !tasks.iter().all(|task| baseline.contains_key(task))
-            {
-                continue;
-            }
-            if !found.iter().any(|(path, ids)| {
-                ids == tasks && crate::store::same_database_file(path, source).unwrap_or(false)
-            }) {
-                return Err(anyhow!(
-                    "execution in {} was copied from {}; its source execution could not be located",
-                    database.display(),
-                    source.display()
-                ));
-            }
-            let mut unchanged = true;
-            for task in tasks {
-                unchanged &=
-                    machine_install::execution_copy::unchanged(database, task, &baseline[task])?;
-            }
-            if unchanged {
-                locations.retain(|path| *path != database);
-            }
-        }
-    }
-    let database = match locations.as_slice() {
-        [] if found.is_empty() => return Ok(None),
-        [database] => *database,
-        _ => {
-            return Err(anyhow!(
-                "execution exists in multiple distinct locations: {}",
-                found
-                    .iter()
-                    .map(|(path, _)| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        }
-    };
-    let current = crate::store::database_path_from_env()?;
-    if crate::store::same_database_file(database, &current)? {
-        return Ok(None);
-    }
-    Ok(Some(ChildExecutionContext {
-        lf_bin: selected.verified_cli()?.to_path_buf(),
-        lf_home: database
-            .parent()
-            .context("execution database has no directory")?
-            .to_path_buf(),
-        db_path: database.clone(),
     }))
 }
 
@@ -259,42 +130,6 @@ fn command(context: &ChildExecutionContext, cwd: &Path, args: &[String]) -> Comm
         command.env(name, &context.lf_bin);
     }
     command
-}
-
-/// Continue in the selected runtime without detaching the caller's terminal.
-pub(crate) fn forward_session(
-    context: &ChildExecutionContext,
-    cwd: &Path,
-    args: &[String],
-    readiness: bool,
-) -> Result<()> {
-    let mut command = command(context, cwd, args);
-    if readiness {
-        // Preserve the exact review's capture token; the owning store fences it.
-        for name in [
-            crate::durable::RUN_ID_ENV,
-            crate::ops::human_session::HUMAN_SESSION_ENV,
-        ] {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
-        }
-    }
-    #[cfg(unix)]
-    {
-        Err(command.exec()).context("continue Session through installed lf")
-    }
-    #[cfg(not(unix))]
-    {
-        let status = command
-            .status()
-            .context("continue Session through installed lf")?;
-        anyhow::ensure!(
-            status.success(),
-            "installed Session operation failed ({status})"
-        );
-        Ok(())
-    }
 }
 
 pub(super) fn execute(

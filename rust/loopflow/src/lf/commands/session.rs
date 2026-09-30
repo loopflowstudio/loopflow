@@ -8,24 +8,6 @@ use crate::run_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
-    let id = match command {
-        SessionCommand::Open { id, .. }
-        | SessionCommand::Complete { id }
-        | SessionCommand::Rename { id, .. } => Some(id.clone()),
-        SessionCommand::Ready { .. } => std::env::var(crate::durable::RUN_ID_ENV).ok(),
-        _ => None,
-    };
-    if let Some(id) = id {
-        if let Some(destination) = crate::ops::task_destination::existing_session(&id)? {
-            let args = std::env::args().skip(1).collect::<Vec<_>>();
-            return crate::ops::task_destination::forward_session(
-                &destination,
-                &std::env::current_dir()?,
-                &args,
-                matches!(command, SessionCommand::Ready { .. }),
-            );
-        }
-    }
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }

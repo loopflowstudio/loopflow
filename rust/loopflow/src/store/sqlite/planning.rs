@@ -452,6 +452,11 @@ fn put_item(
             comparable.rank = previous.rank;
             comparable.project = previous.project.clone();
             comparable.revision = previous.revision.clone();
+            // Earlier observations did not request Linear's branch name.
+            // Enrich unknown placement without accepting conflicting known facts.
+            if previous.branch_name.is_none() {
+                comparable.branch_name = None;
+            }
             if comparable != previous {
                 return Err(StoreError::InvalidData(format!(
                     "conflicting planning facts at the same provider revision for {}; refresh planning", item.identifier

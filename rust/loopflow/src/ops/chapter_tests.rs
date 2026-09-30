@@ -142,6 +142,7 @@ fn lost_creation_has_one_identity_on_every_home() {
 
 fn task(state: &str) -> PmItem {
     PmItem {
+        branch_name: None,
         revision: None,
         id: "issue".into(),
         identifier: "FIX-1".into(),

@@ -4,7 +4,7 @@
 //! select the reliable store by changing `LF_HOME`, and a published Home cannot
 //! hide an interrupted cross-store switch by selecting another database.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 #[cfg(unix)]
 use std::ffi::{CStr, OsString};
 use std::fs::{self, File, OpenOptions};
@@ -24,8 +24,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-
-pub(crate) mod execution_copy;
 
 const SCHEMA_VERSION: u32 = 1;
 const ACTIVE_FILE: &str = "active.json";
@@ -402,10 +400,6 @@ pub struct SwitchReceipt {
     pub activation: ActivationTargets,
     pub app_was_running: bool,
     pub disposable_store_owned: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copied_from: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copied_tasks: Option<BTreeMap<String, String>>,
 }
 
 impl SwitchReceipt {
@@ -418,19 +412,6 @@ impl SwitchReceipt {
             prior.validate()?;
         }
         self.target.validate()?;
-        if let Some(source) = &self.copied_from {
-            if !source.is_absolute() || *source == self.target.store || !self.disposable_store_owned
-            {
-                return Err(anyhow!("invalid installation copy source"));
-            }
-            if self.active_selection_committed && self.copied_tasks.is_none() {
-                return Err(anyhow!("installation copy has no execution baseline"));
-            }
-        } else if self.copied_tasks.is_some() {
-            return Err(anyhow!(
-                "installation execution baseline has no copy source"
-            ));
-        }
         if let Some(fallback) = &self.published_fallback {
             if fallback.source != InstallSource::Published {
                 return Err(anyhow!("install switch fallback is not published"));
@@ -566,20 +547,6 @@ impl SwitchReceipt {
     }
 
     fn validate_transition_from(&self, prior: &Self) -> Result<()> {
-        if (self.copied_from != prior.copied_from
-            && (prior.copied_from.is_some()
-                || self.phase != SwitchPhase::TargetPrepared
-                || prior.target_store_advance_started))
-            || (self.copied_tasks != prior.copied_tasks
-                && (prior.copied_tasks.is_some()
-                    || !self.target_store_advanced
-                    || self.phase != SwitchPhase::Advancing
-                    || prior.active_selection_committed))
-        {
-            return Err(anyhow!(
-                "install switch cannot replace its execution copy evidence"
-            ));
-        }
         let identity_changed = self.schema_version != prior.schema_version
             || self.id != prior.id
             || self.prior != prior.prior
@@ -1661,8 +1628,6 @@ mod tests {
             },
             app_was_running: false,
             disposable_store_owned: false,
-            copied_from: None,
-            copied_tasks: None,
         }
     }
 

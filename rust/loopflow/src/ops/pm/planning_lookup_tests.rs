@@ -13,7 +13,7 @@ use crate::store::{PmSnapshotRow, PmTaskRecord};
 
 fn issue(project: serde_json::Value) -> serde_json::Value {
     json!({"data":{"issue":{
-        "id":"issue-1", "identifier":"FIX-1", "url":null,
+        "id":"issue-1", "identifier":"FIX-1", "url":null, "branchName":"dev/fix-1-existing",
         "title":"Inspect a planning-only Task", "description":"Keep this work visible",
         "prioritySortOrder":0.0, "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
         "state":{"type":"unstarted"}, "team":{"id":"team-1"}, "project":project
@@ -31,7 +31,7 @@ fn team_response() -> QueuedResponse {
 }
 
 fn project() -> serde_json::Value {
-    json!({"id":"project-1", "name":"Chapter", "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
+    json!({"id":"project-1", "name":"Chapter", "status":{"type":"started"}, "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
         "initiatives":{"nodes":[{"id":"initiative-1"}]},
         "teams":{"nodes":[{"id":"team-1"}]}})
 }
@@ -65,6 +65,10 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .await
                 .unwrap();
             assert_eq!(record.item.name, "Inspect a planning-only Task");
+            assert_eq!(
+                record.item.branch_name.as_deref(),
+                Some("dev/fix-1-existing")
+            );
             let resolved =
                 crate::ops::task_pm::resolve_task_async(&repo, "issue-1", PmRefresh::Never)
                     .await

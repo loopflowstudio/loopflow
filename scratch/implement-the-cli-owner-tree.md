@@ -917,3 +917,8 @@ requires typed help to prove invalid Flow/review compilation fails nonzero befor
 its validation leaf can be removed; saved FlowSession inventory/detail remain
 distinct. Keep the copied-Flow counterexample and all open demo choices. This
 slice does not publish, land, complete the Task or choose Flow navigation.
+
+Compression after `f63912dc3` consolidates duplicate reserved-skill fixtures and
+help assertions, separates namespace discovery, and shares catalog JSON decoding.
+Isolated `cli_discovery` (14), formatting, all-target Clippy (four jobs) and diff
+checks passed. Production behavior, compiled counts and remaining scope are unchanged.

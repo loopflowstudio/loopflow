@@ -141,6 +141,20 @@ passing; `connect-replace-clippy.log` records all-target Clippy passing. Build,
 formatting, Ruff, architecture coverage, regenerated HTML consistency and diff
 checks passed. Website docs were synced. No integrated gate ran in this slice.
 
+Client replacement compression, 2026-09-30: review resume now shares the same
+client-stop operation; unused history and stop forwarding methods are removed.
+The public-connect fixture shares client startup without changing its assertions.
+Focused verification exposed an Ask fixture opening the default `loopflow.db`
+instead of its `registry.db`; the fixture now pins that existing database.
+`client-compress-focused-final.log` records 26 passes, and
+`client-compress-native.log` plus `client-compress-native/results.json` record the
+real-Codex/synthetic-Responses connection proof passing. The initial focused run
+also reported one leaky command-construction test; it did not recur in the final
+run, and no leak repair is claimed. Evidence remains under `.lf/tmp/test-compress/`.
+Build, formatting, Ruff, diff checks and all-target Clippy passed
+(`client-compress-build.log`, `client-compress-clippy.log`).
+Explicit engine restart and configured provider/Desktop acceptance remain open.
+
 `lf pr publish` checkpoint publication is blocked after local code commit `58ea71c2b`.
 `lf pr publish` refused: Task LOO-298 records base `00cf9dffe840`, behind the
 merged branch fork `4a696c074073`, and requests `lf rebase`. The accepted merge-only

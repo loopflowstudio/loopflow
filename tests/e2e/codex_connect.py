@@ -505,6 +505,24 @@ def _public_connection_contract(
         wait(output)
         return json.loads(output.read_text())
 
+    def _connect(label: str, *, replace: bool = False) -> None:
+        control = work.parent / f"{session}-{label}"
+        control.mkdir()
+        controls.append(control)
+        argv = [str(binary), "session", "connect", session]
+        if replace:
+            argv.append("--replace")
+        processes.append(
+            subprocess.Popen(
+                argv,
+                cwd=work,
+                env={**env, "LF_PROBE_CLIENT": str(control)},
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        )
+        wait(control / "ready")
+
     try:
         with sqlite3.connect(env["LF_DB_PATH"]) as database:
             endpoint, thread, generation = database.execute(
@@ -521,18 +539,7 @@ def _public_connection_contract(
         engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
-            control = work.parent / f"{session}-{label}"
-            control.mkdir()
-            controls.append(control)
-            child = subprocess.Popen(
-                [str(binary), "session", "connect", session],
-                cwd=work,
-                env={**env, "LF_PROBE_CLIENT": str(control)},
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            processes.append(child)
-            wait(control / "ready")
+            _connect(label)
             if label == "first":
                 call(0, 0, "thread/read", {"threadId": thread})
                 with sqlite3.connect(env["LF_DB_PATH"]) as database:
@@ -606,18 +613,7 @@ def _public_connection_contract(
             ).fetchone()
         assert after_prepare == before_prepare
         replaced.extend(processes)
-        control = work.parent / f"{session}-replacement"
-        control.mkdir()
-        controls.append(control)
-        replacement = subprocess.Popen(
-            [str(binary), "session", "connect", session, "--replace"],
-            cwd=work,
-            env={**env, "LF_PROBE_CLIENT": str(control)},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        processes.append(replacement)
-        wait(control / "ready")
+        _connect("replacement", replace=True)
         for previous in replaced:
             previous.communicate(timeout=10)
         assert (

@@ -18,6 +18,9 @@ use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     SUPERVISOR_STALE_AFTER,
 };
+use crate::session_record::{
+    AgentExecRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+};
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
 
@@ -263,8 +266,8 @@ fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> Op
         chrome: config.chrome,
     };
     let (harness, model) = crate::engine::parse_agent(launch.agent());
-    let capture = crate::session_record::CaptureHandle::begin_with_request(
-        crate::session_record::SessionCaptureSpec {
+    let capture = CaptureHandle::begin_with_request(
+        SessionCaptureSpec {
             harness,
             model,
             surface: "headless".to_string(),
@@ -273,7 +276,7 @@ fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> Op
             worktree: Some(landing.worktree.clone()),
             skill: Some("ci-fix".to_string()),
             subjects: Vec::new(),
-            flow: crate::session_record::SessionFlowMembership::Independent,
+            flow: SessionFlowMembership::Independent,
             work: landing
                 .task_id
                 .clone()
@@ -283,7 +286,7 @@ fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> Op
                     source: crate::session::WorkSource::Declared,
                 }),
         },
-        crate::session_record::AgentExecRequest::from_prepared(&launch, &capabilities),
+        AgentExecRequest::from_prepared(&launch, &capabilities),
     )
     .map_err(|error| OpsError::Message(error.to_string()))?;
     capture.record_input("initial", &launch.task_prompt);

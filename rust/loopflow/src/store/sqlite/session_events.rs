@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::id::ExecId;
 use crate::session::{SessionEvent, SessionEventKind};
+use crate::session_record::{FinalAnswer, ProviderSessionRef};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -12,7 +13,7 @@ impl SqliteStore {
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
-    ) -> StoreResult<Option<crate::session_record::ProviderSessionRef>> {
+    ) -> StoreResult<Option<ProviderSessionRef>> {
         let Some(session) = self.session_for_artifact(input)? else {
             return Ok(None);
         };
@@ -38,10 +39,7 @@ impl SqliteStore {
             .collect()
     }
 
-    pub(crate) fn input_final_answer(
-        &self,
-        input: &str,
-    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
+    pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<FinalAnswer>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
@@ -65,10 +63,7 @@ impl SqliteStore {
                     })?
                     .to_owned(),
             };
-            return Ok(Some(crate::session_record::FinalAnswer {
-                text,
-                exact: true,
-            }));
+            return Ok(Some(FinalAnswer { text, exact: true }));
         }
         crate::session_record::final_answer(self.input_events(input)?)
             .map_err(|error| StoreError::InvalidData(error.to_string()))

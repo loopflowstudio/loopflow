@@ -7,6 +7,9 @@ use crate::engine::{
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
+use crate::session_record::{
+    AgentExecRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
+};
 use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -188,7 +191,7 @@ fn exec_bound(
     message: Option<&str>,
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
-) -> Result<Option<crate::session_record::FinalAnswer>> {
+) -> Result<Option<FinalAnswer>> {
     let mut launch = cli.exec_options();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
@@ -642,10 +645,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     );
 }
 
-fn exec_prompt(
-    built: &PromptBuild,
-    cli: &Cli,
-) -> Result<Option<crate::session_record::FinalAnswer>> {
+fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     // Bare terminal control always stays in the TUI. Other interactive skills
     // use explicit flags first, then the configured launch target.
     let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
@@ -745,7 +745,7 @@ fn exec_prompt(
 
 fn exec_headless_prompt(
     built: &PromptBuild,
-    capture: &crate::session_record::CaptureHandle,
+    capture: &CaptureHandle,
     effective_system: &str,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
@@ -824,7 +824,7 @@ fn begin_run_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
-) -> Result<crate::session_record::CaptureHandle> {
+) -> Result<CaptureHandle> {
     let cwd = built
         .agent_config
         .cwd
@@ -834,10 +834,10 @@ fn begin_run_capture(
         .subjects
         .iter()
         .cloned()
-        .map(crate::session_record::SubjectAttribution::declared)
+        .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
     let step = crate::ops::flow_run::capture_membership()?;
-    let spec = crate::session_record::SessionCaptureSpec {
+    let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
         surface: surface.to_string(),
@@ -852,15 +852,11 @@ fn begin_run_capture(
     let capture = if let Some((token, captured, run_id)) = step.reserved {
         // The step command reserved this capture; publication retains its claim.
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        crate::session_record::CaptureHandle::begin_reserved_with_context(
+        CaptureHandle::begin_reserved_with_context(
             spec,
             run_id,
-            (surface == "headless").then(|| {
-                crate::session_record::AgentExecRequest::from_prepared(
-                    prepared_config,
-                    &built.capabilities,
-                )
-            }),
+            (surface == "headless")
+                .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
             &built.context,
             |_artifact| {
                 let path = crate::store::observability_database_path()
@@ -876,41 +872,22 @@ fn begin_run_capture(
             },
         )
     } else if let Some((run_id, membership)) = crate::ops::human_session::reserved_capture()? {
-        let spec = crate::session_record::SessionCaptureSpec {
+        let spec = SessionCaptureSpec {
             flow: membership,
             ..spec
         };
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        crate::session_record::CaptureHandle::begin_reserved_with_context(
-            spec,
-            run_id,
-            None,
-            &built.context,
-            |run_id| {
-                crate::ops::human_session::publish_capture_binding(
-                    run_id,
-                    &provider,
-                    model.as_deref(),
-                )
+        CaptureHandle::begin_reserved_with_context(spec, run_id, None, &built.context, |run_id| {
+            crate::ops::human_session::publish_capture_binding(run_id, &provider, model.as_deref())
                 .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
-            },
-        )
+        })
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
-        crate::session_record::CaptureHandle::start_prepared(
-            &crate::store::lf_home_dir(),
-            &id,
-            spec,
-            &built.context,
-        )
+        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
         let interactive = surface != "headless";
-        let launch = (!interactive).then(|| {
-            crate::session_record::AgentExecRequest::from_prepared(
-                prepared_config,
-                &built.capabilities,
-            )
-        });
-        crate::session_record::CaptureHandle::begin_with_context(spec, &built.context, launch)
+        let launch = (!interactive)
+            .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities));
+        CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {
         anyhow!("failed to publish Session capture manifest before agent launch: {error}")

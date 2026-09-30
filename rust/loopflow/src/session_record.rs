@@ -1,4 +1,4 @@
-//! Authoritative, Home-local evidence for one Loopflow harness exec.
+//! Captured Session inputs and append-only provider evidence.
 
 pub mod active;
 pub(crate) mod activity;
@@ -1251,7 +1251,7 @@ pub(crate) fn input_id_from_dir(dir: &Path) -> std::io::Result<String> {
         .file_name()
         .and_then(|id| id.to_str())
         .ok_or_else(|| std::io::Error::other("input path has no identifier"))?;
-    crate::session_record::parse_artifact_key(id).map_err(std::io::Error::other)
+    parse_artifact_key(id).map_err(std::io::Error::other)
 }
 
 /// Fresh publications supersede the imported sidecar, whose import time says
@@ -1632,8 +1632,7 @@ pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
 }
 
 fn validate_manifest_path(dir: &Path, manifest: &SessionCaptureManifest) -> std::io::Result<()> {
-    crate::session_record::parse_artifact_key(manifest.artifact_key.as_str())
-        .map_err(std::io::Error::other)?;
+    parse_artifact_key(manifest.artifact_key.as_str()).map_err(std::io::Error::other)?;
     if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.artifact_key.as_str())
         || dir
             .parent()
@@ -2040,7 +2039,7 @@ impl CaptureHandle {
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_with_key_and_caller(
             spec,
-            crate::session_record::new_artifact_key(),
+            new_artifact_key(),
             None,
             true,
             Some(exec),
@@ -2053,14 +2052,7 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         exec: Option<AgentExecRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_key_and_caller(
-            spec,
-            crate::session_record::new_artifact_key(),
-            None,
-            true,
-            exec,
-            Some(context),
-        )
+        Self::begin_with_key_and_caller(spec, new_artifact_key(), None, true, exec, Some(context))
     }
 
     pub(crate) fn begin_reserved_with_context(
@@ -2108,7 +2100,7 @@ impl CaptureHandle {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::session_record::new_artifact_key(),
+            new_artifact_key(),
             caller_artifact_key,
             Some(exec),
             Some(&context),
@@ -2151,7 +2143,7 @@ impl CaptureHandle {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::session_record::new_artifact_key(),
+            new_artifact_key(),
             inherited_caller(),
             None,
             None,
@@ -2169,7 +2161,7 @@ impl CaptureHandle {
         Self::begin_at_with_id(
             lf_home,
             spec,
-            crate::session_record::new_artifact_key(),
+            new_artifact_key(),
             inherited_caller(),
             Some(exec),
             Some(&context),

@@ -113,28 +113,15 @@ No Run launched or owner reply established the latest execution schema. Retry
 coordination before shared migrations; do not edit that branch, copy stores,
 repair auth or treat prior Wave memory as current agreement.
 
-## Earlier implementation evidence at b8e0e1d60 — 2026-09-29
+## Implementation evidence and limits — 2026-09-29
 
-At `b8e0e1d60`, issue revisions, UUID-scoped webhook invalidation/removal receipts,
-soft-refresh errors with unchanged observation age, and Rust/Swift planning
-fixtures are implemented. The grouped OAuth capture failure is resolved by an
-isolated process/subscriber; the recorded grouped run passed all 15 active tests.
-Project/membership ordering still uses acquisition timestamps. Invalidated facts
-remain stored but hidden from both planning readers. Full execution/action
-fixtures, local lifecycle and contextual Wave definitions remain unimplemented.
-
-At that earlier checkpoint, source still refused failed hard-stale/forced inspection. When no
-execution exists and planning cannot resolve, status returns an error rather than
-the unavailable JSON fixture. Every new status fixture has null execution. Keep
-fixture shape, public command behavior and managed-admission policy separate.
-The [working design](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
-owns the full remaining work and retained proof receipts.
-
-Realign found a bounded mismatch: content edits without `updatedAt` manufactured
-an empty timestamp instead of invalidating planning. Treat missing/empty revision
-as unknown, invalidate via the existing event path, and await a complete ordered
-observation before steering. This follows the accepted partial-event contract;
-it does not choose outage admission or provider restoration semantics.
+At `01f7814ef`, issue revisions, UUID-scoped webhook invalidation/removal receipts,
+Project fact revisions and retained planning inspection are implemented. Missing
+or empty webhook revisions invalidate through the existing event path; ordered
+steering waits for complete evidence. The grouped OAuth capture failure is
+resolved by an isolated process/subscriber. The
+[working design](resolve-tasks-from-linear-and.md#implementation-checkpoint--2026-09-29)
+owns proof receipts and the full remaining acceptance matrix.
 
 The last-fetched `origin/main` remains `a3820bf7e`; no new execution contract was
 available there. This reconciliation made no coordination retry, fetch, provider
@@ -143,13 +130,18 @@ remains a blocker only for dependent execution migrations. Reuse local planning
 proofs without claiming live provider or full command-story acceptance. Resolve
 outage and transition policy before dependent work; the saved Flow owns navigation.
 
-## Planning-evidence follow-through — 2026-09-29
-
 The current implementation now retains invalid/removed facts publicly, returns
 unavailable status without execution, and preserves last-good facts/age after
 hard-stale or forced inspection failure. `planning_state` and Project `revision`
-are mirrored in Rust/Swift fixtures. These replace the corresponding gaps in the
-older checkpoint above; execution/action fixtures and the full story remain open.
+are mirrored in Rust/Swift fixtures. All new status fixtures have null execution;
+execution/action parity, local lifecycle, contextual Wave definitions and the
+full story remain open. Keep fixture shape, public command behavior and
+managed-admission policy separate.
+
+Realign reproduced and repaired a null lookup response hiding a removal receipt
+that arrived during acquisition. Confirmed removal remains explicit in inspection;
+the dated facts remain visible and managed reads still refuse. This follows the
+accepted evidence contract without selecting new product policy.
 
 Safe implementation choice: a later list cannot establish Project removal, and
 Project `updatedAt` alone cannot order separate Initiative/Team relationships.

@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use axum::http::StatusCode;
 use serde_json::json;
+use tokio::sync::Barrier;
 
 use super::test_fixture::{now, Fixture};
 use super::{inspect_task_planning_async, read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
@@ -701,6 +704,54 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 crate::store::PlanningState::Removed
             );
             assert_eq!(removed.observation.record.as_ref(), Some(&original));
+            assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
+                .await
+                .is_err());
+            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
+    let fixture = Fixture::new().await;
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let mut absent = json_response(StatusCode::OK, json!({"data":{"issue":null}}));
+    absent.gate = Some((entered.clone(), release.clone()));
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+        team_response(),
+        absent,
+    ])
+    .await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let original = read_task_planning_async(&repo, "FIX-1", PmRefresh::Auto)
+                .await
+                .unwrap();
+            let (inspection, ()) = tokio::join!(
+                inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force),
+                async {
+                    entered.wait().await;
+                    fixture
+                        .store
+                        .observe_pm_issue_change("issue-1", None, true)
+                        .await
+                        .unwrap();
+                    release.wait().await;
+                }
+            );
+            let inspection = inspection.unwrap();
+            assert_eq!(
+                inspection.observation.state,
+                crate::store::PlanningState::Removed
+            );
+            assert_eq!(inspection.observation.record.as_ref(), Some(&original));
+            assert!(inspection.refresh_error.is_none());
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());

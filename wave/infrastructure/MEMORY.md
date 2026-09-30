@@ -36,14 +36,14 @@ Accepted contracts below exceed the implemented planning slice:
   coupled runtime/store target in the LOO-321 branch notes below, while retaining
   source isolation and verified historical pairs. It is not implemented yet.
 
-Branch `b8e0e1d60` implements normalized connected planning, revision-ordered
-issue writes, webhook invalidation/removal receipts and planning-only status.
-Soft-refresh errors now preserve age and surface stale/error evidence; Rust/Swift
-fixtures cover the planning envelope. Invalidated records remain hidden and
-Project/membership ordering still uses acquisition time. Full execution/action
-parity, local lifecycle, contextual definitions and runtime selection remain work.
-All new status fixtures have null execution; an unavailable fixture alone does
-not establish public CLI success without planning or execution.
+Branch `01f7814ef` implements normalized connected planning, revision-ordered
+issue and Project facts, webhook receipts and planning-only status. Inspection
+retains invalid/removed facts and their age even when hard-stale or forced
+acquisition fails. Public CLI proof now covers unavailable planning without
+execution; Rust/Swift fixtures cover the planning envelope, all with null
+execution. Managed readers still exclude invalid/removed records. Full
+execution/action parity, local lifecycle, contextual definitions and runtime
+selection remain work; inspection does not prove managed boundary enforcement.
 
 Durable lessons from this slice:
 
@@ -52,9 +52,26 @@ Durable lessons from this slice:
   revisions cannot authorize ordered steering. Realign reproduced a missing
   `updatedAt` content edit failing before invalidation, then routed it through
   the existing unknown-revision invalidation path.
+  After acquisition, preserve newly arrived removal evidence: a null response
+  must not downgrade a confirmed removal to absence. A barrier-controlled lookup
+  reproduced that race; inspection now retains removal and dated facts while
+  managed reads refuse.
+- Project facts have their own revisions, independent of the enclosing issue.
+  Project `updatedAt` cannot order separate Initiative/Team relationships.
+  Contradictions persist as unresolved ownership outside the rejected ingestion
+  transaction; replay cannot repair them. Ordered relationship acquisition and
+  repair remain necessary. List omission alone cannot retire a Project.
 - Current normalized membership cannot reconstruct a predecessor chapter. The
   chapter receipt owns frozen history. Failed assertions expecting stale snapshot
   resurrection or never-acquired entities did not establish lost history.
+  Confirmed chapter archive acknowledgements exclude predecessors from current
+  reads, including after migration or delayed lists. This does not implement
+  provider Project completion, external archive acquisition or restoration.
+- Repository alias repair must move Waves and normalized planning atomically.
+  Moving only the Wave stranded its planning in the old scope. Conflicts fail
+  without merging observations; this canonicalization is not cross-repository
+  relocation or local-to-Linear connection migration. Populated planning across
+  explicit repository relocation remains unproven.
 - Tracing callsite interest is process-global. The grouped OAuth log-capture
   failure reproduced and was resolved with an isolated process/subscriber;
   its recorded grouped run passed 15 active tests. Do not add retries or production

@@ -17,8 +17,8 @@ Wave mapping and remaining migration details: [Wave existence and Linear migrati
 
 ## Implementation checkpoint — 2026-09-29
 
-Baseline reconciled against `b8e0e1d60` and the bounded webhook repair below;
-the following planning-evidence follow-through updates that baseline. The connected
+Reconciled against `01f7814ef`, including the planning-evidence implementation
+at `3508257b0` and its subsequent compression. The connected
 planning slice is implemented; the full approved single-PR outcome remains open.
 The last-fetched `origin/main` is still `a3820bf7e`. No new integrated LOO-298
 execution contract or owner reply was found; no fetch or coordination retry ran
@@ -61,6 +61,14 @@ only confirmed removal receipts establish removed state. Managed readers filter
 invalid/removed observations and retain the existing hard/forced refresh refusal.
 This does not select cached-Task outage admission.
 
+Realign reproduced a concurrent-observation counterexample: a confirmed removal
+arriving during an in-flight detail lookup was overwritten in the returned state
+by the lookup's null response (`Absent` instead of `Removed`). Inspection now
+preserves the removal receipt's state and dated facts. The regression uses the
+existing test-server barrier, not timing sleeps, and also checks that managed
+reads refuse the Task and no execution is allocated. This repair adds no storage,
+restoration or outage policy.
+
 Project list/detail queries now acquire `updatedAt`. Shared writes order Project
 facts separately from issue revisions, so a newer Project observation can win
 when its enclosing issue request began earlier. Missing Project content or
@@ -88,15 +96,20 @@ archive acquisition and restoration semantics remain separate unfinished work.
 The self-review also preserved execution inspection when the owning checkout is
 missing; planning-context failure cannot hide already-recorded execution.
 No execution schema, runtime selection, execution ownership, account or live
-provider state was changed by this follow-through. No LOO-298 coordination retry was needed for this
-planning-only schema change. Its execution-contract blocker remains unchanged.
+provider state was changed by this follow-through. No LOO-298 coordination retry
+was needed for this planning-only schema change. Its execution-contract blocker
+remains unchanged. Infrastructure memory now reflects these implemented inspection
+and Project-revision contracts and the archival/canonicalization lessons; its
+earlier hidden-invalid and acquisition-ordered Project guidance is superseded.
 
 Focused local proof receipts:
 
-- `cargo test -p loopflow --lib ops::pm::planning_lookup_tests`: all ten cases
+- `cargo test -p loopflow --lib ops::pm::planning_lookup_tests`: all eleven cases
   passed, including forced failure, retained invalid/removed/absent facts,
-  partial Project fields and independent Project revisions. The ordering case
-  was rerun after distinguishing unknown revisions from known older revisions.
+  partial Project fields, independent Project revisions and removal during a null
+  lookup. Realign reran this group after the new race case first failed with
+  `Absent` instead of `Removed`. The ordering case had previously been rerun
+  after distinguishing unknown revisions from known older revisions.
 - `cargo test -p loopflow --test planning_lookup_tests --test dto_fixtures`:
   public CLI matrix passed; all eleven DTO tests passed. CLI cases include
   identifier/UUID, more-than-seven-day-old planning, invalidation, cached and
@@ -117,6 +130,10 @@ Focused local proof receipts:
   `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed.
   Scratch links resolve and the full acceptance matrix is unchanged.
 
+The other behavioral receipts above are reused in this reconciliation; DTOs and
+public command shapes are unchanged by the race repair. Realign also passed
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, whitespace and
+local-link checks, and verified the full acceptance matrix is unchanged.
 These are simulated-provider and disposable local CLI proofs. The complete
 acceptance matrix remains required and unproven. No affected-suite/repository
 gate, live provider demonstration, installation promotion or Flow navigation is

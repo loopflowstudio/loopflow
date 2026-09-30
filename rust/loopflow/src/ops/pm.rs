@@ -1817,6 +1817,7 @@ async fn inspect_task_planning_async(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
+        Ok(false) if observation.state == PlanningState::Removed => None,
         Ok(false) => {
             observation.state = PlanningState::Absent;
             Some(format!("task {issue:?} is absent from repository planning"))

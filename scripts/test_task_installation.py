@@ -17,7 +17,7 @@ PROOFS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="rust:1.89-bookworm")
+    parser.add_argument("--image", default="rust:bookworm")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
@@ -81,6 +81,7 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
     LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 \
     CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
+        rustc --version
         version=$(sed -n "s/^version = \"\([^\"]*\)\"/\1/p" Cargo.toml | head -1)
         python3 scripts/canonicalize_migrations.py "$version" --materialize-for-tests
         nice -n 10 cargo test -p loopflow --lib \

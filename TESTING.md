@@ -400,6 +400,11 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
+The installation harness pulls `rust:bookworm` on each run to follow stable
+alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
+standard-library API, run `uv run python scripts/test_task_installation.py` too;
+a local lint pass does not prove that the disposable installation builds.
+
 CI installs stable on each run. An older local compiler can miss new Clippy
 lints and standard-library deprecations. Put rustup's proxies first on `PATH`
 so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.

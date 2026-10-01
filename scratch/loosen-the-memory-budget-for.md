@@ -20,12 +20,20 @@ compatibility paths are removed.
 
 ## Remaining work
 
-Implementation is complete. Gate owns broader acceptance; publication and landing
-belong to subsequent Flow steps. LOO-356 is already in the branch's base.
+Implementation and gate are complete. Publication and landing belong to
+subsequent Flow steps. LOO-356 is already in the branch's base.
 
 Review finding: increasing only the token limit would leave Product excerpted
 by the old byte cap. The matching 128 KiB default resolves that mismatch; the
 regression retains a 70,000-byte memory whole and checks the 16,000-token boundary.
 Explicit override precedence and source preservation retain their existing tests.
 
-Checks: `cargo test -p loopflow --lib engine::context_budget::tests` (4 passed); `cargo test -p loopflow --test golden_prompt` (passed); `cargo fmt --check` and `git diff --check` (passed).
+Gate review found no additional defects. This branch's `lf context` retains
+Product's gathered 14,189 tokens / 66,111 bytes whole; Infrastructure's 23,709
+tokens / 112,521 bytes becomes a 13,530-token excerpt. Both report default memory
+limits of 16,000 tokens / 128 KiB and input limits of 64,000 tokens / 512 KiB.
+Under the former defaults, Product exceeded both memory limits. No memory files
+were changed. Prompt goldens establish delivery of gradual curation instructions;
+they do not establish an agent's curation judgment on a live memory.
+
+Checks: `cargo nextest run -p loopflow --lib --test context_tests --test golden_prompt --test global_commands -E 'test(engine::context) | test(engine::exec::tests) | test(engine::prompt::) | test(engine::builtins::tests) | binary(context_tests) | binary(golden_prompt) | test(context_budget_preview_reads_authored_wave_without_registration)' --no-fail-fast --build-jobs 4 --test-threads 4` (138 passed); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py`, `git diff --check` (passed); `uv run pytest python/tests/test_loopflow_skill_alignment.py` (4 passed); `uv run python dev.py test` in `website/` (78 passed, 3 skipped); `target/debug/lf context --wave product --json` and `--wave infrastructure --json` (confirmed measurements above). Full materialized Rust matrix remains CI-owned; the changed-aware runner creates a separate worktree, contrary to this Run's execute-here instruction.

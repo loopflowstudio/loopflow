@@ -143,7 +143,7 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
 lf qa --no-loopflow                    # skip LOOPFLOW.md

@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
-use tracing::instrument::WithSubscriber;
 
 use super::test_fixture::{now, token, Fixture};
 use super::{
@@ -48,11 +47,10 @@ impl Fixture {
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            payload: serde_json::to_string(&PmSnapshot {
+            snapshot: PmSnapshot {
                 projects: vec![],
                 items: vec![],
-            })
-            .unwrap(),
+            },
         };
         self.store.put_pm_snapshot(row.clone()).await.unwrap();
         row
@@ -175,7 +173,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert!(result.projects[0].metric_targets.is_empty());
     assert_eq!(result.projects[0].krs[0].text, "Fresh proof");
     let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-    let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+    let snapshot = row.snapshot;
     assert_eq!(snapshot.projects, result.projects);
     assert_eq!(
         serde_json::to_value(fixture.store.get_wave(wave.id()).await.unwrap()).unwrap(),
@@ -626,8 +624,30 @@ impl std::io::Write for TraceBuffer {
     }
 }
 
+#[test]
+fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+    // Tracing callsite interest is process-global. Capture in an isolated process
+    // so concurrently running tests cannot disable this subscriber's callsites.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "ops::pm::oauth_tests::oauth_trace_process_entry",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[tokio::test]
-async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
+#[ignore = "isolated tracing entry point"]
+async fn oauth_trace_process_entry() {
     let fixture = Fixture::new().await;
     let mut original = fixture.seed(now() + 60).await;
     original.access_token = "synthetic-secret-access".into();
@@ -646,11 +666,8 @@ async fn linear_oauth_proactive_failure_tracing_is_secret_free() {
         .with_max_level(tracing::Level::TRACE)
         .with_writer(move || writer.clone())
         .finish();
-    let value = fixture
-        .resolve(&url)
-        .with_subscriber(subscriber)
-        .await
-        .unwrap();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let value = fixture.resolve(&url).await.unwrap();
     assert!(value.as_deref() == Some(original.access_token.as_str()));
     let captured = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
     assert!(captured.contains("proactive Linear refresh failed"));

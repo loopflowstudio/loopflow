@@ -616,25 +616,16 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     if !gh_available() {
         return Ok(None);
     }
-
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    Ok(find_open_branch_pr(repo, &branch)?.map(|pr| pr_info(&branch, &pr)))
+}
 
-    if let Some(pr) = find_open_pr(repo)? {
-        let state = if pr.is_draft { "draft" } else { "open" }.to_string();
-        return Ok(Some(PrInfo {
-            url: pr.url,
-            number: pr.number,
-            state,
-            branch,
-            merge_commit: pr.merge_commit.map(|commit| commit.oid),
-            merged_at: None,
-            head_sha: pr.head_ref_oid,
-            merge_state: None,
-        }));
+pub(crate) fn branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<PrInfo>> {
+    if !gh_available() {
+        return Ok(None);
     }
-
-    Ok(None)
+    Ok(find_open_branch_pr(repo, branch)?.map(|pr| pr_info(branch, &pr)))
 }
 
 pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
@@ -1339,11 +1330,15 @@ struct GhCheck {
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    find_open_branch_pr(repo, &branch)
+}
+
+fn find_open_branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhPr>> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("list")
         .arg("--head")
-        .arg(&branch)
+        .arg(branch)
         .arg("--json")
         .arg("url,state,isDraft,number,mergeCommit,headRefOid")
         .current_dir(repo)

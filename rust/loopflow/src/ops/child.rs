@@ -3,6 +3,8 @@
 use std::time::Duration;
 
 use crate::durable::WorkRef;
+use crate::engine::config::load_config;
+use crate::engine::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
 
 pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
@@ -39,34 +41,45 @@ pub(crate) async fn inject_live_steers(
     cursor: &mut i64,
 ) -> Vec<crate::durable::Steer> {
     let mut delivered = Vec::new();
-    let steers = match store.task_steers(task_id).await {
+    let mut steers = match store.task_steers(task_id).await {
         Ok(steers) => steers,
         Err(error) => {
             tracing::warn!(%error, "failed to read steers for live injection");
             return delivered;
         }
     };
-    for mut steer in steers {
-        if steer.id <= *cursor {
-            continue;
+    steers.retain(|steer| steer.id > *cursor);
+    if steers.is_empty() {
+        return delivered;
+    }
+    let context = async {
+        let task = store
+            .get_task(task_id)
+            .await?
+            .ok_or(crate::store::StoreError::NotFound)?;
+        let wave = store.get_wave(&task.wave_id).await?;
+        let config = load_config(Some(&task.worktree))?.unwrap_or_default();
+        let budgets = ContextBudgets::resolve(
+            &config,
+            &task.worktree,
+            wave.as_ref().map(|wave| wave.name()),
+        )?;
+        Ok::<_, anyhow::Error>((task.worktree, budgets))
+    }
+    .await;
+    let (worktree, budgets) = match context {
+        Ok(context) => context,
+        Err(error) => {
+            tracing::warn!(%error, "failed to resolve live direction budgets; deferring delivery");
+            return delivered;
         }
-        // Token count cannot exceed byte count, so small inputs need no lookup.
-        if steer.text.len() > crate::engine::context_budget::GOAL_TOKENS {
-            let result = async {
-                let task = store
-                    .get_task(task_id)
-                    .await?
-                    .ok_or(crate::store::StoreError::NotFound)?;
-                crate::engine::context_budget::bound_message(&steer.text, &task.worktree)
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-            }
-            .await;
-            match result {
-                Ok(text) => steer.text = text,
-                Err(error) => {
-                    tracing::warn!(%error, "failed to preserve oversized live direction; deferring delivery");
-                    break;
-                }
+    };
+    for mut steer in steers {
+        match bound_message(&steer.text, &worktree, &budgets) {
+            Ok(text) => steer.text = text,
+            Err(error) => {
+                tracing::warn!(%error, "failed to preserve oversized live direction; deferring delivery");
+                break;
             }
         }
         match harness.send_current(&steer.text).await {

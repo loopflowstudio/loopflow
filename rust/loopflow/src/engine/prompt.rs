@@ -175,6 +175,7 @@ impl std::str::FromStr for Surface {
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
+    pub budget_notice: Option<String>,
     pub surface: Surface,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
@@ -410,6 +411,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         diff_tier,
         diff_file_count,
         budget_decisions: Vec::new(),
+        budget_notice: None,
     })
 }
 
@@ -1405,8 +1407,7 @@ const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
 /// Remove docs that duplicate any agent's natively-loaded instruction file.
 ///
-/// Skips all known native files (CLAUDE.md and AGENTS.md) and any
-/// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
+/// Skips all known native files and any files they symlink to.
 pub fn drop_native_instruction_docs(
     components: &mut PromptComponents,
     repo_root: &Path,
@@ -1430,7 +1431,7 @@ pub fn drop_native_instruction_docs(
             return false;
         }
 
-        // Drop symlink partners (CLAUDE.md -> STYLE.md or STYLE.md -> CLAUDE.md)
+        // Drop aliases of native instruction files in either symlink direction.
         let doc_path = repo_root.join(&doc.path);
         if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
             if canonical_paths.contains(&doc_canon) {
@@ -1578,6 +1579,12 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              As sections grow, promote stable entries to wave docs or explicit docs and trim.\n\
              </lf:wave>",
             wave, wave, memory_path
+        ));
+    }
+
+    if let Some(notice) = &components.budget_notice {
+        parts.push(format!(
+            "<lf:context-budget>\n{notice}\n</lf:context-budget>"
         ));
     }
 
@@ -2261,6 +2268,54 @@ mod tests {
     }
 
     #[test]
+    fn native_instructions_are_not_injected() {
+        let repo = init_repo();
+        write_file(repo.path(), "AGENTS.md", "Repository instructions");
+        write_file(repo.path(), "README.md", "Project documentation");
+        let mut components = PromptComponents {
+            docs: gather_documents(&GatherSpec {
+                repo_root: repo.path().to_path_buf(),
+                docs: vec!["AGENTS.md".to_string(), "README.md".to_string()],
+                ..Default::default()
+            })
+            .unwrap(),
+            ..Default::default()
+        };
+
+        let removed = drop_native_instruction_docs(&mut components, repo.path());
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].path, "AGENTS.md");
+        let prompt = render_full_prompt(components);
+        assert!(!prompt.contains("Repository instructions"));
+        assert!(prompt.contains("Project documentation"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_instruction_symlink_aliases_are_not_injected() {
+        for (target, link) in [
+            ("CONTRIBUTING.md", "AGENTS.md"),
+            ("AGENTS.md", "CONTRIBUTING.md"),
+        ] {
+            let repo = init_repo();
+            write_file(repo.path(), target, "Repository instructions");
+            std::os::unix::fs::symlink(repo.path().join(target), repo.path().join(link)).unwrap();
+            let mut components = PromptComponents {
+                docs: vec![Document {
+                    path: "CONTRIBUTING.md".to_string(),
+                    content: "Repository instructions".to_string(),
+                    source: DocumentSource::Docs,
+                }],
+                ..Default::default()
+            };
+
+            let removed = drop_native_instruction_docs(&mut components, repo.path());
+            assert_eq!(removed.len(), 1);
+            assert!(!render_full_prompt(components).contains("Repository instructions"));
+        }
+    }
+
+    #[test]
     fn format_prompt_with_docs() {
         let components = PromptComponents {
             docs: vec![
@@ -2270,7 +2325,7 @@ mod tests {
                     source: DocumentSource::Docs,
                 },
                 Document {
-                    path: "STYLE.md".to_string(),
+                    path: "CONTRIBUTING.md".to_string(),
                     content: "# Style Guide".to_string(),
                     source: DocumentSource::Docs,
                 },
@@ -2283,37 +2338,7 @@ mod tests {
         assert!(prompt.contains("<lf:file path=\"README.md\">"));
         assert!(prompt.contains("# Test Project"));
         assert!(prompt.contains("</lf:file>"));
-        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
-        assert!(prompt.contains("# Style Guide"));
-    }
-
-    #[test]
-    fn format_prompt_claude_md_renders_as_file() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "CLAUDE.md".to_string(),
-                content: "# Instructions".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:file path=\"CLAUDE.md\">"));
-        assert!(prompt.contains("# Instructions"));
-    }
-
-    #[test]
-    fn format_prompt_style_md_renders_as_file() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "STYLE.md".to_string(),
-                content: "# Style Guide".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
+        assert!(prompt.contains("<lf:file path=\"CONTRIBUTING.md\">"));
         assert!(prompt.contains("# Style Guide"));
     }
 
@@ -3271,11 +3296,15 @@ mod tests {
     #[test]
     fn gather_documents_cross_repo_docs_include_target_docs_only() {
         let source_repo = init_repo();
-        write_file(source_repo.path(), "CLAUDE.md", "source claude");
+        write_file(source_repo.path(), "AGENTS.md", "source instructions");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
-        std::fs::write(related_repo.path().join("STYLE.md"), "related style").unwrap();
+        std::fs::write(
+            related_repo.path().join("AGENTS.md"),
+            "related instructions",
+        )
+        .unwrap();
+        std::fs::write(related_repo.path().join("CONTRIBUTING.md"), "related style").unwrap();
         std::fs::create_dir_all(related_repo.path().join("src")).unwrap();
         std::fs::write(related_repo.path().join("src/README.md"), "src area doc").unwrap();
 
@@ -3295,12 +3324,12 @@ mod tests {
         // Source-repo scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .all(|d| d.path != "CLAUDE.md" && d.content != "source claude"));
+            .all(|d| d.path != "AGENTS.md" && d.content != "source instructions"));
 
         // Related repo root docs are not loaded for a directory docs target.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "[acme/widgets] CLAUDE.md" && d.content == "related claude"));
+            .any(|d| d.path == "[acme/widgets] AGENTS.md" && d.content == "related instructions"));
 
         // Related repo docs target.
         assert!(docs
@@ -3311,10 +3340,14 @@ mod tests {
     #[test]
     fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
         let source_repo = init_repo();
-        write_file(source_repo.path(), "CLAUDE.md", "source claude");
+        write_file(source_repo.path(), "AGENTS.md", "source instructions");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
+        std::fs::write(
+            related_repo.path().join("AGENTS.md"),
+            "related instructions",
+        )
+        .unwrap();
 
         let related = RelatedRepoContext {
             repo_id: RepoId::parse("acme/widgets").unwrap(),
@@ -3331,7 +3364,7 @@ mod tests {
         // Source-repo root docs are not ambient.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "source claude"));
+            .any(|d| d.path == "AGENTS.md" && d.content == "source instructions"));
 
         // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
@@ -3382,7 +3415,7 @@ mod tests {
         let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::write(related_repo.path().join("AGENTS.md"), "studio instructions").unwrap();
         std::fs::create_dir_all(related_repo.path().join("swift")).unwrap();
         std::fs::write(related_repo.path().join("swift/README.md"), "swift docs").unwrap();
 
@@ -3412,7 +3445,7 @@ mod tests {
         let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::write(related_repo.path().join("AGENTS.md"), "studio instructions").unwrap();
         std::fs::write(related_repo.path().join("README.md"), "studio readme").unwrap();
 
         let related = RelatedRepoContext {

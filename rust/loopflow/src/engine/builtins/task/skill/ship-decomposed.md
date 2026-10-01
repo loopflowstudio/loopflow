@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
   change; it tells you which parts were one idea and which merely shared a
   branch.
 - Run `git diff main --stat` to see the change's real footprint.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 ## When this skill applies
 

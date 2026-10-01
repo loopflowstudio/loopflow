@@ -993,9 +993,9 @@ fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
 
 fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
-    if pr.task_id != task.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
+    if pr.task_id != task.id || pr.sequence != 1 || !pr.is_active() {
         return Err(StoreError::InvalidData(
-            "Task requires its sequence-1 Working PR".to_string(),
+            "Task requires its sequence-1 active PR".to_string(),
         ));
     }
     Ok(())

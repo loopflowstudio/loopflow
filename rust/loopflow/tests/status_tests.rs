@@ -94,7 +94,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
             synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -350,7 +350,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -608,7 +608,7 @@ Count dispatched Task loops that settle without rescue.
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
     select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
@@ -756,15 +756,15 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
 
 #[test]
 fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
-    for payload in [None, Some("{}"), Some(r#"{"projects": [], "items": []}"#)] {
+    for payload in [None, Some("{}"), Some("not-json")] {
         let home = tempfile::tempdir().unwrap();
         seed_stale_project_work(home.path(), false);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_snapshots SET payload=?1", [payload])
+            conn.execute("UPDATE pm_projects SET body=?1", [payload])
                 .unwrap();
         } else {
-            conn.execute("DELETE FROM pm_snapshots", []).unwrap();
+            conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
@@ -821,12 +821,7 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         seed_persisted_merge_request_without_copy(home.path());
         if missing_provider_task {
             let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            connection
-                .execute(
-                    "UPDATE pm_snapshots SET payload=json_set(payload, '$.items', json('[]'))",
-                    [],
-                )
-                .unwrap();
+            connection.execute("DELETE FROM pm_items", []).unwrap();
         }
 
         let status = status_json(home.path(), &["product"], None);
@@ -974,15 +969,13 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     );
     store.create_wave(&other).unwrap();
     let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
-    let mut payload: serde_json::Value = serde_json::from_str(&snapshot.payload).unwrap();
-    payload["projects"][0]["id"] = "other-project".into();
-    payload["projects"][0]["initiative_ids"] = serde_json::json!(["other-initiative"]);
-    payload["items"][0]["id"] = "other-task".into();
-    payload["items"][0]["project_id"] = "other-project".into();
-    payload["items"][0]["completed"] = true.into();
+    snapshot.snapshot.projects[0].id = "other-project".into();
+    snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
+    snapshot.snapshot.items[0].id = "other-task".into();
+    snapshot.snapshot.items[0].project_id = Some("other-project".into());
+    snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
-    snapshot.payload = serde_json::to_string(&payload).unwrap();
     store.put_pm_snapshot(&snapshot).unwrap();
 
     for all in [true, false] {

@@ -920,8 +920,42 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             }
         }
         TaskCommand::Status { issue, json } => {
-            let task = loopflow::ops::task::task_status(issue.as_deref())?;
-            print_task(&task, *json)
+            let status = loopflow::ops::task::task_status(repo, issue.as_deref())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                println!(
+                    "Planning evidence: {}",
+                    serde_json::to_value(status.planning_state)?
+                        .as_str()
+                        .expect("planning state is a string")
+                );
+                if let Some(planning) = &status.planning {
+                    println!("{} · {}", planning.item.identifier, planning.item.name);
+                    println!(
+                        "Planning: {} · {} · observed at {}",
+                        planning.item.state.as_deref().unwrap_or("unknown"),
+                        if status.planning_stale {
+                            "stale"
+                        } else {
+                            "current"
+                        },
+                        planning.observed_at
+                    );
+                    if planning.project.is_none() {
+                        println!("No Project assigned; managed work requires ownership.");
+                    }
+                }
+                if let Some(error) = &status.planning_error {
+                    println!("Planning: {error}");
+                }
+                if let Some(execution) = &status.execution {
+                    print_task_snapshot(execution, false)?;
+                } else {
+                    println!("No execution allocated.");
+                }
+            }
+            Ok(())
         }
         TaskCommand::Diff {
             issue,
@@ -1593,6 +1627,12 @@ fn execute_command(
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd, cli))
         }
+        Some(Commands::Context {
+            json,
+            wave,
+            task,
+            skill,
+        }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             let item = loopflow::engine::flow::Command {
                 command: "__telemetry-scorecard".to_string(),

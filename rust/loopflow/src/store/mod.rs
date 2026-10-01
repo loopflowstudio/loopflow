@@ -30,15 +30,40 @@ mod token_crypto;
 pub use branch_data::isolate_branch_data;
 pub(crate) use branch_data::observation_database_path;
 
-/// One wave's locally readable PM projection. Linear owns the payload; sync
-/// replaces this row atomically so readers never observe a partial refresh.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One Wave's planning view, assembled from shared entities and membership.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PmSnapshotRow {
     pub wave_id: WaveId,
     pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
-    pub payload: String,
+    pub snapshot: crate::pm::PmSnapshot,
+}
+
+/// A planning observation; neither Project ownership nor execution is required.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PmTaskRecord {
+    pub item: crate::pm::PmItem,
+    pub project: Option<crate::pm::PmProject>,
+    pub observed_at: i64,
+}
+
+/// Availability of retained planning facts, independent of execution permission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PlanningState {
+    Available,
+    Invalid,
+    Removed,
+    Absent,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PmTaskObservation {
+    pub record: Option<PmTaskRecord>,
+    pub state: PlanningState,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +204,13 @@ fn default_lf_home_dir_for(
 }
 
 pub(crate) fn lf_home_dir() -> PathBuf {
+    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
+        if let Ok(database) = installed_execution_database(&selection) {
+            if let Some(home) = database.parent() {
+                return home.to_path_buf();
+            }
+        }
+    }
     select_store_env_value(
         crate::build_info::provenance(),
         std::env::var_os(CONTROL_HOME_ENV),
@@ -196,12 +228,7 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     if let Some(selection) = crate::machine_install::selection_for_current_executable()
         .map_err(|error| std::io::Error::other(error.to_string()))?
     {
-        guard_development_database(
-            &selection.store,
-            crate::build_info::provenance(),
-            &machine_home_dir(),
-        )?;
-        return Ok(selection.store);
+        return installed_execution_database(&selection);
     }
     resolve_database_path(
         select_store_env_value(
@@ -220,8 +247,10 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
 /// default) is honored here — the control-plane selection is deliberately not.
 pub(crate) fn current_home_lf_home_dir() -> PathBuf {
     if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(parent) = selection.store.parent() {
-            return parent.to_path_buf();
+        if let Ok(database) = installed_execution_database(&selection) {
+            if let Some(parent) = database.parent() {
+                return parent.to_path_buf();
+            }
         }
     }
     std::env::var_os("LF_HOME")
@@ -238,14 +267,34 @@ pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
     if let Some(selection) = crate::machine_install::selection_for_current_executable()
         .map_err(|error| std::io::Error::other(error.to_string()))?
     {
+        return installed_execution_database(&selection);
+    }
+    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+}
+
+fn installed_execution_database(
+    selection: &crate::machine_install::InstallSelection,
+) -> Result<PathBuf, std::io::Error> {
+    let requested = std::env::var_os("LF_DB_PATH").filter(|value| !value.is_empty());
+    let home = std::env::var_os("LF_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    if requested.is_none() && home.is_none() {
         guard_development_database(
             &selection.store,
             crate::build_info::provenance(),
             &machine_home_dir(),
         )?;
-        return Ok(selection.store);
+        return Ok(selection.store.clone());
     }
-    resolve_database_path(std::env::var_os("LF_DB_PATH"), current_home_lf_home_dir())
+    let home = home.unwrap_or_else(|| {
+        selection
+            .store
+            .parent()
+            .expect("installation store has a directory")
+            .to_path_buf()
+    });
+    resolve_database_path(requested, home)
 }
 
 fn resolve_database_path(
@@ -430,6 +479,79 @@ impl Store {
 
     pub async fn put_pm_snapshot(&self, snapshot: PmSnapshotRow) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
+    }
+
+    pub async fn put_pm_task(
+        &self,
+        repo: &str,
+        provider: &str,
+        record: PmTaskRecord,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.put_pm_task(&repo, &provider, &record)
+        })
+        .await
+    }
+
+    pub async fn pm_task_observation(
+        &self,
+        repo: &str,
+        provider: &str,
+        selector: &str,
+    ) -> StoreResult<PmTaskObservation> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pm_task_observation(&repo, &provider, &selector)
+        })
+        .await
+    }
+
+    pub async fn confirm_pm_project_archival(
+        &self,
+        repo: &str,
+        provider: &str,
+        project: crate::pm::PmProject,
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.confirm_pm_project_archival(&repo, &provider, &project, observed_at)
+        })
+        .await
+    }
+
+    pub async fn observe_pm_issue_change(
+        &self,
+        issue_id: &str,
+        revision: Option<&str>,
+        removed: bool,
+    ) -> StoreResult<()> {
+        let issue_id = issue_id.to_string();
+        let revision = revision.map(str::to_string);
+        run_sqlite(&self.sqlite, move |store| {
+            store.observe_pm_issue_change(&issue_id, revision.as_deref(), removed)
+        })
+        .await
+    }
+
+    pub async fn invalidate_pm_task(
+        &self,
+        repo: &str,
+        provider: &str,
+        selector: &str,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let provider = provider.to_string();
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.invalidate_pm_task(&repo, &provider, &selector)
+        })
+        .await
     }
 
     pub(crate) async fn retain_task_issue_identity(
@@ -3166,14 +3288,16 @@ mod tests {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: 1,
-            payload: "{\"version\":1}".to_string(),
+            snapshot: crate::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         };
         store
             .put_pm_snapshot(snapshot.clone())
             .await
             .expect("write snapshot");
         snapshot.synced_at = 2;
-        snapshot.payload = "{\"version\":2}".to_string();
         store
             .put_pm_snapshot(snapshot.clone())
             .await

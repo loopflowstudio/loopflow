@@ -75,6 +75,57 @@ config files.
 | Claude/Codex/OpenCode launch surface | `--mode tui` / `--mode ide` | `session.launch: tui` |
 | Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
+## Context budgets
+
+```bash
+lf context                         # limits, sources, original and submitted usage
+lf context --wave intelligence     # local Wave memory and scratch
+lf context --task LOO-303 --json    # Task checkout and locally stored goal
+lf context --skill implement       # preview this skill instead of realign
+```
+
+Edit the existing repo `.lf/config.yaml`:
+
+```yaml
+context_budgets:
+  memory_tokens: 6000
+  scratch_tokens: 12000
+```
+
+Override individual fields for a Wave in `wave/<name>/GOAL.md` frontmatter:
+
+```yaml
+---
+context_budgets:
+  memory_tokens: 10000
+---
+```
+
+Each field resolves from Wave frontmatter, repo config, personal config, then
+the compiled default. `lf context` shows the winning source for every value.
+The same block supports `memory_bytes`, `scratch_bytes`, `goal_tokens`,
+`goal_bytes`, `input_tokens`, and `input_bytes`. Values must be positive integers.
+Run `lf context` to see defaults; no settings file is needed to use them.
+
+Usage covers gathered Wave memory (including applicable ancestors), recursive
+scratch Markdown, the selected Work's launch message, and total assembled input.
+Memory and Wave overrides are read from the execution checkout. Without a Task
+or Work seed, goal usage is reported as absent; arbitrary future messages cannot
+be measured. The query uses local stored Task direction without contacting Linear
+or launching a provider, and never reads the clipboard. Total usage is a headless
+preview of the selected skill, including budget feedback; a different skill,
+message, client, or launch source can change it.
+
+Original usage remains visible when launch substitutes an excerpt. Complete
+sources stay on disk at the named pointer. Prompts show the overage and require
+the next memory- or scratch-writing step to curate it. `realign`, `compress`,
+`kickoff`, and `implement` preserve live decisions while consolidating notes and
+retiring historical or stacked-parent material, then re-query usage. The query
+still reports a total-input overage when an actual launch would reject it.
+Memory curation is gradual: retire the largest stale sections to git history
+until it fits just under the effective limits. Keep live decisions and evidence
+limits; memory already within budget needs no reduction merely for size.
+
 ## Context Assembly
 
 Every skill gets context assembled automatically. Run any command to see the breakdown:
@@ -88,11 +139,12 @@ scratch        3,050 ██
 clipboard      1,234 █
 ```
 
+The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
 The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
+| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |

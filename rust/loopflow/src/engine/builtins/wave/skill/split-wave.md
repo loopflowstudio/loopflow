@@ -13,7 +13,7 @@ Before starting, orient yourself in this branch:
   questions and assumptions).
 - If a `wave/<name>/` directory matches this work, skim its `GOAL.md`/`MEMORY.md`,
   PM snapshot, and live tasks (`lf wave status <name>`).
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.

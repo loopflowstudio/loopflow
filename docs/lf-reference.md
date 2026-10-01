@@ -1335,6 +1335,18 @@ Stop the pinned Flow and begin a new one in a fresh Task worker; defaults to the
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf context
+
+Show effective context budgets, their sources, and current source usage
+
+| Argument | What it does |
+|---|---|
+| `--json` | json |
+| `--wave` | Inspect a Wave's local authored context |
+| `--task` | Inspect a Task's checkout and locally stored goal |
+| `--skill` | Skill to include in the launch preview Default: realign. |
+| `--help` | Print help |
+
 ## lf __telemetry-scorecard
 
 Internal: render the repository maintainer scorecard for telemetry-daily

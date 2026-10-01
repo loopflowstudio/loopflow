@@ -4,8 +4,8 @@
 //! managed Work process. Wave names resolve only inside the canonical
 //! repository; the UUID remains durable identity across locator changes.
 //!
-//! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN
-//! repo — a worktree resolves its main repo first.
+//! Wave identity resolves against the canonical repository. Authored memory
+//! reads the execution checkout so local curation reaches the next launch.
 
 use crate::id::WaveId;
 use crate::work::wave::{Wave, WaveLocator};
@@ -337,7 +337,7 @@ fn query_repo_origin(repo_root: &Path) -> PathBuf {
         .unwrap_or_else(|| repo_root.to_path_buf())
 }
 
-/// The origin repo a wave's state lives under: the main checkout when
+/// The canonical repository used to resolve Wave identity: the main checkout when
 /// `repo_root` is a worktree root, `repo_root` itself otherwise (see
 /// [`repo_origin`] for the guard).
 pub fn wave_origin(repo_root: &Path) -> PathBuf {
@@ -347,7 +347,7 @@ pub fn wave_origin(repo_root: &Path) -> PathBuf {
 /// The Wave's prompt memory, read directly from applicable `MEMORY.md` files.
 pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
     let origin = wave_origin(repo_root);
-    gather_wave_memory_from(&origin, &origin, wave)
+    gather_wave_memory_from(&origin, repo_root, wave)
 }
 
 /// Resolve inherited Wave scope from the canonical registry while reading the

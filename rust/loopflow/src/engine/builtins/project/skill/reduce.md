@@ -14,7 +14,7 @@ Before starting, orient yourself in this branch:
 - Read wave/PM context only when the seed names the exact wave, task, project,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.

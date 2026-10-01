@@ -57,12 +57,16 @@ lf mon show SESSION --final         # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
 lf session connect SESSION         # continue a conversation
 lf session complete SESSION         # return review feedback
+lf context --task EXP-12 --json     # effective context limits, sources and usage
 ```
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 Its overview explains each item's state and next action. A mechanical Exec has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
+
+`lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
+in existing personal, repository or Wave settings.
 
 ## Publish and finish
 

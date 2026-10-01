@@ -85,9 +85,9 @@ adds flow and goal structure only where it earns its place.
 
 ## Context
 
-Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md`), `LOOPFLOW.md`,
-`scratch/`, and `wave/`. Nothing else is auto-injected — pull in more
-explicitly:
+The provider loads `AGENTS.md` natively; Loopflow does not inject it again.
+Every skill also sees `LOOPFLOW.md`, `scratch/`, and `wave/`.
+Pull in more context explicitly:
 
 ```bash
 lf gate --docs VISUAL_DESIGN.md        # one doc

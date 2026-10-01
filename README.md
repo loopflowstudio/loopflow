@@ -101,8 +101,9 @@ lf task comment INF-123 "take the smaller approach"   # post a Linear comment fo
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
-lf task status INF-123 --json                         # inspect durable state
-lf land -c                                           # request auto-merge and Task completion after merge
+lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
+lf arm -c                                          # request exact-head auto-merge and return
+lf land -c                                         # watch, repair CI, merge, then complete the Task
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
@@ -125,6 +126,7 @@ lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable work, delivery and steering history
 lf session list --json # conversations on this Home
+lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
@@ -209,7 +211,7 @@ lf install                                   # return to the latest published re
 uv run python scripts/install.py local        # build only under local-bin/
 ```
 
-`TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;
+`TESTING.md` covers the test suites; `AGENTS.md` is the governing style guide;
 `RELEASE_NOTES.md` and `release/` carry the release chronology.
 Loopflow maintainers should use the repository resource envelope and affected
 suite runner documented in [TESTING.md](TESTING.md#bounded-and-honest).

@@ -40,7 +40,7 @@ and tags. It freezes the draft set, rejects missing or cyclic dependencies, and 
 first, ties broken by name — never merge time, PR number, or wall clock). It then
 concatenates the ordered bodies into the release's one
 `<major>.<minor>.<patch>.001_release.sql` batch. `-- draft: <name>` markers retain
-the authoring identities for dependencies and incident review. The cut appends one
+the draft names for dependencies and incident review. The cut appends one
 `Migration` entry and deletes all consumed drafts atomically; on any failure it
 restores the tree byte-for-byte. The same drafts and version always produce the
 same id and diff, so an aborted release regenerates identically. A second batch for

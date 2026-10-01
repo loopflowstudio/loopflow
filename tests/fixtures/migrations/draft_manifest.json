@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "name": "dependency_order_body_and_checksum",
+      "name": "dependency_order_and_body",
       "drafts": [
         {
           "filename": "a_backfill.sql",

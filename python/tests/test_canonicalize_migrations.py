@@ -154,7 +154,6 @@ def test_the_canonical_file_carries_the_body_without_the_header(repo: Path) -> N
 
     written = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
     assert written == ("-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n")
-    assert "-- name:" not in written
 
 
 def test_a_minor_release_uses_its_full_package_version(repo: Path) -> None:

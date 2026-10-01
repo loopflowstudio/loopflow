@@ -34,10 +34,21 @@ schema exists, so nothing tests or protects one.
   `_applied_development_migrations`, `_validate_applied_drafts`,
   `_validate_draft_manifest`, receipt listing in the experimental diagnostic.
 - Tests exclusive to the above.
+- `loopflow_test_support::migration_sql_for_test` and
+  `wave_repository_ownership::apply_status_truth`: `status_truth` shipped in
+  0.12.13, so the helper always returned early. `store::migrations::
+  migration_sql_for_test` is the one reader.
 
 Preserve: dependency ordering, released-name collision, reserved `-- draft:`
 marker, canonical batch bytes, promotion refusal for draft-bearing builds,
-experimental exact-schema validation and concurrent-initializer rechec## Remaining
+experimental exact-schema validation and concurrent-initializer recheck.
+
+Kept on purpose: `check_migrations.py`, `canonicalize_migrations.py` and
+`check_architecture.py` each read drafts themselves. Tests and the release
+fixture copy one script into a throwaway repo, so a shared module would
+change how they are deployed.
+
+## Remaining
 
 - Gate/CI: full Rust suite under draft materialization. Two lib tests
   (`legacy_persisted_json_upgrades_to_typed_stable_tasks`,
@@ -52,3 +63,7 @@ Check: `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflo
 --lib -- migration_drafts store::migrations build_info store::sqlite` 166 pass,
 the 2 above fail; `flow_tests` 23 pass; migration/architecture pytest 77 pass;
 `check_migrations.py` and `check_architecture.py` pass.
+
+Compress: `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p
+loopflow --test wave_repository_ownership` 4 pass; `--lib migration_drafts` 2
+pass; migration/architecture pytest 77 pass. Full suite owner: gate/CI.

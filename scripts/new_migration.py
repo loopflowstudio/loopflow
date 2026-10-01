@@ -20,6 +20,7 @@ Stdlib only, so no Python environment is needed to author a migration.
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -85,27 +86,19 @@ def _task_drafts(drafts: set[str]) -> list[str]:
     return []
 
 
-def main() -> None:
-    args = sys.argv[1:]
-    depends_on: list[str] = []
-    positional: list[str] = []
-    index = 0
-    while index < len(args):
-        argument = args[index]
-        if argument == "--depends-on":
-            index += 1
-            if index >= len(args):
-                print("--depends-on needs a comma-separated list", file=sys.stderr)
-                raise SystemExit(2)
-            depends_on = [part.strip() for part in args[index].split(",") if part.strip()]
-        else:
-            positional.append(argument)
-        index += 1
+def _name(value: str) -> str:
+    if not NAME.fullmatch(value):
+        raise argparse.ArgumentTypeError(f"{value!r} is not a snake_case name")
+    return value
 
-    if len(positional) != 1 or not NAME.fullmatch(positional[0]):
-        print("usage: new_migration.py <snake_case_name> [--depends-on a,b]", file=sys.stderr)
-        raise SystemExit(2)
-    name = positional[0]
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Create this Task's draft migration.")
+    parser.add_argument("name", type=_name, metavar="snake_case_name")
+    parser.add_argument("--depends-on", default="", metavar="a,b")
+    args = parser.parse_args()
+    name = args.name
+    depends_on = [part.strip() for part in args.depends_on.split(",") if part.strip()]
 
     drafts = _draft_names()
     existing = _task_drafts(drafts)

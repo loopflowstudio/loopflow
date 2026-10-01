@@ -3,13 +3,6 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-/// Read one draft migration by name.
-pub fn migration_sql_for_test(crate_root: &Path, name: &str) -> String {
-    let draft = crate_root.join(format!("src/store/migrations/drafts/{name}.sql"));
-    std::fs::read_to_string(&draft)
-        .unwrap_or_else(|error| panic!("migration draft {name:?} not found: {error}"))
-}
-
 #[derive(Debug)]
 pub struct TestRepo {
     bare: TempDir,

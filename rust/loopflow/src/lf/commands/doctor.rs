@@ -509,10 +509,11 @@ fn format_gap_dates(gaps: &[&time::Date]) -> String {
 
 fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<ExpectedInterval> {
     if obligation.schedule.every_minute() {
-        let start = now - now.rem_euclid(60);
+        // The current minute's check may not have started; the last full minute counts.
+        let start = now - now.rem_euclid(60) - 60;
         return (start >= obligation.activated_at).then_some(ExpectedInterval {
             start,
-            end: start + 60,
+            end: start + 120,
         });
     }
     let start = scheduled_at_or_before(

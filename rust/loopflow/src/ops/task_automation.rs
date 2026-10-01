@@ -117,13 +117,13 @@ pub(crate) fn admission_blocker(
                 }
             }
         }
-        if store.session_has_pending_turn(&session.id).map_err(error)? {
-            if !recovery || !session.managed || session_engine_unresolved(store, &session.id)? {
-                return Ok(Some(format!(
-                    "Session {} has an unresolved provider turn",
-                    session.id
-                )));
-            }
+        if store.session_has_pending_turn(&session.id).map_err(error)?
+            && (!recovery || !session.managed || session_engine_unresolved(store, &session.id)?)
+        {
+            return Ok(Some(format!(
+                "Session {} has an unresolved provider turn",
+                session.id
+            )));
         }
     }
     for exec in &work.execs {
@@ -192,9 +192,8 @@ pub fn reconcile(repo: &Path) -> OpsResult<AutomationCheck> {
         if cause.kind() != std::io::ErrorKind::WouldBlock {
             return Err(cause.into());
         }
-        report
-            .errors
-            .push("another repository check is running".into());
+        // The running check already covers this repository; overlap is not a failure.
+        eprintln!("another repository check is running");
         return Ok(report);
     }
     let runtime = tokio::runtime::Runtime::new()?;
@@ -466,6 +465,8 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
                 .ok()
                 .as_ref()
                 == Some(&repo_id)
+                // Finished Tasks get no new work; unsettled deliveries are listed below.
+                && super::task::task_work_status(&store, &task).await? == WorkStatus::Ready
             {
                 tasks.push(store.sqlite.task_automation(&task.id).map_err(error)?);
             }

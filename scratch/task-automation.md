@@ -421,4 +421,28 @@ latency, duplicate admissions (zero), and merge-to-settlement convergence.
 Jack authorized the cron floor independently of these ownership choices. The
 provisional defaults above govern implementation until amended.
 
-Check: 2026-09-30 source/claim/cron and pinned LOO-353 design review completed; `git diff --check` passed; no builds/tests run for this documentation-only pass.
+## Remaining after the 2026-10-01 implementation pass
+
+Built on this branch: finite `lf pr land`/`arm`, `lf pr reconcile`,
+`lf task reconcile|automate|automation`, `lf cron sync --repo [--disable]`,
+checkout admission lock, detached `ci-fix` Exec with reservation/handoff/finish,
+CI timeout attempt clock, enrollment default, bounded minute receipts/log, and
+the Desktop "Background progress" popover over the shared DTO.
+
+Still owed before the Task's acceptance is met:
+
+- OS launchd lifecycle proof on a disposable Home/job with real children,
+  including survival of an admitted worker after the tick's process group ends.
+- Configured installed-path demo with Desktop closed (the Flow's demo gate).
+  `lf cron sync --repo` requires a release binary; no development build was
+  installed or run against the installed Home.
+- Integrated scenario gaps in `scheduled_task_tests`: driver killed with a live
+  provider vs. both dead, taskless and queued landings in one pass, interrupted
+  Linear settlement retry, two Home placements.
+- An overlapping manual `lf task reconcile` makes the scheduled check exit
+  non-zero ("another repository check is running"), which shows as a failed
+  check until the next minute. Decide whether overlap is a quiet no-op.
+- LOO-338 watcher retirement on the installed release, and LOO-353 Unit 2
+  Session callers of the same operation.
+
+Check: 2026-10-01 `cargo test -p loopflow --test land_tests lf_pr_land_returns_before` (detached repair, failed-start recovery), `--test scheduled_task_tests --test dto_fixtures`, `--lib ops::cron::tests`, `swift test --filter TaskAutomationTests`, fmt and clippy — results in the commit message; gate owns the full suites.

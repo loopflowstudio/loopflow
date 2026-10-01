@@ -472,6 +472,12 @@ pub fn run_cron(
 
     let result = spawn_cron_target(&spec);
     receipt.finished_at = Some(Utc::now().timestamp());
+    let result = result.inspect(|_| {
+        if spec.schedule.every_minute {
+            // Coverage needs the latest outcomes, not one file per minute forever.
+            let _ = prune_minute_receipts(&root, &spec, &receipt.id);
+        }
+    });
     match result {
         Ok(status) if status.success() => {
             receipt.outcome = CronOutcome::Succeeded;
@@ -787,6 +793,9 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
         .create(true)
         .append(true)
         .open(spec.log_path())?;
+    if spec.schedule.every_minute && stdout.metadata()?.len() > MINUTE_LOG_LIMIT {
+        stdout.set_len(0)?;
+    }
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
     if spec.target_kind == CronTargetKind::Repository {
@@ -894,6 +903,36 @@ fn read_receipts(root: &Path, wave: &str, flow: Option<&str>) -> OpsResult<Vec<C
         }
     }
     Ok(receipts)
+}
+
+const MINUTE_RECEIPTS_KEPT: usize = 10;
+const MINUTE_LOG_LIMIT: u64 = 1024 * 1024;
+
+/// Keep recent receipts plus the latest success and failure.
+fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) -> OpsResult<()> {
+    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.flow))?;
+    receipts.sort_by_key(|receipt| std::cmp::Reverse(receipt.started_at));
+    let latest = |outcome| {
+        receipts
+            .iter()
+            .find(|receipt| receipt.outcome == outcome)
+            .map(|receipt| receipt.id.clone())
+    };
+    let kept = [latest(CronOutcome::Succeeded), latest(CronOutcome::Failed)];
+    let dir = root
+        .join(safe_component(&spec.wave))
+        .join(safe_component(&spec.flow));
+    for receipt in receipts.iter().skip(MINUTE_RECEIPTS_KEPT) {
+        if &receipt.id == current || kept.contains(&Some(receipt.id.clone())) {
+            continue;
+        }
+        fs::remove_file(dir.join(format!(
+            "{}-{}.json",
+            receipt.started_at,
+            receipt.id.as_str()
+        )))?;
+    }
+    Ok(())
 }
 
 fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
@@ -1352,6 +1391,49 @@ mod tests {
             cron.flow,
             super::repository_cron_key(&cron.working_directory, &HomeId::new())
         );
+    }
+
+    #[test]
+    fn minute_checks_keep_bounded_receipts_and_the_latest_success() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        add_cron(&agents, &cron, &launchctl).unwrap();
+        let run = || {
+            run_cron(
+                &agents,
+                "",
+                &cron.flow,
+                &cron.host.home_id,
+                &cron.host.home_id,
+                CronSource::Scheduled,
+            )
+        };
+        for _ in 0..14 {
+            run().unwrap();
+        }
+        let root = receipt_root(&cron.host.lf_home);
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 1);
+        assert_eq!(receipts[0].outcome, CronOutcome::Succeeded);
+
+        let mut failing = cron.clone();
+        failing.lf_path = PathBuf::from("/usr/bin/false");
+        add_cron(&agents, &failing, &launchctl).unwrap();
+        for _ in 0..14 {
+            assert!(run().is_err());
+        }
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 2);
+        assert!(receipts
+            .iter()
+            .any(|receipt| receipt.outcome == CronOutcome::Succeeded));
     }
 
     #[test]

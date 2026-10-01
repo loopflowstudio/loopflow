@@ -49,7 +49,7 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-pub(super) fn exec_ids(selector: &str) -> String {
+fn exec_ids(selector: &str) -> String {
     format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
@@ -83,25 +83,17 @@ impl SqliteStore {
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
                 session_ids("?1")
             ))?
-            .query_map([task.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(2)?,
-                    TaskSession {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        kind: crate::session::SessionKind::Conversation,
-                        interactive: row.get(3)?,
-                        flow_session_id: row.get(4)?,
-                        completed_at: row.get(5)?,
-                        managed: row.get(6)?,
-                    },
-                ))
+            .query_and_then([task.as_str()], |row| {
+                Ok(TaskSession {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
+                    interactive: row.get(3)?,
+                    flow_session_id: row.get(4)?,
+                    completed_at: row.get(5)?,
+                    managed: row.get(6)?,
+                })
             })?
-            .map(|row| {
-                let (kind, mut session) = row?;
-                session.kind = serde_json::from_value(serde_json::Value::String(kind))?;
-                Ok(session)
-            })
             .collect::<StoreResult<Vec<_>>>()?;
         let mut flows = tx
             .prepare(&format!(
@@ -131,9 +123,7 @@ impl SqliteStore {
             execs,
         })
     }
-}
 
-impl SqliteStore {
     /// Exact Flow membership is used only to exempt the completing worker from
     /// its own completion gate. Causal ancestry does not establish membership.
     pub(crate) fn flow_exec_ids(&self, flow: &str) -> StoreResult<Vec<crate::id::ExecId>> {
@@ -145,9 +135,7 @@ impl SqliteStore {
         let rows = query.query_map([flow], |row| row.get(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
-}
 
-impl SqliteStore {
     pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events start WHERE start.session_id=?1

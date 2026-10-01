@@ -1,4 +1,5 @@
 //! Task lifecycle composes the provider, PR, worker and checkout owners.
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -615,7 +616,7 @@ fn execution_blockers(
     work: &crate::task_work::TaskWork,
 ) -> OpsResult<Vec<String>> {
     let mut blockers = Vec::new();
-    let mut managed_execs = Vec::new();
+    let mut managed_execs = HashSet::new();
     for flow in work.flows.iter().filter(|flow| flow.managed) {
         managed_execs.extend(
             store
@@ -625,7 +626,7 @@ fn execution_blockers(
         );
         if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
             if let Some(claim) = position.claim {
-                managed_execs.push(claim.owner.exec_id);
+                managed_execs.insert(claim.owner.exec_id);
             }
         }
     }

@@ -16,8 +16,8 @@ the checkout is missing. A missing path never matches everything.
 
 ## Delete — do not maintain
 
-- TaskSnapshot's Runs-only projection and misleading Run labels.
-- Desktop's binding-only navigation; use shared Rust memberships. Keep detailed
+- Removed `TaskSnapshot.runs` / `runs_truncated` and misleading Run labels.
+- Removed Desktop's separate Task-binding lookup; use Rust `task_ids`. Keep detailed
   conversation history alongside the general Sessions, Flows and Execs inventory.
 - Managed-only cleanup/abandonment checks; inspect all associated execution.
 - Task-filtered Session and Flow inventories restricted to explicit Task IDs.
@@ -44,10 +44,14 @@ or alternate durable owner is required.
   cannot inherit this Task's completion exemption through checkout association.
 - Keep detailed conversation history alongside the general inventory: it exposes
   provider outcomes that the owner list deliberately does not decode.
+- Compression removed Desktop's duplicate membership rule; explicit bindings now
+  appear in fixture `task_ids`, matching Rust's additive association. Task Session
+  rows decode directly without temporary placeholder kinds, and managed Exec
+  exclusions use set membership rather than scanning history for every Exec.
 
 ## Remaining verification
 
 Gate owns affected suites and broader lifecycle acceptance. Configured Desktop
 judgment remains with demo/review; no publication or installation was attempted.
 
-Checks: `cargo test -p loopflow --lib task_work` 15 passed; focused `dto_fixtures` and `task_initialization_tests` 1 each passed; `swift test --package-path swift --filter 'DTOFixtureTests|WorkspaceNavigationTests.checkoutMembership'` 20 passed; `cargo clippy --all-targets -- -D warnings`, formatting and diff checks passed; broader acceptance → gate.
+Checks: `cargo test -p loopflow --lib task_work_` 2 passed; `cargo test -p loopflow --test dto_fixtures` 13 passed; `swift test --package-path swift --filter 'DTOFixtureTests|WorkspaceNavigationTests'` 45 passed; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed; broader acceptance → gate.

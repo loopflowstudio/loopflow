@@ -9,8 +9,47 @@ Ask contract: [ask-evidence.md](ask-evidence.md).
 
 Status: the app/CLI protocol mismatch is repaired using a private copy of Jack's
 Home, as Jack explicitly accepted. Native planning and LOO-330's Task workspace
-now render. No complete Unit 1 walkthrough or latency target has passed.
-Jack has not accepted the experience or requested a workspace design change.
+now render. Visual review failed: Jack Heart called the result “extremely ugly,”
+then clarified that the terminal is fine and the problem is mostly the buttons
+to its left. No complete Unit 1 walkthrough or latency target has passed.
+
+## Visual review — 18:32
+
+Jack supplied a screenshot of LOO-330 and said “extremely ugly.” When the agent
+proposed broader layout changes, Jack clarified: “the terminal part is fine its
+mostly the buttons on the left of it.” This supersedes the agent's initial
+proposal to change the terminal background or center the visual revision on it.
+Preserve the terminal presentation. Jack then requested the ability to collapse
+the left pane and questioned whether the Flow module needs to stay at the top.
+
+Observed in the screenshot: Task details, New conversation, New shell and Files
+form a large vertical stack beside the terminal. A long Task description sits
+below that stack, while the conversation title above it wraps and truncates.
+Files is also exposed in the top toolbar.
+
+Proposed revision, not yet accepted in detail: retain a compact conversation list;
+replace the creation-button stack with one + menu containing New conversation and
+New shell; keep one Files toggle in the toolbar; put Task details and the directive
+behind the Task title. Keep Expand/Collapse and Focus associated with their pane
+rows, using compact controls. Preserve retained surfaces, documents and direct
+Session completion. Add a retained collapse preference for this pane and a small
+restore control in the Task toolbar; collapse must preserve pane processes,
+drafts, selection and layout. Jack explicitly requested this collapse capability.
+
+For the Flow, the agent recommends moving the full module into Task details and
+keeping a compact current-stage/status action near the Task title, linked to the
+exact interactive Session when available. Jack questioned the persistent module;
+Jack has not yet chosen this specific replacement. Preserve existing completion
+and recovery controls and detailed Flow access. See the
+[design](growth-thoughts.md#left-panel-visual-revision).
+
+Recommended next action: implement the left-panel revision and review the real
+LOO-330 workspace with Jack, with one conversation, multiple panes and Files open.
+Verify readable names, unclipped actions and retained pane behavior at the current
+window size and a narrower size. Jack's clarification defines the area to change;
+the proposed exact controls still need visual review. Functional and latency proof
+remain open. The earlier working-window evidence establishes rendering, not visual
+acceptance.
 
 ## Jack's direction
 
@@ -123,7 +162,8 @@ Receipt: `.lf/tmp/task-workspace-demo/launch-recording/report.md`.
 
 ## Recommended next action
 
-Resume the LOO-330 walkthrough and measure actual layout actions. Jack's screenshot at 17:57 showed
+Revise and review the left pane before resuming the remaining walkthrough and
+layout measurements. Jack's screenshot at 17:57 showed
 the Open Task sheet remaining at “Finding Task…”, after the planning repair.
 This is a counterexample to treating healthy planning as a working Task demo.
 The exact CLI lookup succeeds, but an unscoped lookup also reports unavailable
@@ -139,8 +179,8 @@ At 18:13, an agent-captured screenshot of the running app shows LOO-330 selected
 its checkout in the header, Show Files, Conversations, Collapse, Focus, New shell,
 Files, and the task-design/review-design participation strip. This supersedes the
 navigation blocker as the current observation. Image:
-`.lf/tmp/task-workspace-demo/loo330-workspace.png`. Jack has not yet supplied
-feedback on this working workspace. Its terminal shows login output; that is not
+`.lf/tmp/task-workspace-demo/loo330-workspace.png`. Jack's subsequent visual
+rejection and clarification are recorded above. Its terminal shows login output; that is not
 proof of a resumed provider conversation. No layout-action or save acceptance is
 inferred from these visible controls.
 

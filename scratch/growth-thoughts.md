@@ -20,6 +20,36 @@ provider and latency walkthrough remains open. [Demo evidence](task-workspace-de
 records Jack's screenshots, the repairs and the current next step. These results
 do not establish live-main-Home operation or acceptance of Unit 1.
 
+## Left-panel visual revision
+
+Demo feedback, 2026-09-30: Jack Heart rejected the appearance of the LOO-330
+workspace, then clarified that the terminal is fine and the problem is mostly
+the buttons to its left. Preserve the terminal presentation; the agent's broader
+terminal redesign proposal is superseded by this narrower direction. Jack also
+requested left-pane collapse and questioned the persistent Flow module at the top.
+
+Proposed implementation: retain the conversation list but replace the vertical
+Task details / New conversation / New shell / Files button stack. Use a compact
++ menu for conversation and shell creation, one Files toggle in the toolbar, and
+the Task title to open details and the directive. Keep pane-specific expansion
+and focus controls on their rows. Allow the entire left pane to collapse, retaining
+its preference in the existing workspace owner; provide a small restore control
+in the Task toolbar. This visibility change must preserve processes, documents,
+selection and terminal layout. Do not add another saved-layout owner.
+
+Agent recommendation for the Flow: move the full module into Task details and
+retain only a compact current-stage/status action near the Task title. Selecting
+an available interactive stage still opens its exact Session; completion and
+recovery controls remain available. Jack questioned the permanent top module but
+has not yet selected this exact replacement. The button arrangement and Flow
+placement remain proposals; left-pane collapse and preserving the terminal are
+explicit direction from Jack.
+
+Next proof: show the actual LOO-330 workspace with one conversation, multiple
+panes and Files open, at the current window size and a narrower size; obtain
+Jack's visual feedback before declaring this revision accepted. The
+[demo note](task-workspace-demo.md) retains the observations and remaining proof.
+
 ## Problem and accepted direction
 
 Jack wants to work on the software without monitoring agents or shepherding work

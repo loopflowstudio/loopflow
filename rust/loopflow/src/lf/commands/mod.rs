@@ -3,6 +3,7 @@ pub mod activity;
 pub mod ask;
 pub mod ci;
 pub mod context;
+pub mod context_cost;
 pub mod desktop;
 pub mod discord;
 pub mod doctor;

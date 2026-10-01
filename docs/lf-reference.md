@@ -802,7 +802,7 @@ Install or replace a scheduled lf invocation
 |---|---|
 | `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted) |
 | `--flow` | Flow or skill name to run |
-| `--schedule` | Fixed-daily cron expression, or the `daily` alias Default: daily. |
+| `--schedule` | Daily or every-minute cron expression, or a schedule alias Default: daily. |
 | `--help / -h` | Print help |
 
 ## lf wave cron list
@@ -830,7 +830,9 @@ Reconcile installed launchd jobs to match a wave's declared `crons:`
 
 | Argument | What it does |
 |---|---|
-| `--wave / -w` | Wave whose GOAL.md `crons:` drive the installed jobs |
+| `--wave / -w` | wave |
+| `--repo` | Install the finite repository Task check on this Home Default: false. |
+| `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron run
@@ -944,9 +946,57 @@ Concrete work, worktrees, commits, and pull requests
 |---|---|
 | `--help / -h` | Print help |
 
+## lf task automation
+
+Inspect repository scheduling and Task enrollment
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task reconcile
+
+Check enrolled Tasks and authorized deliveries once, then exit
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task automate
+
+Enroll or hold a Task without interrupting running work
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<state>` | state |
+| `--help / -h` | Print help |
+
+## lf task __repair
+
+Run a reserved CI repair in its own process
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<incident>` | incident |
+| `<launcher>` | launcher |
+| `--help / -h` | Print help |
+
 ## lf task pr
 
 Pull request lifecycle
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task pr reconcile
+
+Check recorded repository landings once, repair CI, and settle verified merges
 
 | Argument | What it does |
 |---|---|
@@ -1027,7 +1077,7 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 
 ## lf task pr land
 
-Arm and watch a PR through CI repair and authoritative merge
+Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|

@@ -20,16 +20,16 @@ pub fn execute_flow_command(
     repo: &Path,
     item: &FlowCommand,
     progress: &impl Progress,
-) -> OpsResult<()> {
+) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
     let argv = crate::lf::navigation::normalize_args(item.argv())
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
     let cli = Cli::try_parse_from(argv)
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
-    match cli.command {
+    let result = match cli.command {
         Some(Commands::Task {
             cmd: TaskCommand::Pr { cmd: Some(pr) },
-        }) => execute_pr(repo, pr, progress),
+        }) => return execute_pr(repo, pr, progress),
         Some(Commands::Task {
             cmd:
                 TaskCommand::Sync(SyncArgs {
@@ -86,7 +86,8 @@ pub fn execute_flow_command(
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
         _ => Err(unsupported()),
-    }
+    };
+    result.map(|()| None)
 }
 
 fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
@@ -209,9 +210,13 @@ fn persist_metric_observations(
     .map_err(|_| OpsError::Message("metric writer thread panicked".to_string()))?
 }
 
-fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
+fn execute_pr(
+    repo: &Path,
+    cmd: PrCommand,
+    progress: &impl Progress,
+) -> OpsResult<Option<crate::pr_landing::PrLandingId>> {
     let draft = matches!(&cmd, PrCommand::Open { .. });
-    match cmd {
+    let result = match cmd {
         PrCommand::Arm {
             strict,
             local,
@@ -263,10 +268,10 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
                 agent: None,
             };
             let Some(pr) = arm(repo, &options, progress)? else {
-                return Ok(());
+                return Ok(None);
             };
-            crate::ops::pr_landing::watch_armed_pr(repo, &options, pr, progress)?;
-            Ok(())
+            let landing = crate::ops::pr_landing::record_armed_pr(repo, &options, &pr)?;
+            return Ok(Some(landing.id));
         }
         PrCommand::Submit {
             strict,
@@ -328,8 +333,9 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             crate::ops::task::pr_next(repo, slug.as_deref())?;
             Ok(())
         }
-        PrCommand::Checks { .. } => Err(unsupported()),
-    }
+        PrCommand::Checks { .. } | PrCommand::Reconcile => Err(unsupported()),
+    };
+    result.map(|()| None)
 }
 
 fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -> OpsResult<()> {

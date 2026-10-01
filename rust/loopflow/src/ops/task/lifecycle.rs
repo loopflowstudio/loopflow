@@ -573,6 +573,11 @@ fn execution_blockers(
         }
     }
     for session in work.sessions.iter().filter(|session| !session.managed) {
+        if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
+            if !input.interactive && !input.input_published {
+                blockers.push(format!("Session {} has a reserved input", session.id));
+            }
+        }
         if session.completed_at.is_none()
             && session.kind != crate::session::SessionKind::Conversation
         {

@@ -39,6 +39,10 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None => pr_status(),
+        Some(PrCommand::Reconcile) => {
+            crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
+            Ok(())
+        }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
         Some(PrCommand::Publish { model, title, body }) => publish_pr(
             title.clone(),
@@ -85,22 +89,8 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        }) => arm_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
-            },
-            &progress,
-        ),
-        Some(PrCommand::Land {
+        })
+        | Some(PrCommand::Land {
             strict,
             local,
             complete,
@@ -513,20 +503,11 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
-        crate::ops::pr_landing::watch_armed_pr(repo_root, options, pr, progress)?;
+        progress.status(&format!(
+            "PR #{} handed off; lf pr reconcile checks delivery.",
+            pr.number
+        ));
     }
-    Ok(())
-}
-
-fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    with_sync_retry(&repo_root, "arm", progress, |repo, integrated| {
-        if integrated {
-            finish_arm_after_sync(repo, options, progress)
-        } else {
-            arm(repo, options, progress)
-        }
-    })?;
     Ok(())
 }
 
@@ -1000,7 +981,33 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 authority.local_home
             );
         }
-        CronCommand::Sync { wave } => {
+        CronCommand::Sync {
+            wave,
+            repo,
+            disable,
+        } => {
+            if *repo {
+                require_release_cron_binary()?;
+                let authority = cron_authority("")?;
+                let key =
+                    crate::ops::cron::repository_cron_key(&authority.repo, &authority.local_home);
+                if *disable {
+                    crate::ops::remove_cron(&launch_agents_dir, "", &key, &SystemLaunchctl)?;
+                } else {
+                    let spec = CronSpec {
+                        wave: String::new(),
+                        flow: key,
+                        target_kind: CronTargetKind::Repository,
+                        schedule: crate::ops::parse_schedule("every-minute")?,
+                        working_directory: authority.repo,
+                        lf_path: crate::ops::resolve_lf_path()?,
+                        host: authority.host,
+                    };
+                    crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
+                }
+                return Ok(());
+            }
+            let wave = wave.as_deref().expect("clap requires Wave or repository");
             require_release_cron_binary()?;
             let authority = cron_authority(wave)?;
             ensure_cron_placement(wave, &authority)?;
@@ -1171,23 +1178,22 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         let store = crate::store::open_registry_for_authority()
             .await
             .map_err(cron_registry_error)?;
-        let wave = crate::work::wave::context::resolve_managed_wave(
-            Some(&store),
-            Some(&repo_root),
-            Some(wave_name),
-            None,
-        )
-        .await?;
-        let placement = store
-            .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
-            .await?;
         let local = store.local_home().await?;
-        let repo = main_repo_root(Path::new(wave.repo())).map_err(|error| {
-            anyhow!(
-                "Wave {wave_name} repo {} has no authoritative main checkout: {error}",
-                wave.repo()
+        let (repo, placed_home) = if wave_name.is_empty() {
+            (main_repo_root(&repo_root)?, local.id.clone())
+        } else {
+            let wave = crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(&repo_root),
+                Some(wave_name),
+                None,
             )
-        })?;
+            .await?;
+            let placement = store
+                .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+                .await?;
+            (main_repo_root(Path::new(wave.repo()))?, placement.home_id)
+        };
         let path_env = std::env::var("PATH").map_err(|_| {
             anyhow!("PATH is absent; cannot install an unattended cron environment")
         })?;
@@ -1204,7 +1210,7 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
                 path_env,
             },
             local_home: local.id,
-            placed_home: placement.home_id,
+            placed_home,
             repo,
         })
     })

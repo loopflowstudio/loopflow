@@ -2548,6 +2548,16 @@ pub(crate) async fn exec_task_process(
     task: &mut Task,
     selected_flow: Option<&str>,
 ) -> OpsResult<()> {
+    store
+        .sqlite
+        .set_task_automation(
+            &task.id,
+            crate::engine::config::load_config_or_default(Some(&task.worktree))
+                .automation
+                .enroll_new_tasks,
+            true,
+        )
+        .map_err(task_error)?;
     let _declaration = crate::lf::commands::flow::EnvVarGuard::set(
         crate::lf::WORK_DECLARATION_ENV,
         &format!("task:{}", task.id),
@@ -2775,11 +2785,35 @@ pub(crate) async fn settle_task_landing(
         .await
         .map_err(|error| task_error(format!("failed to read landing Task: {error}")))?
         .ok_or_else(|| task_error(format!("landing Task {task_id} disappeared")))?;
-    let pr =
-        reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
-            .await?
-            .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?;
-    apply_merged_task_landing(store, &mut task, &pr, landing).await
+    // A previous check may have rotated to the next PR before it exited.
+    // Reconcile the delivery's PR, not whichever successor is active now.
+    let settled = store
+        .task_prs(task_id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .into_iter()
+        .find(|pr| {
+            pr.phase() == PrPhase::Merged
+                && pr.github().map(|github| github.number) == Some(landing.pr_number)
+        });
+    let pr = match settled {
+        Some(pr) => pr,
+        None => {
+            reconcile_task_pr_observation(store, &mut task, crate::ops::pr::PrReadFreshness::Fresh)
+                .await?
+                .ok_or_else(|| task_error("landing Task PR disappeared during merge settlement"))?
+        }
+    };
+    apply_merged_task_landing(store, &mut task, &pr, landing).await?;
+    if landing.after_merge == Some(AfterMerge::CompleteTask) {
+        if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
+            return Err(task_error(format!("Linear completion pending: {error}")));
+        }
+        if task_work_status(store, &task).await? != WorkStatus::Done {
+            return Err(task_error("Task completion gate is not yet satisfied"));
+        }
+    }
+    Ok(())
 }
 
 async fn apply_merged_task_landing(
@@ -4952,6 +4986,10 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        store
+            .sqlite
+            .set_task_automation(&task.id, false, false)
+            .map_err(task_error)?;
         let work = crate::durable::WorkRef::Task(task.id.clone());
         store.append_interrupt(&work).await.map_err(task_error)?;
         Ok(TaskControlResult {

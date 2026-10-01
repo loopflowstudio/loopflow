@@ -666,6 +666,25 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Inspect repository scheduling and Task enrollment
+    Automation {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check enrolled Tasks and authorized deliveries once, then exit
+    Reconcile {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Enroll or hold a Task without interrupting running work
+    Automate {
+        issue: String,
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Run a reserved CI repair in its own process
+    #[command(name = "__repair", hide = true)]
+    Repair { incident: String, launcher: String },
     /// Pull request lifecycle
     Pr {
         #[command(subcommand)]
@@ -850,10 +869,14 @@ impl TaskCommand {
             Self::Worker { .. }
             | Self::Create { .. }
             | Self::Sweep { .. }
+            | Self::Reconcile { .. }
+            | Self::Repair { .. }
+            | Self::Automation { .. }
             | Self::Pr { .. }
             | Self::Wt { .. }
             | Self::Sync(_)
             | Self::Commit { .. } => None,
+            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
             | Self::Diff { issue, .. }
@@ -950,6 +973,8 @@ pub enum InstallCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
+    /// Check recorded repository landings once, repair CI, and settle verified merges.
+    Reconcile,
     /// Show CI status for current branch
     Checks {
         #[arg(short = 'w', long = "watch")]
@@ -1024,7 +1049,7 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Arm and watch a PR through CI repair and authoritative merge.
+    /// Request auto-merge, retain settlement intent, and return.
     Land {
         #[arg(long)]
         strict: bool,
@@ -1062,7 +1087,7 @@ pub enum CronCommand {
         /// Flow or skill name to run
         #[arg(long = "flow")]
         flow: String,
-        /// Fixed-daily cron expression, or the `daily` alias
+        /// Daily or every-minute cron expression, or a schedule alias
         #[arg(long = "schedule", default_value = "daily")]
         schedule: String,
     },
@@ -1083,9 +1108,19 @@ pub enum CronCommand {
     },
     /// Reconcile installed launchd jobs to match a wave's declared `crons:`
     Sync {
-        /// Wave whose GOAL.md `crons:` drive the installed jobs
-        #[arg(short = 'w', long = "wave")]
-        wave: String,
+        #[arg(
+            short = 'w',
+            long,
+            required_unless_present = "repo",
+            conflicts_with = "repo"
+        )]
+        wave: Option<String>,
+        /// Install the finite repository Task check on this Home
+        #[arg(long)]
+        repo: bool,
+        /// Remove the repository schedule; running work retains its authority
+        #[arg(long, requires = "repo")]
+        disable: bool,
     },
     /// Execute one installed cron job and persist its terminal receipt
     #[command(hide = true)]

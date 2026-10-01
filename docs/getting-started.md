@@ -164,10 +164,12 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr open                             # push + create or update a draft, then open its page
-lf pr publish                          # push + create or update PR and mark ready (no browser)
-lf submit                              # prepare the exact head; you click merge
-lf land                                 # watch CI, repair failures, and finish merged
+lf pr open      # push + create or update a draft, then open its page
+lf pr publish   # push + create or update PR and mark ready (no browser)
+lf submit    # prepare the exact head; you click merge
+lf arm       # arm exact-head auto-merge and return
+lf land      # request auto-merge, record delivery, and return
+lf pr reconcile # check recorded landings once: repair CI, settle merges
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -186,8 +188,8 @@ lf ps --json
 Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave/operate` invocation reviews the plan and takes a bounded next action.
-Tasks own implementation in stable worktrees; `lf pr land` watches CI and repair
-through merge.
+Tasks own implementation in stable worktrees; `lf land` hands off delivery and
+`lf pr reconcile` repairs CI and settles verified merges.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations, Asks and Flow reviews; open one with

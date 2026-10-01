@@ -540,6 +540,7 @@ impl SqliteStore {
         &self,
         expected: &FlowSession,
     ) -> StoreResult<(FlowSession, AgentSession)> {
+        let _admission = self.lock_checkout(&expected.cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::flows::flow_in(&tx, expected.id())?.ok_or(StoreError::NotFound)?;
@@ -643,6 +644,7 @@ impl SqliteStore {
         review: Option<&FlowSession>,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
+        let _admission = self.lock_checkout(&session.cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -684,6 +686,7 @@ impl SqliteStore {
         expected_input: Option<i64>,
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
+        let _admission = self.lock_checkout(&session.cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;

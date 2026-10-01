@@ -968,8 +968,17 @@ fi
                     time::OffsetDateTime::now_utc(),
                 )
                 .unwrap();
-                crate::ops::task::settle_task_landing(&fixture.store, &landing).await?;
-                Ok(fixture.store.get_task(&task.id).await.unwrap())
+                let settlement = crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
+                let retained = fixture.store.get_task(&task.id).await.unwrap().unwrap();
+                if let PmWritebackState::Pending { error, .. } = &retained.pm_writeback {
+                    assert_eq!(
+                        settlement.unwrap_err().to_string(),
+                        format!("Linear completion pending: {error}")
+                    );
+                } else {
+                    settlement?;
+                }
+                Ok(Some(retained))
             }),
         };
         if let Some(task) = &task {

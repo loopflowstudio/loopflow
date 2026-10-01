@@ -91,18 +91,46 @@ in existing personal, repository or Wave settings.
 lf pr publish                         # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
-lf land                            # watch CI, repair failures, and finish merged
+lf land                            # record delivery and return
 lf --task EXP-12 land -c            # also request completion after merge
 lf task sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
 lf release check                   # inspect release eligibility
 ```
 
-PR operations work on ordinary branches. Publication does not integrate main.
-Arm returns after the request. Land watches GitHub, repairs failed CI through
-ci-fix, and re-arms until merged or blocked. Task completion requires observed
-merged evidence. LOO-332 will make Land finite once repository ticks own this
-watch-and-repair lifecycle.
+Choose one delivery operation for the desired endpoint. Submit, arm, and land
+own preparation and integration; publish does not sync. PR operations work
+on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
+`lf pr reconcile` checks it once and settles verified merges.
+
+## Keep Tasks progressing in the background
+
+```bash
+lf cron sync --repo                 # install this Home's minute check
+lf --task EXP-12 flow start                  # new launches enroll automatically
+lf task automate EXP-12 off         # hold future automatic work
+lf task automate EXP-12 on          # enroll or clear its retry hold
+lf task automation --json           # schedule coverage and Task blockers
+lf task reconcile --json            # run one check now
+lf cron sync --repo --disable       # remove the schedule
+```
+
+Checks continue with Desktop closed while the placed Home's user is logged in.
+They resume captured Flows, respect reviews and holds, and reconcile authorized
+landings. CI repair runs in a separate Exec; the check returns after startup.
+An idle check launches no provider. Existing work and GitHub merge requests
+continue when the schedule is disabled or a Task is held.
+
+Set repository defaults in `.lf/config.yaml`:
+
+```yaml
+automation: {enroll_new_tasks: true, retries: 1, timeout_reruns: 1}
+```
+
+Historical Tasks stay unenrolled until selected. One unchanged launch/runtime
+failure may retry; a completed blocked repair waits for changed evidence.
+Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
+Use an always-available Home for progress through laptop logout or shutdown.
 
 ## Accounts and children
 

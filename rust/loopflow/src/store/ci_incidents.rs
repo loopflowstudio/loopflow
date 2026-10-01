@@ -43,32 +43,6 @@ impl Store {
         .await
     }
 
-    /// Record the head a ci-fix body shipped for this incident. First-write only,
-    /// so the head that originally settled the incident survives a retry or a
-    /// later push.
-    pub async fn mark_ci_incident_repaired(
-        &self,
-        identity: &str,
-        landing_id: &PrLandingId,
-        generation: u64,
-        repaired_head_sha: &str,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let identity = identity.to_string();
-        let landing_id = landing_id.clone();
-        let repaired_head_sha = repaired_head_sha.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_ci_incident_repaired(
-                &identity,
-                &landing_id,
-                generation,
-                &repaired_head_sha,
-                updated_at,
-            )
-        })
-        .await
-    }
-
     pub async fn mark_ci_incidents_green(
         &self,
         landing_id: &PrLandingId,

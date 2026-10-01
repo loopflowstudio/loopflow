@@ -1,4 +1,4 @@
-//! SQLite persistence for watched pull-request landings.
+//! SQLite persistence for finite pull-request delivery checks.
 
 use std::path::PathBuf;
 
@@ -88,6 +88,64 @@ const LANDING_COLUMNS: &str = "
     blocked_reason, created_at, updated_at";
 
 impl super::SqliteStore {
+    pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT {LANDING_COLUMNS} FROM pr_landings
+             WHERE repo=?1 AND state NOT IN ('merged', 'closed') ORDER BY created_at, id"
+        ))?;
+        let rows = statement
+            .query_map([repo], map_landing)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn release_pr_landing(&self, landing: &PrLanding) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE pr_landings SET supervisor_placement=NULL, supervisor_home_id=NULL,
+             supervisor_process_id=NULL, supervisor_heartbeat_at=NULL, generation=generation+1
+             WHERE id=?1 AND generation=?2",
+            params![landing.id.as_str(), landing.generation as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn bind_operation_landing(
+        &self,
+        operation_start: i64,
+        landing: &PrLandingId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE flow_events SET landing_id=?2 WHERE seq=?1 AND kind='operation_started' AND (landing_id IS NULL OR landing_id=?2)",
+            params![operation_start, landing.as_str()],
+        )? != 1
+        {
+            return Err(StoreError::InvalidData(
+                "operation landing identity changed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn landing_has_pending_flow(&self, landing: &PrLandingId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM flow_events event JOIN flow_sessions flow ON flow.id=event.flow_id
+             WHERE event.landing_id=?1 AND flow.state='current')",
+            [landing.as_str()], |row| row.get(0),
+        )?)
+    }
+
+    pub fn operation_landing(&self, flow_id: &str) -> StoreResult<Option<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=(SELECT event.landing_id FROM flow_sessions flow JOIN flow_events event ON event.seq=flow.operation_start WHERE flow.id=?1)"),
+            [flow_id], map_landing,
+        ).optional().map_err(StoreError::from)
+    }
+
     pub fn start_or_join_pr_landing(&self, landing: &PrLanding) -> StoreResult<PrLanding> {
         landing
             .validate()
@@ -245,7 +303,11 @@ impl super::SqliteStore {
             transaction.commit()?;
             return Ok(None);
         };
-        if current.state.is_terminal() || current.generation != expected_generation {
+        if matches!(
+            current.state,
+            PrLandingState::Merged | PrLandingState::Closed
+        ) || current.generation != expected_generation
+        {
             transaction.commit()?;
             return Ok(None);
         }
@@ -269,7 +331,7 @@ impl super::SqliteStore {
             "UPDATE pr_landings
              SET generation=?2, supervisor_placement=?3, supervisor_home_id=?4,
                  supervisor_process_id=?5, supervisor_heartbeat_at=?6, updated_at=?6
-             WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing')",
+             WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing', 'blocked')",
             params![
                 landing_id.as_str(),
                 generation as i64,
@@ -305,7 +367,7 @@ impl super::SqliteStore {
             "UPDATE pr_landings
              SET supervisor_heartbeat_at=?3, updated_at=?3
              WHERE id=?1 AND generation=?2
-               AND state IN ('watching', 'repairing')
+               AND state IN ('watching', 'repairing', 'blocked')
                AND supervisor_process_id IS NOT NULL",
             params![
                 landing_id.as_str(),
@@ -326,7 +388,7 @@ impl super::SqliteStore {
                  blocked_reason=?6,
                  supervisor_heartbeat_at=?7, updated_at=?7
              WHERE id=?1 AND generation=?2
-               AND state IN ('watching', 'repairing')",
+               AND state IN ('watching', 'repairing', 'blocked')",
             params![
                 landing.id.as_str(),
                 landing.generation as i64,

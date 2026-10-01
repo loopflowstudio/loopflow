@@ -12,14 +12,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
     }
 
-    pub(crate) async fn input_final_answer(
-        &self,
-        input: &str,
-    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
-        let input = input.to_owned();
-        run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
-    }
-
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -106,16 +98,6 @@ impl Store {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.bind_session(&id, expected_capture, &task)
-        })
-        .await
-    }
-
-    pub(crate) async fn conversation_history(
-        &self,
-        since: i64,
-    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.conversation_history(None, None, None, None, since, true)
         })
         .await
     }

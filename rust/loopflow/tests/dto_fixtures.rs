@@ -405,3 +405,16 @@ fn task_work_preserves_all_owners_and_managed_marker() {
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
 }
+
+#[test]
+fn task_automation_keeps_coverage_distinct_from_held_and_reviewing_work() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_automation.json"
+    ))
+    .unwrap();
+    let status: loopflow::ops::task_automation::AutomationStatus =
+        serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(status.coverage, "overdue");
+    assert_eq!(status.tasks[1].enabled, Some(false));
+    assert_eq!(serde_json::to_value(status).unwrap(), value);
+}

@@ -36,7 +36,7 @@ Task Work ----> managed worktree ----> commits
 | managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
-| landing supervision and repair admission | exact recorded PR head plus landing generation |
+| landing checks and repair admission | exact recorded PR head plus landing generation |
 
 Task types live under [`work/task/`](../../rust/loopflow/src/work/task/). Operational Git,
 PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow/src/ops/).
@@ -78,7 +78,8 @@ lf commit -m "parser: accept nested groups" # local checkpoint
 lf pr open                             # prepare a draft and open its page
 lf pr publish                          # ready for review
 lf arm                                 # request auto-merge and return
-lf land                                # watch CI, repair, and finish merged
+lf land                                # hand off delivery and return
+lf pr reconcile                        # check recorded landings once
 ```
 
 `publish` creates or refreshes the current PR without integration. A completed
@@ -86,12 +87,13 @@ merge, including one made outside `lf`, advances the recorded Task base to the
 actual merge base when the old base is its ancestor. Publication, submit and
 landing share that ancestry check; unrelated or divergent bases still fail.
 
-`land` merges current main, clears merge-time scratch state, verifies once,
+`arm` and `land` merge current main, clear merge-time scratch state, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
-GitHub squash-merges the final PR tree into one commit on main. `land` requests
-GitHub auto-merge, watches CI, repairs failures through ci-fix and re-arms until
-GitHub confirms the merge or a blocker requires intervention. `arm` returns after
-the request. `submit` performs the
+GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
+GitHub auto-merge, record the landing, and return. Success means handoff;
+`lf task reconcile` checks enrolled Tasks and recorded repository landings once;
+`lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
+finite minute check on this Home. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a live
 Task worker or certify that a particular Flow ran.
@@ -160,15 +162,15 @@ Launching the agent neither adopts the operation nor publishes the result.
 repair, range healing, merge request, settlement, and serial rotation. A
 second mutation fails fast while that exact section is held.
 
-### Landing supervision
+### Landing checks
 
-`lf-pr-landing.lock` follows the supervisor's actual operation lifetime. A
-replacement waits while an old observation or repair is still running, even
-when its async waiter has been canceled. The file contains no state; the
-existing landing generation still fences database writes. Once the old
-operation returns, the replacement observes GitHub before deciding what to do.
-Joining an active landing updates the requested head and disposition while
-retaining the supervisor's checkout. Resuming a blocked landing can select the
+`lf-pr-landing.lock` follows one check's actual operation lifetime. A
+contending check returns immediately while an observation or repair is still
+running, even when its async waiter has been canceled. The file contains no
+state; the existing landing generation still fences database writes. Each
+check observes GitHub before deciding what to do and releases its claim when it
+returns. Joining an active landing updates the requested head and disposition
+while retaining the running check's checkout. Resuming a blocked landing can select the
 caller's current checkout.
 
 Raw Git commands do not participate in these advisory protocols. Loopflow can
@@ -183,22 +185,27 @@ observe GitHub PR head H1
 claim landing generation G
           |
           v
-wait for required checks on H1
+read required checks on H1 once
           |
-      +---+---+
-      |       |
-    pass     fail
-      |       |
-    merge   repair under supervisor G
-              |
-              v
-           observe current head --> fresh check evidence
+   +------+------+----------+
+   |      |      |          |
+ pending pass  merged      fail
+   |      |      |          |
+ return return settle   reserve detached repair under G; return
 ```
 
-A landing supervisor never transfers green checks from one head to another.
-A failure may need several repairs, including on the same head. Incidents
-record responses; the supervisor owns execution. A moved head requires a new
-observation and check set. GitHub remains the final merge authority.
+The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
+
+A check never transfers green checks from one head to another. A failure is
+confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
+Session. Admission reserves that Session and launcher Exec atomically before
+starting its detached worker. A dead launch may retry once using the same
+conversation and native history; a completed blocked repair retains its outcome.
+The same incident failing again waits until the head or evidence changes.
+Required integration is actionable even with green checks. Pending and missing
+checks retain their first-observed clock; provider attempt changes reset that
+clock without resetting the timeout rerun allowance. A failed read is never evidence
+of CI failure or merge. GitHub remains the final merge authority.
 
 An auto-merge request targeting a merge queue keeps waiting when its base
 advances, including before queue entry. Its original-head CI still receives
@@ -213,9 +220,9 @@ queue membership in one GitHub response. A merge therefore takes precedence
 over its removed request without combining an earlier open state with a later
 request read. Missing or partial responses cannot settle a landing.
 
-`PrLanding` owns the supervisor generation. `LandingSupervisor` names the
-process, placement, and heartbeat used both to claim and to retain that
-ownership. Incidents retain response provenance and timing across generations.
+`PrLanding` owns the generation. `LandingSupervisor` names the process,
+placement, and heartbeat of the check currently holding the claim. Incidents
+retain response provenance and timing across generations.
 
 Required gates and repair details come from one paginated GitHub check set for
 the observed PR head. Every page must still name that head. A moved head leaves
@@ -223,21 +230,21 @@ checks unknown until the caller reobserves; an unreadable page cannot supply a
 partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
-Rerun `lf land` after resolving a blocker to renew the exact-head request.
-The CLI and release watcher retain supervisor generations and repair conclusions
-in conversation history. `lf mon show SESSION --final` inspects a conclusion.
-LOO-332 owns replacing the CLI watcher with finite repository ticks; Land keeps
-watch-and-repair until that replacement exists.
+A blocked landing stays observable: later checks still settle its merge, and
+checks that stop failing clear the block. Rerun `lf arm` or `lf land`
+after resolving a blocker to resume under a fresh generation, including when
+the SHA has not changed. Use `lf mon show SESSION --final` to inspect a repair's
+conclusion.
 
-Watched repairs return `published` or `blocked` with a summary in their existing
-final answer. A blocked result names the required action. The watcher observes
-GitHub before returning it, so an already-merged PR still finishes successfully.
-That reconciliation happens immediately after the repair returns. Pending CI
-keeps its normal polling interval, and a repeated repair waits for that interval
-and a fresh observation before starting.
-Provider exit code zero alone does not mean the repair succeeded.
+Repairs return `published` or `blocked` with a summary in their final answer.
+A blocked result names the required action. Provider exit code zero alone does
+not mean the repair succeeded.
 
-After an observed merge, the recorded bare-land disposition leaves the Task open.
+A PR closed without merging ends its landing unsettled. Merge evidence is
+recorded before Task settlement; a failed local or Linear settlement keeps the
+landing pending and the next check retries it.
+
+After verified merge, bare `lf land` settles that PR and leaves the Task open.
 `lf land -c` completes the Task. `lf land --next <slug>` rotates the
 serial chain to a new branch from fetched main.
 
@@ -269,3 +276,27 @@ serial chain to a new branch from fetched main.
 [Planning →](planning.md) separates the Task objective from exact Flow positions.
 [Homes and processes →](homes.md) owns the machine and process boundaries around
 delivery.
+
+
+## Scheduled Task admission
+
+Task owns enrollment, hold and unchanged-failure retry count. A repository check
+never chooses a new Flow for a finished Task. Enrollment without a prior Flow
+captures the Project default once; explicit Task launches preserve their choice.
+Session input reservations, Flow review reservations and worker claims share a
+short checkout admission lock. Automatic claims re-read membership and Hold
+under that boundary. Unknown process identity, live unrelated work and unresolved
+reviews defer admission. A proven-dead managed reservation can recover through
+the common Flow driver; completed effects are consumed without repeating them.
+
+The repository lock skips overlapping observations. Per-Task and per-PR claims
+still fence direct callers. A pass budgets 45 seconds and each Task or external
+operation 10 seconds; deferred work stays visible in check output. launchd's
+calendar entries run each minute and coalesce sleep into a wake-time check.
+The detached tmux launch starts a separate process group, including when it must
+start the tmux server. No resident or provider turn runs inside the tick.
+
+Desktop consumes the Rust automation projection: installed/enabled state,
+last successful and failed receipts, selection and blockers. A missing receipt
+is unknown coverage. Disabling removes the job and prevents its later admissions;
+it leaves running work and explicitly requested GitHub merges intact.

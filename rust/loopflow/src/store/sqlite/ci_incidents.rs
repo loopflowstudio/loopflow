@@ -133,45 +133,15 @@ impl super::SqliteStore {
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET claimed_landing_generation=?3,
-                 responded_at=COALESCE(responded_at, ?4),
+                 responded_at=?4,
                  updated_at=MAX(updated_at, ?4)
-             WHERE identity=?1 AND landing_id=?2
+             WHERE identity=?1 AND landing_id=?2 AND responded_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
+                      AND landing.state IN ('watching', 'repairing', 'blocked')
                )",
             params![identity, landing_id.as_str(), generation as i64, at],
-        )? > 0)
-    }
-
-    pub fn mark_ci_incident_repaired(
-        &self,
-        identity: &str,
-        landing_id: &PrLandingId,
-        generation: u64,
-        repaired_head_sha: &str,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let at = timestamp(updated_at);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE ci_incidents
-             SET repaired_head_sha=COALESCE(repaired_head_sha, ?4),
-                 updated_at=MAX(updated_at, ?5)
-             WHERE identity=?1 AND landing_id=?2
-               AND EXISTS (
-                    SELECT 1 FROM pr_landings landing
-                    WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
-               )",
-            params![
-                identity,
-                landing_id.as_str(),
-                generation as i64,
-                repaired_head_sha,
-                at
-            ],
         )? > 0)
     }
 

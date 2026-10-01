@@ -103,7 +103,8 @@ lf --task INF-123 research "write scratch/runtime.md"    # one independent Task 
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # watch, repair CI, merge, then complete the Task
+lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf pr reconcile                                      # check recorded deliveries once, repair or settle
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts

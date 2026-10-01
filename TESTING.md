@@ -576,7 +576,7 @@ cargo test -p loopflow --lib engine::skills::tests
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
-cargo test -p loopflow golden_prompt
+cargo test -p loopflow --test golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
@@ -630,6 +630,16 @@ from commit creation. Exercise takeover while the old repair is still running;
 generation fencing alone does not stop its effects. Label simulated
 provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 
+Landing changes also affect release finalization and Linear completion recovery:
+
+```bash
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::pm::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+```
+
+Detached repair proofs enter through the compiled CLI so admission records its
+Exec before launching a child. Assert the published tag and completed repair;
+an in-process `release_run` call does not exercise that execution boundary.
+
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
 binary mid-test mixes migration frontiers in a single temporary Home.
 
@@ -651,10 +661,18 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+The default container tracks stable Rust, matching the other CI Rust jobs, and
+logs its compiler version. When adopting a newer standard-library API or Clippy
+fix, verify the installation harness uses the same toolchain policy; a host lint
+pass does not verify the container build. Use `--image` to reproduce an older
+toolchain explicitly.
 
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
+Task status and automation must also handle the saved cursor past the last step
+while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
+for that boundary; a fast mechanical Flow can finish while its start command reads status.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 

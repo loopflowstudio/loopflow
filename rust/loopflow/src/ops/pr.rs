@@ -1165,9 +1165,23 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         })
     });
     let mut seen = std::collections::HashSet::new();
+    let mut attempts = Vec::new();
     let mut required = Vec::new();
     let mut full = Vec::new();
     for context in contexts {
+        let attempt = match &context {
+            GhCheckContext::CheckRun {
+                name,
+                started_at,
+                details_url,
+                ..
+            } => format!("{name}:{started_at:?}:{details_url:?}"),
+            GhCheckContext::StatusContext {
+                context,
+                target_url,
+                ..
+            } => format!("{context}:{target_url:?}"),
+        };
         let (identity, name, state, link, is_required) = match context {
             GhCheckContext::CheckRun {
                 name,
@@ -1206,6 +1220,7 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         if !seen.insert(identity) {
             continue;
         }
+        attempts.push(attempt);
         let bucket = match state.as_str() {
             "SUCCESS" => "pass",
             "SKIPPED" | "NEUTRAL" => "skipping",
@@ -1223,7 +1238,12 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         }
         full.push(check);
     }
-    (!required.is_empty()).then(|| MergeGateReading::from_checks(required, full))
+    (!required.is_empty()).then(|| {
+        let mut reading = MergeGateReading::from_checks(required, full);
+        attempts.sort();
+        reading.attempt = attempts.join("\n");
+        reading
+    })
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -1233,6 +1253,7 @@ pub struct MergeGateReading {
     pub failing: bool,
     pub pending: bool,
     pub failing_leaves: Vec<GhFailingCheck>,
+    pub attempt: String,
 }
 
 impl MergeGateReading {
@@ -1273,6 +1294,7 @@ impl MergeGateReading {
             failing: gate.failing,
             pending: gate.pending,
             failing_leaves,
+            attempt: String::new(),
         }
     }
 }

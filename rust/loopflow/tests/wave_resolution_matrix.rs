@@ -61,6 +61,9 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// `global_commands` covers their config, usage and refresh behavior.
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
+/// Scheduling requires an explicit Wave or repository, never ambient selection.
+const REPOSITORY_OR_WAVE: &[&[&str]] = &[&["wave", "cron", "sync"]];
+
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
@@ -79,7 +82,6 @@ const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
     &["discord", "serve"],
     &["wave", "cron", "preflight"],
-    &["wave", "cron", "sync"],
     &["wave", "cron", "run"],
     &["wave", "cron", "history"],
     &["wave", "cron", "trigger"],
@@ -557,6 +559,7 @@ fn registry_is_complete() {
         .iter()
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
+        .chain(REPOSITORY_OR_WAVE)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -603,6 +606,7 @@ fn registry_is_complete() {
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
+        .chain(REPOSITORY_OR_WAVE)
     {
         assert!(
             find_clap_command(&root, path).is_some(),
@@ -622,6 +626,17 @@ fn registry_is_complete() {
             }),
             "explicit-only command {path:?} must require one `wave` argument"
         );
+    }
+
+    for path in REPOSITORY_OR_WAVE {
+        let mut args = vec!["lf"];
+        args.extend_from_slice(path);
+        assert!(Cli::command().try_get_matches_from(&args).is_err());
+        for target in [vec!["--repo"], vec!["--wave", "fixture"]] {
+            let mut explicit = args.clone();
+            explicit.extend(target);
+            assert!(Cli::command().try_get_matches_from(explicit).is_ok());
+        }
     }
 
     // 6. Every registry entry must map to a real clap command (no stale

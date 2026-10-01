@@ -22,14 +22,16 @@ lf commit -m "<what changed and why>"  # local checkpoint
 lf task sync --plan                  # inspect integration strategy
 lf task sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf submit                           # prepare for the user's merge click
-lf arm                              # prepare and request auto-merge; return
-lf land                             # watch CI, repair, and finish merged
+lf submit                         # prepare for the user's merge click
+lf arm                            # prepare and request auto-merge; return
+lf land                           # record delivery and return
+lf pr reconcile                      # check delivery once; repair or settle merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
-for a reviewer to land; arm requests auto-merge, and land watches and repairs through merge. Bare land keeps the Task open;
-`-c` requests completion after merge, and `--next <slug>` rotates its PR chain. Use the
+for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
+settles verified merges. Bare land keeps the Task open;
+`-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.

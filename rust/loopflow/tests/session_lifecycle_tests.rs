@@ -619,9 +619,10 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 #[test]
 fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
+    let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-binding",
         &fixture.repo.head_sha(),
     );

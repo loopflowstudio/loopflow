@@ -1621,9 +1621,9 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         bin.path().display(),
         std::env::var("PATH").unwrap()
     );
-    let launch = |args: &[&str]| -> String {
+    let launch = |cwd: &Path, args: &[&str]| -> String {
         let before = std::fs::read_to_string(&launched).unwrap_or_default();
-        let output = run_lf(repo.path(), home.path(), args, Some(&path));
+        let output = run_lf(cwd, home.path(), args, Some(&path));
         assert!(
             output.status.success(),
             "lf {args:?}: {}",
@@ -1637,7 +1637,10 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
-    let bound = launch(&["--mode", "tui", "binding-work", "--no-loopflow"]);
+    let bound = launch(
+        repo.path(),
+        &["--mode", "tui", "binding-work", "--no-loopflow"],
+    );
     let listed = session(&bound);
     assert_eq!(
         listed["work"],
@@ -1655,9 +1658,12 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         .block_on(task.store.task_started(&task.task.id))
         .unwrap());
 
-    // A branch no Task owns stays unbound; nothing is inferred from the path.
-    repo.create_branch("unregistered");
-    let unbound = launch(&["--mode", "tui", "binding-work", "--no-loopflow"]);
+    // A checkout no Task owns stays unbound and retires on exit.
+    let unrelated = repo.create_named_worktree("unregistered");
+    let unbound = launch(
+        &unrelated,
+        &["--mode", "tui", "binding-work", "--no-loopflow"],
+    );
     let history = json(&["session", "list", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
@@ -1671,14 +1677,17 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // Explicit selection wins over the checkout.
     repo.checkout("task-binding");
-    let explicit = launch(&[
-        "--task",
-        "INF-124",
-        "--mode",
-        "tui",
-        "binding-work",
-        "--no-loopflow",
-    ]);
+    let explicit = launch(
+        repo.path(),
+        &[
+            "--task",
+            "INF-124",
+            "--mode",
+            "tui",
+            "binding-work",
+            "--no-loopflow",
+        ],
+    );
     assert_eq!(
         session(&explicit)["work"],
         serde_json::json!({"kind": "task", "id": sibling.id})
@@ -1711,7 +1720,10 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     runtime
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
-    let after_landing = launch(&["--mode", "tui", "binding-work", "--no-loopflow"]);
+    let after_landing = launch(
+        repo.path(),
+        &["--mode", "tui", "binding-work", "--no-loopflow"],
+    );
     assert_eq!(
         session(&after_landing)["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})

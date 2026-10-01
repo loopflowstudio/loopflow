@@ -200,10 +200,22 @@ mod tests {
 
     fn identity_store(path: &Path) -> Connection {
         let conn = Connection::open(path).unwrap();
-        conn.execute_batch("CREATE TABLE waves(id TEXT, name TEXT, created_at INTEGER);
+        conn.execute_batch("CREATE TABLE waves(id TEXT, name TEXT, created_at INTEGER, parent_wave_id TEXT);
             CREATE TABLE projects(id TEXT, wave_id TEXT, project_slug TEXT, external_project_id TEXT, created_at INTEGER);
             CREATE TABLE tasks(id TEXT, project_id TEXT, issue_identifier TEXT, external_issue_id TEXT, created_at INTEGER);
             CREATE TABLE operations(name TEXT, executable TEXT, home TEXT);").unwrap();
+        let reference = tempfile::tempdir().unwrap();
+        let reference_path = reference.path().join("schema.db");
+        let _store = crate::store::sqlite::SqliteStore::open_ephemeral(&reference_path).unwrap();
+        let view: String = Connection::open(&reference_path)
+            .unwrap()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name='wave_addresses'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute_batch(&view).unwrap();
         conn
     }
 
@@ -292,8 +304,11 @@ mod tests {
                 step: None,
                 captured: None,
             },
-            runs: vec![],
-            runs_truncated: false,
+            work: crate::task_work::TaskWork {
+                sessions: vec![],
+                flows: vec![],
+                execs: vec![],
+            },
             worktree: root.display().to_string(),
             workspace_slug: "fixture".into(),
             agent: None,
@@ -392,7 +407,7 @@ mod tests {
         }
         assert!(super::require_worker_destination().is_err());
         // A Task that exists only in this branch cannot become an installed Task.
-        local.execute_batch("INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'local', 1);
+        local.execute_batch("INSERT INTO waves(id,name,created_at) VALUES ('00000000-0000-0000-0000-000000000001', 'local', 1);
             INSERT INTO projects VALUES ('project_local', '00000000-0000-0000-0000-000000000001', 'local', 'project-external', 1);
             INSERT INTO tasks VALUES ('task_local', 'project_local', 'LOO-2', 'issue-local', 1);").unwrap();
         assert!(task_run(&root, "LOO-2", TaskExecOptions::default())

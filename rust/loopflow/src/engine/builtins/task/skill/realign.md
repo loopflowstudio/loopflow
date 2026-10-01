@@ -14,6 +14,9 @@ Bring the plan and the implementation into agreement with what the work has taug
    alongside the plan. Recover accepted decisions, lessons, and evidence limits
    that should shape the work. Use supplied Wave context or the repository's
    memory location; do not invent a Wave for unbound work.
+   At a parent Wave, also read its child Waves' top-level Markdown from this
+   checkout so relevant child findings can inform the parent's memory. Ordinary
+   execution context excludes children; read these files explicitly here.
    When intent is missing, ask for the specific missing decision rather than
    treating the implementation as its own specification.
 
@@ -80,3 +83,21 @@ If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-decide to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to
 the caller.
+
+## Keep authored context within budget
+
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Curate Wave memory gradually. When it exceeds either limit, retire the largest
+stale sections to git history first and bring it just under both limits. Stop
+once it fits; do not rewrite the whole memory toward a smaller target or shrink
+an in-budget memory merely for size. Continue correcting stale guidance and
+recording durable lessons where this work changes them.
+Bring over-budget scratch under both limits too: merge duplicates, summarize
+long evidence, and remove obsolete notes inherited from a stacked parent.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.

@@ -7,6 +7,18 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Task work retains conversations, managed Flows and command history")
+    func taskWorkFixture() throws {
+        let data = try loadFixtureData("task_work.json")
+        let work = try JSONDecoder().decode(TaskWork.self, from: data)
+        #expect(work.sessions.count == 2)
+        #expect(!work.sessions[0].managed)
+        #expect(work.sessions[1].kind == "flow_review")
+        #expect(work.flows[0].managed)
+        #expect(!work.execs.isEmpty)
+        #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+    }
+
     @Test("Task planning retains the provider branch before execution exists")
     func taskPlanningBranchFixture() throws {
         let states = try JSONDecoder().decode([TaskStatus].self, from: loadFixtureData("task_status.json"))

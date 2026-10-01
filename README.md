@@ -126,6 +126,7 @@ lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable work, delivery and steering history
 lf session list --json # conversations on this Home
+lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
@@ -210,7 +211,7 @@ lf install                                   # return to the latest published re
 uv run python scripts/install.py local        # build only under local-bin/
 ```
 
-`TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;
+`TESTING.md` covers the test suites; `AGENTS.md` is the governing style guide;
 `RELEASE_NOTES.md` and `release/` carry the release chronology.
 Loopflow maintainers should use the repository resource envelope and affected
 suite runner documented in [TESTING.md](TESTING.md#bounded-and-honest).

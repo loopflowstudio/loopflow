@@ -232,9 +232,10 @@ requests for the same document do not repeat its contents; distinct memory files
 remain separate even when their text matches. IDE launches with Wave documents
 use the assembled prompt so those references reach the provider.
 
-Launch assembly allows 8,000 tokens of Wave memory, 16,000 across scratch notes,
-and 16,000 for the launch goal/message. Oversized sources become marked excerpts
-with their full local paths; oversized messages are preserved under
+Launch assembly allows 16,000 tokens and 128 KiB each for the shared memory
+collection (repository-root, ancestor, and selected Wave memory), the scratch
+collection, and the launch goal/message. Oversized sources become marked
+excerpts with their full local paths; oversized messages are preserved under
 `.lf/tmp/context/`. Read relevant omitted sections before acting. The complete
 assembled input must fit 64,000 cl100k tokens and 512 KiB, otherwise launch reports
 which explicit sources to reduce before contacting the provider. Native provider
@@ -412,6 +413,11 @@ the command path.
 
 Use `lf roadmap --json` to inspect Tasks across current Wave plans and
 `lf task status ISSUE` for one retained Task, including past planning ownership.
+Its `work` lists every Session, Flow and Exec associated with the checkout plus
+explicit binds, including headless and completed history. The managed Flow is
+marked; the execution field describes that worker's cursor. Session inventory's
+`task_ids` carries the same Rust association for Desktop navigation without
+changing historical usage attribution.
 
 ### Create and advance a Task
 

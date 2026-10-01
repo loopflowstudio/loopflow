@@ -115,8 +115,8 @@ fn inventory_query(
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
         sql.push_str(&format!(
-            " AND s.task_id IN (SELECT id FROM tasks
-            WHERE id={task} OR issue_identifier={task} OR external_issue_id={task})"
+            " AND s.id IN ({})",
+            super::task_work::session_ids(&task)
         ));
     }
     if let Some(search) = &filter.search {
@@ -162,18 +162,19 @@ fn summary_query(page: &str, by_id: bool) -> String {
         flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
             WHERE f.id IN (SELECT flow_session_id FROM page))
         SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
-        w.name,t.issue_identifier,
+        w.slug,t.issue_identifier,
         COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
-         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
+         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
+        (SELECT json_group_array(id) FROM ({}))
         FROM page s
         LEFT JOIN flows f ON f.id=s.flow_session_id
-        LEFT JOIN waves w ON w.id=s.wave_id
+        LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
-        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS)
+        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
 }
 
 fn read_summary(
@@ -181,6 +182,7 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
+            task_ids: serde_json::from_str(&row.get::<_, String>(32)?)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -382,10 +384,10 @@ impl SqliteStore {
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
-                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM waves WHERE id=?1 OR name=?1)
+                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
-                        AND origin.wave_id IN (SELECT id FROM waves WHERE id=?1 OR name=?1)))
+                        AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
                     WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
@@ -399,7 +401,7 @@ impl SqliteStore {
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?4))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
-                    (SELECT name FROM waves WHERE id=eligible.wave_id),
+                    (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
                     (SELECT issue_identifier FROM tasks WHERE id=eligible.task_id),
                     s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
                     total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),

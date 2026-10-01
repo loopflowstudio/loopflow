@@ -102,8 +102,7 @@ pub struct TaskSnapshot {
     pub project_id: String,
     pub status: WorkStatus,
     pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
-    pub runs: Vec<crate::session_record::SessionHistory>,
-    pub runs_truncated: bool,
+    pub work: crate::task_work::TaskWork,
     pub worktree: String,
     pub workspace_slug: String,
     pub agent: Option<String>,
@@ -554,6 +553,10 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
                 task.worktree.display()
             )));
         }
+    }
+    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
     }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
         let driver_may_live = position.claim.as_ref().is_some_and(|claim| {
@@ -1656,18 +1659,18 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         .pm_snapshot(&task.wave_id)
         .await
         .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let snapshot = snapshot.snapshot;
     let item = snapshot
         .items
         .iter()
         .find(|item| item.id == task.plan.id.as_str())
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let url = item
         .url
         .as_deref()
         .filter(|url| _valid_task_url(url))
-        .ok_or_else(|| _missing_task_pr_url(task, wave.name()))?;
+        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
     let pr = store
         .active_task_pr(&task.id)
         .await
@@ -3181,6 +3184,10 @@ pub(crate) async fn task_recovery_adoption(
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &task.worktree;
     let identifier = &task.plan.identifier;
+    let blockers = lifecycle::associated_execution_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     if !worktree.exists() {
         return Err(task_error(format!(
             "Task {identifier} worktree {} is missing; recovery refused before moving any ownership",
@@ -4013,7 +4020,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
         body,
     };
     let outcome =
-        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.name(), &request, &prior).await;
+        crate::ops::pm::pm_link_pr_async(&task.worktree, wave.slug(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
     // reading, but an operator running `lf pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
@@ -4047,7 +4054,7 @@ async fn reconcile_pm_writeback(
         let wave = owning_wave(store, task).await?;
         crate::ops::task_pm::complete_task(
             Path::new(wave.repo()),
-            wave.name(),
+            wave.slug(),
             task.plan.id.as_str(),
             pr_url,
         )
@@ -4152,6 +4159,9 @@ pub(crate) async fn task_completion_gate(
         gate.blockers.push(blocker.reason);
         return Ok(gate);
     }
+
+    gate.blockers
+        .extend(lifecycle::associated_work_blockers(store, task)?);
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -4317,12 +4327,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         let execution = crate::ops::task_execution::task_execution(&store, &task.id)
             .await
             .map_err(task_error)?;
-        let (runs, runs_truncated) =
-            crate::lf::commands::runs::collect_runs(crate::lf::commands::WorkFilter {
-                task: Some(task.id.as_str()),
-                ..Default::default()
-            })
-            .map_err(task_error)?;
+        let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
         let actions = if store
             .task_deletion(&task.wave_id, task.plan.id.as_str())
             .await
@@ -4389,12 +4394,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             project: project.plan.slug,
             pm_snapshot_synced_at: task.plan.pm_snapshot_synced_at,
             pm_writeback: task.pm_writeback,
-            wave: wave.name().to_string(),
+            wave: wave.slug().to_string(),
             project_id: task.project_id.to_string(),
             status: work_status,
             execution,
-            runs,
-            runs_truncated,
+            work: work_set,
             worktree: task.worktree.display().to_string(),
             workspace_slug: task.workspace_slug,
             agent: task.agent,
@@ -5311,6 +5315,127 @@ mod tests {
         task_fixture_at(identifier, repository).await
     }
 
+    #[tokio::test]
+    async fn task_work_completion_preserves_independent_flow_and_managed_selection() {
+        let fixture = task_fixture("WORK-1").await;
+        let managed = claim_stop_fixture(&fixture, 999_999).await;
+        let mut independent = managed.clone();
+        independent.invocation.id = "independent-work".into();
+        independent.task_id = None;
+        independent.wave_id = None;
+        independent.claim = None;
+        let independent = fixture.store.create_flow(independent).await.unwrap();
+        let blockers =
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
+        assert!(blockers
+            .iter()
+            .any(|reason| reason.contains("independent-work")));
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed.clone())
+        );
+        fixture
+            .store
+            .end_flow(independent.id(), independent.version, None, "finished")
+            .await
+            .unwrap();
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
+    #[tokio::test]
+    async fn task_work_recovery_preserves_another_tasks_claim_in_a_descendant_checkout() {
+        let fixture = task_fixture("WORK-PARENT").await;
+        let managed = claim_stop_fixture(&fixture, 999_999).await;
+        let mut child = fixture.task.clone();
+        child.id = TaskId::new();
+        child.plan.id = LinearIssueId::new("child-issue").unwrap();
+        child.plan.identifier = "WORK-CHILD".into();
+        child.worktree = child.worktree.join("child");
+        let mut pr = fixture
+            .store
+            .task_prs(&fixture.task.id)
+            .await
+            .unwrap()
+            .remove(0);
+        pr.id = TaskPrId::new();
+        pr.task_id = child.id.clone();
+        pr.branch = "test/child".into();
+        fixture.store.create_task(&child, &pr).await.unwrap();
+        let mut flow = managed.clone();
+        flow.invocation.id = "child-flow".into();
+        flow.task_id = Some(child.id.clone());
+        flow.cwd = child.worktree.clone();
+        flow.claim = None;
+        let flow = fixture
+            .store
+            .start_task_flow(&child.id, flow)
+            .await
+            .unwrap();
+        let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+        assert!(work
+            .flows
+            .iter()
+            .any(|entry| entry.summary.id == flow.id() && !entry.managed));
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+
+        // A claim can precede the first Flow event. Missing process evidence
+        // cannot authorize recovery over another Task's worker.
+        fixture
+            .store
+            .claim_task_worker(
+                &child.id,
+                flow.id(),
+                flow.version,
+                &managed.claim.as_ref().unwrap().owner,
+                time::OffsetDateTime::now_utc(),
+            )
+            .await
+            .unwrap();
+        let claimed = fixture.store.task_flow(&child.id).await.unwrap().unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(flow.id()))
+        );
+        assert_eq!(
+            fixture.store.task_flow(&child.id).await.unwrap(),
+            Some(claimed.clone())
+        );
+        fixture
+            .store
+            .release_flow(claimed.id(), claimed.version, claimed.claim.as_ref())
+            .await
+            .unwrap();
+        assert!(
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            fixture.store.task_flow(&fixture.task.id).await.unwrap(),
+            Some(managed)
+        );
+    }
+
     async fn claim_stop_fixture(fixture: &TaskFixture, pid: u32) -> crate::durable::FlowSession {
         claim_stop_fixture_for(
             fixture,
@@ -5413,7 +5538,8 @@ mod tests {
             "scripts/lifecycle_scorecard.py",
             r#"import os, pathlib, time
 repo = pathlib.Path.cwd()
-repo.joinpath('entered').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').write_text(os.environ['LF_PROCESS_ID'])
+repo.joinpath('entering').rename(repo.joinpath('entered'))
 time.sleep(30)
 "#,
         );

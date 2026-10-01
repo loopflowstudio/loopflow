@@ -42,9 +42,10 @@ struct WorkspaceProjection {
 
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
-        func attached(to work: WorkReference?) -> [SessionRecord] {
-            guard let work else { return [] }
-            let records = sessions.filter { $0.work == work }
+        let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
+        func attached(to taskId: String?) -> [SessionRecord] {
+            guard let taskId else { return [] }
+            let records = sessions.filter { $0.taskIds.contains(taskId) }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -55,14 +56,15 @@ struct WorkspaceProjection {
                 roadmap: wave,
                 sessions: {
                     let records = sessions.filter {
-                        $0.work == .wave(id: wave.wave.id)
-                            || ($0.work?.kind == .project && $0.waveId == wave.wave.id)
+                        !$0.taskIds.contains(where: visibleTaskIds.contains)
+                            && ($0.work == .wave(id: wave.wave.id)
+                                || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
                     }
                     matched.formUnion(records.map(\.id))
                     return records
                 }(),
                 tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
-                    let records = attached(to: task.runtime.map { .task(id: $0.workId) })
+                    let records = attached(to: task.runtime?.workId)
                     return WorkspaceTask(
                         id: WorkspaceNodeKey(repo: repo, work: .task(id: task.id)),
                         task: task, sessions: records

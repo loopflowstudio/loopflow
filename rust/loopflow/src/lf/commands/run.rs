@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, exec_agent, load_config_or_default, missing_agent_message, parse_agent,
-    prepare_exec_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextSourceOverrides, ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill,
-    SkillSyncOptions, StreamFormat, Surface,
+    check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
+    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
+    StreamFormat, Surface,
 };
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -110,7 +110,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         .map(|id| {
             store
                 .get_wave(id)?
-                .map(|wave| wave.name().to_owned())
+                .map(|wave| wave.slug().to_owned())
                 .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
         })
         .transpose()?;
@@ -340,7 +340,7 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::prepare(&store, &task, wave.name()).await?;
+        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }
@@ -368,7 +368,7 @@ fn build_prompt_at(
         .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
     let message = task_message.as_deref().or(message);
     let config_start = Instant::now();
-    let config = load_config_or_default(Some(&repo_root));
+    let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -413,9 +413,6 @@ fn build_prompt_at(
         .wave
         .clone()
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| crate::work::wave::context::gather_wave_memory(&repo_root, wave));
     let prepared = prepare_exec_prompt(
         &config,
         ExecPromptInput {
@@ -425,7 +422,6 @@ fn build_prompt_at(
             surface,
             docs: cli.docs.clone(),
             wave,
-            wave_memory,
             message: message.map(|value| value.to_string()),
             no_loopflow: cli.no_loopflow,
             agent: task_input
@@ -475,6 +471,7 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
+    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
     if confine {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
@@ -507,17 +504,22 @@ fn build_prompt_at(
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
-            let wave_memory =
-                crate::engine::prompt::format_wave_memory_section(&prepared.components);
+            let wave_context =
+                crate::engine::prompt::format_wave_sections(&prepared.components).join("\n\n");
             prompt = skill_exec_seed(
                 &harness,
                 surface,
                 skill_name,
                 prepared.components.message.as_deref(),
                 prepared.components.operate,
-                wave_memory.as_deref(),
+                Some(&wave_context),
                 prepared.components.user_name.as_deref(),
             );
+            if let Some(notice) = &prepared.components.budget_notice {
+                prompt.push_str(&format!(
+                    "\n\n<lf:context-budget>\n{notice}\n</lf:context-budget>"
+                ));
+            }
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
         } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
@@ -533,7 +535,11 @@ fn build_prompt_at(
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    crate::engine::context_budget::check_input(&effective_system, &agent_config.task_prompt)?;
+    crate::engine::context_budget::check_input(
+        &effective_system,
+        &agent_config.task_prompt,
+        &budgets,
+    )?;
     let context = attributed_context(
         &components,
         &effective_system,
@@ -600,7 +606,7 @@ fn skill_exec_seed(
     skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    wave_memory: Option<&str>,
+    wave_context: Option<&str>,
     user_name: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
@@ -616,9 +622,9 @@ fn skill_exec_seed(
         seed.push_str("\n\n");
         seed.push_str(&user_context);
     }
-    if let Some(memory) = wave_memory {
+    if let Some(context) = wave_context.filter(|context| !context.is_empty()) {
         seed.push_str("\n\n");
-        seed.push_str(&crate::engine::prompt::render_reference(memory));
+        seed.push_str(&crate::engine::prompt::render_reference(context));
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
@@ -997,19 +1003,13 @@ pub(crate) fn attributed_context(
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
         push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
-    if let Some(memory) = &components.wave_memory {
-        push(
-            &memory.content,
-            Kind::Memory,
-            Scope::Wave,
-            "wave memory".to_string(),
-            Some(memory.path.clone()),
-            "wave",
-        );
-    }
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
             Kind::Scratch
+        } else if document.source == DocumentSource::RepoMemory
+            || (document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md"))
+        {
+            Kind::Memory
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
         } else {
@@ -1018,10 +1018,18 @@ pub(crate) fn attributed_context(
         push(
             &document.content,
             kind,
-            Scope::Repo,
+            if document.source == DocumentSource::Wave {
+                Scope::Wave
+            } else {
+                Scope::Repo
+            },
             document.path.clone(),
             Some(document.path.clone()),
-            "docs",
+            if document.source == DocumentSource::Wave {
+                "wave"
+            } else {
+                "docs"
+            },
         );
     }
     for document in &components.diff_files {
@@ -1988,20 +1996,48 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_exec_seed_carries_wave_memory_before_the_message() {
-        let memory = "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>";
+    fn skill_exec_seed_carries_wave_files_before_the_message() {
+        let components = PromptComponents {
+            wave: Some("infrastructure/release".into()),
+            docs: vec![
+                Document {
+                    path: "MEMORY.md".into(),
+                    content: "Repository decisions.".into(),
+                    source: DocumentSource::RepoMemory,
+                },
+                Document {
+                    path: "wave/infrastructure/MEMORY.md".into(),
+                    content: "Inherited decisions.".into(),
+                    source: DocumentSource::Wave,
+                },
+                Document {
+                    path: "wave/infrastructure/release/GOAL.md".into(),
+                    content: "Deliver releases.".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
+            ..Default::default()
+        };
+        let context = crate::engine::prompt::format_wave_sections(&components).join("\n\n");
         let seed = skill_exec_seed(
             "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
             false,
-            Some(memory),
+            Some(&context),
             None,
         );
-        let memory_pos = seed.find("<lf:wave-memory>").unwrap();
-        let message_pos = seed.find("<lf:message>").unwrap();
-        assert!(memory_pos < message_pos);
+        assert!(
+            seed.find("Inherited decisions.").unwrap() < seed.find("Deliver releases.").unwrap()
+        );
+        assert!(
+            seed.find("Repository decisions.").unwrap()
+                < seed.find("Inherited decisions.").unwrap()
+        );
+        assert_eq!(seed.matches("Repository decisions.").count(), 1);
+        assert!(seed.find("Deliver releases.").unwrap() < seed.find("<lf:message>").unwrap());
+        assert_eq!(seed.matches("Inherited decisions.").count(), 1);
     }
 
     #[test]
@@ -2023,16 +2059,18 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn attributed_context_keeps_escaped_reference_sources() {
         let components = PromptComponents {
-            docs: vec![Document {
-                path: "scratch/intent.md".into(),
-                content: "> $kickoff".into(),
-                source: DocumentSource::Scratch,
-            }],
-            wave_memory: Some(Document {
-                path: "wave/product/MEMORY.md".into(),
-                content: "Earlier $design".into(),
-                source: DocumentSource::WaveMemory,
-            }),
+            docs: vec![
+                Document {
+                    path: "scratch/intent.md".into(),
+                    content: "> $kickoff".into(),
+                    source: DocumentSource::Scratch,
+                },
+                Document {
+                    path: "wave/product/MEMORY.md".into(),
+                    content: "Earlier $design".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
@@ -2065,11 +2103,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
-            wave_memory: Some(Document {
+            docs: vec![Document {
                 path: "wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
+                source: DocumentSource::Wave,
+            }],
             message: Some("outer MEMORY remainder".to_string()),
             message_context: Some((ContextAssetKind::Goal, ContextScope::Step)),
             ..PromptComponents::default()

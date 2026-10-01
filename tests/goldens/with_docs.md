@@ -136,31 +136,24 @@ The current conversation participant's display name is "Fixture Participant" (JS
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Wave context is included in docs below.
-
-## Wave memory
-
-Persistent memory at wave/rust/MEMORY.md. Use the supplied memory; read relevant omitted
-sections when an excerpt names them. Its current
-contents, when any, ride this prompt's wave-memory section.
-Edit it through the ordinary repository workflow; no live Wave is required.
-`realign` reconciles memory with the plan and code. Keep durable observations,
-correct or remove stale entries, and drop session-specific notes. Use absolute dates.
-
-Organize as useful, for example:
-- Patterns: codebase conventions, architecture, how things connect
-- Preferences: user workflow, tool choices, communication norms
-- Learnings: what worked, what failed, surprises
-
-Keep memory compact enough for every iteration. Put architectural decisions
-in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.
-As sections grow, promote stable entries to wave docs or explicit docs and trim.
+Curate wave/rust/MEMORY.md in this checkout. Ancestor files provide inherited context.
+Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 
-<lf:wave-memory>
+Reference files for this task. Includes parent documentation for context.
+<lf:files>
+<lf:file path="wave/rust/README.md">
+# Rust Roadmap
+
+Overview of Rust work.
+
+</lf:file>
+<lf:file path="wave/rust/MEMORY.md">
 - Keep prompts concise and concrete.
 - Prefer behavior-focused tests over mock wiring.
-</lf:wave-memory>
+
+</lf:file>
+</lf:files>
 
 Scratch reference material: design artifacts and working notes.
 Use these files for intent, accepted decisions, remaining work, and evidence.
@@ -179,12 +172,6 @@ Current design notes.
 
 Reference files for this task. Includes parent documentation for context.
 <lf:files>
-<lf:file path="wave/rust/README.md">
-# Rust Roadmap
-
-Overview of Rust work.
-
-</lf:file>
 <lf:file path="README.md">
 # Test Repo
 

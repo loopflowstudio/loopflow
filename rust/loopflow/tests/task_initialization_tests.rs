@@ -1069,8 +1069,8 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
     let status = &status["execution"];
     assert_eq!(status["execution"]["state"], "idle");
-    assert_eq!(status["runs"], serde_json::json!([]));
-    assert_eq!(status["runs_truncated"], false);
+    assert_eq!(status["work"]["sessions"], serde_json::json!([]));
+    assert_eq!(status["work"]["flows"], serde_json::json!([]));
     assert_eq!(status["actions"]["recommended"], "no_action");
     assert!(status["actions"]["reason"]
         .as_str()

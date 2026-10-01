@@ -28,8 +28,6 @@ pub struct ExecPromptInput {
     pub surface: Surface,
     pub docs: Vec<String>,
     pub wave: Option<String>,
-    /// Wave memory already resolved by the Work layer.
-    pub wave_memory: Option<String>,
     pub message: Option<String>,
     pub no_loopflow: bool,
     pub agent: Option<String>,
@@ -46,6 +44,7 @@ pub struct ExecPromptInput {
 /// Canonical Exec preparation output.
 #[derive(Debug, Clone)]
 pub struct PreparedExecPrompt {
+    pub budget_report: crate::engine::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
@@ -57,6 +56,25 @@ pub fn prepare_exec_prompt(
     config: &Config,
     input: ExecPromptInput,
 ) -> Result<PreparedExecPrompt, CoreError> {
+    let prepared = preview_exec_prompt(config, input)?;
+    crate::engine::context_budget::check_input(
+        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
+        &prepared.config.task_prompt,
+        &prepared.budget_report.budgets,
+    )?;
+    Ok(prepared)
+}
+
+/// Assemble a preview even when its total input would prevent launch.
+pub(crate) fn preview_exec_prompt(
+    config: &Config,
+    input: ExecPromptInput,
+) -> Result<PreparedExecPrompt, CoreError> {
+    let budgets = crate::engine::context_budget::ContextBudgets::resolve(
+        config,
+        &input.repo_root,
+        input.wave.as_deref(),
+    )?;
     let ExecPromptInput {
         repo_root,
         skill,
@@ -64,7 +82,6 @@ pub fn prepare_exec_prompt(
         surface,
         docs: requested_docs,
         wave,
-        wave_memory,
         message,
         no_loopflow,
         agent,
@@ -96,7 +113,6 @@ pub fn prepare_exec_prompt(
         docs,
         files: Vec::new(),
         wave,
-        wave_memory,
         include_diff: diff,
         include_diff_files: diff_files,
         include_clipboard: clipboard,
@@ -117,7 +133,16 @@ pub fn prepare_exec_prompt(
         });
     }
 
-    crate::engine::context_budget::bound_context(&mut components)?;
+    let original_system = format_claude_system_prompt(&components);
+    let original_task = format_claude_task_prompt(&components);
+    let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
+    budget_report.measure_input(
+        &original_system,
+        &original_task,
+        &format_claude_system_prompt(&components),
+        &format_claude_task_prompt(&components),
+    );
+    components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -155,12 +180,18 @@ pub fn prepare_exec_prompt(
         )]
         .into(),
     };
-    crate::engine::context_budget::check_input(
-        &crate::engine::agent::system_prompt_with_structured_replies(&launch),
+    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
+    budget_report.measure_input(
+        &original_system,
+        &original_task,
+        &effective_system,
         &launch.task_prompt,
-    )?;
+    );
+    // The source snapshot is stable; the total includes this notice and provider guidance.
+    // The notice labels its pre-feedback total; the report measures submitted bytes.
 
     Ok(PreparedExecPrompt {
+        budget_report,
         config: launch,
         components,
         deduplication_decisions,
@@ -342,15 +373,22 @@ Test skill body.
 
     #[test]
     fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
-        use crate::engine::context_budget::{
-            GOAL_TOKENS, INPUT_BYTES, INPUT_TOKENS, MEMORY_TOKENS, SCRATCH_TOKENS,
-        };
+        use crate::engine::context_budget::BudgetKey;
+        let goal_tokens = BudgetKey::GoalTokens.default_limit();
+        let input_bytes = BudgetKey::InputBytes.default_limit();
+        let input_tokens = BudgetKey::InputTokens.default_limit();
+        let memory_tokens = BudgetKey::MemoryTokens.default_limit();
+        let scratch_tokens = BudgetKey::ScratchTokens.default_limit();
         use crate::engine::prompt::count_tokens;
 
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         let evidence =
             "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
+        fs::create_dir_all(tmp.path().join("wave/infrastructure/release")).unwrap();
+        for wave in ["infrastructure", "infrastructure/release"] {
+            fs::write(tmp.path().join(format!("wave/{wave}/MEMORY.md")), &evidence).unwrap();
+        }
         for index in 0..14 {
             fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
         }
@@ -369,8 +407,7 @@ Test skill body.
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".into()),
-                wave: Some("infrastructure".into()),
-                wave_memory: Some(evidence.clone()),
+                wave: Some("infrastructure/release".into()),
                 message: Some(message.clone()),
                 surface: Surface::Headless,
                 ..Default::default()
@@ -380,13 +417,21 @@ Test skill body.
         let config = &prepared.config;
         let bytes = config.system_prompt.len() + config.task_prompt.len();
         let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
-        assert!(bytes <= INPUT_BYTES, "{bytes}");
-        assert!(tokens <= INPUT_TOKENS, "{tokens}");
-        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
-        assert!(
-            count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
-                <= MEMORY_TOKENS
-        );
+        assert!(bytes <= input_bytes, "{bytes}");
+        assert!(tokens <= input_tokens, "{tokens}");
+        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= goal_tokens);
+        for path in [
+            "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/release/MEMORY.md",
+        ] {
+            let memory = prepared
+                .components
+                .docs
+                .iter()
+                .find(|doc| doc.path == path)
+                .unwrap();
+            assert!(count_tokens(&memory.content) <= memory_tokens);
+        }
         assert!(
             prepared
                 .components
@@ -395,7 +440,7 @@ Test skill body.
                 .filter(|doc| doc.source == DocumentSource::Scratch)
                 .map(|doc| count_tokens(&doc.content))
                 .sum::<usize>()
-                <= SCRATCH_TOKENS
+                <= scratch_tokens
         );
         assert!(config.task_prompt.contains("Task definition"));
         assert!(config
@@ -406,7 +451,17 @@ Test skill body.
             .unwrap()
             .collect();
         assert_eq!(sources.len(), 3);
-        assert_eq!(prepared.components.budget_decisions.len(), 3);
+        assert_eq!(prepared.components.budget_decisions.len(), 4);
+        assert!(
+            config
+                .task_prompt
+                .find("<lf:file path=\"wave/infrastructure/MEMORY.md\">")
+                .unwrap()
+                < config
+                    .task_prompt
+                    .find("<lf:file path=\"wave/infrastructure/release/MEMORY.md\">")
+                    .unwrap()
+        );
         let path = sources
             .iter()
             .map(|entry| entry.as_ref().unwrap().path())
@@ -419,6 +474,110 @@ Test skill body.
             evidence
         );
         eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
+    }
+
+    #[test]
+    fn repository_ancestor_and_selected_wave_memory_share_one_budget() {
+        let tmp = create_repo_fixture();
+        let inherited = "Parent decisions and observations.\n".repeat(8_000);
+        let own = "Release decisions and observations.\n".repeat(2_000);
+        fs::write(tmp.path().join("MEMORY.md"), &inherited).unwrap();
+        for (wave, memory) in [
+            ("infrastructure", &inherited),
+            ("infrastructure/delivery", &inherited),
+            ("infrastructure/delivery/release", &own),
+        ] {
+            let directory = tmp.path().join("wave").join(wave);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("MEMORY.md"), memory).unwrap();
+        }
+        let memory_tokens = 6_000;
+        let memory_bytes = 48 * 1024;
+        let config = Config {
+            context_budgets: [
+                (
+                    crate::engine::context_budget::BudgetKey::MemoryTokens,
+                    memory_tokens,
+                ),
+                (
+                    crate::engine::context_budget::BudgetKey::MemoryBytes,
+                    memory_bytes,
+                ),
+            ]
+            .into(),
+            ..default_test_config()
+        };
+        let prepared = prepare_exec_prompt(
+            &config,
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                wave: Some("infrastructure/delivery/release".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let memories = &prepared.components.docs;
+        assert_eq!(
+            memories
+                .iter()
+                .map(|doc| doc.path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "MEMORY.md",
+                "wave/infrastructure/MEMORY.md",
+                "wave/infrastructure/delivery/MEMORY.md",
+                "wave/infrastructure/delivery/release/MEMORY.md",
+            ]
+        );
+        assert!(memories
+            .iter()
+            .all(|doc| doc.content.contains("excerpt only")));
+        let submitted_tokens: usize = memories
+            .iter()
+            .map(|doc| crate::engine::prompt::count_tokens(&doc.content))
+            .sum();
+        assert!(submitted_tokens <= memory_tokens);
+        assert!(memories.iter().map(|doc| doc.content.len()).sum::<usize>() <= memory_bytes);
+        let usage = &prepared.budget_report.usage[..memories.len()];
+        assert!(usage.iter().map(|entry| entry.token_limit).sum::<usize>() <= memory_tokens);
+        assert!(usage.iter().map(|entry| entry.byte_limit).sum::<usize>() <= memory_bytes);
+        for (doc, entry) in memories.iter().zip(usage) {
+            assert_eq!(entry.source, doc.path);
+            assert_eq!(
+                entry.submitted_tokens,
+                crate::engine::prompt::count_tokens(&doc.content)
+            );
+            assert_eq!(entry.submitted_bytes, doc.content.len());
+            assert!(entry.original_tokens > entry.submitted_tokens);
+        }
+    }
+
+    #[test]
+    fn repository_memory_is_bounded_without_a_selected_wave() {
+        let tmp = create_repo_fixture();
+        let memory = "Repository decisions and observations.\n".repeat(8_000);
+        fs::write(tmp.path().join("MEMORY.md"), &memory).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let doc = &prepared.components.docs[0];
+        assert!(
+            crate::engine::prompt::count_tokens(&doc.content)
+                <= crate::engine::context_budget::BudgetKey::MemoryTokens.default_limit()
+        );
+        assert!(doc.content.contains("excerpt only"));
+        assert_eq!(
+            prepared.components.budget_decisions[0].scope,
+            crate::trace::ContextScope::Repo
+        );
+        assert!(fs::read_dir(tmp.path().join(".lf/tmp/context"))
+            .unwrap()
+            .any(|entry| fs::read_to_string(entry.unwrap().path()).unwrap() == memory));
     }
 
     #[test]
@@ -458,7 +617,9 @@ Test skill body.
         let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
         let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
             + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
-        let content = " x".repeat(crate::engine::context_budget::INPUT_TOKENS - overhead - 32);
+        let content = " x".repeat(
+            crate::engine::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
+        );
         prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
         let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
             panic!("structured reply guidance exceeded the launch budget without rejection");
@@ -474,13 +635,19 @@ Test skill body.
         let intent = "> $kickoff\n> ok just run kickoff here then";
         fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
         fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        fs::create_dir_all(tmp.path().join("wave/product")).unwrap();
+        fs::write(
+            tmp.path().join("wave/product/MEMORY.md"),
+            "Jack previously invoked $kickoff.",
+        )
+        .unwrap();
         let prepared = prepare_exec_prompt(
             &default_test_config(),
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
                 agent: Some("codex".into()),
-                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                wave: Some("product".into()),
                 message: Some(
                     "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
                         .into(),
@@ -903,5 +1070,71 @@ Test skill body.
         .expect("bare OpenCode should defer to the user's default");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use std::fs;
+
+    use crate::engine::config::Config;
+    use crate::engine::context_budget::BudgetKey;
+    use crate::engine::exec::{prepare_exec_prompt, preview_exec_prompt, ExecPromptInput};
+    use crate::engine::prompt::count_tokens;
+
+    #[test]
+    fn every_context_writer_receives_limits_usage_and_cleanup_guidance() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join("scratch")).unwrap();
+        fs::write(
+            repo.path().join("scratch/plan.md"),
+            "Pending live decision. ".repeat(500),
+        )
+        .unwrap();
+        let config = Config {
+            context_budgets: [(BudgetKey::ScratchTokens, 400)].into(),
+            ..Default::default()
+        };
+        for skill in ["realign", "compress", "kickoff", "implement"] {
+            let prepared = prepare_exec_prompt(
+                &config,
+                ExecPromptInput {
+                    repo_root: repo.path().to_owned(),
+                    skill: Some(skill.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let prompt = &prepared.config.task_prompt;
+            assert!(prompt.contains("<lf:context-budget>"), "{skill}");
+            assert!(prompt.contains("scratch_tokens: 400 (provided config)"));
+            assert!(prompt.contains("Read the relevant omitted sections"));
+            assert!(prompt.contains("Re-run the query after writing"));
+            let total = prepared.budget_report.usage.last().unwrap();
+            assert_eq!(
+                total.submitted_tokens,
+                count_tokens(&prepared.config.system_prompt) + count_tokens(prompt)
+            );
+        }
+    }
+
+    #[test]
+    fn preview_reports_a_total_that_launch_would_reject() {
+        let repo = tempfile::tempdir().unwrap();
+        let config = Config {
+            context_budgets: [(BudgetKey::InputTokens, 100)].into(),
+            ..Default::default()
+        };
+        let input = ExecPromptInput {
+            repo_root: repo.path().to_owned(),
+            skill: Some("realign".into()),
+            ..Default::default()
+        };
+        let preview = preview_exec_prompt(&config, input.clone()).unwrap();
+        assert!(preview.budget_report.usage.last().unwrap().submitted_tokens > 100);
+        assert!(prepare_exec_prompt(&config, input)
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds the input budget"));
     }
 }

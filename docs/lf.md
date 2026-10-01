@@ -53,11 +53,14 @@ lf ps                               # snapshot of live processes and call trees
 lf top                              # continuously refresh the live view
 lf runs INPUT --final                # the recorded conclusion of one captured input
 lf usage --days 30                  # reported consumption
+lf context --task EXP-12 --json     # effective context limits, sources and usage
 ```
 
 Inspection reads this Home. Live processes, recorded outcomes, and missing
 observations remain distinct. `lf runs` reads AgentSession history; `lf exec list`
 reads actual lf processes and their command results.
+`lf context` previews local launch input; [configure context budgets](config.md#context-budgets)
+in existing personal, repository or Wave settings.
 
 Read Wave state as JSON with the supported inspection commands:
 
@@ -172,3 +175,15 @@ Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
 Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
 Task destinations open details; selecting a Flow opens its folded template.
+
+### Inspect all work in a Task
+
+```bash
+lf task status LOO-358 --json
+lf session list --task LOO-358 --history
+```
+
+Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
+including headless and completed work. Managed marks the Flow advanced by
+`lf task run`; the managed execution line describes only that worker. Independent
+work remains visible and preserves the checkout while unfinished or unresolved.

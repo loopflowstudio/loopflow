@@ -22,5 +22,6 @@ pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
         row.get::<_, Option<i64>>(6)?.map(unix_to_datetime),
         row.get(7)?,
         row.get(8)?,
-    ))
+    )
+    .with_slug(row.get(9)?))
 }

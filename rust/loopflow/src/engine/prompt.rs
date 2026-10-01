@@ -2048,7 +2048,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains("lf commit"));
+        assert!(prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -2061,7 +2061,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains("lf commit"));
+        assert!(!prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prompt.contains("lf chat"));
     }
 
@@ -2082,13 +2082,13 @@ mod tests {
             assert!(prompt.contains("Checks and Flow boundaries"));
             assert!(prompt.contains("Gate owns\nverification once"));
             assert!(prompt.contains("Checks must run headless"));
-            assert!(prompt.contains("lf pr land"));
+            assert!(prompt.contains("lf land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
-            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
-            for procedure in ["lf task restart", "lf wave place", "lf ps --json"] {
+            assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
+            for procedure in ["lf restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
                     name == "loopflow",

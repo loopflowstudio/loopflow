@@ -25,7 +25,7 @@ against the preceding `.0` tag. Patch notes retain their incremental baseline.
 Run exactly one command:
 
 ```bash
-lf release run <version>
+lf repo run <version>
 ```
 
 That command is responsible for:
@@ -47,11 +47,11 @@ publication, deployment, and secret handling in the publisher.
 
 ## Re-entry
 
-`lf release run` resumes an existing release PR or incomplete latest tag after
+`lf repo run` resumes an existing release PR or incomplete latest tag after
 interruptions.
 
 A minor run records its selected patch, minor version, and source snapshot in
-`.lf/releases/minor-<target>.json`. Retry `lf release run minor` to complete that
+`.lf/releases/minor-<target>.json`. Retry `lf repo run minor` to complete that
 pair; a published patch is reused even when no unreleased commits remain.
 
 Process death does not make generated release state temporary. Re-entry owns:

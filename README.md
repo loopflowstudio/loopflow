@@ -17,11 +17,11 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 
 ```bash
 lf install                  # update to the latest published release, from any directory
-lf install schedule         # check at login and weekly (macOS)
-lf install schedule daily   # also accepts weekly, hourly, 5min
+lf schedule         # check at login and weekly (macOS)
+lf schedule daily   # also accepts weekly, hourly, 5min
 ```
 
-Use `lf sync` inside a repository to update its checkout.
+Use `lf task sync` inside a repository to update its checkout.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
@@ -67,7 +67,7 @@ an error. Use `lf skill NAME` to select the skill explicitly.
 External skills honor the same frontmatter as local skills, on first fetch and
 when read from cache. Malformed definitions report their parse error.
 
-Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
+Flows invoke builtin commands with `cmd:`, for example `- cmd: task pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
 ## Keep work moving
@@ -95,15 +95,15 @@ reviewed repository file, not live server state.
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task checkout INF-123                               # durable Task Work + worktree, no controller
-lf task run INF-123                                   # start end-to-end Task automation
+lf checkout INF-123                               # durable Task Work + worktree, no controller
+lf --task INF-123 flow start                                   # start end-to-end Task automation
 lf task comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
 lf task interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf pr arm -c                                          # request exact-head auto-merge and return
-lf pr land -c                                         # watch, repair CI, merge, then complete the Task
+lf arm -c                                          # request exact-head auto-merge and return
+lf land -c                                         # watch, repair CI, merge, then complete the Task
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
@@ -120,7 +120,7 @@ Watch this repository and the current Home:
 
 ```bash
 lf wave list                  # every durable Wave and its Home/runtime evidence
-lf user name           # display name from Git or a personal Loopflow override
+lf user           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
@@ -131,7 +131,7 @@ lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
-lf prune --dry-run     # inspect dead receipts and registered orphan providers
+lf mon prune --dry-run     # inspect dead receipts and registered orphan providers
 ```
 
 ## Sessions
@@ -205,7 +205,7 @@ each `.md` URL, use the curated
 ```bash
 lf install                                   # install the latest published Loopflow from anywhere
 lf install schedule                          # update Loopflow at login and weekly (macOS)
-lf sync                                      # refresh main and integrate it into this worktree
+lf task sync                                      # refresh main and integrate it into this worktree
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # run a disposable experiment
 ```

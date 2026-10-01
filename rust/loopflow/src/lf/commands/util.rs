@@ -594,7 +594,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if provider_session_id.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
+            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.",
             command.program,
             outcome.status,
         ))
@@ -1996,7 +1996,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
         // The native CLI rejects an ordinary OAuth token in this agent-identity
-        // variable. A prior `lf auth status` must not poison a working login.
+        // variable. A prior `lf account` must not poison a working login.
         let codex = temp.path().join("bin/codex");
         std::fs::write(
             &codex,

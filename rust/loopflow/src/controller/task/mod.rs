@@ -152,7 +152,7 @@ pub(crate) async fn ensure_flow_position(
                 .await?
         }
         (None, None) => anyhow::bail!(
-            "Task {} has no active Flow; run `lf task run {} [--flow FLOW]` to select one",
+            "Task {} has no active Flow; run `lf --task {} flow start [TEMPLATE]` to select one",
             task.plan.identifier,
             task.plan.identifier
         ),
@@ -348,7 +348,7 @@ mod planning_tests {
         position.cursor.progress.direction = Some("Design clarified with the human".into());
         finish(&mut position).unwrap();
         for pass in 0..10 {
-            for expected in ["implement", "compress", "sync", "realign"] {
+            for expected in ["implement", "compress", "task sync", "realign"] {
                 assert_eq!(position.current().step, expected);
                 assert!(!finish(&mut position).unwrap());
             }
@@ -420,10 +420,16 @@ mod planning_tests {
             summary: "Human feedback addressed".into(),
         });
         finish(&mut position).unwrap();
-        for expected in ["compress", "sync", "realign", "gate", "pr land -c"] {
+        for expected in [
+            "compress",
+            "task sync",
+            "realign",
+            "gate",
+            "task pr land -c",
+        ] {
             assert_eq!(position.current().step, expected);
             let finished = finish(&mut position).unwrap();
-            assert_eq!(finished, expected == "pr land -c");
+            assert_eq!(finished, expected == "task pr land -c");
         }
     }
 
@@ -1095,7 +1101,7 @@ mod planning_tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             flow_dir.join("persisted-proof.yaml"),
-            "- original-proof\n- cmd: sync --plan\n",
+            "- original-proof\n- cmd: task sync --plan\n",
         )
         .unwrap();
         std::fs::write(
@@ -1138,8 +1144,8 @@ mod planning_tests {
         let crate::engine::ConcreteStep::Command(active_op) = &persisted.invocation.steps[1] else {
             panic!("active second step is an op")
         };
-        assert_eq!(active_op.item.command, "sync");
-        assert_eq!(active_op.item.args, ["--plan"]);
+        assert_eq!(active_op.item.command, "task");
+        assert_eq!(active_op.item.args, ["sync", "--plan"]);
 
         let future = super::start_task_flow(&task, "persisted-proof").unwrap();
         let crate::engine::ConcreteStep::Skill(future_skill) = future.current_plan() else {

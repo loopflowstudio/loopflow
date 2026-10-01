@@ -5,7 +5,7 @@
     uv run python scripts/canonicalize_migrations.py 0.12.2 --check
 
 The release cut is the single publication boundary that turns drafts into
-canonical migrations. `lf release run` invokes this inside its release worktree,
+canonical migrations. `lf repo release run` invokes this inside its release worktree,
 after the version bump and before the commit, so the generated files are part of
 the release PR and run under real Rust CI before the queue merges and tags. It:
 

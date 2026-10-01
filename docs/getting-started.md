@@ -54,7 +54,7 @@ scratch notes, and clipboard—and passes it to the coding agent. Before the
 provider starts, Loopflow reserves the AgentSession and captures its input in
 this Home. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Exec records the command result. Add repo
-docs explicitly with `--docs` and changed file bodies with `--diff-files`.
+docs explicitly with `--docs` and changed file bodies with `--diff files`.
 
 `LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
 
@@ -65,7 +65,7 @@ git clone https://github.com/loopflowstudio/loopflow-demos
 cd loopflow-demos/calculator
 python -m pytest test_calc.py    # see the bug
 # copy error to clipboard
-lf debug -c                       # fix it
+lf debug -c                            # fix it
 ```
 
 ### Inline prompts
@@ -81,10 +81,10 @@ lf : "add type hints to utils.py"
 |------|--------------|
 | `-c` | Clipboard content |
 | `--docs PATH,PATH` | Add specific files, globs, or directories to context |
-| `--diff-files` | Full content of files changed on the branch |
-| `--diff` | Raw `git diff` output |
-| `-i` | Interactive mode |
-| `-b` | Batch/headless mode |
+| `--diff files` | Full content of files changed on the branch |
+| `--diff patch` | Raw `git diff` output |
+| `--mode interactive` | Interactive mode |
+| `--mode batch` | Batch/headless mode |
 
 ---
 
@@ -95,8 +95,8 @@ Start from a Linear task; Loopflow creates and retains its worktree.
 ```bash
 lf task create --run --wave <wave> --title "add OAuth login"
 lf task status <issue-id>
-lf task comment <issue-id> "support passkeys too"
-lf task wait <issue-id> --until terminal
+lf comment <issue-id> "support passkeys too"
+lf wait <issue-id> --until terminal
 ```
 
 ### Skills chain
@@ -124,10 +124,10 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf incident                              # unbreak → 5whys → launch-plan
-lf code                                  # implement → compress; local changes
-lf feature                               # kickoff → design review → pursue → queue → land
-lf ship                                  # gate → land and complete the Task
+lf incident                            # unbreak → 5whys → launch-plan
+lf code                                # implement → compress; local changes
+lf feature                             # kickoff → design review → pursue → queue → land
+lf ship                                # gate → land and complete the Task
 ```
 
 Use bare names for both skills and Flows: `lf debug`, `lf code`, `lf incident`.
@@ -155,7 +155,7 @@ Focus on input validation and auth boundaries.
 ```
 
 ```bash
-lf audit    # runs your custom skill
+lf audit                               # runs your custom skill
 ```
 
 The [Authoring guide](authoring.md) covers prompt contracts, evidence loops,
@@ -164,11 +164,10 @@ and Wave goals.
 ### Shipping
 
 ```bash
-lf pr open      # push + create or update a draft, then open its page
-lf pr publish   # push + create or update PR and mark ready (no browser)
-lf pr submit    # prepare the exact head; you click merge
-lf pr arm       # arm exact-head auto-merge and return
-lf pr land      # watch, repair CI, and return after GitHub merges
+lf pr open                             # push + create or update a draft, then open its page
+lf pr publish                          # push + create or update PR and mark ready (no browser)
+lf submit                              # prepare the exact head; you click merge
+lf land                                 # watch CI, repair failures, and finish merged
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -192,7 +191,7 @@ through merge.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations, Asks and Flow reviews; open one with
-`lf session open <session-id>`. Completing it returns its saved feedback.
+`lf session connect <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 
@@ -204,7 +203,7 @@ Bootstrap the remote identity once:
 
 ```bash
 lf ssh jack@mini.local home id --json
-lf home observe <home-id> ssh://jack@mini.local
+lf observe <home-id> ssh://jack@mini.local
 lf wave list --json
 lf wave place <wave-id> <home-id>    # record origin-side planning state
 lf ssh <home-id> --wave shipper wave/operate
@@ -213,7 +212,7 @@ lf ssh <home-id> --wave shipper wave/operate
 The target Home proves its identity before running the command and keeps the
 resulting execution locally.
 
-Reads follow the same rule: `lf runs`, `lf usage`, `lf wave list`, and `lf wave status`
+Reads follow the same rule: `lf monitor list`, `lf usage`, `lf wave list`, and `lf wave status`
 read the executing Home. Prefix the command with `lf ssh <home-id>` to read
 another Home. Loopflow does not silently aggregate or replicate execution records.
 
@@ -225,10 +224,10 @@ and uses authority installed on its own machine. See
 Auth connects your providers locally:
 
 ```bash
-lf auth connect github    # connect GitHub
-lf auth connect claude    # connect Claude
-lf auth connect linear    # connect Linear with OAuth
-lf auth status    # refresh managed identity and usage
+lf account connect github    # connect GitHub
+lf account connect claude    # connect Claude
+lf account connect linear    # connect Linear with OAuth
+lf account    # refresh managed identity and usage
 ```
 
 ---

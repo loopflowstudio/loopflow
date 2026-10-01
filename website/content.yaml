@@ -139,10 +139,10 @@ homepage:
         content: |
           lf task create --run --wave auth \
             --title "Unify token validation"
-          lf task comment AUTH-12 \
+          lf comment AUTH-12 \
             "prefer the middleware approach"
           lf task status AUTH-12 --json
-          lf pr land -c
+          lf land -c
       - label: "A wave"
         filename: "wave/auth/GOAL.md"
         content: |

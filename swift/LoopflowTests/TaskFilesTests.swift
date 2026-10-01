@@ -91,7 +91,7 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         }, run: { args, _ in
             let value: [String: Any]
-            if args[1] == "changes" {
+            if args.contains("--files") {
                 value = ["issue_identifier": "TEST-1", "task_id": "task-files", "base_commit": "base",
                          "head_commit": "head", "files": [], "scratch": ["note.txt"], "scratch_truncated": false]
             } else { value = try fileJSON(file) }
@@ -261,8 +261,9 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let store = TaskFilesStore(issue: "TEST-1", cwd: directory.path, query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
-            if args[1] == "diff" { value["patch"] = try String(contentsOf: file, encoding: .utf8) }
+            let files = args.contains("--files")
+            var value = root[files ? "changes" : "diff"] as! [String: Any]
+            if !files { value["patch"] = try String(contentsOf: file, encoding: .utf8) }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })
         store.selection = "new.txt"

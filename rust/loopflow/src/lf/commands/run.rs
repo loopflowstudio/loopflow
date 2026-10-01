@@ -100,7 +100,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         "command does not name the selected Flow skill"
     );
     let mut launch = cli.exec_options();
-    launch.batch = true;
+    launch.mode = Some(crate::lf::LaunchMode::Batch);
     launch.task = task.as_ref().map(ToString::to_string);
     launch.wave = flow
         .wave_id
@@ -392,9 +392,9 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let exec_target = if cli.ide {
+    let exec_target = if cli.mode == Some(crate::lf::LaunchMode::Ide) {
         ExecTarget::Ide
-    } else if cli.tui || skill == Some("loopflow") {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) || skill == Some("loopflow") {
         ExecTarget::Tui
     } else {
         config.session.launch
@@ -578,10 +578,11 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    cli.tui
-        || cli.ide
-        || cli.interactive
-        || (!cli.batch && (attached_tty || (skill.is_none() && message.is_none())))
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Batch) => false,
+        Some(_) => true,
+        None => attached_tty || (skill.is_none() && message.is_none()),
+    }
 }
 
 fn should_exec_via_skill(skill_name: &str) -> bool {
@@ -662,9 +663,9 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     // use explicit flags first, then the configured launch target.
     let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
         Some(ExecTarget::Tui)
-    } else if cli.ide {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Ide) {
         Some(ExecTarget::Ide)
-    } else if cli.tui {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) {
         Some(ExecTarget::Tui)
     } else {
         None
@@ -787,7 +788,7 @@ fn exec_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf pr land` rotates worktrees).
+    // (e.g. `cd` after `lf task wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
@@ -1242,6 +1243,69 @@ mod tests {
     }
 
     #[test]
+    fn context_choices_override_config_and_omission_inherits() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("context-choice");
+        repo.create_file("changed.txt", "changed file body\n");
+        repo.stage_all();
+        repo.commit("Add changed content");
+        for configured in [false, true] {
+            repo.create_file(
+                ".lf/config.yaml",
+                &format!(
+                "diff: {configured}\ndiff_files: {configured}\nchrome: {configured}\npaste: false\n"
+            ),
+            );
+            for (choice, files, patch) in [
+                (None, configured, configured),
+                (Some("files"), true, false),
+                (Some("patch"), false, true),
+                (Some("both"), true, true),
+                (Some("none"), false, false),
+            ] {
+                let mut args = vec!["lf", "--mode", "batch"];
+                if let Some(choice) = choice {
+                    args.extend(["--diff", choice]);
+                }
+                for browser in [None, Some("on"), Some("off")] {
+                    let mut args = args.clone();
+                    if let Some(browser) = browser {
+                        args.extend(["--chrome", browser]);
+                    }
+                    let cli = Cli::parse_from(args);
+                    let built =
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
+                            .unwrap();
+                    assert_eq!(
+                        built
+                            .components
+                            .diff_files
+                            .iter()
+                            .any(|file| file.content.contains("changed file body")),
+                        files
+                    );
+                    assert_eq!(
+                        built
+                            .components
+                            .diff
+                            .as_ref()
+                            .is_some_and(|diff| diff.contains("+changed file body")),
+                        patch
+                    );
+                    assert_eq!(
+                        built.capabilities.chrome,
+                        browser.map_or(configured, |value| value == "on")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
         let _restore = EnvironmentRestore::capture(&[
@@ -1262,7 +1326,7 @@ mod tests {
             ".lf/config.yaml",
             "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
 
         for name in ["Jack", "Jacqueline", "  "] {
             std::fs::write(
@@ -1322,7 +1386,7 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
@@ -1697,7 +1761,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
 
         let cli = Cli {
-            batch: true,
+            mode: Some(crate::lf::LaunchMode::Batch),
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
@@ -1733,7 +1797,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.stage_all();
         repo.commit("bound basis");
         let cli = Cli {
-            interactive: true,
+            mode: Some(crate::lf::LaunchMode::Interactive),
             ..Cli::default()
         };
 
@@ -1771,14 +1835,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "gate"]);
 
         assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
     fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--batch", "design"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch", "design"]);
         assert!(!is_interactive_run(&cli, Some("design"), None));
     }
 
@@ -1806,7 +1870,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "--mode", "tui", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1969,7 +2033,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             None,
         );
         assert!(!seed.contains("<lf:loopflow>"));
-        assert!(!seed.contains("lf commit"));
+        assert!(!seed.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]

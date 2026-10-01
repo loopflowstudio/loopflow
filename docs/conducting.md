@@ -26,11 +26,11 @@ print, and keeps no separate copy.
 ## From the command line
 
 ```bash
-lf roadmap                 # tasks in this project, sorted by what they need
-lf roadmap --all           # every project on this computer
-lf top                     # what is running right now
-lf runs --wave infra       # the record of each time the AI was started
-lf ssh <home-id> roadmap   # ask another computer the same question
+lf roadmap                             # tasks in this project, sorted by what they need
+lf roadmap --all                       # every project on this computer
+lf top                                 # what is running right now
+lf usage --days 0 --wave infra                   # the record of each time the AI was started
+lf ssh <home-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine
@@ -69,8 +69,8 @@ lf session list --task INF-123 --json
 lf session list --interactive false --history --task INF-123 --json
 lf session history SESSION --json
 lf session connect SESSION
-lf runs --task INF-123 --json
-lf runs run_ab12 --final
+lf mon show --task INF-123 --json
+lf mon show run_ab12 --final
 lf replay run_ab12
 ```
 
@@ -79,7 +79,7 @@ successful provider turn, the command's outcome and the Flow's progress can
 differ: the engine can finish after its driver dies, and a completed command
 can leave a Flow parked at review.
 
-`lf runs` and `lf replay` retain their historical selectors during the conversion.
+`lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
 [cutover status](architecture-reference.md#cutover-status) and the
 [CLI reference](lf-reference.md#monitor-history-and-live-activity). Replay uses the captured prompt,
@@ -94,7 +94,7 @@ that a provider is still running; inspect exact OS evidence separately.
 ```bash
 lf ps              # one OS-live process and call-tree snapshot
 lf top             # continuously refresh elapsed time and process state
-lf prune --dry-run # inspect safely removable process state
+lf mon prune --dry-run # inspect safely removable process state
 lf usage --days 30 # recorded provider usage
 lf usage --task INF-123 # the same evidence drilled to one Task
 lf usage --json    # current usage wire, newest first
@@ -106,7 +106,7 @@ lf doctor          # audit the ledger: continuity, attribution, lineage
 `lf top` is the first move when work feels slow — live machine-health evidence.
 Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
-`lf prune --dry-run` before cleanup. Plain `lf prune` removes stale Exec
+`lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Exec
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.
@@ -118,10 +118,10 @@ Reading is half; the system stays steerable while it runs.
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
 lf --wave <wave> : "Review this plan"          # start a conversation
-lf task comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
-lf task interrupt INF-123                     # end this turn and re-read direction
+lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
+lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions
-lf session open <session-id> --json           # recover one exact conversation
+lf session connect <session-id> --json           # recover one exact conversation
 ```
 
 Task steering posts a Linear Task comment; commenting in Linear also steers the
@@ -133,7 +133,7 @@ prove that the agent applied the correction. See [The Agent API](agent-api.md#st
 `lf ask` is a synchronous boundary with a person. It opens an interactive AgentSession
 against the caller's exact checkout, enters the Sessions surface, and blocks
 the caller until the user completes the conversation.
-Use `lf --as <work> : "<prompt>"` when only another agent perspective is needed.
+Use `lf --task <task> : "<prompt>"` when only another agent perspective is needed.
 
 A review node retains its exact FlowSession boundary and captured Skill. Opening
 its AgentSession returns to the conversation. Ready saves feedback; Complete
@@ -143,9 +143,9 @@ through its authored edge. Pane close and provider exit choose nothing.
 ## Inspect and resume
 
 ```bash
-lf top                      # live Loopflow process activity
-lf wave status shipper           # work and its current conditions
-lf session open <id>        # start or resume the selected conversation
+lf top                                 # live Loopflow process activity
+lf wave status shipper                 # work and its current conditions
+lf session connect <id>                   # start or resume the selected conversation
 ```
 
 Open a Session in the app or CLI to return to its provider-native conversation.
@@ -153,8 +153,8 @@ Task workspace shells run directly in the app's terminal.
 
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
-Use `lf task comment` for durable Task direction,
-`lf --as` for another agent perspective, and `lf ask` for a new review boundary.
+Use `lf comment` for durable Task direction,
+`lf --task` for another agent perspective, and `lf ask` for a new review boundary.
 
 ## Next
 

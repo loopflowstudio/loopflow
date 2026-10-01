@@ -169,7 +169,7 @@ loop well:
    work.
 
 Frontmatter carries machine policy such as `agent`, `crons`, `pm`, and `home`.
-Keep current chapter metric targets and proof-shaped KRs in the internal Project, edited with `lf wave update-plan`. Keep
+Keep current chapter metric targets and proof-shaped KRs in the internal Project, edited with `lf update-plan`. Keep
 concrete implementation in Tasks. A Wave steers one current chapter; it does
 not contain a roadmap disguised as a prompt.
 

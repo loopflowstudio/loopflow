@@ -1,7 +1,7 @@
 # Testing
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf pr arm`, and `lf pr land`
+matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
 clear scratch before pushing a landing candidate. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
 Implement/compress only build changed code and run its focused test. Gate owns
@@ -628,6 +628,12 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 
 Pass several names after `--test` to share one disposable build across related proofs.
 
+CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+to verify builtin operation labels, plus the affected proofs above. The regular
+Rust suite skips those installation proofs; a skipped case is not verification.
+Managed Task fixtures must bind the checkout's Team and Initiative before
+creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
+
 When changing Task planning lookup or provider response shapes, run the affected
 installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
 the deletion test, and the regular Rust suite skips installation proofs. Keep
@@ -686,7 +692,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf runs --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Home with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.

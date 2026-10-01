@@ -408,7 +408,7 @@ async fn launch_keyed_ask<F: Future<Output = Result<AgentSession>>>(
         && !ask_exec_is_running(&id).await?
     {
         // Keep the Session on failure. A retry can start the same Session;
-        // a published native Run is reopened only through `lf session open`.
+        // a published native Run is reopened only through `lf session connect`.
         exec_ask(&session).await.with_context(|| {
             format!("launch human Ask {id}; retry the same boundary to recover")
         })?;
@@ -518,7 +518,7 @@ pub(crate) async fn task_waiting_unblock(
 
 fn report_ask_wait(id: &str) {
     eprintln!(
-        "Waiting for human session {id}. Open it in Loopflow or with `lf session open {id}`."
+        "Waiting for human session {id}. Open it in Loopflow or with `lf session connect {id}`."
     );
 }
 
@@ -1037,7 +1037,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowSession)
     drop(launch_lock);
     launch.with_context(|| {
         format!(
-            "Review feedback saved; continue with `lf task run {}`",
+            "Review feedback saved; continue with `lf --task {} flow start`",
             task.plan.identifier
         )
     })
@@ -1093,7 +1093,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession)
         let command = vec![
             "lf".to_string(),
             "session".to_string(),
-            "stop-run".to_string(),
+            "stop-client".to_string(),
             run_id.to_string(),
         ];
         tokio::task::spawn_blocking(move || {
@@ -1165,7 +1165,6 @@ async fn serve_flow_locked(
     }
     let message = flow_message(&task, &token);
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let selector = format!("task:{}", token.task_id);
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
         token: Box::new(token.clone()),
     })?;
@@ -1181,7 +1180,14 @@ async fn serve_flow_locked(
     };
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--model", &agent, "--as", &selector])
+        .args([
+            "--mode",
+            "tui",
+            "--model",
+            &agent,
+            "--task",
+            task.id.as_str(),
+        ])
         .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
@@ -1271,7 +1277,8 @@ async fn serve_locked(
 
 async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "--mode".to_string(),
+        "tui".to_string(),
         "--model".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
@@ -1284,7 +1291,8 @@ async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<Str
             .await
             .is_ok()
         {
-            args.extend(["--as".to_string(), selector]);
+            let (kind, value) = selector.split_once(':').expect("Work selector has a kind");
+            args.extend([format!("--{kind}"), value.to_string()]);
         }
     }
     match &session.skill {
@@ -2135,7 +2143,7 @@ pub(crate) fn human_open_argv(
         }
         argv.push(home_id.to_string());
     }
-    argv.extend(["session".to_string(), "open".to_string(), id.to_string()]);
+    argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
     Ok(argv)
 }
 
@@ -3613,7 +3621,7 @@ mod tests {
         let home = AskHome::new();
         let argv = human_open_argv(None, None, "ask_123").unwrap();
 
-        assert_eq!(&argv[argv.len() - 3..], ["session", "open", "ask_123"]);
+        assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
         assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }

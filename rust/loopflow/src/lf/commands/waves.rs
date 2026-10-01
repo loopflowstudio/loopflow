@@ -1,11 +1,10 @@
 //! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
-//! `lf wave list` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf wave status [wave]` adds the
-//! Wave's current chapter and Tasks, the runs it has produced, what is waiting on
-//! somebody, and live loop state; with no argument it reports the Wave this
-//! process is running inside. Both are read-only; `--json` is the dashboard
-//! contract. A Wave remains visible when its chat is disconnected.
+//! `lf wave list` lists durable Wave identities, authored goals, Task counts and
+//! Home placement. `lf wave status [wave]` adds current Projects, Task conditions,
+//! metric readings and Session history; it never reads resident health or a live
+//! loop. With no argument it resolves the ambient Wave. Reads preserve missing
+//! evidence; `--json` is the dashboard contract.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
@@ -60,8 +59,8 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf wave status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
-/// when a server is live — loop state. Wire type; no defaults.
+/// `lf wave status <wave>`: current planning, Task conditions and Session history.
+/// Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -72,7 +71,7 @@ pub struct WaveDetailSnapshot {
     /// Durable Project Work that cannot join the current PM plan, including
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
-    /// This Wave's Home-local Run records, newest first.
+    /// This Wave's Home-local Session history, newest first.
     pub runs: Evidence<SessionHistory>,
 }
 
@@ -459,7 +458,7 @@ pub struct RoadmapTask {
     pub section: RoadmapSection,
 }
 
-/// `lf wave list` — every wave the registry knows, running and stopped alike.
+/// `lf wave list` — every durable Wave identity the registry knows.
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
@@ -508,7 +507,7 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf wave status [wave]` — one Wave's Work hierarchy, Runs, and loop.
+/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -710,7 +709,7 @@ async fn wave_tasks(
             Some(match result {
                 Err(error) => error.to_string(),
                 _ => format!(
-                    "no local chapter plan; run `lf wave sync --wave {}`",
+                    "no local chapter plan; run `lf repo refresh {}`",
                     wave.slug()
                 ),
             }),
@@ -1533,7 +1532,8 @@ fn next_move_for_task(
         }
         return NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
+            reason: "PR is published but settlement is not armed with `lf task pr land -c`"
+                .to_string(),
         };
     }
     let owner = NextMoveOwner::Wave;

@@ -288,7 +288,7 @@ def main() -> None:
                 (fixture["issue"],)
             ]
             assert authored.read_text() == "preserve authored work\n"
-            for args in [["wave", "sync", "task-pr-tests"], ["doctor", "--planning", "--json"]]:
+            for args in [["repo", "refresh", "task-pr-tests"], ["doctor", "--planning", "--json"]]:
                 result = subprocess.run(
                     [fixture["lf"], *args],
                     cwd=repo,

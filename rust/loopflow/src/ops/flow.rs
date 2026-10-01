@@ -7,7 +7,7 @@ use time::OffsetDateTime;
 
 use crate::engine::flow::Command as FlowCommand;
 use crate::engine::process::ProcessGroupGuard;
-use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand};
+use crate::lf::{Cli, Commands, PrCommand, ReleaseCommand, RepoCommand, SyncArgs, TaskCommand};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
@@ -27,14 +27,19 @@ pub fn execute_flow_command(
         .map_err(|err| OpsError::Message(format!("invalid cmd item: {err}")))?;
 
     match cli.command {
-        Some(Commands::Pr { cmd: Some(pr) }) => execute_pr(repo, pr, progress),
-        Some(Commands::Sync {
-            plan,
-            manual,
-            continue_sync,
-            abort,
-            adopt,
-            onto,
+        Some(Commands::Task {
+            cmd: TaskCommand::Pr { cmd: Some(pr) },
+        }) => execute_pr(repo, pr, progress),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Sync(SyncArgs {
+                    plan,
+                    manual,
+                    continue_sync,
+                    abort,
+                    adopt,
+                    onto,
+                }),
         }) => {
             if manual || continue_sync || abort || adopt {
                 return Err(OpsError::Message(
@@ -53,18 +58,14 @@ pub fn execute_flow_command(
             .map_err(|error| OpsError::Message(error.to_string()))
         }
 
-        Some(Commands::Commit {
-            message,
-            push,
-            no_add,
+        Some(Commands::Task {
+            cmd: TaskCommand::Commit { message, no_add },
         }) => {
             crate::ops::task::guard_task_mutation(repo)?;
             commit_workflow(
                 repo,
                 &CommitOptions {
                     add: !no_add,
-                    push,
-                    create_draft_pr: true,
                     message,
                     ..CommitOptions::for_task("commit")
                 },
@@ -72,10 +73,15 @@ pub fn execute_flow_command(
             )?;
             Ok(())
         }
-        Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
-        Some(Commands::Doctor {
-            json,
-            planning: false,
+        Some(Commands::Repo {
+            cmd: RepoCommand::Release { cmd },
+        }) => execute_release(repo, cmd, progress),
+        Some(Commands::Home {
+            cmd:
+                crate::lf::HomeCommand::Doctor {
+                    json,
+                    planning: false,
+                },
         }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
         Some(Commands::TelemetryScorecard { json }) => run_telemetry_scorecard(repo, json),
@@ -95,12 +101,13 @@ fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
     // Earlier and unfinished Runs can contain the first attempt on a PR merged
     // inside the window. Python windows Run statistics and PR intervals separately.
-    let runs = crate::lf::commands::runs::collect_runs_started_since(
+    let runs = crate::lf::commands::runs::collect_history(
         crate::lf::commands::WorkFilter {
             wave: None,
             project: None,
             task: None,
         },
+        None,
         0,
     )
     .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
@@ -321,7 +328,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
             crate::ops::task::pr_next(repo, slug.as_deref())?;
             Ok(())
         }
-        PrCommand::Status | PrCommand::Checks { .. } => Err(unsupported()),
+        PrCommand::Checks { .. } => Err(unsupported()),
     }
 }
 

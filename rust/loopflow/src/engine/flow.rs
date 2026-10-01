@@ -97,25 +97,33 @@ impl Step {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Command {
-    #[serde(deserialize_with = "deserialize_command_name")]
     pub command: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
 }
 
-// Saved invocations outlive CLI spellings. Migrate the stored operation name;
-// preserve captured arguments and topology instead of reloading today's Flow.
-fn deserialize_command_name<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<String, D::Error> {
-    let name = String::deserialize(deserializer)?;
-    Ok(if name == "rebase" {
-        "sync".to_string()
-    } else {
-        name
-    })
+// Saved invocations outlive CLI spellings. Migrate their operation owner while
+// retaining the captured arguments and topology instead of reloading a Flow.
+impl<'de> Deserialize<'de> for Command {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct SavedCommand {
+            command: String,
+            #[serde(default)]
+            args: Vec<String>,
+        }
+        let mut saved = SavedCommand::deserialize(deserializer)?;
+        if matches!(saved.command.as_str(), "rebase" | "sync") {
+            saved.command = "task".into();
+            saved.args.insert(0, "sync".into());
+        }
+        Ok(Self {
+            command: saved.command,
+            args: saved.args,
+        })
+    }
 }
 
 impl Command {
@@ -493,7 +501,7 @@ fn warn_retired_interactive(name: &str, content: &str) {
     });
     if has_interactive && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed) {
         eprintln!(
-            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --batch now select the launch surface"
+            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --mode batch now select the launch surface"
         );
     }
 }
@@ -1240,7 +1248,11 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
+        fs::write(
+            flows.join("invalid.yaml"),
+            "- cmd: task sync\n  human: true\n",
+        )
+        .unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()
@@ -1571,7 +1583,7 @@ Design the feature.
     #[test]
     fn parse_command_mapping_accepts_command_and_args() {
         let yaml = r#"
-- cmd: pr land
+- cmd: task pr land
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1582,8 +1594,8 @@ Design the feature.
                 target: Target::Command(item),
                 ..
             } => {
-                assert_eq!(item.command, "pr");
-                assert_eq!(item.args, vec!["land"]);
+                assert_eq!(item.command, "task");
+                assert_eq!(item.args, vec!["pr", "land"]);
             }
             other => panic!("expected command item, got {other:?}"),
         }
@@ -1774,7 +1786,7 @@ Design the feature.
         fs::write(tmp.path().join(".lf/skills/work.md"), "Captured work").unwrap();
         fs::write(
             tmp.path().join(".lf/flows/inner.yaml"),
-            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: pr land --local\n",
+            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: task pr land --local\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".lf/flows/outer.yaml"),
@@ -1808,7 +1820,7 @@ Design the feature.
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
             panic!("command")
         };
-        assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);
+        assert_eq!(command.item.argv(), ["lf", "task", "pr", "land", "--local"]);
     }
 
     #[test]

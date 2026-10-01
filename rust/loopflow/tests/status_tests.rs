@@ -530,7 +530,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
 }
 
 #[test]
-fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
+fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history() {
     let home = tempfile::tempdir().unwrap();
     let current = seed(home.path(), "current");
     let abandoned = seed(home.path(), "accidental");
@@ -559,38 +559,7 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
     let rows: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["id"], current.id().as_str());
-    let preview = run(&[
-        "wave",
-        "forget",
-        abandoned.id().as_str(),
-        "--dry-run",
-        "--json",
-    ]);
-    assert!(
-        preview.status.success(),
-        "{}",
-        String::from_utf8_lossy(&preview.stderr)
-    );
     assert!(store.get_wave(abandoned.id()).unwrap().is_some());
-    let deleted = run(&["wave", "forget", abandoned.id().as_str(), "--json"]);
-    assert!(
-        deleted.status.success(),
-        "{}",
-        String::from_utf8_lossy(&deleted.stderr)
-    );
-    assert!(store.get_wave(abandoned.id()).unwrap().is_none());
-    assert!(store.get_wave(current.id()).unwrap().is_some());
-
-    assert!(store.forget_wave(current.id(), false).is_err());
-    let project = test_project(&current, "retained", OffsetDateTime::now_utc());
-    store.insert_project(&project).unwrap();
-    store
-        .abandon(
-            &loopflow::durable::WorkRef::Wave(current.id().clone()),
-            "historical",
-        )
-        .unwrap();
-    assert!(store.forget_wave(current.id(), false).is_err());
     assert!(store.get_wave(current.id()).unwrap().is_some());
 }
 

@@ -5,7 +5,7 @@
     install.py local --skip swift
     install.py local -n         # dry run
 
-Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
+Remote releases happen via `lf repo release run patch` -> merge -> auto-tag -> CI.
 """
 
 from __future__ import annotations

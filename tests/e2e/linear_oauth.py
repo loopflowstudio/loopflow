@@ -327,7 +327,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
                 assert result.returncode != 0
                 assert not result.stdout.strip(), "failed fresh read returned planning output"
                 assert "invalid_grant" in result.stderr
-                assert "doppler run -- lf auth connect linear" in result.stderr
+                assert "doppler run -- lf account connect linear" in result.stderr
                 assert current == token_before
                 assert (
                     db.execute("SELECT * FROM pm_snapshots WHERE wave_id=?", (wave_id,)).fetchall()

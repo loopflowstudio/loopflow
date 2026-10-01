@@ -480,7 +480,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         &repo_a,
         &[
             "wave",
-            "relocate",
+            "rename",
             alpha.id().as_str(),
             "--name",
             "platform",
@@ -622,7 +622,7 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
         &target,
         &[
             "wave",
-            "relocate",
+            "rename",
             wave.id().as_str(),
             "--repo",
             target.to_str().unwrap(),

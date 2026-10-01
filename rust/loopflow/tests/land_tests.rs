@@ -1735,6 +1735,7 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "task",
             "pr",
             "arm",
             "--strict",
@@ -1812,7 +1813,7 @@ fn lf_pr_land_waits_for_authoritative_merged_observation() {
   export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
+  "$LF_TEST_BIN" task sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
@@ -1842,7 +1843,7 @@ fi"#;
             fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
             fs::write(
                 worktree.join(".lf/flows/repair-proof.yaml"),
-                "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
         }
@@ -1867,9 +1868,10 @@ fi"#;
         let repair_launches = repo.bare_path().join("repair-launches.log");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         if flow {
-            command.args(["flow", "repair-proof", "-b", "--no-loopflow"]);
+            command.args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"]);
         } else {
             command.args([
+                "task",
                 "pr",
                 "land",
                 "--strict",

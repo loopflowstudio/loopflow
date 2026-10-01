@@ -1,6 +1,6 @@
 mod lifecycle;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
-pub use lifecycle::{task_abandon, task_delete, task_operation, task_repository, task_sweep};
+pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
@@ -53,6 +53,7 @@ pub enum TaskWaitUntil {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskExecOptions {
+    pub wave: Option<String>,
     pub retry: bool,
     pub reason: Option<String>,
     pub agent: Option<String>,
@@ -407,6 +408,7 @@ fn prepare_task(
     launch: bool,
 ) -> OpsResult<Task> {
     let TaskExecOptions {
+        wave: expected_wave,
         name,
         stack_on,
         directive,
@@ -432,6 +434,16 @@ fn prepare_task(
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(task) = &mut existing {
+            if let Some(expected) = &expected_wave {
+                let wave = owning_wave(&store, task).await?;
+                if wave.slug() != expected {
+                    return Err(task_error(format!(
+                        "--wave {expected} does not own Task {} (Wave {})",
+                        task.plan.identifier,
+                        wave.slug()
+                    )));
+                }
+            }
             let status = task_work_status(&store, task).await?;
             match status {
                 WorkStatus::Done => {
@@ -490,6 +502,14 @@ fn prepare_task(
     let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
+    if let Some(expected) = &expected_wave {
+        if &resolved.wave != expected {
+            return Err(task_error(format!(
+                "--wave {expected} does not own Task {} (Wave {})",
+                resolved.item.identifier, resolved.wave
+            )));
+        }
+    }
     require_startable_issue(&resolved.item)?;
     let prepared = block_on_task(prepare_new_task(
         &main_repo,
@@ -497,6 +517,7 @@ fn prepare_task(
         Some(&resolved.item),
         &resolved.project,
         &TaskExecOptions {
+            wave: expected_wave,
             retry,
             reason,
             name,
@@ -664,7 +685,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
         .await
         .map_err(|error| task_error(error.to_string()))?;
     eprintln!(
-        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf task sync` in {} to integrate it.",
         task.plan.identifier, parent.id, task.worktree.display()
     );
     Ok(())
@@ -962,9 +983,7 @@ fn create_prepared_task(
             {
                 tracing::warn!(task = %task.id, %event_error, "worktree creation failed after Task planning state committed; failure event did not persist");
             }
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
+            return Err(task_error(format!("failed to create task wt: {error}")));
         }
 
         finish_task_checkout(&store, &task, &pr).await?;
@@ -1046,7 +1065,7 @@ pub fn task_create(
         None => task_run(&main, &issue, options),
     };
     result.map(|task| TaskCreateResult::Started(Box::new(task))).map_err(|error| task_error(format!(
-        "Linear task {issue} is retained: {error}. Retry `lf task run {issue}`; retrying the same `lf task create --run` also reuses its issue."
+        "Linear task {issue} is retained: {error}. Retry `lf --task {issue} flow start`; retrying the same `lf task create --run` also reuses its issue."
     )))
 }
 
@@ -1250,7 +1269,7 @@ pub(crate) async fn resolve_managed_task_planning(
     let wave = owning_wave(store, task).await?;
     if resolved.item.id != task.plan.id.as_str()
         || resolved.project.id != project.plan.id.as_str()
-        || resolved.wave != wave.name()
+        || resolved.wave != wave.slug()
     {
         return Err(task_error(format!(
             "Task {} planning no longer matches its managed execution; its saved Flow is preserved",
@@ -1296,7 +1315,7 @@ pub(crate) async fn task_worktree_blocker(
                 )
             } else {
                 format!(
-                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf task run {}`; Task identity and PR history are unchanged",
+                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf --task {} flow start`; Task identity and PR history are unchanged",
                     task.plan.identifier, task.plan.identifier
                 )
             };
@@ -1320,7 +1339,7 @@ pub(crate) async fn task_worktree_blocker(
     Ok(Some(TaskWorktreeBlocker {
         initializing: false,
         reason: format!(
-            "Task {} worktree {} is missing; restore that exact path{branch} before `lf task run {}`; Task identity and PR history are unchanged",
+            "Task {} worktree {} is missing; restore that exact path{branch} before `lf --task {} flow start`; Task identity and PR history are unchanged",
             task.plan.identifier,
             task.worktree.display(),
             task.plan.identifier,
@@ -1422,7 +1441,7 @@ pub(crate) fn require_unmanaged_checkout(repo: &Path, database: Option<&Path>) -
             )
         };
         if managed {
-            return Err(task_error("Task Work cannot change the machine installation. Run installation outside the Task checkout without a Task --as declaration."));
+            return Err(task_error("Task Work cannot change the machine installation. Run installation outside the Task checkout without a --task selector."));
         }
         Ok(())
     })
@@ -1675,7 +1694,7 @@ fn _valid_task_url(value: &str) -> bool {
 
 fn _missing_task_pr_url(task: &Task, wave: &str) -> OpsError {
     task_error(format!(
-        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf wave sync --wave {wave}` before publishing this Task PR",
+        "Task {} has no valid provider URL in the cached PM snapshot. Run `lf repo refresh {wave}` before publishing this Task PR",
         task.plan.identifier,
     ))
 }
@@ -1960,13 +1979,13 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
 /// a root PR, or the live parent's branch tip for a stacked child), `H` = HEAD,
 /// and `M = merge-base(O, H)`. The parity invariant is `M == B`, which
 /// guarantees GitHub's range (`M..H`) equals the recorded range (`B..H`) equals
-/// `lf task changes`:
+/// `lf diff --files`:
 /// - `M == B` — parity holds; publish.
 /// - `M` ancestor of `B` — the recorded base itself carries commits absent from
 ///   `O` (inherited foreign ancestry, the #877/#882 shape). Refuse before any
 ///   push, naming the foreign commits/files and the safe sync.
 /// - `B` ancestor of `M` — `O` advanced past a stale or squash-merged base. Safe:
-///   heal `base_commit → M` so the durable evidence and `lf task changes` stay
+///   heal `base_commit → M` so the durable evidence and `lf diff --files` stay
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
 ///   both sides (`M..B` and `B..M`) plus the safe sync.
@@ -2164,7 +2183,7 @@ async fn verify_task_pr_range_mode(
 
     if crate::engine::git::is_ancestor(repo, &base, &merge_base)? {
         // B < M: the upstream advanced past a stale or squash-merged base.
-        // Heal the recorded base to the true fork point so lf task changes and
+        // Heal the recorded base to the true fork point so lf diff --files and
         // the durable evidence report the minimal M..HEAD range.
         if stale_base == StaleBaseAction::Accept {
             return Ok(());
@@ -2868,7 +2887,7 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
 /// settlement. Merged evidence remains available to completion retries.
 ///
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
-/// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
+/// deciding it — `lf task pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
 async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
     if let Some(active) = store
@@ -3236,7 +3255,7 @@ pub(crate) async fn task_recovery_adoption(
     {
         return Err(task_error(format!(
             "Task {identifier} cannot recover between PRs while {} has uncommitted changes; \
-             carry them forward with `lf pr next` or commit before resuming, recovery refused \
+             carry them forward with `lf task pr next` or commit before resuming, recovery refused \
              before moving any ownership",
             worktree.display()
         )));
@@ -3266,7 +3285,7 @@ pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, task: &Task) -
     }
     Err(task_error(format!(
         "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
-         forward with `lf pr next` or commit before resuming",
+         forward with `lf task pr next` or commit before resuming",
         task.plan.identifier,
         task.worktree.display()
     )))
@@ -3280,7 +3299,7 @@ pub(crate) async fn ensure_working_pr(
 }
 
 /// How a serial-PR rotation treats the worktree. Automated settlement rotates
-/// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
+/// only a clean tree (`carry_dirty = false`); the operator's `lf task pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
 /// (`carry_dirty = true`) and may name that branch via `slug_override`.
 #[derive(Debug, Clone, Default)]
@@ -3736,7 +3755,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 .map(|github| format!("#{}", github.number))
                 .unwrap_or_else(|| format!("sequence {}", active.sequence));
             return Err(task_error(format!(
-                "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
+                "current PR {which} is not merged yet; land it or wait for the merge before `lf task pr next`"
             )));
         }
         if matches!(
@@ -3994,7 +4013,7 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let outcome =
         crate::ops::pm::pm_link_pr_async(&task.worktree, wave.slug(), &request, &prior).await;
     // Say so at publish time. The PR line in `lf task status` carries the durable
-    // reading, but an operator running `lf pr open` should not have to go looking.
+    // reading, but an operator running `lf task pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
         tracing::warn!(
             issue = task.plan.identifier,
@@ -4181,10 +4200,10 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open; merge it or run `lf pr abandon`"
+                "pull request {which} is open; merge it or run `lf task pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
-                "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
+                "pull request {which} is still publishing; wait for it to land or run `lf task pr abandon`"
             )),
             // An unpublished PR means three different things; say which. The
             // classification is inert: a gate that goes on to refuse leaves the
@@ -4194,11 +4213,11 @@ pub(crate) async fn task_completion_gate(
                     gate.discardable_successor = Some(pr.clone());
                 }
                 CommittedFollowUp::ProvenEmpty => gate.blockers.push(format!(
-                    "pull request {which} is unpublished; publish and merge it or run `lf pr abandon`"
+                    "pull request {which} is unpublished; publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Range { .. } => gate.blockers.push(format!(
                     "follow-up work is committed on unpublished pull request {which}; \
-                     publish and merge it or run `lf pr abandon`"
+                     publish and merge it or run `lf task pr abandon`"
                 )),
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove unpublished pull request {which} is empty: {reason}"
@@ -5143,7 +5162,7 @@ pub(crate) async fn continue_task_async(
             super::linear_observe::publish_task_steer(&store, &task, reason).await?;
         } else if feedback.is_none() {
             return Err(task_error(format!(
-                "{}\nResolve the failure, then use `lf task run {} --reason \"<what changed>\"`.",
+                "{}\nResolve the failure, then use `lf --task {} flow start --reason \"<what changed>\"`.",
                 failure.reason, task.plan.identifier
             )));
         }

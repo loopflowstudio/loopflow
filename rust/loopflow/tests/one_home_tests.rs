@@ -76,13 +76,17 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
     let home = tempfile::tempdir().unwrap();
     let decoy = tempfile::tempdir().unwrap();
     fs::write(decoy.path().join("loopflow.db"), b"never open this store").unwrap();
-    repo.create_file(".lf/flows/home-proof.yaml", "- cmd: sync --plan\n");
-    let output = command(home.path(), repo.path(), &["flow", "home-proof", "-b"])
-        .env("LF_CONTROL_HOME", decoy.path())
-        .env("LF_CONTROL_DB_PATH", decoy.path().join("loopflow.db"))
-        .env("LF_CONTROL_BIN", "/missing/historical/lf")
-        .output()
-        .unwrap();
+    repo.create_file(".lf/flows/home-proof.yaml", "- cmd: task sync --plan\n");
+    let output = command(
+        home.path(),
+        repo.path(),
+        &["flow", "home-proof", "--mode", "batch"],
+    )
+    .env("LF_CONTROL_HOME", decoy.path())
+    .env("LF_CONTROL_DB_PATH", decoy.path().join("loopflow.db"))
+    .env("LF_CONTROL_BIN", "/missing/historical/lf")
+    .output()
+    .unwrap();
     success(output);
     let connection = Connection::open(home.path().join("loopflow.db")).unwrap();
     let child_commands: i64 = connection.query_row(
@@ -145,7 +149,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     let files = tempfile::tempdir().unwrap();
     let cli = files.path().join("lf");
     // Simulate only the installed boundary; both incoming processes are the real source CLI.
-    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = home ]; then exec \"$SOURCE_CLI\" runs --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_DB_PATH\" \"$LF_BIN\" \"$*\"\n").unwrap();
+    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = home ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_DB_PATH\" \"$LF_BIN\" \"$*\"\n").unwrap();
     fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
     let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap();
     let set = ArtifactSet {
@@ -190,7 +194,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "{}\n{}\n{}\nruns --json\n",
+            "{}\n{}\n{}\nmonitor list --json\n",
             main.display(),
             main.join("loopflow.db").display(),
             cli.display()

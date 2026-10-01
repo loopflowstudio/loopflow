@@ -610,14 +610,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
-    pub async fn forget_wave(&self, wave_id: &WaveId, dry_run: bool) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.forget_wave(&wave_id, dry_run)
-        })
-        .await
-    }
-
     pub(crate) async fn provider_auth_snapshot(
         &self,
         provider: Provider,
@@ -1441,7 +1433,7 @@ mod tests {
         }
     }
 
-    /// A fresh Task Flow at `cursor`, as `lf task run` starts one.
+    /// A fresh Task Flow at `cursor`, as `lf flow start` starts one.
     fn task_flow(
         task: &Task,
         invocation: crate::engine::invocation::QueuedInvocation,

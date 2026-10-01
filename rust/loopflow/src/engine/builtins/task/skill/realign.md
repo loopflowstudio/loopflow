@@ -76,9 +76,13 @@ the caller.
 Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
 to read effective limits, their configuration sources, and current usage. Before
 updating scratch or Wave memory, read complete sources named by excerpt pointers.
-Bring over-budget material under both token and byte limits as part of this step.
-Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
-stacked parent, and keep historical detail in git rather than ambient context.
+Curate Wave memory gradually. When it exceeds either limit, retire the largest
+stale sections to git history first and bring it just under both limits. Stop
+once it fits; do not rewrite the whole memory toward a smaller target or shrink
+an in-budget memory merely for size. Continue correcting stale guidance and
+recording durable lessons where this work changes them.
+Bring over-budget scratch under both limits too: merge duplicates, summarize
+long evidence, and remove obsolete notes inherited from a stacked parent.
 Preserve live decisions, attribution, unresolved work, and contrary evidence;
 keep a precise git reference when older detail still matters. Preserve uncommitted
 evidence before removing it. Edit existing notes instead of accumulating reports.

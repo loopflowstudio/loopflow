@@ -122,6 +122,9 @@ the next memory- or scratch-writing step to curate it. `realign`, `compress`,
 `kickoff`, and `implement` preserve live decisions while consolidating notes and
 retiring historical or stacked-parent material, then re-query usage. The query
 still reports a total-input overage when an actual launch would reject it.
+Memory curation is gradual: retire the largest stale sections to git history
+until it fits just under the effective limits. Keep live decisions and evidence
+limits; memory already within budget needs no reduction merely for size.
 
 ## Context Assembly
 

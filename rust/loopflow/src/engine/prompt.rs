@@ -2285,13 +2285,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn native_instruction_symlink_aliases_are_not_injected() {
-        for native_is_symlink in [true, false] {
+        for (target, link) in [
+            ("CONTRIBUTING.md", "AGENTS.md"),
+            ("AGENTS.md", "CONTRIBUTING.md"),
+        ] {
             let repo = init_repo();
-            let (target, link) = if native_is_symlink {
-                ("CONTRIBUTING.md", "AGENTS.md")
-            } else {
-                ("AGENTS.md", "CONTRIBUTING.md")
-            };
             write_file(repo.path(), target, "Repository instructions");
             std::os::unix::fs::symlink(repo.path().join(target), repo.path().join(link)).unwrap();
             let mut components = PromptComponents {
@@ -2334,21 +2332,6 @@ mod tests {
         assert!(prompt.contains("</lf:file>"));
         assert!(prompt.contains("<lf:file path=\"CONTRIBUTING.md\">"));
         assert!(prompt.contains("# Style Guide"));
-    }
-
-    #[test]
-    fn format_prompt_agents_md_renders_as_file() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "AGENTS.md".to_string(),
-                content: "# Instructions".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:file path=\"AGENTS.md\">"));
-        assert!(prompt.contains("# Instructions"));
     }
 
     #[test]

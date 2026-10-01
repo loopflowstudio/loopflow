@@ -16,8 +16,8 @@ change; it does not substitute for the fresh-session acceptance proof.
 
 - Delete the separate style-guide file and both root instruction symlinks;
   preserve the guide as a regular AGENTS.md.
-- Remove obsolete guide references and the redundant single-document style
-  rendering test; preserve generic document rendering coverage.
+- Remove obsolete guide references and filename-specific rendering tests;
+  preserve generic document rendering and native-exclusion coverage.
 - Retain native instruction detection and canonical-path deduplication: Loopflow
   operates in other repositories where either native filename can be symlinked.
 
@@ -36,4 +36,8 @@ instructions as injected files; it now identifies the provider as their owner.
 Generic native-file detection remains unchanged, with regressions covering the
 regular file and symlinks in either direction.
 
-Checks: `cargo test -p loopflow --lib engine::prompt::tests -- --test-threads=4` passed (82); `uv run python scripts/check_architecture.py`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, guide-byte comparison and live tracked-reference scan passed; fresh provider sessions and golden/affected suites belong to gate.
+Compression removes the remaining filename-specific rendering test: the generic
+document test covers rendering, while the native-exclusion test proves the actual
+launch behavior. Symlink cases name their target and link directly.
+
+Checks: `cargo test -p loopflow --lib engine::prompt::tests -- --test-threads=4` passed (81); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; reused unchanged architecture-scan, guide-byte and tracked-reference results; fresh provider sessions and golden/affected suites belong to gate.

@@ -656,18 +656,6 @@ Internal command; invoked by the owning operation.
 | `--json` | Emit the structured PromotionPreview as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf home install local-preflight
-
-Validate this exact local candidate against one receipt-selected store
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--store` | store |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf home install advance-switch
 
 Advance the receipt-selected store with this exact candidate's registry
@@ -687,10 +675,6 @@ Internal command; invoked by the owning operation.
 
 | Argument | What it does |
 |---|---|
-| `--from-build` | Promote this exact unpublished local lf into a disposable installed Home |
-| `--coordinated-build` | Candidate delegated to the receipt-pinned active coordinator Internal. |
-| `--fresh` | Abandon an incompatible disposable Home and fork published data again Default: false. |
-| `--reuse-home` | Reuse a retained development installation and its existing Home data |
 | `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
 | `--app-source` | A staged Loopflow.app bundle to install alongside the CLI |
 | `--app-target` | The global Loopflow.app path to replace atomically |

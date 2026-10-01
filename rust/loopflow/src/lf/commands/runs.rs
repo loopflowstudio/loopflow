@@ -75,7 +75,7 @@ pub(crate) fn collect_history(
     parent: Option<&str>,
     since: i64,
 ) -> Result<Vec<SessionHistory>> {
-    let database = crate::store::observability_database_path()?;
+    let database = crate::store::database_path_from_env()?;
     if !database.exists() {
         return Ok(Vec::new());
     }

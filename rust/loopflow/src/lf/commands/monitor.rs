@@ -343,7 +343,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         } else {
             CanonicalRepo::current()?.map(|repo| repo.to_string())
         };
-        let home = crate::store::observability_home_dir();
+        let home = crate::store::lf_home_dir();
         let active = crate::session_record::active::snapshot(&home, &store, None).await;
         let mut gaps = active.gaps.clone();
         let mut items = Vec::new();

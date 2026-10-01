@@ -1,0 +1,1 @@
+`cargo build --jobs 4`; `cargo clippy --all-targets --jobs 4 -- -D warnings`; `cargo fmt --all -- --check`; focused CLI/monitor/one-Home/docs and Task-work tests — PASS (37 active tests; three environment-dependent cases skipped); regenerated CLI reference, reviewed shared ownership and one-Home resolution.

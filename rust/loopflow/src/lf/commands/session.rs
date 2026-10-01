@@ -59,6 +59,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             all,
             interactive,
             history,
+            needs_me,
             limit,
             offset,
             page,
@@ -70,6 +71,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             list(
                 &store,
                 *json,
+                *needs_me,
                 &crate::session::SessionFilter {
                     repo: if *all {
                         None
@@ -78,7 +80,11 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                     },
                     task: task.clone(),
                     search: search.clone(),
-                    interactive: interactive.interactive(),
+                    interactive: if *needs_me {
+                        None
+                    } else {
+                        interactive.interactive()
+                    },
                     history: *history,
                     limit: *limit,
                     offset: *offset,
@@ -192,6 +198,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
 async fn list(
     store: &Arc<Store>,
     json: bool,
+    needs_me: bool,
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<()> {
     if filter.after.is_some() {
@@ -204,7 +211,11 @@ async fn list(
             .limit
             .checked_add(1)
             .context("Session page limit is too large")?;
-        let mut entries = crate::ops::human_session::list(store, &selection).await?;
+        let mut entries = if needs_me {
+            crate::ops::human_session::list_attention(store, &selection).await?
+        } else {
+            crate::ops::human_session::list(store, &selection).await?
+        };
         let next = if entries.len() > filter.limit {
             entries.pop();
             entries.last().map(|session| session.id.clone())
@@ -220,7 +231,11 @@ async fn list(
         );
         return Ok(());
     }
-    let sessions = crate::ops::human_session::list(store, filter).await?;
+    let sessions = if needs_me {
+        crate::ops::human_session::list_attention(store, filter).await?
+    } else {
+        crate::ops::human_session::list(store, filter).await?
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -236,6 +251,7 @@ async fn list(
                     SessionState::Active => "active",
                     SessionState::Ready => "ready",
                     SessionState::Closed => "closed",
+                    SessionState::Interrupted => "interrupted",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),
                 session.title

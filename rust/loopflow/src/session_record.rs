@@ -1855,6 +1855,20 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 #[derive(Debug, Clone)]
 pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 
+pub(crate) fn register_session_driver_interrupt(
+    store: &crate::store::sqlite::SqliteStore,
+    session: String,
+    driver: crate::exec::SessionDriver,
+) {
+    let store = store.clone();
+    crate::engine::agent::register_interrupt_cleanup(move || {
+        match store.finish_session_driver(&session, &driver, "interrupted") {
+            Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
+            Err(error) => tracing::warn!(%error, %session, "record interrupted Session connection"),
+        }
+    });
+}
+
 impl CaptureHandle {
     /// Publish identity before a human boundary becomes visible. No provider or
     /// terminal receipt exists until this prepared Session executes.
@@ -2190,6 +2204,18 @@ impl CaptureHandle {
             replace_provider,
         )?;
         capture.driver = Some((session.id, driver));
+        drop(capture);
+        let capture = Arc::downgrade(&self.0);
+        crate::engine::agent::register_interrupt_cleanup(move || {
+            if let Some(capture) = capture.upgrade() {
+                let mut capture = capture.lock().expect("Session capture mutex poisoned");
+                if capture.settled_outcome.is_none() {
+                    if let Err(error) = capture.finish("interrupted") {
+                        tracing::warn!(%error, "record interrupted Session exit");
+                    }
+                }
+            }
+        });
         Ok(())
     }
 
@@ -2663,7 +2689,7 @@ impl SessionCapture {
         self.recorder.drain_after_settlement();
         if let Some((session, driver)) = self.driver.take() {
             match row_store(&self.dir)
-                .and_then(|store| store.release_session_driver(&session, &driver))
+                .and_then(|store| store.finish_session_driver(&session, &driver, outcome))
             {
                 Ok(_) | Err(StoreError::InvalidAuthority(_)) => {}
                 Err(error) => return Err(std::io::Error::other(error)),

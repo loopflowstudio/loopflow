@@ -7,6 +7,19 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     case active
     case ready
     case closed
+    case interrupted
+}
+
+public enum SessionAttention: String, Codable, Sendable, Hashable {
+    case review
+    case reply
+
+    public var label: String {
+        switch self {
+        case .review: "Needs review"
+        case .reply: "Needs reply"
+        }
+    }
 }
 
 public enum SessionKind: String, Codable, Sendable, Hashable {
@@ -136,6 +149,8 @@ public struct SessionAction: Codable, Sendable, Hashable {
 /// One resumable Session and the exact command that opens it.
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let primaryScope: String?
+    public let attention: SessionAttention?
     public let taskIds: [String]
     public let id: String
     public let kind: SessionKind
@@ -162,7 +177,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, interactive, work, title, detail, provider, cwd, state
+        case id, kind, interactive, work, title, detail, provider, cwd, state, attention
+        case primaryScope = "primary_scope"
         case waveId = "wave_id"
         case taskIds = "task_ids"
         case actions

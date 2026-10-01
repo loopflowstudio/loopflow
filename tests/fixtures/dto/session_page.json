@@ -51,7 +51,9 @@
           []
         ]
       },
-      "interactive": true
+      "interactive": true,
+      "primary_scope": null,
+      "attention": "review"
     }
   ],
   "next": null

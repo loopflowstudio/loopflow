@@ -88,9 +88,17 @@ when planning is readable;
 Tasks remain visible even before they have a Session. Disclosure folds a branch,
 while presentation changes preserve its saved expansion and selection.
 The sidebar lists started Tasks; unstarted Tasks remain in the Wave plan.
-Repository conversations and Sessions with unavailable ancestry stay reachable
-in **Orphan sessions** above search. Its header opens the first Session; the
-control room and manual binding are follow-up work.
+Choose **Needs me** to reach conversations awaiting review or a recorded reply,
+including headless-origin reviews. Search filters those destinations and their
+count together. Session rows open the exact conversation beneath its Task or
+Wave; repository primary conversations appear at the top. Unassigned conversations
+remain in **Orphan sessions** above search. Closed Sessions contribute no rows or
+counts. A failed inventory read shows an unavailable count and expandable details.
+
+Exiting a disposable CLI conversation retires it from navigation while keeping
+its provider history. Ctrl-C interruption is recorded; interrupted Flow reviews,
+Ask boundaries, Task conversations and repository/Wave primaries remain reachable.
+Stopping a response alone never closes the conversation or completes a review.
 
 Right-click a row to inspect its subject or ancestors, start a scoped conversation,
 or open an ordinary terminal. Right-click the outline background for repository

@@ -121,7 +121,7 @@ lf --wave <wave> wave/operate "ship the parser fix first"
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf interrupt INF-123                     # end this turn and re-read direction
-lf session list --json                        # unresolved Sessions
+lf session list --needs-me --json             # conversations waiting for review or reply
 lf session connect <session-id> --json           # recover one exact conversation
 ```
 

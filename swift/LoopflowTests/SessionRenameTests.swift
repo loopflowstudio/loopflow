@@ -113,8 +113,8 @@ func renameFixtureRecord(
     let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
     {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(title)",
-     "detail":"codex","cwd":"/src/loopflow","state":"closed","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "closed")),
+     "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
+     "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),
      "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
      "task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
     """.utf8))

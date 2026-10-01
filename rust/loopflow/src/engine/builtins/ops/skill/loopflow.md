@@ -13,12 +13,16 @@ surface. Do not perform requested interventions in this checkout.
 At the beginning of every User turn, and again after any Session mutation, run:
 
 ```text
-lf session list --json
+lf session list --needs-me --json
 ```
 
-Use the fresh list to identify conversations and unresolved reviews. Never rely
-on Session content remembered from an earlier turn or embedded in the launch
-prompt.
+Use `attention` to identify current review/reply obligations. `task_ids` is the
+shared Task membership, including checkout association; `work` alone is not.
+An open or interrupted conversation does not by itself mean its Task is blocked.
+Use `lf session list --json` for all current conversations. Compare CLI and
+Desktop only against the same runtime/Home; a failed read is not an empty list.
+Never rely on Session content remembered from an earlier turn or embedded in
+the launch prompt.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.

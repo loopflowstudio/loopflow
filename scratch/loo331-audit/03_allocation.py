@@ -15,7 +15,7 @@ print('scratch file count/run',q([sum(1 for a in c['assets'] if a['kind']=='scra
 share=[s/t for s,t in zip(scr,tot) if t]
 print('scratch share p50',round(statistics.median(share),2),'runs >50%',sum(1 for x in share if x>.5),'runs >80%',sum(1 for x in share if x>.8))
 over=[(t,m['run_id'],m.get('skill'),wave(m),m['harness'],os.path.basename(m['worktree'] or '')) for (m,c,d),t in zip(lf,tot)]
-print('top 8 largest prompts'); 
+print('top 8 largest prompts');
 for x in sorted(over,reverse=True)[:8]: print(' ',x)
 print('prompts >100k',sum(1 for t in tot if t>100000),'>200k',sum(1 for t in tot if t>200000))
 # by skill

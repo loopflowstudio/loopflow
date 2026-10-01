@@ -6,7 +6,7 @@ def wave(m):
         if s['selector'].startswith('wave:'): return s['selector'][5:]
 rows=[]
 noev=nous=0
-reread_mem=collections.Counter(); reread_scr=0; release_read=[]; 
+reread_mem=collections.Counter(); reread_scr=0; release_read=[];
 for m,c,d in lf:
     p=os.path.join(d,'events.jsonl')
     if not os.path.exists(p): noev+=1; continue
@@ -48,7 +48,7 @@ import math
 r=[x for x in rows if x['last'] and x['acc'] and x['streams']==1]
 xs=[x['acc'] for x in r]; ys=[x['last'] for x in r]
 mx=sum(xs)/len(xs); my=sum(ys)/len(ys)
-cov=sum((a-mx)*(b-my) for a,b in zip(xs,ys)); 
+cov=sum((a-mx)*(b-my) for a,b in zip(xs,ys));
 print('pearson accounted vs cumulative input',round(cov/math.sqrt(sum((a-mx)**2 for a in xs)*sum((b-my)**2 for b in ys)),2),'n',len(r))
 print('memory included; agent also read its wave MEMORY.md by command:',reread_mem)
 print('runs that read an already-included scratch file by command:',reread_scr)

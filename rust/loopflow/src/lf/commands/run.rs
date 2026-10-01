@@ -1822,6 +1822,44 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
+    fn ide_wave_skill_launch_delivers_the_authored_goal() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        // A regression into native skill sync must never write personal skills.
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("LF_HOME", home.path().join(".lf"));
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let goal =
+            "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
+        repo.create_file("wave/release/GOAL.md", goal);
+        let cli = Cli::parse_from(["lf", "--ide", "--wave", "release", "design"]);
+        let built = build_prompt_at(
+            Some("design"),
+            Some("plan the release"),
+            &cli,
+            repo.path().to_path_buf(),
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.prompt.matches(goal).count(), 1);
+        assert!(built
+            .context
+            .task
+            .assets
+            .iter()
+            .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
+    }
+
+    #[test]
     fn persisted_skill_spec_is_the_prompt_authority() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(

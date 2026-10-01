@@ -77,9 +77,17 @@ content once, captured source/decision attribution, native and symlink duplicate
 sources across automatic scratch and explicit docs, equal text in distinct memory
 files, customized guidance, and guidance with operate disabled. A focused assembly
 test also covers a document requested as changed-file context and its deduplication
-decision. Golden fixtures carry the authored `realign` procedure.
+decision. The IDE launch test exercises `build_prompt_at` with native skill
+execution enabled and checks the submitted goal and captured source. Its isolated
+home prevents a regression from exporting skills into personal directories.
+Golden fixtures carry the authored `realign` procedure.
 
-Gate owns broader affected suites and acceptance checks. Demo/review owns observing
+CI owns completion of the broader Rust suite: gate's host-security monitor stopped
+it after 1,103 passes, terminating four tests and leaving 922 unrun (17 skipped).
+No assertion failure preceded that stop. The runner reported sustained
+`syspolicyd` pressure at 323% CPU; this is an unavailable full-suite result, not a
+product pass. Architecture, formatting, Clippy and website checks passed.
+Demo/review owns observing
 an agent discover a relevant child lesson and curate a useful parent entry; prompt
 presence does not prove that behavior. A current Session-history allocation audit,
 provider pressure, omitted reads and delivered-outcome measurements remain unrun.
@@ -94,8 +102,10 @@ and the known operating document so identical memory scopes retain meaning.
 Compression review found that deduplicated changed-file context was classified
 as a generic document. The shared filter now retains its Diff classification;
 no extra deduplication pass or record type is needed.
+Gate review added the missing IDE launch proof and removed trailing whitespace
+from the preserved audit scripts; it found no production repair necessary.
 
-Check: `cargo test -p loopflow --lib context_delivery_` (4 tests), `cargo test -p loopflow --lib gather_files_` (4 tests), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; broader acceptance belongs to gate and observed curation to demo/review.
+Check: `uv run python scripts/test.py --base de074a2ebd2cb54e6f7dde799400dae36c87bbbe --reuse-passing` passed architecture, fmt, Clippy and website (78 passed, 3 skipped); Rust stopped for host-security pressure after 1,103 passes, full completion deferred to CI. Final test isolation verified with `cargo test -p loopflow --lib ide_wave_skill_launch_delivers_the_authored_goal`, `cargo fmt --all -- --check` and `cargo clippy --all-targets --jobs 4 -- -D warnings`; `cargo test -p loopflow --test golden_prompt` and `git diff --check de074a2eb` passed.
 
 ## Historical evidence limits
 

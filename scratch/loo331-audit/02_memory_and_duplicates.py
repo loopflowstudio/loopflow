@@ -24,7 +24,7 @@ print('memory assets by (wave,path)',mem)
 for k,v in memtok.items(): print(k,'n',len(v),'min',min(v),'median',int(statistics.median(v)),'max',max(v))
 print('runs with inherited/owned headers',inherit,'assets from wave/**/release',rel)
 # wave subject but no memory / no wave but memory
-nomem=collections.Counter(); 
+nomem=collections.Counter();
 for m,c,d in lf:
     hasmem=any(a['kind']=='memory' for a in c['assets'])
     hasgoal=any(a['kind']=='goal' and a['scope']=='wave' for a in c['assets'])

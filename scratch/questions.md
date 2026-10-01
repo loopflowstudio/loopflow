@@ -8,6 +8,10 @@ LOO-331 implements child-memory curation guidance and duplicate delivery removal
 PR #1375 was OPEN at implementation start; this patch does not depend on it.
 No further review decision is pending.
 
+- Gate's full Rust suite remains deferred to CI after sustained macOS security
+  pressure terminated the run. It recorded 1,103 passes, four signal-terminated
+  tests and 922 unrun tests, with 17 skipped. Focused delivery tests and prompt
+  goldens passed; no full-suite pass is claimed.
 - Demo/review still needs observed child discovery and useful parent curation.
   Authored instructions and prompt fixtures establish delivery, not compliance.
 - Current Session-history allocation measurements remain unavailable. Historical

@@ -613,13 +613,40 @@ uv run python scripts/test_task_installation.py
 uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
-This copies source into a disposable Linux container and creates an OS account
-with disposable installation records. No host Home, credentials or installation
+Pass several names after `--test` to share one disposable build across related proofs.
+
+When changing Task planning lookup or provider response shapes, run the affected
+installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
+the deletion test, and the regular Rust suite skips installation proofs. Keep
+simulated provider revisions and checkout Team/Initiative bindings consistent
+with the planning records those workflows resolve. Exercise unfinished work
+before confirmed removal; do not resurrect deleted Tasks by resetting only
+execution tables while retaining planning tombstones.
+
+This copies source into a disposable Linux container, materializes its draft
+migrations and builds the development CLI with two Cargo jobs. It checks
+populated planning upgrades from the released schema. Intermediate branch
+schemas follow the current-state cutover policy and are not imported. Installation-copy succession is no longer a
+product contract; its two cross-store promotion/continuation cases were removed.
+
+The adoption case starts with planning and no Task row. Public checkout/run
+reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
+retain the PR identity, and preserve a saved later Flow cursor after source
+changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
+
+The disposable OS account authors fixture installation records for routing proofs;
+Task adoption uses an explicit experimental Home. No host Home, credentials or installation
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
 `HOME` and `LF_HOME` cannot isolate machine installation records. The ordinary
 `pr_tests` suite covers Task continuation's auto-merge revocation and review
 continuity in an explicit experimental Home.
+
+The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
+normalized local planning, proving that inspection creates no execution or worktree.
+That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+acquisition with simulated Linear responses, including missing Projects, partial
+responses, absence, and provider failure. Neither is configured live-provider proof.
 
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
@@ -816,6 +843,11 @@ to PATH, so an inherited CLI directory containing `claude` can outrank a fixture
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
+
+Default-runtime selection reads the OS account's installation records. Use the
+installation harness for default-runtime proofs; never replace the machine's
+selection to make tests pass. Flow/Session tests with an explicit experimental
+`LF_HOME` and source `LF_BIN` stay within that experiment.
 
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.

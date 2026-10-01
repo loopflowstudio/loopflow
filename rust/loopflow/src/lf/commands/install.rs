@@ -45,7 +45,12 @@ pub(crate) fn guard_task_checkout() -> Result<()> {
     if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_some()
         || crate::repo::discover_repo_root(&cwd)?.is_some()
     {
-        crate::ops::task::require_unmanaged_checkout(&cwd)?;
+        crate::ops::task::require_unmanaged_checkout(&cwd, None)?;
+        if let Some(selection) =
+            crate::machine_install::current_selection(&crate::machine_install::root()?)?
+        {
+            crate::ops::task::require_unmanaged_checkout(&cwd, Some(&selection.store))?;
+        }
     }
     Ok(())
 }
@@ -1891,7 +1896,9 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
 }
 
 pub fn advance_switch(switch_id: &str) -> Result<()> {
-    guard_task_checkout()?;
+    // The initiating promotion checked Task ownership before writing this
+    // receipt. Continuation uses its pinned authority, not ordinary selection:
+    // a first installation has no selected runtime until this operation finishes.
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
     let root = crate::machine_install::root()?;
@@ -2075,7 +2082,6 @@ fn settle_switch(
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
-    guard_task_checkout()?;
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::machine_install::root()?;
@@ -2112,6 +2118,19 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         ));
     }
     expected.verify()?;
+
+    // Recovery is a new caller of the saved operation. Check its Task ownership
+    // in the receipt's store without selecting or migrating an ordinary runtime.
+    let database = if receipt.target_store_advanced {
+        &receipt.target.store
+    } else {
+        receipt
+            .prior
+            .as_ref()
+            .map(|prior| &prior.store)
+            .unwrap_or(&receipt.target.store)
+    };
+    crate::ops::task::require_unmanaged_checkout(&std::env::current_dir()?, Some(database))?;
 
     if receipt.phase == crate::machine_install::SwitchPhase::Settled
         && receipt.active_selection_committed

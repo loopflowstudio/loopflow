@@ -457,6 +457,29 @@ async fn drive_loop(
                 return Ok(FlowOutcome::Completed);
             }
         }
+        if let Some(task_id) = &flow.task_id {
+            if store
+                .task_flow(task_id)
+                .await?
+                .is_some_and(|managed| managed.id() == flow.id())
+            {
+                let task = store.get_task(task_id).await?.context("Task disappeared")?;
+                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
+                    &store,
+                    &task,
+                    crate::ops::pm::PmRefresh::Auto,
+                )
+                .await
+                {
+                    if owned_claim.is_some() {
+                        store
+                            .release_flow(flow.id(), flow.version, owned_claim.as_ref())
+                            .await?;
+                    }
+                    return Err(error.into());
+                }
+            }
+        }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
                 "Flow {id} is blocked: {}; resume with `lf flow resume {id} --retry`",
@@ -912,7 +935,7 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         );
     }
     let status = command.status().await;
-    // PATH can select a newer child. Never settle its result through an older
+    // A new installation can select a newer child. Never settle its result through an older
     // schema, including recording a failure which would discard that selection.
     store.sqlite.validate_current_schema().map_err(|error| {
         StepEnd::StoreChanged(format!(

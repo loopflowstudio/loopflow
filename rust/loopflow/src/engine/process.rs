@@ -102,6 +102,13 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
+    if !crate::store::custom_home_selected() {
+        if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
+        {
+            cli.verify()?;
+            return Ok(cli.path);
+        }
+    }
     let candidate = resolve_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {

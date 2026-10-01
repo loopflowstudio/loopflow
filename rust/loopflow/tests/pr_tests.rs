@@ -871,10 +871,8 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
         .block_on(task.store.pm_snapshot(&task.task.wave_id))
         .expect("read PM snapshot")
         .expect("PM snapshot");
-    let mut payload: serde_json::Value =
-        serde_json::from_str(&snapshot.payload).expect("decode PM snapshot");
-    payload["items"][0]["url"] = serde_json::Value::Null;
-    snapshot.payload = serde_json::to_string(&payload).expect("encode PM snapshot");
+    snapshot.snapshot.items[0].url = None;
+    snapshot.snapshot.items[0].revision = Some("2026-09-30T00:00:00Z".into());
     runtime
         .block_on(task.store.put_pm_snapshot(snapshot))
         .expect("remove cached Task URL");
@@ -941,9 +939,11 @@ fn serial_task_pr_publication_restores_task_context() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
-    let persisted_task = task_status(Some("INF-123")).expect("reconcile Task PR");
-    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
-    assert!(!matches!(snapshot.status, WorkStatus::Done));
+    let persisted_task = task_status(repo.path(), Some("INF-123"))
+        .expect("reconcile Task PR")
+        .execution
+        .expect("execution");
+    assert!(!matches!(persisted_task.status, WorkStatus::Done));
     assert!(
         matches!(
             persisted_task.observation,
@@ -951,7 +951,10 @@ fn serial_task_pr_publication_restores_task_context() {
         ),
         "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
     );
-    let cached_task = task_status(Some("INF-123")).expect("reuse partial merge-time observation");
+    let cached_task = task_status(repo.path(), Some("INF-123"))
+        .expect("reuse partial merge-time observation")
+        .execution
+        .expect("execution");
     assert!(
         matches!(
             cached_task.observation,
@@ -1090,7 +1093,10 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
-    task_status(Some("INF-123")).expect("reconcile merged Task PR");
+    task_status(repo.path(), Some("INF-123"))
+        .expect("reconcile merged Task PR")
+        .execution
+        .expect("execution");
 
     let restore = Command::new("git")
         .current_dir(repo.path())
@@ -1194,7 +1200,10 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto-merge request");
 
-    task_status(Some("INF-123")).expect("reconcile changed head");
+    task_status(repo.path(), Some("INF-123"))
+        .expect("reconcile changed head")
+        .execution
+        .expect("execution");
 
     let persisted = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
@@ -1214,6 +1223,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
     let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
     let base = repo.head_sha();
     let branch = "jack/task-resume-proof";
     repo.create_branch(branch);
@@ -1388,7 +1398,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
 }
 
 #[test]
-fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
+fn observed_merge_does_not_complete_a_task_from_status() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -1421,16 +1431,18 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let persisted_task = task_status(Some("INF-123")).expect("reconcile completing PR");
+    let persisted_task = task_status(repo.path(), Some("INF-123"))
+        .expect("reconcile completing PR")
+        .execution
+        .expect("execution");
     assert!(
         matches!(
             persisted_task.observation,
             loopflow::work::task::Observation::Fresh { .. }
         ),
-        "completion should use the bounded REST observation: {persisted_task:?}"
+        "status should use the bounded REST observation: {persisted_task:?}"
     );
-    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
-    assert!(matches!(snapshot.status, WorkStatus::Done));
+    assert!(matches!(persisted_task.status, WorkStatus::Ready));
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1472,9 +1484,11 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let persisted_task = task_status(Some("INF-123")).expect("reconcile watched PR merge");
-    let snapshot = task_snapshot(&persisted_task).expect("snapshot Task");
-    assert!(!matches!(snapshot.status, WorkStatus::Done));
+    let persisted_task = task_status(repo.path(), Some("INF-123"))
+        .expect("reconcile watched PR merge")
+        .execution
+        .expect("execution");
+    assert!(!matches!(persisted_task.status, WorkStatus::Done));
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1482,7 +1496,7 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
 }
 
 #[test]
-fn repeated_status_of_merged_task_records_completion_once() {
+fn repeated_status_of_merged_task_never_completes_work() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -1515,38 +1529,42 @@ fn repeated_status_of_merged_task_records_completion_once() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let first = task_status(Some("INF-123")).expect("first completed status");
-    let first_snapshot = task_snapshot(&first).expect("first completed snapshot");
-    assert_eq!(first_snapshot.status, WorkStatus::Done);
+    let first = task_status(repo.path(), Some("INF-123"))
+        .expect("first merged-PR status")
+        .execution
+        .expect("execution");
+    assert_eq!(first.status, WorkStatus::Ready);
     let first_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("read first Task events");
     let conn =
         rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open test registry");
-    let first_state: (String, i64) = conn
+    let first_state: (String, Option<i64>) = conn
         .query_row(
             "SELECT work_state, work_terminal_at FROM tasks WHERE id=?1",
             [task.task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("read completed Work");
-    let second = task_status(Some("INF-123")).expect("repeated completed status");
-    let second_snapshot = task_snapshot(&second).expect("repeated completed snapshot");
-    let second_state: (String, i64) = conn
+        .expect("read Work state");
+    let second = task_status(repo.path(), Some("INF-123"))
+        .expect("repeated merged-PR status")
+        .execution
+        .expect("execution");
+    let second_state: (String, Option<i64>) = conn
         .query_row(
             "SELECT work_state, work_terminal_at FROM tasks WHERE id=?1",
             [task.task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("reread completed Work");
+        .expect("reread Work state");
     let second_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("reread Task events");
 
-    assert_eq!(second_snapshot.status, WorkStatus::Done);
+    assert_eq!(second.status, WorkStatus::Ready);
     assert_eq!(
         second_state, first_state,
-        "terminal Work must not be mutated"
+        "status must not mutate Work state"
     );
     assert_eq!(
         second_events, first_events,
@@ -1561,7 +1579,7 @@ fn repeated_status_of_merged_task_records_completion_once() {
             )
         })
         .count();
-    assert_eq!(completion_count, 1);
+    assert_eq!(completion_count, 0);
 }
 
 #[test]

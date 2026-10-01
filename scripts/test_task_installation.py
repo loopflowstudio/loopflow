@@ -7,6 +7,7 @@ from pathlib import Path
 
 PROOFS = {
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_home_tests",
+    "task_adopts_linear_checkout_and_preserves_saved_progress": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
     "task_operation_starts_with_durable_history_after_claim_only_failure": "flow_tests",
     "task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart": "flow_tests",
@@ -16,7 +17,7 @@ PROOFS = {
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="rust:1.89-bookworm")
-    parser.add_argument("--test", choices=PROOFS, help="run one named proof")
+    parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
@@ -63,7 +64,7 @@ def main() -> None:
             copy.stdin.close()
             if copy.wait() != 0:
                 raise RuntimeError("copy disposable source snapshot")
-        selected = {args.test: PROOFS[args.test]} if args.test else PROOFS
+        selected = {name: PROOFS[name] for name in args.test} if args.test else PROOFS
         targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
         checks = "\n".join(
             f"timeout 180 cargo test -p loopflow --test {target} {name} "
@@ -76,9 +77,13 @@ useradd --create-home lf-task-proof
 chown -R lf-task-proof:lf-task-proof /source
 chown -R lf-task-proof:lf-task-proof /usr/local/cargo/registry
 runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
-    LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 \
-    CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=4 \
+    LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 \
+    CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
+        version=$(sed -n "s/^version = \"\([^\"]*\)\"/\1/p" Cargo.toml | head -1)
+        python3 scripts/canonicalize_migrations.py "$version" --materialize-for-tests
+        nice -n 10 cargo test -p loopflow --lib \
+            migration_preserves_planning_identity_and_removes_snapshot_storage
         nice -n 10 cargo test -p loopflow TARGETS --no-run
         CHECKS'
 """
@@ -87,7 +92,12 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
         )
     finally:
-        subprocess.run(["docker", "rm", "--force", container], check=True)
+        try:
+            subprocess.run(["docker", "rm", "--force", container], check=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Docker cleanup timed out; proof container {container} still needs removal."
+            ) from None
 
 
 if __name__ == "__main__":

@@ -900,6 +900,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     assert!(Path::new("/.dockerenv").is_file());
     assert!(!loopflow::machine_install::root().unwrap().exists());
     let fixture = Fixture::new(false);
+    support::bind_task_planning(&fixture.repo);
     let y = fixture.repo.create_named_worktree("task-y");
     let target =
         support::register_unrun_task(fixture.home.path(), &y, "task-y", &fixture.repo.head_sha());

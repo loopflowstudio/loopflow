@@ -1,15 +1,26 @@
 mod support;
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
-use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use sha2::{Digest, Sha256};
 use support::{register_unrun_task, EnvGuard};
+
+fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(cli);
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            command.env_remove(name);
+        }
+    }
+    command.current_dir(repo).args(args);
+    command
+}
 
 #[test]
 fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
@@ -117,19 +128,15 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     fs::write(repo.path().join("main-notes"), "keep main edits").unwrap();
     fs::write(invoking.join("caller-notes"), "keep caller edits").unwrap();
     let checkout = || {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_") {
-                command.env_remove(name);
-            }
-        }
-        command
-            .current_dir(&invoking)
-            .args(["task", "checkout", "INF-123", "--json"])
-            .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
-            .output()
-            .unwrap()
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &invoking,
+            &["task", "checkout", "INF-123", "--json"],
+        )
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .output()
+        .unwrap()
     };
     let first = checkout();
     assert!(
@@ -364,7 +371,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let stale = runtime
             .block_on(task.store.create_session(stale, None))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
         let current = runtime
             .block_on(
@@ -373,6 +380,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             )
             .unwrap();
         let status = read(&status_args);
+        let status = &status["execution"];
         assert_eq!(status["execution"]["state"], "blocked");
         assert_eq!(status["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         assert!(status["execution"]["reason"]
@@ -402,7 +410,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         runtime
             .block_on(task.store.complete_session(&session, current.captured))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         assert_eq!(
             runtime
                 .block_on(task.store.task_flow(&task.task.id))
@@ -422,7 +430,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             runtime
                 .block_on(task.store.create_session(other, None))
                 .unwrap();
-            assert_eq!(read(&status_args)["execution"]["state"], "running");
+            assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         }
         // The body is real; the five-minute observation history is simulated.
         struct SleepingBody(std::process::Child);
@@ -447,6 +455,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         });
         std::fs::write(run_dir.join("events.jsonl"), format!("{observation}\n")).unwrap();
         let stalled = read(&status_args);
+        let stalled = &stalled["execution"];
         let desktop = read(&["roadmap", "--json"]);
         drop(body);
         assert_eq!(stalled["execution"]["state"], "stalled");
@@ -490,45 +499,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .expect("publish initialization marker");
     std::fs::create_dir_all(&missing_worktree)
         .expect("simulate a partially created worktree directory");
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .expect("read owning Project")
-        .expect("owning Project exists");
-    let payload = serde_json::json!({
-        "projects": [{
-            "id": project.plan.id.as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
-            "summary": project.plan.prompt_context,
-            "metric_targets": [],
-            "flow": "feature", "status": "started",
-            "krs": [],
-            "initiative_ids": ["initialization-initiative"],
-            "team_ids": ["initialization-team"]
-        }],
-        "items": [{
-            "id": task.task.plan.id.as_str(),
-            "identifier": task.task.plan.identifier,
-            "url": null,
-            "name": task.task.plan.title,
-            "description": task.task.plan.description,
-            "rank": 1,
-            "completed": false,
-            "project_id": project.plan.id.as_str(),
-            "project": project.plan.slug,
-            "team_id": "initialization-team",
-            "assignee": null
-        }]
-    });
-    runtime
-        .block_on(task.store.put_pm_snapshot(PmSnapshotRow {
-            wave_id: task.task.wave_id.clone(),
-            provider: "linear".to_string(),
-            initiative: "initialization-initiative".to_string(),
-            synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
-        }))
-        .expect("seed roadmap planning");
     let run_lf = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
@@ -545,6 +515,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
+    let status = &status["execution"];
     assert_eq!(status["execution"]["state"], "idle");
     assert_eq!(status["runs"], serde_json::json!([]));
     assert_eq!(status["runs_truncated"], false);
@@ -579,8 +550,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected = task_snapshot(&task_status(Some("INF-123")).expect("read Task"))
-        .expect("project Task status");
+    let projected = task_status(repo.path(), Some("INF-123"))
+        .expect("read Task")
+        .execution
+        .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -600,6 +573,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale: serde_json::Value =
         serde_json::from_slice(&stale.stdout).expect("stale status JSON");
+    let stale = &stale["execution"];
     assert_eq!(stale["actions"]["recommended"], "no_action");
     assert!(stale["actions"]["reason"]
         .as_str()
@@ -642,8 +616,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status(Some("INF-123")).expect("status survives the absent worktree");
-    let snapshot = task_snapshot(&status).expect("project missing-worktree status");
+    let snapshot = task_status(&missing_path, Some("INF-123"))
+        .expect("status survives the absent worktree")
+        .execution
+        .expect("execution");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot

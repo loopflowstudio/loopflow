@@ -421,6 +421,18 @@ preserves the Task's identity and prepares its worktree. Repeating checkout
 reuses that placement; repeating run continues the saved workflow or reports
 the active worker.
 
+When Linear supplies a branch name, checkout and run reuse that branch and its
+existing Git worktree, including dirty work, and retain its open PR. Without a
+provider branch, the normal title-based branch is reused when it exists.
+Adoption does not create or edit a PR. Git and PR state never supply a Flow
+cursor; the Task's captured progress remains authoritative.
+
+Managed continuation and each new driver boundary require nonterminal planning
+that still matches the recorded Project, Wave and configured Team. Fresh cached
+facts suffice; a due refresh failure stops managed execution and preserves its
+saved Flow. Status retains the dated evidence. Independent Flows can still run
+in the checkout, including after its Task is removed.
+
 `--stack-on` gives a dependent Task its own worktree and PR, based on the
 parent Task's published PR. Its PR initially targets the parent branch and
 can move to the default branch after the parent merges.

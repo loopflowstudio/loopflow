@@ -54,7 +54,11 @@ fn flow_steps_use_explicit_binary_and_retain_effects_after_experimental_schema_c
         // An explicitly selected executable delegates the effect to lf, then
         // changes the experimental schema so subsequent opens must refuse it.
         let migration = if upgrade {
-            r#"sqlite3 "$LF_HOME/loopflow.db" <<'SQL'
+            r#"python3 - <<'PYTHON'
+import os
+import sqlite3
+with sqlite3.connect(os.path.join(os.environ["LF_HOME"], "loopflow.db")) as connection:
+    connection.executescript("""
 BEGIN IMMEDIATE;
 CREATE TABLE future_flow_feature (id INTEGER PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS development_migrations (
@@ -63,7 +67,8 @@ CREATE TABLE IF NOT EXISTS development_migrations (
 INSERT INTO development_migrations
  SELECT COUNT(*), 'future', 'future_flow_feature', 'fixture', 1 FROM development_migrations;
 COMMIT;
-SQL
+""")
+PYTHON
 "#
         } else {
             ""
@@ -113,7 +118,11 @@ SQL
             .unwrap();
         assert_eq!(state, if upgrade { "current" } else { "completed" });
         if upgrade {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"));
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("Resume with a compatible lf"),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             let selected: Option<i64> = conn
                 .query_row("SELECT operation_start FROM flow_sessions", [], |r| {
                     r.get(0)
@@ -863,7 +872,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .unwrap();
         assert!(position.cursor.progress.verdict.is_none());
         let resolved: serde_json::Value = serde_json::from_slice(&decision.stdout).unwrap();
-        assert_eq!(resolved["task_id"], child.task.id.as_str());
+        assert_eq!(resolved["execution"]["task_id"], child.task.id.as_str());
         assert!(runtime
             .block_on(child.store.task_flow(&parent.id))
             .unwrap()
@@ -879,7 +888,11 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             String::from_utf8_lossy(&status.stderr)
         );
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        assert_eq!(status["task_id"], child.task.id.as_str(), "{status}");
+        assert_eq!(
+            status["execution"]["task_id"],
+            child.task.id.as_str(),
+            "{status}"
+        );
 
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
@@ -1680,6 +1693,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use loopflow::engine::invocation::QueuedInvocation;
     let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
     repo.create_branch("task-claim");
     let home = TempDir::new().unwrap();
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
@@ -2381,6 +2395,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     use loopflow::engine::invocation::QueuedInvocation;
 
     let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-flow-read", &repo.head_sha());
@@ -2557,7 +2572,8 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         String::from_utf8_lossy(&status.stderr)
     );
     let status = String::from_utf8(status.stdout).unwrap();
-    assert_eq!(status.lines().next(), Some("INF-123  blocked"));
+    assert_eq!(status.lines().next(), Some("Planning evidence: available"));
+    assert!(status.lines().any(|line| line == "INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
 }
 

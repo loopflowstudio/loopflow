@@ -98,9 +98,10 @@ One Task, coherent slices. Each stands on its own.
 
 - Migration draft `primary_session_scope`: `agent_sessions.primary_scope` and a
   partial unique index on the current Wave primary.
-- Store: `primary_session`, `ensure_primary_session`,
-  `replace_primary_session`. Ensure and replace are single transactions;
-  concurrent callers converge on one row.
+- Store: one `ensure_primary_session(scope, replacing, session)` transaction.
+  It returns the scope's current primary, or admits the given Session; when the
+  current primary is the one being replaced it completes it and admits the
+  successor together. Concurrent callers converge on one row.
 - `lf session ensure --wave NAME [--json]` — find or admit the Wave's primary,
   publish its prepared input, and start its durable terminal once. Repeats
   return the same Session and never start a second launcher. A failed start

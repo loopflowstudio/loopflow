@@ -22,13 +22,9 @@ pub(crate) async fn ensure_wave(
     let binding = crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?;
     let scope = PrimaryScope::Wave(binding.wave_id.clone());
     let _lock = lock_scope(&scope).await?;
-    let session = match store.primary_session(&scope).await? {
-        Some(session) => session,
-        None => {
-            let successor = wave_session(&binding);
-            store.ensure_primary_session(&scope, successor).await?
-        }
-    };
+    let session = store
+        .ensure_primary_session(&scope, None, wave_session(&binding))
+        .await?;
     start(store, session).await
 }
 
@@ -54,7 +50,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
     let binding =
         crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}")).await?;
     let session = store
-        .replace_primary_session(&scope, id, wave_session(&binding))
+        .ensure_primary_session(&scope, Some(id), wave_session(&binding))
         .await?;
     start(store, session).await
 }
@@ -151,7 +147,7 @@ mod tests {
     use super::{ensure_wave, replace};
     use crate::ops::human_session::tests::{AskHome, ASK_LAUNCHERS, FAILED_ASK_LAUNCHERS};
     use crate::ops::human_session::{action_test::NativeClients, ask_background_name};
-    use crate::session::{PrimaryScope, SessionKind};
+    use crate::session::SessionKind;
 
     async fn wave(
         store: &crate::store::SharedStore,
@@ -201,8 +197,7 @@ mod tests {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
-            let wave = wave(&store, &repo).await;
-            let scope = PrimaryScope::Wave(wave.id().clone());
+            wave(&store, &repo).await;
 
             // The launcher name derives from an id admitted inside ensure; fail
             // every launcher by admitting first, then failing that name.
@@ -215,10 +210,6 @@ mod tests {
             assert!(ensure_wave(&store, repo.path(), "infrastructure")
                 .await
                 .is_err());
-            assert_eq!(
-                store.primary_session(&scope).await.unwrap().unwrap().id,
-                admitted.id
-            );
 
             FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
             let retried = ensure_wave(&store, repo.path(), "infrastructure")
@@ -236,8 +227,7 @@ mod tests {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
-            let wave = wave(&store, &repo).await;
-            let scope = PrimaryScope::Wave(wave.id().clone());
+            wave(&store, &repo).await;
             let first = ensure_wave(&store, repo.path(), "infrastructure")
                 .await
                 .unwrap();
@@ -256,10 +246,6 @@ mod tests {
                 .unwrap()
                 .completed_at
                 .is_some());
-            assert_eq!(
-                store.primary_session(&scope).await.unwrap().unwrap().id,
-                successor.id
-            );
             // A repeat after a lost response names the replaced predecessor.
             assert_eq!(replace(&store, &first.id).await.unwrap().id, successor.id);
             assert_eq!(

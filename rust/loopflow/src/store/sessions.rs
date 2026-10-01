@@ -47,38 +47,17 @@ impl Store {
         .await
     }
 
-    pub async fn primary_session(
-        &self,
-        scope: &crate::session::PrimaryScope,
-    ) -> StoreResult<Option<AgentSession>> {
-        let scope = scope.clone();
-        run_sqlite(&self.sqlite, move |store| store.primary_session(&scope)).await
-    }
-
     pub async fn ensure_primary_session(
         &self,
         scope: &crate::session::PrimaryScope,
+        replacing: Option<&str>,
         session: AgentSession,
     ) -> StoreResult<AgentSession> {
         let scope = scope.clone();
+        let replacing = replacing.map(str::to_string);
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.ensure_primary_session(&scope, session, caller.as_ref())
-        })
-        .await
-    }
-
-    pub async fn replace_primary_session(
-        &self,
-        scope: &crate::session::PrimaryScope,
-        expected: &str,
-        successor: AgentSession,
-    ) -> StoreResult<AgentSession> {
-        let scope = scope.clone();
-        let expected = expected.to_string();
-        let caller = crate::journal::current_exec_id();
-        run_sqlite(&self.sqlite, move |store| {
-            store.replace_primary_session(&scope, &expected, successor, caller.as_ref())
+            store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
         })
         .await
     }

@@ -8,7 +8,7 @@
   must outlive a stop whose outcome stays unknown.
 - **The Wave Session runs in the Wave binding's checkout** (the main checkout
   today). A dedicated scope checkout via `ensure_agent_worktree` with a local
-  base is slice 6; until then design notes land in the shared checkout.
+  base remains (see the plan); until then design notes land in the shared checkout.
 - **`serve-ask` launches primaries too.** The hidden command already serves any
   prepared row Session; it was not renamed.
 - **`lf session ready` refuses in a primary.** Nothing waits on a primary, so

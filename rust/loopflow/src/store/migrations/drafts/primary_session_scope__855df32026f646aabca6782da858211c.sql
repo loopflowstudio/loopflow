@@ -5,6 +5,8 @@
 -- A primary Session is an ordinary conversation that is the one ongoing
 -- conversation of its scope. The scope's identity stays in the row's own
 -- columns; completed predecessors remain history.
-ALTER TABLE agent_sessions ADD COLUMN primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave', 'task'));
+ALTER TABLE agent_sessions ADD COLUMN primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave'));
+CREATE UNIQUE INDEX agent_sessions_primary_repository ON agent_sessions(repo)
+    WHERE primary_scope = 'repository' AND completed_at IS NULL;
 CREATE UNIQUE INDEX agent_sessions_primary_wave ON agent_sessions(wave_id)
     WHERE primary_scope = 'wave' AND completed_at IS NULL;

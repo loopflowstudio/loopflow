@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 
 use super::{
     ask_background_name, ask_exec_is_running, capture_is_prepared, lock_session_exec,
@@ -13,30 +13,31 @@ use super::{
 use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
-/// Find or admit the Wave's primary conversation and start its terminal once.
-pub(crate) async fn ensure_wave(
+/// Find or admit the primary conversation of a Wave, or of the repository
+/// itself, and start its terminal once. The repository's needs no Wave, Task
+/// or planning provider.
+pub(crate) async fn ensure(
     store: &SharedStore,
     repo: &Path,
-    wave: &str,
+    wave: Option<&str>,
 ) -> Result<SessionRecord> {
-    let binding = crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?;
-    let scope = PrimaryScope::Wave(binding.wave_id.clone());
+    let (scope, session) = match wave {
+        Some(wave) => {
+            let binding =
+                crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?;
+            (
+                PrimaryScope::Wave(binding.wave_id.clone()),
+                wave_session(&binding),
+            )
+        }
+        None => {
+            let repo = crate::repository::CanonicalRepo::discover(repo)?;
+            let session = repository_session(&repo);
+            (PrimaryScope::Repository(repo), session)
+        }
+    };
     let _lock = lock_scope(&scope).await?;
-    let session = store
-        .ensure_primary_session(&scope, None, wave_session(&binding))
-        .await?;
-    start(store, session).await
-}
-
-/// Find or admit the repository's own conversation. It needs no Wave, Task
-/// or planning provider.
-pub(crate) async fn ensure_repository(store: &SharedStore, repo: &Path) -> Result<SessionRecord> {
-    let repo = crate::repository::CanonicalRepo::discover(repo)?;
-    let scope = PrimaryScope::Repository(repo.clone());
-    let _lock = lock_scope(&scope).await?;
-    let session = store
-        .ensure_primary_session(&scope, None, repository_session(&repo))
-        .await?;
+    let session = store.ensure_primary_session(&scope, None, session).await?;
     start(store, session).await
 }
 
@@ -178,15 +179,14 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
         PrimaryScope::Repository(repo) => format!("primary:repository:{repo}"),
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
     };
-    match tokio::task::spawn_blocking(move || lock_session_exec(&key)).await {
-        Ok(lock) => lock,
-        Err(error) => bail!("lock primary Session scope: {error}"),
-    }
+    tokio::task::spawn_blocking(move || lock_session_exec(&key))
+        .await
+        .context("lock primary Session scope")?
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_repository, ensure_wave, replace};
+    use super::{ensure, replace};
     use crate::ops::human_session::tests::{AskHome, ASK_LAUNCHERS, FAILED_ASK_LAUNCHERS};
     use crate::ops::human_session::{action_test::NativeClients, ask_background_name};
     use crate::session::SessionKind;
@@ -209,12 +209,12 @@ mod tests {
             let repo = loopflow_test_support::TestRepo::new();
             let wave = wave(&store, &repo).await;
 
-            let first = ensure_wave(&store, repo.path(), "infrastructure")
+            let first = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             // The simulated launcher refuses a duplicate start, so a second
             // launch attempt would fail this call.
-            let second = ensure_wave(&store, repo.path(), "infrastructure")
+            let second = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
 
@@ -243,18 +243,18 @@ mod tests {
 
             // The launcher name derives from an id admitted inside ensure; fail
             // every launcher by admitting first, then failing that name.
-            let admitted = ensure_wave(&store, repo.path(), "infrastructure")
+            let admitted = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             let name = ask_background_name(&admitted.id);
             ASK_LAUNCHERS.lock().unwrap().remove(&name);
             FAILED_ASK_LAUNCHERS.lock().unwrap().insert(name.clone());
-            assert!(ensure_wave(&store, repo.path(), "infrastructure")
+            assert!(ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .is_err());
 
             FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
-            let retried = ensure_wave(&store, repo.path(), "infrastructure")
+            let retried = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             assert_eq!(retried.id, admitted.id);
@@ -270,7 +270,7 @@ mod tests {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
             wave(&store, &repo).await;
-            let first = ensure_wave(&store, repo.path(), "infrastructure")
+            let first = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             let previous = store.session(&first.id).await.unwrap().unwrap();
@@ -291,7 +291,7 @@ mod tests {
             // A repeat after a lost response names the replaced predecessor.
             assert_eq!(replace(&store, &first.id).await.unwrap().id, successor.id);
             assert_eq!(
-                ensure_wave(&store, repo.path(), "infrastructure")
+                ensure(&store, repo.path(), Some("infrastructure"))
                     .await
                     .unwrap()
                     .id,
@@ -308,8 +308,8 @@ mod tests {
             let store = home.store().await;
             let repo = loopflow_test_support::TestRepo::new();
 
-            let first = ensure_repository(&store, repo.path()).await.unwrap();
-            let second = ensure_repository(&store, repo.path()).await.unwrap();
+            let first = ensure(&store, repo.path(), None).await.unwrap();
+            let second = ensure(&store, repo.path(), None).await.unwrap();
 
             assert_eq!(first.id, second.id);
             let session = store.session(&first.id).await.unwrap().unwrap();
@@ -318,7 +318,7 @@ mod tests {
 
             // A Wave's conversation in the same repository is a separate scope.
             wave(&store, &repo).await;
-            let wave = ensure_wave(&store, repo.path(), "infrastructure")
+            let wave = ensure(&store, repo.path(), Some("infrastructure"))
                 .await
                 .unwrap();
             assert_ne!(wave.id, first.id);
@@ -326,7 +326,7 @@ mod tests {
             let successor = replace(&store, &first.id).await.unwrap();
             assert_ne!(successor.id, first.id);
             assert_eq!(
-                ensure_repository(&store, repo.path()).await.unwrap().id,
+                ensure(&store, repo.path(), None).await.unwrap().id,
                 successor.id
             );
         });

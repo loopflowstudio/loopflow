@@ -109,14 +109,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
         SessionCommand::Ensure { wave, json } => {
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
-            let session = match wave {
-                Some(wave) => {
-                    crate::ops::human_session::primary::ensure_wave(&store, &repo, wave).await?
-                }
-                None => {
-                    crate::ops::human_session::primary::ensure_repository(&store, &repo).await?
-                }
-            };
+            let session =
+                crate::ops::human_session::primary::ensure(&store, &repo, wave.as_deref()).await?;
             report_primary(&session, *json)
         }
         SessionCommand::Replace { id, json } => {

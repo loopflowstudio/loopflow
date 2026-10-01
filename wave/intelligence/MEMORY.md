@@ -17,6 +17,32 @@ the app and inspect production views without launching windows; native window
 and terminal diagnostics are opt-in. The September 30 baseline and repeatable
 collector live in `performance/check-cost.md`.
 
+## Launch context ablation (2026-10-01)
+
+Jack Heart requested a study of which launch sources change outcomes (LOO-349).
+Findings, method and limits live in `performance/context-ablation.md`; the
+collector is `scripts/context_ablation.py`.
+
+- Verdicts from a 31-replay pilot: keep Wave memory at 16,000 tokens, keep the
+  Task's own scratch notes, trim older scratch (scratch budget now 12,000),
+  old steers and agent comments are already gone from launches. Resumed
+  history is unmeasured: every replayable launch is a fresh turn.
+- A launch is about 12k tokens since budgets and under a tenth of a turn's
+  peak input. Further launch trimming buys little; in-turn reads and resumed
+  history are the unmeasured cost.
+- Two identical replays share 40% of changed files and one in five loop-decide
+  pairs disagrees. No ablation result means anything without a repeat baseline.
+  The pilot compared size, verdict, checks and time, never correctness.
+- Agents fetch what the prompt omits: without inline memory or scratch they
+  read the files from disk. Removing a source moves its tokens into the turn.
+- Replay isolation needs an lf that keeps its store in `LF_HOME` (#1386).
+  Under lf 0.12.28, nested `lf` calls in a "disposable" Home read the real
+  store and Linear. Scrub ambient `LF_*`, put that lf first on `PATH`, and
+  clone without a remote.
+- Manifests do not record HEAD at launch. The worktree reflog recovers it only
+  while the worktree exists; a PR-head approximation made one record block in
+  every arm. Recording the launch commit is the cheapest capture repair.
+
 ## Attribution and feedback evidence (curated 2026-09-25)
 
 - A first-page GraphQL query captured author names while pagination fetched

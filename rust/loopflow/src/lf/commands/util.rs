@@ -332,7 +332,7 @@ pub(crate) fn stop_provider_session(dir: &Path, harness: &str) -> Result<()> {
 
 pub(crate) fn require_provider_session_exec(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_execs_read_only(&crate::store::observability_database_path()?)?;
+    let store = SqliteStore::open_execs_read_only(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Home"))?;
@@ -594,7 +594,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if provider_session_id.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session open --replace` for a Loopflow-owned client.",
+            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.",
             command.program,
             outcome.status,
         ))
@@ -1996,7 +1996,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
         // The native CLI rejects an ordinary OAuth token in this agent-identity
-        // variable. A prior `lf auth status` must not poison a working login.
+        // variable. A prior `lf account` must not poison a working login.
         let codex = temp.path().join("bin/codex");
         std::fs::write(
             &codex,

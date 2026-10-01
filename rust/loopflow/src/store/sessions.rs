@@ -12,14 +12,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
     }
 
-    pub(crate) async fn input_final_answer(
-        &self,
-        input: &str,
-    ) -> StoreResult<Option<crate::session_record::FinalAnswer>> {
-        let input = input.to_owned();
-        run_sqlite(&self.sqlite, move |store| store.input_final_answer(&input)).await
-    }
-
     pub async fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -51,6 +43,21 @@ impl Store {
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
             store.create_session(session, review.as_ref(), caller.as_ref())
+        })
+        .await
+    }
+
+    pub async fn ensure_primary_session(
+        &self,
+        scope: &crate::session::PrimaryScope,
+        replacing: Option<&str>,
+        session: AgentSession,
+    ) -> StoreResult<AgentSession> {
+        let scope = scope.clone();
+        let replacing = replacing.map(str::to_string);
+        let caller = crate::journal::current_exec_id();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
         })
         .await
     }
@@ -106,16 +113,6 @@ impl Store {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.bind_session(&id, expected_capture, &task)
-        })
-        .await
-    }
-
-    pub(crate) async fn conversation_history(
-        &self,
-        since: i64,
-    ) -> StoreResult<Vec<crate::session_record::SessionHistory>> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.conversation_history(None, None, None, None, since, true)
         })
         .await
     }

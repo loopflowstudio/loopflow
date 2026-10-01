@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -46,7 +46,7 @@ impl RelocationPath {
         Self {
             wave_id: planned.wave.id().clone(),
             from_repo: planned.wave.repo().to_string(),
-            from_name: planned.wave.name().to_string(),
+            from_name: planned.wave.slug().to_string(),
             to_repo: planned.target.repo().to_string(),
             to_name: planned.target.slug().to_string(),
         }
@@ -88,7 +88,7 @@ pub async fn relocate_wave(
     let invoking_repo = CanonicalRepo::discover(invoking_repo)?;
     let mut wave = original_wave.clone();
     if CanonicalRepo::discover(Path::new(wave.repo())).is_ok_and(|repo| repo == invoking_repo) {
-        let locator = WaveLocator::new(invoking_repo.clone(), wave.name())?;
+        let locator = WaveLocator::new(invoking_repo.clone(), wave.slug())?;
         let scoped = store
             .get_wave_at(&locator)
             .await?
@@ -104,7 +104,7 @@ pub async fn relocate_wave(
         }
         wave = scoped;
     }
-    WaveLocator::new(invoking_repo.clone(), wave.name())?;
+    WaveLocator::new(invoking_repo.clone(), wave.slug())?;
     let target_repo = match target_repo {
         Some(repo) => CanonicalRepo::discover(repo)?,
         None => CanonicalRepo::discover(Path::new(wave.repo())).map_err(|error| {
@@ -115,7 +115,7 @@ pub async fn relocate_wave(
             )
         })?,
     };
-    let target = WaveLocator::new(target_repo, target_name.unwrap_or(wave.name()))?;
+    let target = WaveLocator::new(target_repo, target_name.unwrap_or(wave.slug()))?;
     let source_repo = CanonicalRepo::discover(Path::new(wave.repo())).ok();
     match source_repo.as_ref() {
         Some(source) if source != &invoking_repo => {
@@ -135,17 +135,17 @@ pub async fn relocate_wave(
         }
         _ => {}
     }
-    if wave.repo() == target.repo().to_string() && wave.name() == target.slug() {
+    if wave.repo() == target.repo().to_string() && wave.slug() == target.slug() {
         if let Some(receipt) = recover_committed_relocation(store, &wave, &invoking_repo).await? {
             return Ok(receipt);
         }
-        if original_wave.repo() != wave.repo() || original_wave.name() != wave.name() {
+        if original_wave.repo() != wave.repo() || original_wave.slug() != wave.slug() {
             return Ok(WaveRelocationReceipt {
                 wave_id: wave.id().to_string(),
                 from_repo: original_wave.repo().to_string(),
-                from_name: original_wave.name().to_string(),
+                from_name: original_wave.slug().to_string(),
                 to_repo: wave.repo().to_string(),
-                to_name: wave.name().to_string(),
+                to_name: wave.slug().to_string(),
                 waves_moved: 1,
             });
         }
@@ -162,6 +162,9 @@ pub async fn relocate_wave(
 
     let mut moves = plan_moves(store, wave, target).await?;
     preflight(store, &mut moves).await?;
+    if let Some((parent, _)) = moves[0].target.slug().rsplit_once('/') {
+        super::ensure_wave_row(store, moves[0].target.repo().as_path(), parent).await?;
+    }
     let recovery = relocation_recovery(&moves);
     ensure_no_shadow_relocation_receipts(&moves)?;
     write_recovery(&recovery)?;
@@ -175,7 +178,7 @@ pub async fn relocate_wave(
         .map(|planned| WaveLocatorUpdate {
             wave_id: planned.wave.id().clone(),
             expected_repo: planned.wave.repo().to_string(),
-            expected_slug: planned.wave.name().to_string(),
+            expected_slug: planned.wave.slug().to_string(),
             target: planned.target.clone(),
             retire_collision: planned.retire_collision.clone(),
         })
@@ -190,7 +193,7 @@ pub async fn relocate_wave(
                 planned.target.repo(),
                 planned.target.slug(),
                 planned.wave.repo(),
-                planned.wave.name()
+                planned.wave.slug()
             )
         })?;
     }
@@ -202,7 +205,7 @@ pub async fn relocate_wave(
     Ok(WaveRelocationReceipt {
         wave_id: root.wave.id().to_string(),
         from_repo: root.wave.repo().to_string(),
-        from_name: root.wave.name().to_string(),
+        from_name: root.wave.slug().to_string(),
         to_repo: root.target.repo().to_string(),
         to_name: root.target.slug().to_string(),
         waves_moved: moves.len(),
@@ -239,48 +242,27 @@ async fn plan_moves(
     root: Wave,
     target: WaveLocator,
 ) -> Result<Vec<PlannedWaveMove>> {
-    let rehome = root.repo() != target.repo().to_string();
-    let rename = root.name() != target.slug();
     let mut moves = vec![PlannedWaveMove {
-        wave: root.clone(),
+        wave: root,
         target,
         retire_collision: None,
     }];
-    if !rehome && !rename {
-        return Ok(moves);
-    }
-
-    let mut pending = VecDeque::from([root.id().clone()]);
-    while let Some(parent) = pending.pop_front() {
-        for child in store.list_child_waves(&parent).await? {
-            pending.push_back(child.id().clone());
-            let target_slug =
-                relocated_descendant_slug(root.name(), moves[0].target.slug(), child.name());
-            if !rehome && target_slug.is_none() {
-                continue;
-            }
+    // Parents precede children so the store can resolve each destination parent.
+    let mut next = 0;
+    while next < moves.len() {
+        for child in store.list_child_waves(moves[next].wave.id()).await? {
             moves.push(PlannedWaveMove {
                 target: WaveLocator::new(
-                    moves[0].target.repo().clone(),
-                    target_slug.as_deref().unwrap_or(child.name()),
+                    moves[next].target.repo().clone(),
+                    &format!("{}/{}", moves[next].target.slug(), child.name()),
                 )?,
                 wave: child,
                 retire_collision: None,
             });
         }
+        next += 1;
     }
     Ok(moves)
-}
-
-fn relocated_descendant_slug(root: &str, target: &str, candidate: &str) -> Option<String> {
-    let relative = Path::new(candidate).strip_prefix(root).ok()?;
-    if relative.as_os_str().is_empty() {
-        return None;
-    }
-    Path::new(target)
-        .join(relative)
-        .to_str()
-        .map(str::to_string)
 }
 
 async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {
@@ -320,17 +302,17 @@ async fn preflight(store: &Store, moves: &mut [PlannedWaveMove]) -> Result<()> {
                 continue;
             };
             let inside_source = source_repo.as_ref().is_some_and(|repo| {
-                repo == &other_repo && is_strict_descendant(other.name(), planned.wave.name())
+                repo == &other_repo && is_strict_descendant(other.slug(), planned.wave.slug())
             });
             let inside_target = &other_repo == planned.target.repo()
-                && is_strict_descendant(other.name(), planned.target.slug());
+                && is_strict_descendant(other.slug(), planned.target.slug());
             if inside_source || inside_target {
                 return Err(anyhow!(
                     "cannot relocate {}/{} because it contains registered Wave {}/{} ({})",
                     planned.wave.repo(),
-                    planned.wave.name(),
+                    planned.wave.slug(),
                     other.repo(),
-                    other.name(),
+                    other.slug(),
                     other.id()
                 ));
             }
@@ -371,7 +353,7 @@ fn prepare_source_for_relocation(planned: &PlannedWaveMove) -> Result<()> {
         default_branch.clone()
     };
 
-    let segment = wave_agent_segment(planned.wave.name())?;
+    let segment = wave_agent_segment(planned.wave.slug())?;
     if let Some(resident) = existing_agent_worktree(source_repo, segment)? {
         if !is_clean(&resident.path)? {
             return Err(anyhow!(
@@ -427,17 +409,14 @@ fn ensure_no_shadow_relocation_receipts(moves: &[PlannedWaveMove]) -> Result<()>
 fn ensure_move_paths_do_not_overlap(planned: &PlannedWaveMove) -> Result<()> {
     let source_repo = Path::new(planned.wave.repo());
     let target_repo = planned.target.repo().as_path();
-    for (source, target) in [(
-        authored_path(source_repo, planned.wave.name()),
-        authored_path(target_repo, planned.target.slug()),
-    )] {
-        if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
-            return Err(anyhow!(
-                "Wave relocation paths overlap; choose a sibling locator: {} -> {}",
-                source.display(),
-                target.display()
-            ));
-        }
+    let source = authored_path(source_repo, planned.wave.slug());
+    let target = authored_path(target_repo, planned.target.slug());
+    if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
+        return Err(anyhow!(
+            "Wave relocation paths overlap; choose a sibling locator: {} -> {}",
+            source.display(),
+            target.display()
+        ));
     }
     Ok(())
 }
@@ -455,7 +434,7 @@ fn stage_wave_paths(planned: &PlannedWaveMove) -> Result<()> {
     let target_repo = planned.target.repo().as_path();
     let stale_source = !source_repo.is_dir();
     stage_tree(
-        &authored_path(source_repo, planned.wave.name()),
+        &authored_path(source_repo, planned.wave.slug()),
         &authored_path(target_repo, planned.target.slug()),
         true,
         true,
@@ -625,25 +604,18 @@ fn remove_boot_files(path: &Path) -> Result<()> {
 fn remove_old_paths(path: &RelocationPath) -> Result<()> {
     let source_repo = Path::new(&path.from_repo);
     let target_repo = Path::new(&path.to_repo);
-    for (source, target, skip_boot_files) in [(
-        authored_path(source_repo, &path.from_name),
-        authored_path(target_repo, &path.to_name),
-        true,
-    )] {
-        if source != target && source.exists() {
-            if !target.exists()
-                || tree_contents(&source, skip_boot_files)?
-                    != tree_contents(&target, skip_boot_files)?
-            {
-                return Err(anyhow!(
-                    "old Wave path changed after staging; preserving both copies: {} -> {}",
-                    source.display(),
-                    target.display()
-                ));
-            }
-            std::fs::remove_dir_all(&source)
-                .with_context(|| format!("remove old Wave path {}", source.display()))?;
+    let source = authored_path(source_repo, &path.from_name);
+    let target = authored_path(target_repo, &path.to_name);
+    if source != target && source.exists() {
+        if !target.exists() || tree_contents(&source, true)? != tree_contents(&target, true)? {
+            return Err(anyhow!(
+                "old Wave path changed after staging; preserving both copies: {} -> {}",
+                source.display(),
+                target.display()
+            ));
         }
+        std::fs::remove_dir_all(&source)
+            .with_context(|| format!("remove old Wave path {}", source.display()))?;
     }
     Ok(())
 }
@@ -656,7 +628,7 @@ fn relocation_recovery(moves: &[PlannedWaveMove]) -> RelocationRecovery {
         receipt: WaveRelocationReceipt {
             wave_id: root.wave.id().to_string(),
             from_repo: root.wave.repo().to_string(),
-            from_name: root.wave.name().to_string(),
+            from_name: root.wave.slug().to_string(),
             to_repo: root.target.repo().to_string(),
             to_name: root.target.slug().to_string(),
             waves_moved: moves.len(),
@@ -766,7 +738,7 @@ async fn recover_committed_relocation(
                 move_path.wave_id
             )
         })?;
-        if current.repo() != move_path.to_repo || current.name() != move_path.to_name {
+        if current.repo() != move_path.to_repo || current.slug() != move_path.to_name {
             return Err(anyhow!(
                 "relocation recovery cannot clean up before Wave {} reaches {}/{}",
                 current.id(),
@@ -987,7 +959,7 @@ mod tests {
             .relocate_waves(vec![WaveLocatorUpdate {
                 wave_id: wave.id().clone(),
                 expected_repo: wave.repo().to_string(),
-                expected_slug: wave.name().to_string(),
+                expected_slug: wave.slug().to_string(),
                 target,
                 retire_collision: None,
             }])

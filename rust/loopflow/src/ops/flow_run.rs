@@ -33,9 +33,7 @@ impl ActiveStep {
 
 pub(crate) fn driver_lock(id: &str) -> Result<File> {
     uuid::Uuid::parse_str(id).context("invalid Flow invocation id")?;
-    let dir = crate::store::current_home_lf_home_dir()
-        .join("flows")
-        .join(id);
+    let dir = crate::store::lf_home_dir().join("flows").join(id);
     fs::create_dir_all(&dir)?;
     let file = OpenOptions::new()
         .read(true)
@@ -70,8 +68,7 @@ pub(crate) fn capture_membership() -> Result<StepExec> {
     let Some(token) = token()? else {
         return Ok(independent);
     };
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let flow = store
         .flow(&token.invocation)?
         .with_context(|| format!("Flow {} has no invocation row", token.invocation))?;
@@ -99,7 +96,7 @@ pub(crate) async fn exec_driver(id: &str) -> Result<()> {
         .flow(id)
         .await?
         .with_context(|| format!("Flow {id} has no invocation row"))?;
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let argv = vec![
         lf.display().to_string(),
         "-b".into(),

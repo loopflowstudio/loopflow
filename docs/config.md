@@ -1,8 +1,8 @@
 # Configuration
 
 ```bash
-lf user name          # show the resolved display name
-lf user name --json   # name as a JSON string, or null when unavailable
+lf user                                # show the resolved display name
+lf user --json                         # name as a JSON string, or null when unavailable
 ```
 
 Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
@@ -34,7 +34,7 @@ submitting a prompt or resetting its participant. Agents can use a name they
 already know or the configured name; no reconciliation is required. Opening a
 session does not approve a review.
 
-`lf user name --json` resolves the name without provider or PM access.
+`lf user --json` resolves the name without provider or PM access.
 Session prompts carry the selected participant name. Stored transcripts retain
 their original wording; unnamed historical messages remain anonymous.
 
@@ -63,17 +63,68 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
+| Interactive TUI | direct TTY or `--mode interactive` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
-| Include branch files | `--diff-files` | `diff_files: true` |
-| Include raw diff | `--diff` | `diff: true` |
+| Include branch files | `--diff files` | `diff_files: true` |
+| Include raw diff | `--diff patch` | `diff: true` |
 | Include clipboard | `-c, --clipboard` | — |
 | Disable Loopflow guidance | `--no-loopflow` | — |
 | Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
-| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
+| Claude/Codex/OpenCode launch surface | `--mode tui` / `--mode ide` | `session.launch: tui` |
 | Review FlowStep terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
+
+## Context budgets
+
+```bash
+lf context                         # limits, sources, original and submitted usage
+lf context --wave intelligence     # local Wave memory and scratch
+lf context --task LOO-303 --json    # Task checkout and locally stored goal
+lf context --skill implement       # preview this skill instead of realign
+```
+
+Edit the existing repo `.lf/config.yaml`:
+
+```yaml
+context_budgets:
+  memory_tokens: 6000
+  scratch_tokens: 12000
+```
+
+Override individual fields for a Wave in `wave/<name>/GOAL.md` frontmatter:
+
+```yaml
+---
+context_budgets:
+  memory_tokens: 10000
+---
+```
+
+Each field resolves from Wave frontmatter, repo config, personal config, then
+the compiled default. `lf context` shows the winning source for every value.
+The same block supports `memory_bytes`, `scratch_bytes`, `goal_tokens`,
+`goal_bytes`, `input_tokens`, and `input_bytes`. Values must be positive integers.
+Run `lf context` to see defaults; no settings file is needed to use them.
+
+Usage covers gathered Wave memory (including applicable ancestors), recursive
+scratch Markdown, the selected Work's launch message, and total assembled input.
+Memory and Wave overrides are read from the execution checkout. Without a Task
+or Work seed, goal usage is reported as absent; arbitrary future messages cannot
+be measured. The query uses local stored Task direction without contacting Linear
+or launching a provider, and never reads the clipboard. Total usage is a headless
+preview of the selected skill, including budget feedback; a different skill,
+message, client, or launch source can change it.
+
+Original usage remains visible when launch substitutes an excerpt. Complete
+sources stay on disk at the named pointer. Prompts show the overage and require
+the next memory- or scratch-writing step to curate it. `realign`, `compress`,
+`kickoff`, and `implement` preserve live decisions while consolidating notes and
+retiring historical or stacked-parent material, then re-query usage. The query
+still reports a total-input overage when an actual launch would reject it.
+Memory curation is gradual: retire the largest stale sections to git history
+until it fits just under the effective limits. Keep live decisions and evidence
+limits; memory already within budget needs no reduction merely for size.
 
 ## Context Assembly
 
@@ -88,15 +139,16 @@ scratch        3,050 ██
 clipboard      1,234 █
 ```
 
+The provider loads `AGENTS.md` natively; Loopflow excludes it from injected files.
 The token breakdown shows what's included:
 
 | Section | What it contains | Config |
 |---------|------------------|--------|
-| **files** | Agent doc (AGENTS.md/CLAUDE.md/STYLE.md), `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
+| **files** | `LOOPFLOW.md`, `scratch/`, `wave/` | always on; `--no-loopflow` drops `LOOPFLOW.md` |
 | **scratch** | `scratch/` design artifacts | always included |
 | **wave** | `wave/` docs | always included |
 | **docs** | Explicit docs files, globs, and directory markdown walks | `docs:` |
-| **diff** | Branch diff when requested | `--diff` |
+| **diff** | Branch diff when requested | `--diff patch` |
 | **diff_files** | Files changed on this branch when requested | `diff_files: true` |
 | **summary** | Token-limited codebase overviews | `summaries:` in config |
 | **clipboard** | Pasted content (errors, context) | `-c` flag |
@@ -175,15 +227,15 @@ release:
       completion: github-release
 ```
 
-`lf release run patch --target cli` selects changes from the exact
+`lf repo run patch --target cli` selects changes from the exact
 `cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
 merged commit only after the configured workflow proves that exact candidate,
 and waits for the configured completion evidence. `area` scopes the range.
 `manifests` use Loopflow's built-in semantic-version adapters; omit them to
 auto-detect supported manifests.
 
-`verify` runs during `lf release run`, after Loopflow resolves the version and
-exact change range but before it prepares release changes. `lf release check`
+`verify` runs during `lf repo run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf check`
 only reads that evidence; it does not execute repository hooks. `prepare` runs
 after manifest bumps inside the isolated release worktree. Both hook types
 accept `{target}`, `{version}`, and `{previous_tag}` placeholders. The
@@ -240,11 +292,11 @@ Full content of files modified on the current branch.
 
 | | |
 |---|---|
-| **CLI** | `--diff-files` / `--no-diff-files` |
+| **CLI** | `--diff files` / `--diff none` |
 | **Config** | `diff_files: true` |
 | **Default** | `false` |
 
-Use `--diff-files` when the agent needs complete file bodies, not just line changes. Combine with `--diff` when the exact patch also matters.
+Use `--diff files` when the agent needs complete file bodies, not just line changes. Use `--diff both` when the exact patch also matters.
 
 ### Clipboard
 
@@ -263,11 +315,11 @@ Include `git diff main...HEAD` output showing exact line changes.
 
 | | |
 |---|---|
-| **CLI** | `--diff` / `--no-diff` |
+| **CLI** | `--diff patch` / `--diff none` |
 | **Config** | `diff: true` |
 | **Default** | `false` (not included) |
 
-Use when you want the agent to see precisely what changed. Can combine with `--diff-files`.
+Use when you want the agent to see precisely what changed. Use `--diff both` to include changed file bodies too.
 
 ### Context Files
 
@@ -341,12 +393,12 @@ This list is additive across global and repo config.
 ### Run Mode
 
 Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
+TTY. Automated flow nodes and `--mode batch` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
 |---|---|
-| **CLI** | `-i` (interactive), `-b` (batch/headless) |
+| **CLI** | `--mode interactive` (interactive), `--mode batch` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
 Flows declare a required User gate on the exact skill occurrence with a stable
@@ -358,7 +410,7 @@ Enable browser automation for Claude Code.
 
 | | |
 |---|---|
-| **CLI** | `--chrome` / `--no-chrome` |
+| **CLI** | `--chrome on` / `--chrome off` |
 | **Config** | `chrome: true` |
 | **Default** | `false` |
 
@@ -412,7 +464,7 @@ session:
 
 `tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
 Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
-link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
+link. OpenCode is terminal-only. The per-run flags `--mode tui` / `--mode ide` override
 this default.
 
 ### Summaries
@@ -434,8 +486,8 @@ Account state and repository routes are managed through CLI commands rather
 than `config.yaml`:
 
 ```bash
-lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf auth route set claude primary@ engineering@
+lf account connect claude primary@example.com --chrome-profile primary@example.com
+lf account route set claude primary@ engineering@
 lf --account primary@ implement
 ```
 
@@ -451,8 +503,8 @@ Loopflow has one external skill channel plus one compatibility shim. No config n
 - **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
-lf npx/vercel-labs/deep-research      # live fetch, cached on first run
-lf rams/rams                          # legacy compatibility alias, if installed
+lf npx/vercel-labs/deep-research       # live fetch, cached on first run
+lf rams/rams                           # legacy compatibility alias, if installed
 ```
 
 The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/skills/<namespace>/<skill>.md` (repo-local) or `~/.lf/skills/<namespace>/<skill>.md` (user-global) and invoke them as `lf <namespace>/<skill>`. Namespaced skills use `/`, not `:`.

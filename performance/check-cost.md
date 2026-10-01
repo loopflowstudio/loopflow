@@ -56,7 +56,7 @@ across Runs counts repeatedly because the model receives it repeatedly.
 | design / kickoff | Generate focused/end-to-end proof without naming its phase or runnable environment | Headless gate commands; judgment goes to demo/review |
 | gate | Run suites, then a second verify-outcome section asks for more proof | Include acceptance in one planned run; assess the results afterward |
 | LOOPFLOW.md | Universal evidence loop is paid on every Run | Compact phase ownership and headless rule |
-| CLAUDE.md → STYLE.md | Implement owns both focused proof and Done when | Sanity now, acceptance at gate; one scratch result line |
+| AGENTS.md | Implement owns both focused proof and Done when | Sanity now, acceptance at gate; one scratch result line |
 | TESTING.md / hosted UI policy | Window captures called headless; required permissioned host and five-run quota | Deny WindowServer in default tests; optional native diagnostics |
 | Intelligence memory | Historic proof limits repeatedly enter context | Preserve dated findings while explicitly removing implied per-pass obligations |
 

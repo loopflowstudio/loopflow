@@ -52,7 +52,6 @@ LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
-MACHINE_INSTALL_STATE = Path.home() / ".lf-machine" / "install" / "active.json"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
 GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
@@ -63,13 +62,6 @@ def _app_environment(repo: Path) -> dict[str, str]:
     for key in ("LF_HOME", "LF_DB_PATH"):
         if value := os.environ.get(key):
             env[key] = value
-    if not any(key in env for key in ("LF_HOME", "LF_DB_PATH")) and MACHINE_INSTALL_STATE.exists():
-        state = json.loads(MACHINE_INSTALL_STATE.read_text())
-        source = Path(state["selection"]["store"])
-        # Source CLI startup snapshots installed data into its branch Home and
-        # clears inherited execution authority before opening it.
-        env["LF_HOME"] = str(source.parent)
-        env["LF_DB_PATH"] = str(source)
     return env
 
 
@@ -562,8 +554,9 @@ def _apply_dev_identity(plist: Path) -> None:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    # UI and CLI share this checkout's protocol. Development startup copies an
-    # installed source Home into branch data without changing the live store.
+    # The app is a live operator surface even when its Swift shell is a dev
+    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # it has no authority to migrate the main Home.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",

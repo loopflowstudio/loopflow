@@ -1,11 +1,10 @@
 //! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
-//! `lf wave list` lists every durable Wave registry row and projects authored policy
-//! from `GOAL.md` plus current listener presence. `lf wave status [wave]` adds the
-//! Wave's current chapter and Tasks, the runs it has produced, what is waiting on
-//! somebody, and live loop state; with no argument it reports the Wave this
-//! process is running inside. Both are read-only; `--json` is the dashboard
-//! contract. A Wave remains visible when its chat is disconnected.
+//! `lf wave list` lists durable Wave identities, authored goals, Task counts and
+//! Home placement. `lf wave status [wave]` adds current Projects, Task conditions,
+//! metric readings and Session history; it never reads resident health or a live
+//! loop. With no argument it resolves the ambient Wave. Reads preserve missing
+//! evidence; `--json` is the dashboard contract.
 //!
 //! Evidence the machine could not read stays [`Evidence::Unavailable`] — an
 //! audit surface that renders "I could not look" as "nothing happened" is worse
@@ -60,8 +59,8 @@ pub struct WaveSnapshot {
     pub home: Home,
 }
 
-/// `lf wave status <wave>` snapshot: native Work hierarchy, the Wave's Runs, and —
-/// when a server is live — loop state. Wire type; no defaults.
+/// `lf wave status <wave>`: current planning, Task conditions and Session history.
+/// Wire type; no defaults.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
@@ -72,7 +71,7 @@ pub struct WaveDetailSnapshot {
     /// Durable Project Work that cannot join the current PM plan, including
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
-    /// This Wave's Home-local Run records, newest first.
+    /// This Wave's Home-local Session history, newest first.
     pub runs: Evidence<SessionHistory>,
 }
 
@@ -401,7 +400,8 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
         let registered = store.list_projects(Some(wave.id())).await?;
-        let projects = decode_pm_planning(wave, &row.payload)?
+        let projects = row
+            .snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
@@ -459,7 +459,7 @@ pub struct RoadmapTask {
     pub section: RoadmapSection,
 }
 
-/// `lf wave list` — every wave the registry knows, running and stopped alike.
+/// `lf wave list` — every durable Wave identity the registry knows.
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
@@ -508,7 +508,7 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
     wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
 }
 
-/// `lf wave status [wave]` — one Wave's Work hierarchy, Runs, and loop.
+/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -528,7 +528,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
                 crate::lf::commands::WorkFilter {
-                    wave: Some(wave.name()),
+                    wave: Some(wave.slug()),
                     project: None,
                     task: None,
                 },
@@ -694,9 +694,9 @@ async fn wave_tasks(
     let planning_read = if identifier.is_some() {
         store
             .pm_snapshot(wave.id())
-            .await?
-            .map(|row| decode_pm_planning(wave, &row.payload))
-            .transpose()
+            .await
+            .map(|row| row.map(|row| row.snapshot))
+            .map_err(anyhow::Error::from)
     } else {
         read_pm_planning(store, wave).await
     };
@@ -710,8 +710,8 @@ async fn wave_tasks(
             Some(match result {
                 Err(error) => error.to_string(),
                 _ => format!(
-                    "no local chapter plan; run `lf wave sync --wave {}`",
-                    wave.name()
+                    "no local chapter plan; run `lf repo refresh {}`",
+                    wave.slug()
                 ),
             }),
         ),
@@ -841,13 +841,13 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
-        name: wave.name().to_string(),
+        name: wave.slug().to_string(),
         status,
         goal: if wave.is_retired() {
-            wave.name().to_string()
+            wave.slug().to_string()
         } else {
-            crate::work::wave::config::read_wave_summary(&goal_repo, wave.name())
-                .unwrap_or_else(|_| wave.name().to_string())
+            crate::work::wave::config::read_wave_summary(&goal_repo, wave.slug())
+                .unwrap_or_else(|_| wave.slug().to_string())
         },
         repo,
         active_tasks,
@@ -894,20 +894,13 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     else {
         return Ok(None);
     };
-    let mut planning = decode_pm_planning(wave, &row.payload)?;
-    let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
+    let mut planning = row.snapshot;
+    let current = crate::ops::chapter::select_current(wave.slug(), &planning.projects)?;
     planning.projects.retain(|project| project.id == current.id);
-    planning.items.retain(|item| item.project_id == current.id);
+    planning
+        .items
+        .retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
     Ok(Some(planning))
-}
-
-fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
-    serde_json::from_str(payload).map_err(|err| {
-        anyhow!(
-            "invalid PM snapshot for wave/{}; run `lf wave sync`: {err}",
-            wave.name()
-        )
-    })
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
@@ -916,22 +909,16 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
-        let Some(row) = store
-            .pm_snapshot(wave.id())
-            .await
-            .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
-        else {
-            continue;
+        let row = match store.pm_snapshot(wave.id()).await {
+            Ok(Some(row)) => row,
+            // Each Wave reports its own unavailable planning. A malformed
+            // entity must not hide that Wave's execution or readable siblings.
+            Ok(None) | Err(_) => continue,
         };
-        let Ok(planning) = decode_pm_planning(wave, &row.payload) else {
-            // The Wave's own roadmap row reports its unreadable planning as
-            // unavailable. Keep validating every readable sibling so one stale
-            // snapshot cannot erase unrelated Work from the machine view.
-            continue;
-        };
+        let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
         ownership.validate(
-            wave.name(),
+            wave.slug(),
             &row.initiative,
             expected_team.as_deref(),
             &planning.projects,
@@ -957,7 +944,7 @@ async fn snapshot_tasks(
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        let recommended = recommended_flow(&planning.projects, &item.project_id);
+        let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         details.push(
             snapshot_task_detail(
                 store,
@@ -1000,6 +987,8 @@ async fn snapshot_tasks(
         let parent = parent
             .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
         let item = PmItem {
+            branch_name: None,
+            revision: None,
             id: task.plan.id.as_str().to_string(),
             identifier: task.plan.identifier.clone(),
             url: None,
@@ -1008,8 +997,8 @@ async fn snapshot_tasks(
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
             state: None,
-            project_id: parent.plan.id.as_str().to_string(),
-            project: parent.plan.slug.clone(),
+            project_id: Some(parent.plan.id.as_str().to_string()),
+            project: Some(parent.plan.slug.clone()),
             team_id: String::new(),
             assignee: None,
         };
@@ -1057,10 +1046,10 @@ fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence 
     }
 }
 
-fn recommended_flow(projects: &[crate::pm::PmProject], project_id: &str) -> String {
+fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>) -> String {
     projects
         .iter()
-        .find(|project| project.id == project_id)
+        .find(|project| Some(project.id.as_str()) == project_id)
         .map_or("feature", |project| project.flow.as_str())
         .to_string()
 }
@@ -1581,7 +1570,8 @@ fn next_move_for_task(
         }
         return NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
+            reason: "PR is published but settlement is not armed with `lf task pr land -c`"
+                .to_string(),
         };
     }
     let owner = NextMoveOwner::Wave;
@@ -2227,6 +2217,8 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let mut item = crate::pm::PmItem {
+            branch_name: None,
+            revision: None,
             id: "removed".into(),
             identifier: "FIX-1".into(),
             url: None,
@@ -2235,8 +2227,8 @@ mod tests {
             rank: 1,
             completed: false,
             state: Some("unstarted".into()),
-            project_id: "current".into(),
-            project: "current".into(),
+            project_id: Some("current".into()),
+            project: Some("current".into()),
             team_id: "team".into(),
             assignee: None,
         };
@@ -2251,12 +2243,12 @@ mod tests {
             provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":items})
-            .to_string(),
+            }], "items":items}))
+            .unwrap(),
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
@@ -2268,12 +2260,19 @@ mod tests {
             .unwrap();
         for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
-            let mut payload: serde_json::Value = serde_json::from_str(&stale.payload).unwrap();
-            payload["projects"][0]["id"] = serde_json::json!(project_id);
-            for item in payload["items"].as_array_mut().unwrap() {
-                item["project_id"] = serde_json::json!(project_id);
+            if project_id == "next" {
+                let mut successor = stale.snapshot.projects[0].clone();
+                successor.id = "next".into();
+                successor.slug = "next".into();
+                successor.name = "Next chapter".into();
+                stale.snapshot.projects[0].status = crate::pm::ProjectStatus::Completed;
+                stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
+                stale.snapshot.projects.push(successor);
+                for item in &mut stale.snapshot.items {
+                    item.project_id = Some(project_id.to_string());
+                    item.revision = Some("2026-09-30T00:00:01Z".into());
+                }
             }
-            stale.payload = payload.to_string();
             store.put_pm_snapshot(stale).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2329,11 +2328,11 @@ mod tests {
         ));
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
-            payload: serde_json::json!({"projects":[{
+            snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
-            }], "items":[]}).to_string(),
+            }], "items":[]})).unwrap(),
         }).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
@@ -2342,8 +2341,18 @@ mod tests {
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        unreadable.payload = "{}".into();
-        store.put_pm_snapshot(unreadable).await.unwrap();
+        unreadable.snapshot.projects.clear();
+        unreadable.snapshot.items.clear();
+        assert!(store.put_pm_snapshot(unreadable).await.is_err());
+        assert!(matches!(
+            super::project_planning(&store, &wave).await,
+            super::Evidence::Ok { items, .. } if items.len() == 1
+        ));
+        // Corrupt the stored entity directly; ingestion rejects malformed plans.
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute("UPDATE pm_projects SET body='not-json'", [])
+            .unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Unavailable { .. }

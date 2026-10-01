@@ -35,7 +35,82 @@ fn success(output: Output) -> String {
 }
 
 #[test]
-fn explicit_branch_data_overrides_inherited_observation_and_run_context() {
+fn context_budget_preview_reads_authored_wave_without_registration() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    fs::create_dir_all(home.path().join(".lf")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::create_dir_all(repo.path().join("wave/local")).unwrap();
+    fs::create_dir_all(repo.path().join("scratch")).unwrap();
+    fs::write(
+        home.path().join(".lf/config.yaml"),
+        "context_budgets:\n  memory_tokens: 500\n  scratch_tokens: 600\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "context_budgets:\n  memory_tokens: 700\n  input_tokens: 100\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("wave/local/GOAL.md"),
+        "---\ncontext_budgets:\n  memory_tokens: 400\n---\nLocal objective.\n",
+    )
+    .unwrap();
+    let memory = repo.path().join("wave/local/MEMORY.md");
+    let scratch = repo.path().join("scratch/plan.md");
+    fs::write(
+        &memory,
+        "Live decision and unresolved evidence. ".repeat(500),
+    )
+    .unwrap();
+    fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
+    let query = || -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &["context", "--wave", "local", "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap()
+    };
+    let report = query();
+    assert_eq!(report["wave"], "local");
+    let budgets = &report["context"]["budgets"];
+    for (key, value, source) in [
+        ("memory_tokens", 400, repo.path().join("wave/local/GOAL.md")),
+        ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
+        ("input_tokens", 100, repo.path().join(".lf/config.yaml")),
+    ] {
+        assert_eq!(budgets[key]["value"], value);
+        assert_eq!(
+            Path::new(budgets[key]["source"].as_str().unwrap())
+                .canonicalize()
+                .unwrap(),
+            source.canonicalize().unwrap()
+        );
+    }
+    let usage = report["context"]["usage"].as_array().unwrap();
+    for source in &usage[..2] {
+        let limit = source["token_limit"].as_u64().unwrap();
+        assert!(source["original_tokens"].as_u64().unwrap() > limit);
+        assert!(source["submitted_tokens"].as_u64().unwrap() <= limit);
+    }
+    assert!(usage.last().unwrap()["submitted_tokens"].as_u64().unwrap() > 100);
+    fs::write(memory, "Live decision retained.").unwrap();
+    fs::write(scratch, "Pending work retained.").unwrap();
+    let refreshed = query();
+    for source in &refreshed["context"]["usage"].as_array().unwrap()[..2] {
+        assert_eq!(source["original_tokens"], source["submitted_tokens"]);
+        assert!(source["original_tokens"].as_u64().unwrap() < 100);
+    }
+}
+
+#[test]
+fn explicit_home_ignores_retired_control_home_pins() {
     let home = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();
     let store_path = home.path().join(".lf/loopflow.db");
@@ -87,7 +162,6 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         "install-task",
         &repo.head_sha(),
     );
-    let store_path = home.path().join(".lf/loopflow.db");
     for (cwd, declaration, restricted) in [
         (repo.path(), None, true),
         (home.path(), Some(format!("task:{}", task.task.id)), true),
@@ -110,25 +184,10 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         let expected = if restricted {
             "Task Work cannot change"
         } else {
-            "did not converge"
+            "only a published candidate"
         };
         assert!(error.contains(expected), "{error}");
     }
-    let output = command(
-        home.path(),
-        repo.path(),
-        &[
-            "install",
-            "local-preflight",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--json",
-        ],
-    )
-    .output()
-    .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&success(output)).unwrap();
-    assert!(preview.get("compatibility").is_some());
 }
 
 #[test]
@@ -140,11 +199,11 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     for args in [
         vec!["list"],
         vec!["flow", "show", "code"],
-        vec!["flow", "validate", "code"],
-        vec!["auth", "status"],
-        vec!["auth", "status", "--details"],
-        vec!["auth", "route", "show"],
-        vec!["auth", "route", "show", "--repo", "example/project"],
+        vec!["help", "flow", "code"],
+        vec!["account", "--cached"],
+        vec!["account", "--cached", "--details"],
+        vec!["account", "route"],
+        vec!["account", "route", "--repo", "example/project"],
         vec!["wave", "list", "--json"],
         vec!["ps", "--json"],
     ] {
@@ -171,11 +230,13 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
+    let output = command(home.path(), cwd.path(), &["task", "sync", "--plan"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Run lf task sync from a Git repository")
+    );
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();
@@ -192,7 +253,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["auth", "route", "set", "claude", "person@example.com"],
+        &["account", "route", "set", "claude", "person@example.com"],
     )
     .output()
     .unwrap();

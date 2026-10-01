@@ -9,6 +9,7 @@ use std::process::Command;
 use loopflow::child::ChildRef;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::store::migrations;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, StorageConfig};
 use loopflow::work::project::{Project, ProjectEventKind, ProjectId};
@@ -94,7 +95,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
             synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -350,7 +351,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
 }
@@ -406,9 +407,11 @@ fn seed_previous_release_task_pr(home: &Path) {
         )
         .expect("read previous release frontier");
     assert_eq!(frontier, "0.12.8.001_release");
+    migrations::apply_sqlite(&connection)
+        .expect("apply published migrations to historical fixture");
     drop(connection);
 
-    let store = SqliteStore::new(&database).expect("migrate previous release store");
+    let store = SqliteStore::new(&database).expect("open migrated previous release store");
     let task_id = TaskId::parse(PERSISTED_TASK_ID).expect("recorded Task id");
     let pr = store
         .active_task_pr(&task_id)
@@ -527,7 +530,7 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
 }
 
 #[test]
-fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
+fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history() {
     let home = tempfile::tempdir().unwrap();
     let current = seed(home.path(), "current");
     let abandoned = seed(home.path(), "accidental");
@@ -556,38 +559,7 @@ fn current_wave_reads_and_forgetting_empty_registrations_share_lifecycle() {
     let rows: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["id"], current.id().as_str());
-    let preview = run(&[
-        "wave",
-        "forget",
-        abandoned.id().as_str(),
-        "--dry-run",
-        "--json",
-    ]);
-    assert!(
-        preview.status.success(),
-        "{}",
-        String::from_utf8_lossy(&preview.stderr)
-    );
     assert!(store.get_wave(abandoned.id()).unwrap().is_some());
-    let deleted = run(&["wave", "forget", abandoned.id().as_str(), "--json"]);
-    assert!(
-        deleted.status.success(),
-        "{}",
-        String::from_utf8_lossy(&deleted.stderr)
-    );
-    assert!(store.get_wave(abandoned.id()).unwrap().is_none());
-    assert!(store.get_wave(current.id()).unwrap().is_some());
-
-    assert!(store.forget_wave(current.id(), false).is_err());
-    let project = test_project(&current, "retained", OffsetDateTime::now_utc());
-    store.insert_project(&project).unwrap();
-    store
-        .abandon(
-            &loopflow::durable::WorkRef::Wave(current.id().clone()),
-            "historical",
-        )
-        .unwrap();
-    assert!(store.forget_wave(current.id(), false).is_err());
     assert!(store.get_wave(current.id()).unwrap().is_some());
 }
 
@@ -639,7 +611,7 @@ Count dispatched Task loops that settle without rescue.
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
-            payload: serde_json::to_string(&project_payload).expect("serialize PM snapshot"),
+            snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
     select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
@@ -787,15 +759,15 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
 
 #[test]
 fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
-    for payload in [None, Some("{}"), Some(r#"{"projects": [], "items": []}"#)] {
+    for payload in [None, Some("{}"), Some("not-json")] {
         let home = tempfile::tempdir().unwrap();
         seed_stale_project_work(home.path(), false);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_snapshots SET payload=?1", [payload])
+            conn.execute("UPDATE pm_projects SET body=?1", [payload])
                 .unwrap();
         } else {
-            conn.execute("DELETE FROM pm_snapshots", []).unwrap();
+            conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
@@ -852,12 +824,7 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         seed_persisted_merge_request_without_copy(home.path());
         if missing_provider_task {
             let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            connection
-                .execute(
-                    "UPDATE pm_snapshots SET payload=json_set(payload, '$.items', json('[]'))",
-                    [],
-                )
-                .unwrap();
+            connection.execute("DELETE FROM pm_items", []).unwrap();
         }
 
         let status = status_json(home.path(), &["product"], None);
@@ -1005,15 +972,13 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     );
     store.create_wave(&other).unwrap();
     let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
-    let mut payload: serde_json::Value = serde_json::from_str(&snapshot.payload).unwrap();
-    payload["projects"][0]["id"] = "other-project".into();
-    payload["projects"][0]["initiative_ids"] = serde_json::json!(["other-initiative"]);
-    payload["items"][0]["id"] = "other-task".into();
-    payload["items"][0]["project_id"] = "other-project".into();
-    payload["items"][0]["completed"] = true.into();
+    snapshot.snapshot.projects[0].id = "other-project".into();
+    snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
+    snapshot.snapshot.items[0].id = "other-task".into();
+    snapshot.snapshot.items[0].project_id = Some("other-project".into());
+    snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
-    snapshot.payload = serde_json::to_string(&payload).unwrap();
     store.put_pm_snapshot(&snapshot).unwrap();
 
     for all in [true, false] {

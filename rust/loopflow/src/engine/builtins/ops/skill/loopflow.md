@@ -26,7 +26,7 @@ Add `--all` to see every repository's review steps on this machine. The same
 repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
 status` resolves one Wave within the repository.
 
-When the User selects a Session, run `lf session open <session-id> --json`.
+When the User selects a Session, run `lf session connect <session-id> --json`.
 It prepares or recovers the boundary's AgentSession and captured input and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
@@ -37,7 +37,7 @@ installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --as <work> : "<prompt>"` contribution. `lf ask` creates a new session,
+ordinary `lf --task <task> : "<prompt>"` contribution. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
 ## Launching and advancing work
@@ -59,7 +59,7 @@ BRIEF
 For an existing Task, use its identity instead of filing another:
 
 ```bash
-lf task run <existing-issue> --flow <chosen-flow>
+lf --task <existing-issue> flow start <chosen-flow>
 ```
 
 Stdin becomes the durable Task description; `--directive` supplies worker
@@ -98,7 +98,7 @@ when the catalog or CLI version is unclear.
 For an existing invocation or an exact review:
 
 ```bash
-lf task run <issue>
+lf --task <issue> flow start
 lf session complete <session-id>
 ```
 
@@ -126,9 +126,9 @@ its maturity, and open questions. Do not invent ownership.
 
 ```bash
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
-lf task checkout <issue> --json
+lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> --flow <chosen-flow>
+lf --task <issue> flow start <chosen-flow>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs
@@ -169,23 +169,23 @@ be forwarded; durable workers use credentials installed on their Home.
 
 Prepare a Task without launching it with `lf task checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
-`lf --wave <wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
+`lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's
-`--as`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
+`--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
 Process ancestry supplies no Work attribution. A direct contribution does not
-advance the Task's selected managed Flow or claim exclusive ownership. `task run`
+advance the Task's selected managed Flow or claim exclusive ownership. `flow start`
 sets the same declaration and drives the ordinary Flow in the Task checkout.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-Use `lf task run <issue> --flow <chosen-flow>` for managed pursuit. Dependent
+Use `lf --task <issue> flow start <chosen-flow>` for managed pursuit. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, update the Task and wait for required
-contributions, then `lf task restart <issue> "<changed direction>"`. Restart
+contributions, then `lf restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
 Task worker; other attributed Flows and conversations remain independent. Reconcile prior
@@ -197,15 +197,15 @@ An explicitly selected Flow governs even when it differs from that default.
 When work seems stuck, run `lf top` before guessing; redirected output gives one
 frame. `lf ps --json` is the parseable snapshot. These show OS-live call trees,
 normalized output rates, completed token usage, age, idle time, health and PIDs.
-Time alone never means dead. `lf prune --dry-run` shows cleanup candidates;
+Time alone never means dead. `lf mon prune --dry-run` shows cleanup candidates;
 plain prune removes dead receipts and registered orphan provider groups. Never
 kill an `unclaimed` PID: ownership is not proven.
 
-Inspect `lf auth status --cached` before proposing an account repair. It is offline;
-use `lf auth status --json` for managed provider acceptance. Local
+Inspect `lf account --cached` before proposing an account repair. It is offline;
+use `lf account --json` for managed provider acceptance. Local
 service state and managed logins are separate evidence. OAuth client
 credentials resolve from environment first, then Doppler when configured. For
-a repository using Doppler, give `doppler run -- lf auth connect <provider>` when those
+a repository using Doppler, give `doppler run -- lf account connect <provider>` when those
 credentials are missing. Otherwise name the missing credential variables and
 follow the customer's secret manager. Never print values or run a secret getter
 bare. Do not change accounts or placement merely to make an inspection pass.

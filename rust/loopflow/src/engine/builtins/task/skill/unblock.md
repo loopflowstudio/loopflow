@@ -28,7 +28,7 @@ Include enough context and evidence links for a reader outside this Ask; update
 the current account without erasing useful observations. Put the exact note
 paths and a short takeaway in the completion summary.
 
-When the human has enough to finish, call `lf session ready "<summary>"` with
+When the human has enough to finish, call `lf ready "<summary>"` with
 the decision, changed assumptions or artifacts, remaining uncertainty, and next
 action. Readiness leaves the Session open. The human's Complete action returns
 the summary to the waiting caller, which reassesses the work. Do not complete

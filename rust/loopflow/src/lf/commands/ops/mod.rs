@@ -38,7 +38,11 @@ use std::time::Instant;
 pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
-        None | Some(PrCommand::Status) => pr_status(),
+        None => pr_status(),
+        Some(PrCommand::Reconcile) => {
+            crate::ops::pr_landing::reconcile_repository(&find_repo_root()?, &progress)?;
+            Ok(())
+        }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
         Some(PrCommand::Publish { model, title, body }) => publish_pr(
             title.clone(),
@@ -85,22 +89,8 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             message,
             title,
             body,
-        }) => arm_current(
-            &LandOptions {
-                strict: *strict,
-                local: *local,
-                create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
-                worktree: worktree.clone(),
-                commit_message: message.clone(),
-                pr_title: title.clone(),
-                pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
-            },
-            &progress,
-        ),
-        Some(PrCommand::Land {
+        })
+        | Some(PrCommand::Land {
             strict,
             local,
             complete,
@@ -140,7 +130,7 @@ fn pr_next(slug: Option<&str>) -> Result<()> {
         pr.branch,
         &pr.base_commit[..pr.base_commit.len().min(12)]
     );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
+    println!("Push your follow-up edits, then `lf task pr open` when ready.");
     Ok(())
 }
 
@@ -224,7 +214,7 @@ pub fn run_sync(
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
     run_sync_in(
         &repo_root,
         onto,
@@ -253,7 +243,7 @@ pub(crate) fn run_sync_in(
     }
     if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
+            "--adopt is only valid with `lf task sync --continue` or `lf task sync --abort`"
         ));
     }
     if continue_sync {
@@ -513,20 +503,11 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
-        crate::ops::pr_landing::watch_armed_pr(repo_root, options, pr, progress)?;
+        progress.status(&format!(
+            "PR #{} handed off; lf pr reconcile checks delivery.",
+            pr.number
+        ));
     }
-    Ok(())
-}
-
-fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    with_sync_retry(&repo_root, "arm", progress, |repo, integrated| {
-        if integrated {
-            finish_arm_after_sync(repo, options, progress)
-        } else {
-            arm(repo, options, progress)
-        }
-    })?;
     Ok(())
 }
 
@@ -646,19 +627,12 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_commit(
-    message: Option<&str>,
-    push: bool,
-    no_add: bool,
-    agent_override: Option<&str>,
-) -> Result<()> {
+pub fn run_commit(message: Option<&str>, no_add: bool, agent_override: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let _ = commit_workflow(
         &repo_root,
         &CommitOptions {
             add: !no_add,
-            push,
-            create_draft_pr: true,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
@@ -684,7 +658,7 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
     use crate::work::wave::context::WaveResolveError;
     match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
-        Ok(wave) => Ok(Some(wave.name().to_string())),
+        Ok(wave) => Ok(Some(wave.slug().to_string())),
         Err(WaveResolveError::NoContext) => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -703,16 +677,16 @@ pub fn connect_wave(
         crate::ops::pm::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
-        // Wave connection is a creation flow: an explicit --wave may name a
+        // Wave connection is a creation flow: its positional name may select a
         // wave not yet registered (it links a wave directory to
         // Linear, not a registry row). Normalize-only for explicit;
         // ambient still uses the shared validating resolver.
         let name = if let Some(raw) = explicit {
             crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
+                .ok_or_else(|| anyhow!("repo connect requires a non-empty wave name"))?
         } else {
             ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
+                .ok_or_else(|| anyhow!("cannot determine wave; run `lf repo connect <name>`"))?
         };
         vec![name]
     };
@@ -743,23 +717,6 @@ pub fn connect_wave(
             result.wave, result.initiative_id
         );
     }
-    Ok(())
-}
-
-pub fn rename_wave(repo_root: &std::path::Path, wave: &str, title: &str) -> Result<()> {
-    let progress = &CliProgress;
-    let result = crate::ops::pm::pm_rename(
-        repo_root,
-        &crate::ops::pm::PmRenameOptions {
-            wave: Some(wave.to_string()),
-            title: title.to_string(),
-        },
-        progress,
-    )?;
-    println!(
-        "{}: renamed Linear Initiative {} to `{}`",
-        result.wave, result.initiative, result.title
-    );
     Ok(())
 }
 
@@ -807,13 +764,32 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 }
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
-    let repo = crate::repo::working_directory()?;
     match cmd {
+        RepoCommand::Connect {
+            wave,
+            all,
+            team_key,
+            team_name,
+        } => {
+            let repo = crate::repo::working_directory()?;
+            connect_wave(
+                &repo,
+                wave.as_deref(),
+                *all,
+                team_key.as_deref(),
+                team_name.as_deref(),
+            )
+        }
+        RepoCommand::Refresh { wave, all } => {
+            let repo = crate::repo::working_directory()?;
+            sync_planning(&repo, wave.as_deref(), *all, false, false)
+        }
         RepoCommand::NewChapter {
             name,
             dry_run,
             json,
         } => {
+            let repo = crate::repo::working_directory()?;
             let rotation = crate::ops::chapter::new_chapter(&repo, name, *dry_run)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&rotation)?);
@@ -834,7 +810,16 @@ pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
             }
             Ok(())
         }
+        RepoCommand::Release { cmd } => run_release(cmd),
+        RepoCommand::Tokens { json, days } => crate::lf::commands::tokens::run(*json, *days),
+        RepoCommand::Ci {
+            since,
+            wave,
+            repo,
+            json,
+        } => crate::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         RepoCommand::Reteam { apply } => {
+            let repo = crate::repo::working_directory()?;
             let result = crate::ops::pm::pm_reteam(
                 &repo,
                 &crate::ops::pm::PmReteamOptions { apply: *apply },
@@ -932,7 +917,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 Some(&repo_root),
                 wave.as_deref(),
             )
-            .map(|wave| wave.name().to_string())
+            .map(|wave| wave.slug().to_string())
             .map_err(|err| match err {
                 crate::work::wave::context::WaveResolveError::NoContext => {
                     anyhow!("cannot determine wave; pass --wave <name>")
@@ -996,7 +981,33 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 authority.local_home
             );
         }
-        CronCommand::Sync { wave } => {
+        CronCommand::Sync {
+            wave,
+            repo,
+            disable,
+        } => {
+            if *repo {
+                require_release_cron_binary()?;
+                let authority = cron_authority("")?;
+                let key =
+                    crate::ops::cron::repository_cron_key(&authority.repo, &authority.local_home);
+                if *disable {
+                    crate::ops::remove_cron(&launch_agents_dir, "", &key, &SystemLaunchctl)?;
+                } else {
+                    let spec = CronSpec {
+                        wave: String::new(),
+                        flow: key,
+                        target_kind: CronTargetKind::Repository,
+                        schedule: crate::ops::parse_schedule("every-minute")?,
+                        working_directory: authority.repo,
+                        lf_path: crate::ops::resolve_lf_path()?,
+                        host: authority.host,
+                    };
+                    crate::ops::add_cron(&launch_agents_dir, &spec, &SystemLaunchctl)?;
+                }
+                return Ok(());
+            }
+            let wave = wave.as_deref().expect("clap requires Wave or repository");
             require_release_cron_binary()?;
             let authority = cron_authority(wave)?;
             ensure_cron_placement(wave, &authority)?;
@@ -1066,7 +1077,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             days,
             json,
         } => {
-            let root = crate::ops::receipt_root(&crate::store::authority_home_dir());
+            let root = crate::ops::receipt_root(&crate::store::lf_home_dir());
             let receipts = crate::ops::list_cron_receipts(&root, wave, flow.as_deref(), *days)?;
             if *json {
                 println!("{}", serde_json::to_string(&receipts)?);
@@ -1167,23 +1178,22 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         let store = crate::store::open_registry_for_authority()
             .await
             .map_err(cron_registry_error)?;
-        let wave = crate::work::wave::context::resolve_managed_wave(
-            Some(&store),
-            Some(&repo_root),
-            Some(wave_name),
-            None,
-        )
-        .await?;
-        let placement = store
-            .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
-            .await?;
         let local = store.local_home().await?;
-        let repo = main_repo_root(Path::new(wave.repo())).map_err(|error| {
-            anyhow!(
-                "Wave {wave_name} repo {} has no authoritative main checkout: {error}",
-                wave.repo()
+        let (repo, placed_home) = if wave_name.is_empty() {
+            (main_repo_root(&repo_root)?, local.id.clone())
+        } else {
+            let wave = crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(&repo_root),
+                Some(wave_name),
+                None,
             )
-        })?;
+            .await?;
+            let placement = store
+                .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+                .await?;
+            (main_repo_root(Path::new(wave.repo()))?, placement.home_id)
+        };
         let path_env = std::env::var("PATH").map_err(|_| {
             anyhow!("PATH is absent; cannot install an unattended cron environment")
         })?;
@@ -1195,12 +1205,12 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         Ok(CronAuthority {
             host: CronHost {
                 home_id: local.id.clone(),
-                lf_home: crate::store::authority_home_dir(),
-                db_path: crate::store::observability_database_path()?,
+                lf_home: crate::store::lf_home_dir(),
+                db_path: crate::store::database_path_from_env()?,
                 path_env,
             },
             local_home: local.id,
-            placed_home: placement.home_id,
+            placed_home,
             repo,
         })
     })
@@ -1247,7 +1257,7 @@ fn scheduled_release_prefers_its_operation_flow_over_the_builtin_skill() {
     std::fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
     std::fs::write(
         repo.path().join(".lf/flows/release-run.yaml"),
-        "- cmd: release run patch\n",
+        "- cmd: repo release run patch\n",
     )
     .unwrap();
     assert_eq!(
@@ -1506,7 +1516,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
     match cmd {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
-        WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
+        WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
@@ -1583,6 +1593,10 @@ fn placement_strategy_name(strategy: &PlacementStrategy) -> &'static str {
 use crate::ops::telemetry::record_ops_metric;
 
 fn wt_switch(name: &str) -> Result<()> {
+    cd_directive(&resolve_worktree(name)?)
+}
+
+pub fn resolve_worktree(name: &str) -> Result<PathBuf> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let worktrees = list_worktrees(&main_repo)?;
@@ -1621,7 +1635,7 @@ fn wt_switch(name: &str) -> Result<()> {
         }
     };
 
-    cd_directive(&path)
+    Ok(path)
 }
 
 fn cd_directive(path: &Path) -> Result<()> {
@@ -1631,7 +1645,7 @@ fn cd_directive(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
+fn wt_list(json: bool, sync: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
     let default_branch = get_default_branch(&main_repo)?;
@@ -1645,7 +1659,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     }
     let worktrees = list_worktrees(&main_repo)?;
 
-    if matches!(format, Some("json")) {
+    if json {
         let json = serde_json::to_string_pretty(&worktrees)?;
         println!("{}", json);
         return Ok(());
@@ -1917,9 +1931,9 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
         }
     }
 
-    // A development binary owns an isolated `.lf-dev` registry, but pruning is
+    // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
+    // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(

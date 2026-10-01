@@ -19,7 +19,7 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf task run INF-123
+lf --task INF-123 flow start
 ```
 
 A Skill supplies instructions; a Flow composes skills, mechanical operations and
@@ -60,9 +60,9 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run the skill
-lf audit: focus on auth       # pass arguments
-lf : "fix the typo in README" # or skip the file entirely
+lf audit                               # run the skill
+lf audit: focus on auth                # pass arguments
+lf : "fix the typo in README"          # or skip the file entirely
 ```
 
 A flow chains skills with commits between them:
@@ -85,15 +85,15 @@ adds flow and goal structure only where it earns its place.
 
 ## Context
 
-Every skill sees your agent doc (`AGENTS.md` / `CLAUDE.md`), `LOOPFLOW.md`,
-`scratch/`, and `wave/`. Nothing else is auto-injected — pull in more
-explicitly:
+The provider loads `AGENTS.md` natively; Loopflow does not inject it again.
+Every skill also sees `LOOPFLOW.md`, `scratch/`, and `wave/`.
+Pull in more context explicitly:
 
 ```bash
-lf gate --docs VISUAL_DESIGN.md      # one doc
-lf gate --docs 'docs/*.md'           # a glob
-lf gate --diff-files                 # bodies of files changed on the branch
-lf debug -c                          # the clipboard
+lf gate --docs VISUAL_DESIGN.md        # one doc
+lf gate --docs 'docs/*.md'             # a glob
+lf gate --diff files                   # bodies of files changed on the branch
+lf debug -c                            # the clipboard
 lf token-compress --docs RELEASE_NOTES.md: fit this history into 2,000 tokens
 ```
 

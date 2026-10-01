@@ -1,23 +1,26 @@
-#[path = "support/installation.rs"]
-mod installation;
 mod support;
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
 
-use loopflow::machine_install::{
-    self, ActivationTargets, ArtifactRole, MachineInstallState, RecoveryOwner, SwitchPhase,
-    SwitchReceipt,
-};
-use loopflow::ops::task::{task_snapshot, task_status};
+use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
-use loopflow::store::PmSnapshotRow;
 use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
-use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 use support::{register_unrun_task, EnvGuard};
+
+fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(cli);
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LF_") {
+            command.env_remove(name);
+        }
+    }
+    command.current_dir(repo).args(args);
+    command
+}
 
 #[test]
 fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
@@ -125,19 +128,15 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     fs::write(repo.path().join("main-notes"), "keep main edits").unwrap();
     fs::write(invoking.join("caller-notes"), "keep caller edits").unwrap();
     let checkout = || {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_") {
-                command.env_remove(name);
-            }
-        }
-        command
-            .current_dir(&invoking)
-            .args(["task", "checkout", "INF-123", "--json"])
-            .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
-            .output()
-            .unwrap()
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            &invoking,
+            &["task", "checkout", "INF-123", "--json"],
+        )
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", home.path().join("loopflow.db"))
+        .output()
+        .unwrap()
     };
     let first = checkout();
     assert!(
@@ -224,552 +223,9 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     );
 }
 
-fn retain_installation_and_select_store(store: &std::path::Path) {
-    let root = machine_install::root().unwrap();
-    let MachineInstallState::Settled(mut active) = machine_install::read_state(&root).unwrap()
-    else {
-        panic!("fixture has a settled installation");
-    };
-    let receipt = SwitchReceipt {
-        schema_version: 1,
-        id: "task-proof-retained".into(),
-        prior: Some(active.selection.clone()),
-        target: active.selection.clone(),
-        published_fallback: Some(active.published_fallback.clone()),
-        target_published_fallback: None,
-        phase: SwitchPhase::Settled,
-        recovery_owner: RecoveryOwner::Candidate,
-        target_store_advance_started: true,
-        target_store_advanced: true,
-        active_selection_committed: true,
-        coordinator: active
-            .selection
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .unwrap()
-            .clone(),
-        candidate: active
-            .selection
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .unwrap()
-            .clone(),
-        activation: ActivationTargets {
-            cli: root.join("lf"),
-            daemon: None,
-            app: None,
-            legacy_app: None,
-        },
-        app_was_running: false,
-        disposable_store_owned: false,
-    };
-    receipt.validate().unwrap();
-    fs::create_dir_all(root.join("receipts")).unwrap();
-    fs::write(
-        root.join("receipts/task-proof-retained.json"),
-        serde_json::to_vec(&receipt).unwrap(),
-    )
-    .unwrap();
-    active.selection.installation_id = "task-proof-later".into();
-    active.selection.store = store.to_path_buf();
-    active.validate().unwrap();
-    // Author historical installation evidence; this fixture does not run promotion.
-    fs::write(
-        root.join("active.json"),
-        serde_json::to_vec(&active).unwrap(),
-    )
-    .unwrap();
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn incompatible_branch_data_recommends_only_a_verified_retained_pair() {
-    let home = tempfile::tempdir().unwrap();
-    let private_home = tempfile::tempdir().unwrap();
-    let later_home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let installed_db = home.path().join("loopflow.db");
-    let private_db = private_home.path().join("loopflow.db");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    drop(
-        runtime
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(installed_db.clone()),
-            ))
-            .unwrap(),
-    );
-    let installation = installation::Installation::new(home.path());
-    let source =
-        Connection::open_with_flags(&installed_db, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    let mut private = Connection::open(&private_db).unwrap();
-    Backup::new(&source, &mut private)
-        .unwrap()
-        .run_to_completion(4096, Duration::from_millis(10), None)
-        .unwrap();
-    let sql = "CREATE TABLE future_notes (note TEXT);";
-    let checksum = hex::encode(Sha256::digest(sql.as_bytes()));
-    private.execute_batch(sql).unwrap();
-    private
-        .execute(
-            "INSERT INTO future_notes VALUES ('independent branch work')",
-            [],
-        )
-        .unwrap();
-    private
-        .execute_batch(
-            "CREATE TABLE IF NOT EXISTS development_migrations (
-            position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL
-        );",
-        )
-        .unwrap();
-    private.execute(
-        "INSERT INTO development_migrations SELECT COUNT(*), '33333333333333333333333333333333', 'future_notes', ?1, 1 FROM development_migrations",
-        [&checksum],
-    ).unwrap();
-    private
-        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE);")
-        .unwrap();
-    drop(private);
-    drop(source);
-    let bytes = || {
-        [
-            std::fs::read(&installed_db).unwrap(),
-            std::fs::read(&private_db).unwrap(),
-        ]
-    };
-    let refuse = || {
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["home", "id", "--json"])
-            .env("LF_HOME", private_home.path())
-            .env("LF_DB_PATH", &private_db)
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        let message = String::from_utf8(output.stderr).unwrap();
-        assert!(
-            message.contains(private_home.path().to_str().unwrap()),
-            "{message}"
-        );
-        assert!(message.contains(private_db.to_str().unwrap()), "{message}");
-        assert!(message.contains("future_notes"), "{message}");
-        assert!(message.contains(&checksum), "{message}");
-        assert!(!message.contains("--fresh"), "{message}");
-        message
-    };
-    let before = bytes();
-    let message = refuse();
-    assert!(message.contains("Verified retained pair:"), "{message}");
-    assert!(
-        message.contains(installation.cli.to_str().unwrap()),
-        "{message}"
-    );
-    assert!(
-        message.contains(installed_db.to_str().unwrap()),
-        "{message}"
-    );
-    assert_eq!(bytes(), before);
-
-    // A historical pair remains recoverable even when the current Home is newer.
-    let later_db = later_home.path().join("loopflow.db");
-    drop(
-        runtime
-            .block_on(loopflow::store::open_ephemeral_store(
-                &loopflow::store::StorageConfig::sqlite(later_db.clone()),
-            ))
-            .unwrap(),
-    );
-    let later = Connection::open(&later_db).unwrap();
-    later
-        .execute_batch("CREATE TABLE newer_installed_data (note TEXT);")
-        .unwrap();
-    drop(later);
-    let later_bytes = std::fs::read(&later_db).unwrap();
-    retain_installation_and_select_store(&later_db);
-    let message = refuse();
-    assert!(message.contains("Verified retained pair:"), "{message}");
-    assert!(message.contains("--reuse-home 'task-proof'"), "{message}");
-    assert!(message.contains("--cli-target"), "{message}");
-    assert!(!message.contains("--daemon-target"), "{message}");
-    assert!(message.contains("--preview"), "{message}");
-    assert_eq!(bytes(), before);
-    assert_eq!(std::fs::read(&later_db).unwrap(), later_bytes);
-
-    // The same retained bytes must not be recommended after their database changes.
-    let changed = Connection::open(&installed_db).unwrap();
-    changed
-        .execute_batch("CREATE TABLE unrecognized_installed_data (note TEXT);")
-        .unwrap();
-    drop(changed);
-    let before = bytes();
-    let message = refuse();
-    assert!(
-        message.contains("No compatible retained executable/database pair was verified"),
-        "{message}"
-    );
-    assert!(!message.contains("Verified retained pair:"), "{message}");
-    assert_eq!(bytes(), before);
-
-    std::fs::rename(
-        &installation.cli,
-        installation.cli.with_extension("retained"),
-    )
-    .unwrap();
-    let message = refuse();
-    assert!(
-        message.contains("No compatible retained executable/database pair was verified"),
-        "{message}"
-    );
-    assert_eq!(bytes(), before);
-    let private =
-        Connection::open_with_flags(&private_db, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    assert_eq!(
-        private
-            .query_row("SELECT note FROM future_notes", [], |row| row
-                .get::<_, String>(0))
-            .unwrap(),
-        "independent branch work"
-    );
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn task_review_completion_consumes_only_installed_readiness() {
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let repo = TestRepo::new();
-    repo.create_branch("jack/review-installation");
-    let task = register_unrun_task(
-        home.path(),
-        repo.path(),
-        "jack/review-installation",
-        &repo.head_sha(),
-    );
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let position = loopflow::durable::FlowSession {
-        task_id: Some(task.task.id.clone()),
-        wave_id: Some(task.task.wave_id.clone()),
-        cwd: task.task.worktree.clone(),
-        message: None,
-        model: None,
-        current_attempt: None,
-        pending_session_id: None,
-        finished: false,
-        invocation: loopflow::engine::invocation::QueuedInvocation::load(
-            repo.path(),
-            "task-design",
-        )
-        .unwrap(),
-        ready_summary: None,
-        cursor: loopflow::engine::ExecutionCursor {
-            index: 1,
-            ..Default::default()
-        },
-        version: 0,
-        worker_generation: 0,
-        claim: None,
-        failure: None,
-        updated_at: time::OffsetDateTime::now_utc(),
-    };
-    let position = runtime
-        .block_on(task.store.start_task_flow(&task.task.id, position))
-        .unwrap();
-    // This proof consumes an existing review's readiness. Seed its acknowledged
-    // launch, without starting a terminal or provider in the installation fixture.
-    let position = runtime
-        .block_on(
-            task.store
-                .reserve_task_review(position.id(), position.version),
-        )
-        .unwrap();
-    let (_, review) = runtime
-        .block_on(task.store.reserve_review_run(&position))
-        .unwrap();
-    assert_eq!(
-        Connection::open(home.path().join("loopflow.db"))
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET input_published=1, provider='claude', model='sonnet' WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
-                [review.artifact_key.as_str()],
-            )
-            .unwrap(),
-        1
-    );
-    let installation = installation::Installation::new(home.path());
-    let command = |cli: &std::path::Path, selected_home: &std::path::Path, args: &[&str]| {
-        let mut command = Command::new(cli);
-        command
-            .args(args)
-            .current_dir(repo.path())
-            .env("LF_HOME", selected_home)
-            .env("LF_DB_PATH", selected_home.join("loopflow.db"));
-        command
-    };
-    let branch = std::path::Path::new(env!("CARGO_BIN_EXE_lf"));
-    // Inheriting installed data must seed a private copy, then run against installation.
-    let started = command(
-        branch,
-        home.path(),
-        &["-m", "claude:sonnet", "task", "run", "INF-123", "--json"],
-    )
-    .env("LF_BIN", branch)
-    .output()
-    .unwrap();
-    assert!(
-        started.status.success(),
-        "{}",
-        String::from_utf8_lossy(&started.stderr)
-    );
-    let snapshot: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
-    assert_eq!(snapshot["agent"], "claude:sonnet");
-    assert_eq!(snapshot["provider"], "claude");
-    let report = String::from_utf8(started.stderr).unwrap();
-    let branch_data = std::path::Path::new(
-        report
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("Branch lf is using data directory ")?
-                    .split_once("; installed store")
-                    .map(|(path, _)| path)
-            })
-            .expect("branch reports its private copy"),
-    );
-    let position = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert!(position.review_artifact_key().is_some());
-    let repeated = command(branch, home.path(), &["task", "run", "INF-123", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        repeated.status.success(),
-        "{}",
-        String::from_utf8_lossy(&repeated.stderr)
-    );
-    let resumed = runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    assert_eq!(resumed.invocation, position.invocation);
-    assert_eq!(resumed.cursor, position.cursor);
-    assert_eq!(
-        resumed.review_artifact_key(),
-        position.review_artifact_key()
-    );
-    for (cli, expected) in [
-        (
-            installation.cli.as_path(),
-            serde_json::json!("claude:sonnet"),
-        ),
-        (branch, serde_json::Value::Null),
-    ] {
-        let status = command(cli, home.path(), &["task", "status", "INF-123", "--json"])
-            .output()
-            .unwrap();
-        assert!(
-            status.status.success(),
-            "{}",
-            String::from_utf8_lossy(&status.stderr)
-        );
-        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        assert_eq!(status["agent"], expected);
-    }
-    // The private snapshot has no installed input bundle or completion authority.
-    let branch_store = runtime
-        .block_on(loopflow::store::open_store(
-            &loopflow::store::StorageConfig::sqlite(branch_data.join("loopflow.db")),
-        ))
-        .unwrap();
-    let session_id = position.pending_session_id.as_ref().unwrap();
-    let session = runtime
-        .block_on(task.store.session(session_id))
-        .unwrap()
-        .unwrap();
-    runtime
-        .block_on(branch_store.ready_session(
-            &session.id,
-            session.captured,
-            "Branch-only feedback must stay private",
-        ))
-        .unwrap();
-    let copied = runtime
-        .block_on(branch_store.task_flow(&task.task.id))
-        .unwrap()
-        .unwrap();
-    let branch_events = runtime
-        .block_on(branch_store.task_events_after(&task.task.id, 0))
-        .unwrap();
-    // A bad replacement delegates first, then refuses before any installed
-    // refresh, checkpoint, or stop. Neither copy loses its saved review.
-    let head = repo.head_sha();
-    let rejected = command(
-        branch,
-        branch_data,
-        &["task", "restart", "INF-123", "--flow", "missing-flow"],
-    )
-    .output()
-    .unwrap();
-    assert!(!rejected.status.success());
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr).contains("missing-flow"),
-        "{}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
-    assert_eq!(
-        runtime
-            .block_on(task.store.task_flow(&task.task.id))
-            .unwrap()
-            .unwrap(),
-        resumed
-    );
-    assert_eq!(repo.head_sha(), head, "no restart checkpoint was committed");
-    let step = position.current();
-    let node = step.id.as_ref().unwrap();
-    let boundary = format!(
-        "{}:{}:{}:{}:{}",
-        task.task.id, position.invocation.id, step.flow, node, position.cursor.iteration
-    );
-    let complete = |id: &str| {
-        command(branch, branch_data, &["session", "complete", id])
-            .output()
-            .unwrap()
-    };
-    let rejected = complete(&boundary);
-    assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("has not marked this ready"));
-    assert_eq!(
-        runtime
-            .block_on(task.store.task_flow(&task.task.id))
-            .unwrap()
-            .unwrap(),
-        position
-    );
-    assert_eq!(
-        runtime
-            .block_on(branch_store.task_flow(&task.task.id))
-            .unwrap()
-            .unwrap(),
-        copied
-    );
-
-    let loopflow::engine::ConcreteStep::Skill(planned) = position.current_plan() else {
-        panic!("review skill")
-    };
-    let mut token = serde_json::json!({"kind": "flow", "token": {
-        "task_id": task.task.id, "invocation_id": position.invocation.id,
-        "flow": step.flow, "node_id": node, "skill": planned.skill,
-        "iteration": position.cursor.iteration + 1,
-    }});
-    let ready = |token: &serde_json::Value| {
-        command(
-            &installation.cli,
-            home.path(),
-            &["session", "ready", "Installed feedback"],
-        )
-        .env(
-            "LF_RUN_ID",
-            position.review_artifact_key().unwrap().as_str(),
-        )
-        .env("LF_HUMAN_SESSION", token.to_string())
-        .output()
-        .unwrap()
-    };
-    let stale = ready(&token);
-    assert!(!stale.status.success());
-    assert!(
-        String::from_utf8_lossy(&stale.stderr).contains("Session is stale"),
-        "{}",
-        String::from_utf8_lossy(&stale.stderr)
-    );
-    assert_eq!(
-        runtime
-            .block_on(task.store.task_flow(&task.task.id))
-            .unwrap()
-            .unwrap(),
-        position
-    );
-    token["token"]["iteration"] = position.cursor.iteration.into();
-    let ready = ready(&token);
-    assert!(
-        ready.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ready.stderr)
-    );
-    // Both public selectors must resolve the same installed review boundary.
-    let accepted = complete(position.review_artifact_key().unwrap().as_str());
-    assert!(
-        accepted.status.success(),
-        "{}",
-        String::from_utf8_lossy(&accepted.stderr)
-    );
-    assert!(runtime
-        .block_on(task.store.task_flow(&task.task.id))
-        .unwrap()
-        .is_none());
-    let events = runtime
-        .block_on(task.store.task_events_after(&task.task.id, 0))
-        .unwrap();
-    let finished: Vec<_> = events
-        .iter()
-        .filter_map(|event| match &event.kind {
-            TaskEventKind::FlowFinished {
-                invocation_id,
-                summary,
-                ..
-            } => Some((invocation_id.as_str(), summary.as_str())),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        finished,
-        [(position.invocation.id.as_str(), "Installed feedback")]
-    );
-    assert_eq!(
-        runtime
-            .block_on(branch_store.task_flow(&task.task.id))
-            .unwrap()
-            .unwrap(),
-        copied
-    );
-    assert_eq!(
-        runtime
-            .block_on(branch_store.task_events_after(&task.task.id, 0))
-            .unwrap(),
-        branch_events
-    );
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn direct_open_preserves_another_installations_development_store() {
-    let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    let database = home.path().join("loopflow.db");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let store = runtime
-        .block_on(loopflow::store::open_ephemeral_store(
-            &loopflow::store::StorageConfig::sqlite(database.clone()),
-        ))
-        .unwrap();
-    let _installation = installation::Installation::new(home.path());
-    let bytes = || {
-        ["loopflow.db", "loopflow.db-wal", "loopflow.db-shm"]
-            .map(|name| std::fs::read(home.path().join(name)).ok())
-    };
-    let before = bytes();
-    let error = loopflow::store::sqlite::SqliteStore::new(&database).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("belongs to another installation"));
-    assert_eq!(bytes(), before);
-    drop(store);
-}
-
 #[test]
 fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
     use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
-    use sha2::{Digest, Sha256};
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
@@ -915,7 +371,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let stale = runtime
             .block_on(task.store.create_session(stale, None))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
         let current = runtime
             .block_on(
@@ -924,6 +380,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             )
             .unwrap();
         let status = read(&status_args);
+        let status = &status["execution"];
         assert_eq!(status["execution"]["state"], "blocked");
         assert_eq!(status["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         assert!(status["execution"]["reason"]
@@ -953,7 +410,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         runtime
             .block_on(task.store.complete_session(&session, current.captured))
             .unwrap();
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         assert_eq!(
             runtime
                 .block_on(task.store.task_flow(&task.task.id))
@@ -973,7 +430,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             runtime
                 .block_on(task.store.create_session(other, None))
                 .unwrap();
-            assert_eq!(read(&status_args)["execution"]["state"], "running");
+            assert_eq!(read(&status_args)["execution"]["execution"]["state"], "running");
         }
         // The body is real; the five-minute observation history is simulated.
         struct SleepingBody(std::process::Child);
@@ -998,6 +455,7 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         });
         std::fs::write(run_dir.join("events.jsonl"), format!("{observation}\n")).unwrap();
         let stalled = read(&status_args);
+        let stalled = &stalled["execution"];
         let desktop = read(&["roadmap", "--json"]);
         drop(body);
         assert_eq!(stalled["execution"]["state"], "stalled");
@@ -1041,45 +499,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .expect("publish initialization marker");
     std::fs::create_dir_all(&missing_worktree)
         .expect("simulate a partially created worktree directory");
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .expect("read owning Project")
-        .expect("owning Project exists");
-    let payload = serde_json::json!({
-        "projects": [{
-            "id": project.plan.id.as_str(),
-            "slug": project.plan.slug,
-            "name": project.plan.name,
-            "summary": project.plan.prompt_context,
-            "metric_targets": [],
-            "flow": "feature", "status": "started",
-            "krs": [],
-            "initiative_ids": ["initialization-initiative"],
-            "team_ids": ["initialization-team"]
-        }],
-        "items": [{
-            "id": task.task.plan.id.as_str(),
-            "identifier": task.task.plan.identifier,
-            "url": null,
-            "name": task.task.plan.title,
-            "description": task.task.plan.description,
-            "rank": 1,
-            "completed": false,
-            "project_id": project.plan.id.as_str(),
-            "project": project.plan.slug,
-            "team_id": "initialization-team",
-            "assignee": null
-        }]
-    });
-    runtime
-        .block_on(task.store.put_pm_snapshot(PmSnapshotRow {
-            wave_id: task.task.wave_id.clone(),
-            provider: "linear".to_string(),
-            initiative: "initialization-initiative".to_string(),
-            synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
-        }))
-        .expect("seed roadmap planning");
     let run_lf = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
@@ -1096,9 +515,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
+    let status = &status["execution"];
     assert_eq!(status["execution"]["state"], "idle");
-    assert_eq!(status["runs"], serde_json::json!([]));
-    assert_eq!(status["runs_truncated"], false);
+    assert_eq!(status["work"]["sessions"], serde_json::json!([]));
+    assert_eq!(status["work"]["flows"], serde_json::json!([]));
     assert_eq!(status["actions"]["recommended"], "no_action");
     assert!(status["actions"]["reason"]
         .as_str()
@@ -1130,8 +550,10 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .as_str()
         .expect("roadmap condition reason")
         .contains("is initializing worktree"));
-    let projected = task_snapshot(&task_status(Some("INF-123")).expect("read Task"))
-        .expect("project Task status");
+    let projected = task_status(repo.path(), Some("INF-123"))
+        .expect("read Task")
+        .execution
+        .expect("execution");
     assert_eq!(projected.actions.recommended, Some(TaskAction::NoAction));
 
     rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1151,6 +573,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale: serde_json::Value =
         serde_json::from_slice(&stale.stdout).expect("stale status JSON");
+    let stale = &stale["execution"];
     assert_eq!(stale["actions"]["recommended"], "no_action");
     assert!(stale["actions"]["reason"]
         .as_str()
@@ -1193,8 +616,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs before status");
 
-    let status = task_status(Some("INF-123")).expect("status survives the absent worktree");
-    let snapshot = task_snapshot(&status).expect("project missing-worktree status");
+    let snapshot = task_status(&missing_path, Some("INF-123"))
+        .expect("status survives the absent worktree")
+        .execution
+        .expect("execution");
 
     assert_eq!(snapshot.actions.recommended, Some(TaskAction::NoAction));
     assert!(snapshot
@@ -1202,7 +627,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .reason
         .contains(&missing_path.display().to_string()));
     assert!(snapshot.actions.reason.contains(&branch));
-    assert!(snapshot.actions.reason.contains("lf task run INF-123"));
+    assert!(snapshot
+        .actions
+        .reason
+        .contains("lf --task INF-123 flow start"));
     assert!(snapshot
         .actions
         .reason

@@ -20,16 +20,18 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf sync --plan                       # inspect integration strategy
-lf sync                              # apply it
+lf task sync --plan                  # inspect integration strategy
+lf task sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf pr submit                         # prepare for the user's merge click
-lf pr arm                            # prepare and request auto-merge; return
-lf pr land                           # watch CI, repair, and finish merged
+lf submit                         # prepare for the user's merge click
+lf arm                            # prepare and request auto-merge; return
+lf land                           # record delivery and return
+lf pr reconcile                      # check delivery once; repair or settle merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
+for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
+settles verified merges. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
@@ -106,7 +108,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+memories live in nested directories; discover relevant ones with ordinary
+filesystem tools. Do not create
 miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
 skills.
 
@@ -117,7 +121,7 @@ conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary contribution explicitly with
-`lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
+`lf --task <task> : "<prompt>"`. When progress genuinely requires a decision from the user,
 run `lf ask "<exact request>"`. It opens a durable session in this
 checkout and blocks until the user completes the conversation. The session
 agent marking itself ready does not complete or remove the session.
@@ -134,31 +138,24 @@ The current conversation participant's display name is "Fixture Participant" (JS
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Wave context is included in docs below.
-
-## Wave memory
-
-Persistent memory at wave/rust/MEMORY.md. Use the supplied memory; read relevant omitted
-sections when an excerpt names them. Its current
-contents, when any, ride this prompt's wave-memory section.
-Edit it through the ordinary repository workflow; no live Wave is required.
-`realign` reconciles memory with the plan and code. Keep durable observations,
-correct or remove stale entries, and drop session-specific notes. Use absolute dates.
-
-Organize as useful, for example:
-- Patterns: codebase conventions, architecture, how things connect
-- Preferences: user workflow, tool choices, communication norms
-- Learnings: what worked, what failed, surprises
-
-Keep memory compact enough for every iteration. Put architectural decisions
-in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.
-As sections grow, promote stable entries to wave docs or explicit docs and trim.
+Curate wave/rust/MEMORY.md in this checkout. Ancestor files provide inherited context.
+Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 
-<lf:wave-memory>
+Reference files for this task. Includes parent documentation for context.
+<lf:files>
+<lf:file path="wave/rust/README.md">
+# Rust Roadmap
+
+Overview of Rust work.
+
+</lf:file>
+<lf:file path="wave/rust/MEMORY.md">
 - Keep prompts concise and concrete.
 - Prefer behavior-focused tests over mock wiring.
-</lf:wave-memory>
+
+</lf:file>
+</lf:files>
 
 Scratch reference material: design artifacts and working notes.
 Use these files for intent, accepted decisions, remaining work, and evidence.
@@ -177,12 +174,6 @@ Current design notes.
 
 Reference files for this task. Includes parent documentation for context.
 <lf:files>
-<lf:file path="wave/rust/README.md">
-# Rust Roadmap
-
-Overview of Rust work.
-
-</lf:file>
 <lf:file path="README.md">
 # Test Repo
 

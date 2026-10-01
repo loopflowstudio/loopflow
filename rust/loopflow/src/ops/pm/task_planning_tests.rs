@@ -13,7 +13,6 @@ use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
 use crate::child::ChildRef;
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
-use crate::pm::PmSnapshot;
 use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
@@ -75,6 +74,26 @@ struct PlanningState {
     move_on_attachment_read: bool,
 }
 
+fn mark_issue_updated(issue: &mut serde_json::Value) {
+    issue["updatedAt"] = json!(time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap());
+}
+
+fn planning_project(id: &str, current: &str) -> serde_json::Value {
+    let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
+    let name = match id {
+        "project-1" => "Chapter",
+        "prior-project" => "Previous chapter",
+        _ => "Next chapter",
+    };
+    json!({"id":id, "name":name, "description":"", "content":"flow: feature",
+        "status":{"type":if completed { "completed" } else { "started" }},
+        "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
+        "archivedAt":null,
+        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}})
+}
+
 async fn planning_graphql(
     axum::extract::State(state): axum::extract::State<Arc<tokio::sync::Mutex<PlanningState>>>,
     axum::Json(request): axum::Json<serde_json::Value>,
@@ -88,17 +107,10 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| "project-1".into());
-    let project_name = if project_id == "project-1" {
-        "Chapter"
-    } else {
-        "Next chapter"
-    };
-    let project_name = state
-        .project_name
-        .clone()
-        .unwrap_or_else(|| project_name.into());
-    let project = json!({"id":project_id, "name":project_name, "description":"", "content":"flow: feature", "status":{"type":"started"},
-        "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
+    let mut project = planning_project(&project_id, &project_id);
+    if let Some(name) = &state.project_name {
+        project["name"] = json!(name);
+    }
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
@@ -121,12 +133,7 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
         let mut projects = if project_id == "prior-project" {
-            let mut previous = project.clone();
-            previous["status"] = json!({"type":"completed"});
-            let mut current = project.clone();
-            current["id"] = json!("project-1");
-            current["name"] = json!("Chapter");
-            vec![previous, current]
+            vec![project, planning_project("project-1", &project_id)]
         } else {
             vec![project]
         };
@@ -157,13 +164,7 @@ async fn planning_graphql(
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query ProjectOwnership") {
-        let mut owned = project.clone();
-        owned["id"] = vars["id"].clone();
-        if vars["id"] != project["id"] {
-            owned["name"] = json!("Chapter");
-            owned["status"] = json!({"type":"completed"});
-        }
-        owned["archivedAt"] = serde_json::Value::Null;
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
         if state.trashed {
@@ -214,6 +215,7 @@ async fn planning_graphql(
             .take()
             .unwrap_or_else(|| vars["stateId"].as_str().unwrap().to_string());
         state.issues[0]["state"] = json!({"type":outcome});
+        mark_issue_updated(&mut state.issues[0]);
         if state.lose_completion {
             state.lose_completion = false;
             return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
@@ -224,6 +226,7 @@ async fn planning_graphql(
             state.move_on_attachment_read = false;
             state.current_project_id = Some("project-1".into());
             state.issues[0]["project"]["id"] = json!("project-1");
+            mark_issue_updated(&mut state.issues[0]);
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
     } else if query.contains("query IssueComments") {
@@ -249,6 +252,7 @@ async fn planning_graphql(
                 issue[key] = value.clone();
             }
         }
+        mark_issue_updated(issue);
         json!({"issueUpdate":{"success":true}})
     } else if query.contains("query UnstartedWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
@@ -257,7 +261,7 @@ async fn planning_graphql(
             .issues
             .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
             "title":vars["title"], "description":vars["description"], "prioritySortOrder":0.0,
-            "sortOrder":0.0, "assignee":null, "state":{"type":"unstarted"},
+            "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1","name":"Chapter"}}));
         return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
     } else {
@@ -348,6 +352,7 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
             // Lookup is valid for terminal planning items; launch owns eligibility.
             state.lock().await.issues[0]["state"]["type"] = json!("completed");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
             let resolved =
                 crate::ops::task_pm::resolve_task_async(&repo, "FIX-1", PmRefresh::Force)
                     .await
@@ -582,6 +587,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     runtime.block_on(async {
         let mut state = state.lock().await;
         state.issues[0]["state"] = json!({"type":"completed"});
+        mark_issue_updated(&mut state.issues[0]);
         state.lose_deletion = lost;
         state.unreadable_trash = lost;
         state.fail_deleted_snapshot = fail_snapshot;
@@ -658,7 +664,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             .block_on(fixture.store.pm_snapshot(wave.id()))
             .unwrap()
             .unwrap();
-        let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+        let snapshot = row.snapshot;
         assert_eq!(snapshot.items.is_empty(), fail_snapshot);
         if fail_local {
             connection
@@ -751,10 +757,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
         .block_on(fixture.store.pm_snapshot(wave.id()))
         .unwrap()
         .unwrap();
-    assert!(serde_json::from_str::<PmSnapshot>(&row.payload)
-        .unwrap()
-        .items
-        .is_empty());
+    assert!(row.snapshot.items.is_empty());
     runtime.block_on(async {
         let state = state.lock().await;
         assert_eq!(state.deletion_writes, 1);
@@ -947,8 +950,7 @@ fi
             .as_ref()
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
         let complete = |summary: &str| match merge {
-            None => crate::ops::task::task_complete(&repo, selector, summary.into()),
-            Some(PrMergeMode::User) => crate::ops::task::task_status(Some(selector)).map(Some),
+            None | Some(PrMergeMode::User) => crate::ops::task::task_complete(&repo, selector, summary.into()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = task.as_ref().unwrap();
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
@@ -966,8 +968,17 @@ fi
                     time::OffsetDateTime::now_utc(),
                 )
                 .unwrap();
-                crate::ops::task::settle_task_landing(&fixture.store, &landing).await?;
-                Ok(fixture.store.get_task(&task.id).await.unwrap())
+                let settlement = crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
+                let retained = fixture.store.get_task(&task.id).await.unwrap().unwrap();
+                if let PmWritebackState::Pending { error, .. } = &retained.pm_writeback {
+                    assert_eq!(
+                        settlement.unwrap_err().to_string(),
+                        format!("Linear completion pending: {error}")
+                    );
+                } else {
+                    settlement?;
+                }
+                Ok(Some(retained))
             }),
         };
         if let Some(task) = &task {
@@ -975,6 +986,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 let error = complete("Cannot change the outcome").unwrap_err();
                 assert!(
@@ -1034,6 +1046,7 @@ fi
                 runtime.block_on(async {
                     let mut provider = state.lock().await;
                     provider.issues[0]["state"] = json!({"type":"unstarted"});
+                    mark_issue_updated(&mut provider.issues[0]);
                     provider.completion_state = Some(terminal.into());
                 });
                 assert!(matches!(
@@ -1049,6 +1062,7 @@ fi
             }
             runtime.block_on(async {
                 state.lock().await.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut state.lock().await.issues[0]);
             });
         }
         runtime.block_on(async {
@@ -1110,6 +1124,7 @@ fi
                 provider.fail_snapshot = true;
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
+                mark_issue_updated(&mut provider.issues[0]);
             });
             let retry = complete("Delivered the requested outcome")
                 .unwrap()
@@ -1142,6 +1157,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                     fixture.store.update_task_pm_writeback(
                         &task.id,
                         &PmWritebackState::Pending {
@@ -1195,6 +1211,7 @@ fi
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
                     state.lock().await.issues[0]["state"] = json!({"type":terminal});
+                    mark_issue_updated(&mut state.lock().await.issues[0]);
                 });
                 assert!(complete("Cannot change the outcome")
                     .unwrap_err()
@@ -1460,6 +1477,7 @@ esac
                     let mut state = state.lock().await;
                     state.current_project_id = Some("prior-project".into());
                     state.issues[0]["project"]["id"] = json!("prior-project");
+                    mark_issue_updated(&mut state.issues[0]);
                 });
                 for apply in [false, true] {
                     let entries = crate::ops::task::task_sweep(&repo, apply).unwrap();
@@ -1478,6 +1496,7 @@ esac
                     let mut state = state.lock().await;
                     state.current_project_id = None;
                     state.issues[0]["project"]["id"] = json!("project-1");
+                    mark_issue_updated(&mut state.issues[0]);
                 });
             } else {
                 // A later GitHub failure preserves enough evidence for a retry.
@@ -1603,7 +1622,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             assert_eq!(provider.extra_projects, vec![foreign.clone()]);
             assert_eq!(provider.project_name.as_deref(), Some("Product — Chapter"));
             let row = fixture.store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-            let snapshot: PmSnapshot = serde_json::from_str(&row.payload).unwrap();
+            let snapshot = row.snapshot;
             assert_eq!(snapshot.projects.len(), 1);
             assert_eq!(snapshot.projects[0].id, "project-1");
         });
@@ -1611,6 +1630,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             let mut provider = state.lock().await;
             provider.current_project_id = Some("prior-project".into());
             provider.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut provider.issues[0]);
             // Duplicate foreign membership still yields one preview entry.
             provider.project_name = None;
             provider.extra_projects.push(foreign.clone());
@@ -1689,6 +1709,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             let mut state = state.lock().await;
             state.current_project_id = Some("prior-project".into());
             state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
         });
         let bin = fixture.directory.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1724,6 +1745,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         for terminal in ["completed", "canceled", "duplicate"] {
             runtime.block_on(async {
                 state.lock().await.issues[0]["state"]["type"] = json!(terminal);
+                mark_issue_updated(&mut state.lock().await.issues[0]);
             });
             assert!(crate::ops::task::task_sweep(&repo, true)
                 .unwrap()
@@ -1731,6 +1753,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         }
         runtime.block_on(async {
             state.lock().await.issues[0]["state"]["type"] = json!("unstarted");
+            mark_issue_updated(&mut state.lock().await.issues[0]);
         });
         // Membership changes after candidate enumeration still prevent writes.
         runtime.block_on(async {
@@ -1746,6 +1769,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             let mut state = state.lock().await;
             state.current_project_id = Some("prior-project".into());
             state.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut state.issues[0]);
         });
         let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(applied[0].outcome, "canceled");

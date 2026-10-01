@@ -1,4 +1,4 @@
-//! Durable ownership and progress for one watched pull-request landing.
+//! Durable intent and claims for pull-request delivery.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -46,10 +46,6 @@ impl PrLandingState {
             Self::Closed => "closed",
             Self::Blocked => "blocked",
         }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Merged | Self::Closed | Self::Blocked)
     }
 }
 

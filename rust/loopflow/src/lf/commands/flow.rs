@@ -1,8 +1,8 @@
 use crate::durable::{FlowSession, TaskFlowBlocker, TaskWorkerClaim, WorkRef};
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{
-    compile_flow, human_occurrence_ids, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext,
-    ExecutionCursor, Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
+    compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
+    Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
@@ -64,18 +64,6 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
             Some(reason) => println!("{}  (unavailable: {reason})", entry.name),
             None => println!("{}", entry.name),
         }
-    }
-    Ok(())
-}
-
-pub fn validate(name: &str, repo: &Path) -> Result<()> {
-    let flow = crate::engine::flow::load_authored_flow(name, repo)?;
-    let mut human = human_occurrence_ids(&flow, repo)?;
-    human.sort();
-    if human.is_empty() {
-        println!("{}: valid (no review steps)", flow.name);
-    } else {
-        println!("{}: valid (review steps: {})", flow.name, human.join(", "));
     }
     Ok(())
 }
@@ -145,7 +133,9 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     match outcome {
         FlowOutcome::Completed => Ok(()),
         FlowOutcome::Waiting => {
-            anyhow::bail!("Flow is waiting for human input; open its Flow Session")
+            anyhow::bail!(
+                "Flow is waiting for human input or delivery; inspect its saved Flow Session"
+            )
         }
         FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
     }
@@ -455,6 +445,29 @@ async fn drive_loop(
                     .context("completed Task disappeared")?;
                 crate::ops::task::cleanup_completed_task(&store, &task).await?;
                 return Ok(FlowOutcome::Completed);
+            }
+        }
+        if let Some(task_id) = &flow.task_id {
+            if store
+                .task_flow(task_id)
+                .await?
+                .is_some_and(|managed| managed.id() == flow.id())
+            {
+                let task = store.get_task(task_id).await?.context("Task disappeared")?;
+                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
+                    &store,
+                    &task,
+                    crate::ops::pm::PmRefresh::Auto,
+                )
+                .await
+                {
+                    if owned_claim.is_some() {
+                        store
+                            .release_flow(flow.id(), flow.version, owned_claim.as_ref())
+                            .await?;
+                    }
+                    return Err(error.into());
+                }
             }
         }
         if let Some(failure) = &flow.failure {
@@ -824,13 +837,15 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
         &self,
         ops: &crate::engine::ConcreteCommand,
         _ctx: ExecutionContext,
-    ) -> Result<()> {
+    ) -> Result<SkillOutcome> {
         let flow = self.begin().await?;
-        if self.store.sqlite.flow_operation_completed(flow.id())? {
-            return Ok(());
+        if !self.store.sqlite.flow_operation_completed(flow.id())? {
+            eprintln!("op: {}", ops.item.display_name());
+            execute_child(&self.store, &flow, self.launcher).await?;
         }
-        eprintln!("op: {}", ops.item.display_name());
-        execute_child(&self.store, &flow, self.launcher).await
+        Ok(landing_outcome(
+            self.store.operation_landing(flow.id()).await?,
+        ))
     }
 }
 
@@ -872,6 +887,9 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
         // Interrupt cleanup can kill the operation and wake this waiter. Its
         // exit is not evidence that the external effect failed or completed.
         crate::engine::agent::wait_for_interrupt_cleanup();
+        if let Ok(Some(landing)) = &result {
+            store.sqlite.bind_operation_landing(start, landing)?;
+        }
         store.sqlite.finish_flow_operation(
             id,
             version,
@@ -880,14 +898,25 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
             Some(&exec),
             result.is_ok(),
         )?;
-        result.map_err(anyhow::Error::from)
+        result.map(|_| ()).map_err(anyhow::Error::from)
     })
+}
+
+fn landing_outcome(landing: Option<crate::pr_landing::PrLanding>) -> SkillOutcome {
+    use crate::pr_landing::PrLandingState;
+    match landing.map(|landing| landing.state) {
+        None | Some(PrLandingState::Merged) => SkillOutcome::Completed { feedback: None },
+        Some(PrLandingState::Closed) => SkillOutcome::Blocked("PR closed without merging".into()),
+        Some(PrLandingState::Blocked | PrLandingState::Watching | PrLandingState::Repairing) => {
+            SkillOutcome::Waiting
+        }
+    }
 }
 
 async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Result<()> {
     // The absolute selected path becomes argv[0] in the child's Exec record.
     let mut command =
-        tokio::process::Command::new(crate::engine::process::resolve_step_lf_binary(&flow.cwd)?);
+        tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
@@ -912,7 +941,7 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         );
     }
     let status = command.status().await;
-    // PATH can select a newer child. Never settle its result through an older
+    // A new installation can select a newer child. Never settle its result through an older
     // schema, including recording a failure which would discard that selection.
     store.sqlite.validate_current_schema().map_err(|error| {
         StepEnd::StoreChanged(format!(
@@ -978,6 +1007,156 @@ mod tests {
     use crate::engine::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn handed_off_landing_keeps_the_saved_flow_before_its_next_review() {
+        use crate::durable::FlowSession;
+        use crate::engine::execution::{FlowEngine, SkillExecutor};
+        use crate::engine::flow::Command;
+        use crate::engine::invocation::QueuedInvocation;
+        use crate::engine::{ConcreteCommand, ConcreteSkill, ExecutionCursor, FlowOutcome, Skill};
+        use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
+        use clap::Parser;
+        use std::sync::{Arc, Mutex};
+
+        let directory = tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let flow = store
+            .create_flow(FlowSession {
+                invocation: QueuedInvocation::new(
+                    "delivery",
+                    vec![
+                        ConcreteStep::Command(ConcreteCommand {
+                            item: Command {
+                                command: "pr".into(),
+                                args: vec!["land".into()],
+                            },
+                            sources: vec![],
+                        }),
+                        ConcreteStep::Skill(ConcreteSkill {
+                            skill: Skill::named("review"),
+                            id: Some("review".into()),
+                            human: true,
+                            repeat: None,
+                            sources: vec![],
+                        }),
+                    ],
+                )
+                .unwrap(),
+                cursor: ExecutionCursor::default(),
+                version: 0,
+                task_id: None,
+                wave_id: None,
+                cwd: directory.path().into(),
+                message: None,
+                model: None,
+                current_attempt: None,
+                pending_session_id: None,
+                ready_summary: None,
+                worker_generation: 0,
+                claim: None,
+                failure: None,
+                finished: false,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+        let start = store
+            .sqlite
+            .begin_flow_operation(flow.id(), flow.version, None, None)
+            .unwrap()
+            .unwrap();
+        let landing = PrLanding::new(
+            NewPrLanding {
+                repo: "owner/repo".into(),
+                pr_number: 1,
+                worktree: directory.path().into(),
+                branch: "feature".into(),
+                task_id: None,
+                requested_head_sha: "head".into(),
+                after_merge: None,
+                next_slug: None,
+            },
+            now,
+        )
+        .unwrap();
+        let mut landing = store.start_or_join_pr_landing(&landing).await.unwrap();
+        store
+            .sqlite
+            .bind_operation_landing(start, &landing.id)
+            .unwrap();
+        store
+            .sqlite
+            .finish_flow_operation(flow.id(), flow.version, None, start, None, true)
+            .unwrap();
+        let cli = crate::lf::Cli::try_parse_from(["lf"]).unwrap();
+        let executor = super::CliFlowExecutor {
+            store: store.clone(),
+            id: flow.id().to_owned(),
+            version: Mutex::new(flow.version),
+            claim: Mutex::new(None),
+            progress: Mutex::new(None),
+            launcher: &cli,
+        };
+        let mut cursor = flow.cursor.clone();
+        for _ in 0..2 {
+            assert_eq!(
+                FlowEngine::new(&executor)
+                    .tick(&flow.invocation.steps, &mut cursor)
+                    .await
+                    .unwrap(),
+                Some(FlowOutcome::Waiting)
+            );
+            (&executor).checkpoint(&cursor).await.unwrap();
+            let saved = store.flow(flow.id()).await.unwrap().unwrap();
+            assert_eq!(saved.cursor.index, 0);
+            assert!(saved.pending_session_id.is_none());
+            assert_eq!(
+                store
+                    .operation_landing(flow.id())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                landing.id
+            );
+        }
+        landing = store
+            .claim_pr_landing(
+                &landing.id,
+                landing.generation,
+                &crate::pr_landing::LandingSupervisor {
+                    placement: crate::pr_landing::LandingPlacement::Local,
+                    process_id: std::process::id(),
+                    heartbeat_at: now,
+                },
+                now - time::Duration::minutes(2),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        landing.state = PrLandingState::Merged;
+        landing.merge_commit = Some("merge".into());
+        assert!(store.update_pr_landing(&landing).await.unwrap());
+        assert_eq!(
+            FlowEngine::new(&executor)
+                .tick(&flow.invocation.steps, &mut cursor)
+                .await
+                .unwrap(),
+            None
+        );
+        (&executor).checkpoint(&cursor).await.unwrap();
+        let saved = store.flow(flow.id()).await.unwrap().unwrap();
+        assert_eq!(saved.cursor.index, 1);
+        assert!(saved.is_human());
+    }
 
     #[test]
     fn render_pipeline_lines_expands_xor_paths_on_separate_lines() {

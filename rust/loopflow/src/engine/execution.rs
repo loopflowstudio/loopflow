@@ -67,7 +67,11 @@ pub trait SkillExecutor: Send + Sync {
     async fn run_skill(&self, skill: &ConcreteSkill, ctx: ExecutionContext)
         -> Result<SkillOutcome>;
 
-    async fn run_command(&self, ops: &ConcreteCommand, ctx: ExecutionContext) -> Result<()>;
+    async fn run_command(
+        &self,
+        ops: &ConcreteCommand,
+        ctx: ExecutionContext,
+    ) -> Result<SkillOutcome>;
 }
 
 #[derive(Debug, Clone)]
@@ -131,10 +135,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
             ConcreteStep::Xor(branch) => {
                 self.executor.run_skill(&branch.router_skill(), ctx).await?
             }
-            ConcreteStep::Command(op) => {
-                self.executor.run_command(op, ctx).await?;
-                SkillOutcome::Completed { feedback: None }
-            }
+            ConcreteStep::Command(op) => self.executor.run_command(op, ctx).await?,
         };
         match outcome {
             SkillOutcome::Completed { feedback } => {
@@ -472,11 +473,15 @@ mod tests {
             }
         }
 
-        async fn run_command(&self, ops: &ConcreteCommand, ctx: ExecutionContext) -> Result<()> {
+        async fn run_command(
+            &self,
+            ops: &ConcreteCommand,
+            ctx: ExecutionContext,
+        ) -> Result<SkillOutcome> {
             let name = format!("op:{}", ops.item.display_name());
             self.contexts.lock().unwrap().push((name.clone(), ctx));
             self.calls.lock().unwrap().push(name);
-            Ok(())
+            Ok(SkillOutcome::Completed { feedback: None })
         }
     }
 

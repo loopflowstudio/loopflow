@@ -41,6 +41,24 @@ struct WorkspaceNavigationTests {
         #expect(projection.subject(for: associated.id) == task.id.work)
     }
 
+    @Test("Checkout-only Sessions use Rust membership in Task navigation")
+    func checkoutMembershipKeepsUnboundConversationReachable() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
+        let bindings: [WorkReference?] = [nil, .wave(id: roadmap.waves[0].wave.id)]
+        for work in bindings {
+            let original = try session("manual", work: work)
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            json["task_ids"] = ["ts_review00000000000000000000000000"]
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+            let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [record])
+            #expect(record.work == work)
+            #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
+            #expect(projection.unmatchedSessions.isEmpty)
+            #expect(projection.waves.allSatisfy { $0.sessions.isEmpty })
+            #expect(projection.breadcrumb(selection: nil, sessionId: "manual")?.task?.task.id == "issue-review")
+        }
+    }
+
     @Test("Repository path spellings share one outline root")
     func repositoryAliasesShareRoot() async throws {
         let source = try ReadingSource(
@@ -746,13 +764,15 @@ struct WorkspaceNavigationTests {
         let workData = try JSONEncoder().encode(work)
         let workJSON = String(decoding: workData, as: UTF8.self)
         let taskJSON = String(decoding: try JSONEncoder().encode(work?.kind == .task ? work?.id : nil), as: UTF8.self)
+        let taskIds = work.flatMap { $0.kind == .task ? [$0.id] : nil } ?? []
+        let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
         let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
         {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
          "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","\(id)"]}
+         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }

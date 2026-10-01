@@ -219,7 +219,8 @@ final class PodiumModel {
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
-    /// Recent Runs, read only when the human discloses them.
+    private(set) var taskWork = TaskReadings<TaskWork>()
+    /// Conversation history, read only on disclosure.
     private(set) var recentRuns = TaskReadings<[SessionHistory]>()
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
@@ -625,8 +626,12 @@ final class PodiumModel {
         }
     }
 
-    /// Read one Task's recent Runs through the shared Run reader, by its exact
-    /// issue identifier.
+    func loadTaskWork(task: RoadmapTask, wave: WaveSnapshot) async {
+        await loadTaskReading(\.taskWork, task: task.id) { [query] in
+            try await query.taskWork(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
     func loadRecentRuns(task: RoadmapTask, wave: WaveSnapshot) async {
         await loadTaskReading(\.recentRuns, task: task.id) { [query] in
             try await query.taskRuns(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))

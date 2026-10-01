@@ -36,7 +36,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["wave", "sync"]`).
+    /// Subcommand path for the completeness guard (e.g. `["repo", "refresh"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -57,16 +57,26 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
+/// Local context previews accept authored Wave directories without registration.
+/// `global_commands` covers their config, usage and refresh behavior.
+const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
+
+/// Scheduling requires an explicit Wave or repository, never ambient selection.
+const REPOSITORY_OR_WAVE: &[&[&str]] = &[&["wave", "cron", "sync"]];
+
+/// Primary conversations default to the repository unless `--wave` is explicit.
+/// `human_session::primary::tests` proves ambient Wave context cannot redirect them.
+const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
+
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["activity"],
-    &["ci"],
-    &["cron", "list"],
-    &["exec", "list"],
-    &["runs"],
-    &["usage"],
+    &["monitor", "activity"],
+    &["repo", "ci"],
+    &["wave", "cron", "list"],
+    &["monitor", "list"],
+    &["monitor", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -74,14 +84,12 @@ const FILTER_ONLY: &[&[&str]] = &[
 /// operations must name the installed Wave whose authority they validate.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
-    &["wave", "relocate"],
     &["discord", "serve"],
-    &["cron", "preflight"],
-    &["cron", "sync"],
-    &["cron", "run"],
-    &["cron", "history"],
-    &["cron", "trigger"],
-    &["cron", "remove"],
+    &["wave", "cron", "preflight"],
+    &["wave", "cron", "run"],
+    &["wave", "cron", "history"],
+    &["wave", "cron", "trigger"],
+    &["wave", "cron", "remove"],
 ];
 
 const COMMANDS: &[Cmd] = &[
@@ -104,25 +112,26 @@ const COMMANDS: &[Cmd] = &[
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
-        id: "wave connect",
-        path: &["wave", "connect"],
-        base_args: &["wave", "connect"],
-        wave_form: WaveForm::Flag,
+        id: "repo connect",
+        path: &["repo", "connect"],
+        base_args: &["repo", "connect"],
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
-        id: "wave sync",
-        path: &["wave", "sync"],
-        base_args: &["wave", "sync"],
-        wave_form: WaveForm::Flag,
+        id: "repo refresh",
+        path: &["repo", "refresh"],
+        base_args: &["repo", "refresh"],
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: true,
     },
     Cmd {
         id: "cron add",
-        path: &["cron", "add"],
+        path: &["wave", "cron", "add"],
         base_args: &[
+            "wave",
             "cron",
             "add",
             "--flow",
@@ -226,10 +235,8 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation and explicit chat connection may register the selected Wave.
-    if env.id == "explicit-unknown"
-        && matches!(cmd.id, "chat post" | "wave connect" | "wave new-chapter")
-    {
+    // Connection may register the selected Wave.
+    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
         return Outcome::Resolved;
     }
 
@@ -331,7 +338,10 @@ fn seed(home: &Path, repo: &Path) -> Wave {
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
-            payload: r#"{"projects":[],"items":[]}"#.to_string(),
+            snapshot: loopflow::pm::PmSnapshot {
+                projects: vec![],
+                items: vec![],
+            },
         })
         .expect("seed pm snapshot");
 
@@ -529,7 +539,7 @@ fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a c
 }
 
 /// The registry is complete: every `wave`-bearing clap leaf is classified as
-/// either a resolver or a machine-wide filter, every cron leaf has exactly one
+/// a resolver, filter, Task owner or authored context, every cron leaf has exactly one
 /// Wave-context classification, every ambient/explicit-only command exists as
 /// a real clap leaf, and every registry entry maps to a real clap leaf. Adding
 /// a new `--wave`-bearing command without classifying it fails CI; removing a
@@ -552,6 +562,9 @@ fn registry_is_complete() {
     let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
         .iter()
         .chain(ISSUE_OWNED)
+        .chain(AUTHORED_CONTEXT)
+        .chain(REPOSITORY_OR_WAVE)
+        .chain(REPOSITORY_DEFAULT)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -564,7 +577,7 @@ fn registry_is_complete() {
         assert!(
             registry_paths.contains(path) || filter_paths.contains(path),
             "clap command {:?} has an optional `wave` arg but is not classified — \
-             add resolvers to COMMANDS or machine-wide filters to FILTER_ONLY",
+             classify its Wave selection in the command registry",
             path
         );
     }
@@ -572,10 +585,16 @@ fn registry_is_complete() {
     // 4. Every cron leaf must be classified exactly once. Required-wave cron
     //    commands do not appear in the optional-wave discovery above.
     let cron = root
+        .find_subcommand("wave")
+        .expect("wave command must exist")
         .find_subcommand("cron")
         .expect("cron command must exist");
     for subcommand in cron.get_subcommands() {
-        let path = vec!["cron".to_string(), subcommand.get_name().to_string()];
+        let path = vec![
+            "wave".to_string(),
+            "cron".to_string(),
+            subcommand.get_name().to_string(),
+        ];
         let classifications = usize::from(registry_paths.contains(&path))
             + usize::from(filter_paths.contains(&path))
             + usize::from(explicit_paths.contains(&path));
@@ -587,7 +606,14 @@ fn registry_is_complete() {
 
     // 5. Every ambient-only, filter-only, and explicit-only command must exist
     //    as a real clap leaf. Explicit-only commands must require `wave`.
-    for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY).chain(ISSUE_OWNED) {
+    for path in AMBIENT_ONLY
+        .iter()
+        .chain(FILTER_ONLY)
+        .chain(ISSUE_OWNED)
+        .chain(AUTHORED_CONTEXT)
+        .chain(REPOSITORY_OR_WAVE)
+        .chain(REPOSITORY_DEFAULT)
+    {
         assert!(
             find_clap_command(&root, path).is_some(),
             "classified command {:?} does not exist in the clap tree",
@@ -606,6 +632,17 @@ fn registry_is_complete() {
             }),
             "explicit-only command {path:?} must require one `wave` argument"
         );
+    }
+
+    for path in REPOSITORY_OR_WAVE {
+        let mut args = vec!["lf"];
+        args.extend_from_slice(path);
+        assert!(Cli::command().try_get_matches_from(&args).is_err());
+        for target in [vec!["--repo"], vec!["--wave", "fixture"]] {
+            let mut explicit = args.clone();
+            explicit.extend(target);
+            assert!(Cli::command().try_get_matches_from(explicit).is_ok());
+        }
     }
 
     // 6. Every registry entry must map to a real clap command (no stale
@@ -671,6 +708,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
 
     let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
+            "wave",
             "cron",
             "add",
             "--flow",

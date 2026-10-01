@@ -7,6 +7,27 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Task work retains conversations, managed Flows and command history")
+    func taskWorkFixture() throws {
+        let data = try loadFixtureData("task_work.json")
+        let work = try JSONDecoder().decode(TaskWork.self, from: data)
+        #expect(work.sessions.count == 2)
+        #expect(!work.sessions[0].managed)
+        #expect(work.sessions[1].kind == "flow_review")
+        #expect(work.flows[0].managed)
+        #expect(!work.execs.isEmpty)
+        #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+    }
+
+    @Test("Task planning retains the provider branch before execution exists")
+    func taskPlanningBranchFixture() throws {
+        let states = try JSONDecoder().decode([TaskStatus].self, from: loadFixtureData("task_status.json"))
+        #expect(states[0].planning?.item.branchName == "dev/fix-1-existing")
+        #expect(states[0].execution == nil)
+        #expect(states[0].planning?.project?.flow == "feature")
+        #expect(states[0].planning?.project?.status == .started)
+    }
+
     @Test("Session page retains complete enumeration and requires entries")
     func sessionPageFixture() throws {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -234,7 +255,7 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
-        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf wave sync") == true)
+        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
 
     }
 
@@ -397,7 +418,7 @@ struct DTOFixtureTests {
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
-            "session", "open", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+            "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])
 
         let encoded = try JSONEncoder().encode(session)

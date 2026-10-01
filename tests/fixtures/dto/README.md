@@ -9,11 +9,18 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`task_execution.json` pins the execution evidence in `lf task status --json`.
+`task_status.json` pins the planning/execution envelope for available, unavailable,
+invalid, removed and absent planning. Rust round-trips it; Swift decodes the `TaskStatus` model
+returned by `RegistryQuery.taskStatus`. These cases have no execution. Complete
+Task execution/action-state parity remains acceptance work; Wave contracts have
+their own fixtures below.
+
+`task_execution.json` pins the execution boundary inside the status envelope's
+optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
-`session.json` pins `lf session open --json`: one unresolved Task FlowStep
+`session.json` pins `lf session connect --json`: one unresolved Task FlowStep
 session, its explicit readiness state, and its exact Home-local attach route.
 
 `session_memberships.json` pins each Session's required `flow_membership`:
@@ -51,7 +58,8 @@ It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries
 
 `task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.
 
-`task_files.json` pins `lf task changes/diff/file/save --json`: exact comparison bases,
+`task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
+exact comparison bases,
 rename paths, scratch listing, and lossless content with a byte revision and
 explicit file state, Save outcome, recovery access and late-change disclosure.
 Rust round-trips the same fixture Swift decodes.

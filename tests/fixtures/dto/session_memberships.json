@@ -16,10 +16,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "task_00000000000000000000000000000001:task-design:review_kickoff:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -73,10 +76,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000002"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -136,10 +142,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000003"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -191,10 +200,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000004"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -241,10 +253,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000006"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -301,10 +316,13 @@
     "open_argv": [
       "lf",
       "session",
-      "open",
+      "connect",
       "run_00000000000000000000000000000007"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [
@@ -358,10 +376,13 @@
       "ssh",
       "home_remote",
       "session",
-      "open",
+      "connect",
       "task_00000000000000000000000000000001:feature:demo:0"
     ],
     "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
     "actions": [

@@ -52,8 +52,10 @@ pub(crate) async fn task_execution_and_flow(
             match crate::journal::exec_process_evidence(&store.sqlite, &exec) {
                 ProcessIdentityEvidence::Live => {
                     snapshot.state = TaskExecutionState::Running;
-                    snapshot.reason =
-                        format!("Step Exec {exec} is running {}", position.current().step);
+                    snapshot.reason = format!(
+                        "Step Exec {exec} is running {}",
+                        position.step_name().as_deref().unwrap_or("Flow completion")
+                    );
                 }
                 ProcessIdentityEvidence::Unknown => {
                     snapshot.state = TaskExecutionState::Unknown;
@@ -99,7 +101,7 @@ pub(crate) async fn task_execution_and_flow(
             "Only Stop & restart can clear this blocker".to_string()
         } else {
             let task = store.get_task(task_id).await?.ok_or(StoreError::NotFound)?;
-            format!("Complete the unblock Session, then run `lf task run {}`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
+            format!("Complete the unblock Session, then run `lf --task {} flow start`. If this blocker has no Session, supply `--reason \"<what changed>\"` after correcting it.", task.plan.identifier)
         };
         snapshot.reason.push_str(&format!(". {recovery}"));
     }
@@ -135,7 +137,19 @@ fn project_execution(
             captured: None,
         };
     };
-    let step = position.current();
+    // The driver checkpoints past the last step before recording completion.
+    let Some(step) = position.current_checked() else {
+        return TaskExecutionSnapshot {
+            state: match evidence {
+                Some(ProcessIdentityEvidence::Live) => TaskExecutionState::Running,
+                Some(ProcessIdentityEvidence::Unknown) => TaskExecutionState::Unknown,
+                Some(ProcessIdentityEvidence::Dead) | None => TaskExecutionState::Idle,
+            },
+            reason: "Flow steps are complete; completion is awaiting settlement".into(),
+            step: None,
+            captured: None,
+        };
+    };
     let captured = position
         .current_attempt
         .as_ref()
@@ -210,9 +224,8 @@ mod tests {
     use crate::journal::ProcessIdentityEvidence;
     use time::OffsetDateTime;
 
-    #[test]
-    fn worker_liveness_is_separate_from_durable_ready_work() {
-        let mut position = FlowSession {
+    fn flow() -> FlowSession {
+        FlowSession {
             invocation: test_flow_invocation("slice", 0, "implement", None, false),
             cursor: crate::engine::ExecutionCursor {
                 index: 0,
@@ -233,7 +246,26 @@ mod tests {
             failure: None,
             finished: false,
             updated_at: OffsetDateTime::now_utc(),
-        };
+        }
+    }
+
+    #[test]
+    fn completed_steps_remain_readable_until_flow_settlement() {
+        let mut position = flow();
+        position.cursor.index = position.invocation.steps.len();
+        let snapshot = project_execution(Some(&position), Some(ProcessIdentityEvidence::Live));
+        assert_eq!(snapshot.state, TaskExecutionState::Running);
+        assert!(snapshot.step.is_none());
+        assert!(snapshot.reason.contains("awaiting settlement"));
+        assert_eq!(
+            project_execution(Some(&position), Some(ProcessIdentityEvidence::Dead)).state,
+            TaskExecutionState::Idle
+        );
+    }
+
+    #[test]
+    fn worker_liveness_is_separate_from_durable_ready_work() {
+        let mut position = flow();
         assert_eq!(
             project_execution(Some(&position), None).state,
             TaskExecutionState::Idle

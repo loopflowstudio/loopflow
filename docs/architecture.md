@@ -262,7 +262,7 @@ and FlowSession are the execution owners; Run has no separate lifecycle.
 
 ```bash
 lf debug -c
-lf gate --diff-files
+lf gate --diff files
 ```
 
 These commands need the execution area only: discover, prompt, route, launch,
@@ -271,12 +271,12 @@ record, return.
 ### Direct Task work
 
 ```bash
-lf task checkout INF-123
+lf checkout INF-123
 lf --task INF-123 research "write scratch/runtime.md"
 lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
-lf pr submit
+lf submit
 lf task status INF-123 --json
 ```
 
@@ -284,15 +284,14 @@ lf task status INF-123 --json
 serial PR identity. It starts no Task execution. Each `--task` command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. `submit`,
-`arm`, and `land` therefore work the same whether the Task was pursued by its
+Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper AgentSessions, or another system.
 
 ### Bounded Task advancement
 
 ```bash
 lf --wave product wave/operate        # one finite planning pass
-lf task run INF-123
+lf --task INF-123 flow start
 lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```

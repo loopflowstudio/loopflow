@@ -100,7 +100,7 @@ pub(crate) fn metric_prompt_section(tag: &str, portfolio: Result<MetricPortfolio
 fn discover_wave_contracts(wave: &Wave) -> Result<MetricContractDiscovery> {
     let metrics_dir = metric_contract_repo(wave, std::env::var_os("LOOPFLOW_DEV_WAVE_REPO"))
         .join("wave")
-        .join(wave.name())
+        .join(wave.slug())
         .join("metrics");
     discover_metric_contracts(&metrics_dir, wave.id().as_str()).map_err(|error| anyhow!(error))
 }
@@ -298,7 +298,7 @@ pub(crate) async fn publish_metric_observations(
         };
         let wave = waves
             .iter()
-            .find(|wave| wave.name() == wave_name)
+            .find(|wave| wave.slug() == wave_name)
             .with_context(|| {
                 format!("producer metric {wave_name}/{metric_id} has no registered Wave")
             })?;
@@ -380,6 +380,7 @@ mod tests {
 
     fn project(id: &str, slug: &str) -> PmProject {
         PmProject {
+            revision: None,
             id: id.to_string(),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
@@ -545,11 +546,10 @@ mod tests {
             provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
-            payload: serde_json::to_string(&crate::pm::PmSnapshot {
+            snapshot: crate::pm::PmSnapshot {
                 projects: vec![projects[0].clone()],
                 items: vec![],
-            })
-            .unwrap(),
+            },
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
@@ -561,17 +561,17 @@ mod tests {
             MetricEvidenceDto::Untargeted { value: 1.0, .. }
         )));
         let mut targeted_project = projects[0].clone();
+        targeted_project.revision = Some("2026-09-30T00:00:01Z".into());
         targeted_project
             .metric_targets
             .push(crate::pm::ChapterMetricTarget {
                 metric_id: "task-loop-trust".into(),
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 1.0 },
             });
-        snapshot.payload = serde_json::to_string(&crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::pm::PmSnapshot {
             projects: vec![targeted_project],
             items: vec![],
-        })
-        .unwrap();
+        };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
@@ -580,11 +580,11 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| matches!(metric.evidence, MetricEvidenceDto::Met { value: 1.0, .. })));
-        snapshot.payload = serde_json::to_string(&crate::pm::PmSnapshot {
+        snapshot.snapshot = crate::pm::PmSnapshot {
             projects: projects.to_vec(),
             items: vec![],
-        })
-        .unwrap();
+        };
+        snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await

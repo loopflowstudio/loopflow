@@ -7,12 +7,17 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app bundles this checkout's matching CLI. Its first scripted
-launch snapshots the machine-selected Home into private branch data; later
-launches reuse that copy, including from Finder. The installed Home stays unchanged.
-Set `LF_HOME` to select existing private demo data explicitly.
+The development app bundles this checkout's CLI. Ordinary launches use the
+installed CLI and main Home. For a branch demo, launch with an explicit private
+`LF_HOME`; that uses the matching source CLI on disposable data. A copied Home
+retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
+
+Choose **Background progress** in the repository toolbar to enable minute
+checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
+continue with the app closed on the selected Home. Disabling stops scheduled
+admission; already-running work and requested GitHub merges continue.
 
 ```text
 ⌘D          split right
@@ -105,7 +110,7 @@ the Flow. Controls are disabled with Rust's reason when they cannot be used.
 A pinned Flow without a live worker reads **Stopped** and offers **Resume**;
 there is no Pause until Loopflow can hold a Flow at a boundary.
 **Recent runs** under the Flow reads nothing until expanded; it then lists that
-Task's newest 50 Runs from the last seven days (`lf runs --task ID --json`) with each recorded
+Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
@@ -189,7 +194,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
+include interactive provider Sessions, Task human FlowSteps, and ad-hoc Asks.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session until Complete.
 
@@ -212,7 +217,7 @@ The shared Session projection supplies action labels, unavailable reasons and Wo
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
-Task FlowSteps run ordinary `lf --tui --as task:<id> <skill>` provider Runs.
+Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
@@ -294,8 +299,9 @@ codebase tree, and registry health.
 - **Tasks** own implementation worktrees and PR delivery and report directly
   to their Wave. The internal Project retains chapter planning and history;
   it has no separate operator.
-- **Task workspace presentation** reads `lf task changes/diff/file --json`.
-  Lifecycle mutations remain `lf task run/interrupt`; review nodes use
+- **Task workspace presentation** reads `lf diff --files --json`,
+  `lf diff --json` and `lf file --json`.
+  Lifecycle mutations remain `lf flow start` and `lf interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
@@ -331,11 +337,13 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app bundles the current source `lf` with development Home selection and
-validation-only migration authority. It reads and updates private branch data
-under `.lf-dev`; its CLI and UI always use the same wire protocol. This copy
-retains recorded checkout paths, so file edits still affect those real checkouts.
-It does not inherit live provider connections or driver authority.
+The dev app uses the installed CLI and main `~/.lf` Home. Its bundled source
+CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
+experiments remain disposable and never become the app's default.
+
+For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
+and UI use this checkout’s wire protocol. Its recorded checkout paths still
+refer to real files. A copied Home does not prove live provider continuation.
 
 | Command | What it does |
 | --- | --- |
@@ -400,7 +408,7 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
 Verified Exec/process and native-client receipts establish activity independently
 of command outcomes. Input replacement keeps the same row; unresolved engine
 ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness

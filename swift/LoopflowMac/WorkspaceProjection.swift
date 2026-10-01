@@ -42,9 +42,10 @@ struct WorkspaceProjection {
 
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
+        let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
         func attached(to taskId: String?) -> [SessionRecord] {
             guard let taskId else { return [] }
-            let records = sessions.filter { $0.workspace?.taskId == taskId }
+            let records = sessions.filter { $0.workspace?.taskId == taskId || $0.taskIds.contains(taskId) }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -55,8 +56,9 @@ struct WorkspaceProjection {
                 roadmap: wave,
                 sessions: {
                     let records = sessions.filter {
-                        $0.workspace?.taskId == nil && ($0.work == .wave(id: wave.wave.id)
-                            || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
+                        !($0.workspace?.taskId.map(visibleTaskIds.contains) ?? false) && !$0.taskIds.contains(where: visibleTaskIds.contains)
+                            && ($0.work == .wave(id: wave.wave.id)
+                                || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
                     }
                     matched.formUnion(records.map(\.id))
                     return records

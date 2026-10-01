@@ -22,8 +22,8 @@ Fix any issues you find.
 ```
 
 ```bash
-lf audit                      # run it
-lf audit: focus on auth       # {args} in the file receives "focus on auth"
+lf audit                               # run it
+lf audit: focus on auth                # {args} in the file receives "focus on auth"
 ```
 
 Write skills direct and imperative — state what to do, not what the skill
@@ -31,7 +31,7 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. `--batch` and automated
+Direct launch from a TTY runs interactively. `--mode batch` and automated
 flow execution run the same skill headlessly. Define the inputs and useful
 change independently of the caller. When judgment is unavailable, make supported
 corrections and leave consequential choices explicit. Use a reviewer protocol
@@ -69,11 +69,11 @@ explicitly; this also lets a flow call its own same-named skill without a cycle.
 An invalid flow reports its error instead of falling back to the skill.
 
 Skills that need another Work's perspective launch it directly with
-`lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
-`lf ask --key <question-key> "<request>"`; the Run blocks while a durable session
+`lf --task <task> : "<prompt>"`. Skills that genuinely need a decision from the user use
+`lf ask --key <question-key> "<request>"`; the caller blocks while a durable session
 works in the same checkout, then resumes when the user completes it. Reuse the
 key when retrying that question: it joins the same Session or returns its retained
-answer. Keys are scoped to the caller Run. Ask in the current conversation when
+answer. Keys are scoped to the caller’s captured input. Ask in the current conversation when
 the participant is already present.
 
 Run a step interactively with `human: true`. Give it an `id` stable within
@@ -88,7 +88,7 @@ its expanded Flow so the conversation can be reopened:
 ```
 
 The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf session ready "feedback and remaining work"`; the human ends
+feedback with `lf ready "feedback and remaining work"`; the human ends
 the review with `lf session complete <session-id>`. The Flow carries that
 feedback to its next step. Provider exit or readiness alone leaves it waiting.
 Human steps have no navigation verdict or backward edge. Put a deciding step
@@ -99,7 +99,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```yaml
 - implement
 - gate
-- cmd: pr land
+- cmd: task pr land
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
@@ -124,7 +124,7 @@ available across steps, regardless of which skill wrote them or runs next.
 A review's ready summary points to that material:
 
 ```sh
-lf session ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
+lf ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
 ```
 
 Loop-decide starts at those paths, then reconciles the current design and other
@@ -166,7 +166,7 @@ execution interpret backward edges through the same transition rules.
 
 ```bash
 lf feature
-lf task run DES-123 --flow feature
+lf --task DES-123 flow start feature
 ```
 
 A loop is a backward edge in that Flow. It returns from a deciding step to an
@@ -271,7 +271,7 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
 | `crons` | Flow schedules installed through `lf cron sync` |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
+| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:
 
@@ -341,6 +341,10 @@ lf design: plan infrastructure hardening for the runtime
 Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
 agents edit the same reviewed file through the ordinary repository workflow;
 `realign` reconciles memory with the plan and code.
+
+Before curating a parent, realign discovers immediate-child `MEMORY.md` files
+with filesystem tools, reads relevant sections, and promotes shared lessons
+while keeping local detail in the child. Unread coverage stays explicit.
 
 ## Adaptation
 

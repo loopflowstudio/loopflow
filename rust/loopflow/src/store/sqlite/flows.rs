@@ -1035,6 +1035,8 @@ impl SqliteStore {
         claim: Option<&TaskWorkerClaim>,
         exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<FlowSession> {
+        let cwd = self.flow(id)?.ok_or(StoreError::NotFound)?.cwd;
+        let _admission = self.lock_checkout(&cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -1456,6 +1458,8 @@ impl SqliteStore {
     /// Park a Task's Flow at its review: the review Session exists and the
     /// row waits on it.
     pub fn reserve_task_review(&self, id: &str, version: u64) -> StoreResult<FlowSession> {
+        let cwd = self.flow(id)?.ok_or(StoreError::NotFound)?.cwd;
+        let _admission = self.lock_checkout(&cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -1533,6 +1537,25 @@ impl SqliteStore {
         owner: &TaskWorkerOwner,
         claimed_at: OffsetDateTime,
     ) -> StoreResult<TaskWorkerClaimOutcome> {
+        let cwd = self
+            .flow(expected_invocation)?
+            .ok_or(StoreError::NotFound)?
+            .cwd;
+        let _admission = self.lock_checkout(&cwd)?;
+        let automation = self.task_automation(task_id)?;
+        if automation.exec_id.as_deref() == Some(owner.exec_id.as_str()) {
+            if automation.enabled != Some(true) {
+                return Err(StoreError::InvalidAuthority(
+                    "Task automation is held".into(),
+                ));
+            }
+            if let Some(reason) =
+                crate::ops::task_automation::admission_blocker(self, task_id, true, None)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+            {
+                return Err(StoreError::InvalidAuthority(reason));
+            }
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let outcome = claim_task_worker_in(

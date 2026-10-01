@@ -1051,7 +1051,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     );
     assert_eq!(
         serde_json::to_value(command).unwrap(),
-        serde_json::json!({"command":"sync", "args":["origin/main"]})
+        serde_json::json!({"command":"task", "args":["sync", "origin/main"]})
     );
 }
 
@@ -1128,7 +1128,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     repo.commit("Main moves independently");
     repo.push();
     let main_head = repo.head_sha();
-    let command = serde_json::from_str(r#"{"command":"rebase","args":[]}"#).unwrap();
+    let command = serde_json::from_str(r#"{"command":"sync","args":[]}"#).unwrap();
     let sync =
         || loopflow::ops::execute_flow_command(&child_path, &command, &NullProgress).unwrap();
     assert_eq!(

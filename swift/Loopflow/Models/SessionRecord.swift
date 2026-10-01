@@ -151,6 +151,7 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
 /// One resumable Session and the exact command that opens it.
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let taskIds: [String]
     public let id: String
     public let callerSessionId: String?
     public let kind: SessionKind
@@ -197,6 +198,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case callerSessionId = "caller_session_id"
         case id, kind, interactive, work, workspace, title, detail, provider, cwd, state
         case waveId = "wave_id"
+        case taskIds = "task_ids"
         case actions
         case titleSource = "title_source"
         case flowMembership = "flow_membership"

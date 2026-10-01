@@ -15,7 +15,7 @@ pub mod linear_observe;
 pub(crate) mod metrics;
 pub mod pm;
 mod pr;
-pub(crate) mod pr_landing;
+pub mod pr_landing;
 mod present;
 mod progress;
 pub mod project;
@@ -24,7 +24,6 @@ mod run;
 mod sync;
 pub mod task;
 pub mod task_actions;
-pub(crate) mod task_destination;
 pub mod task_execution;
 pub mod task_flow;
 #[doc(hidden)]
@@ -75,3 +74,5 @@ pub use sync::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
+
+pub mod task_automation;

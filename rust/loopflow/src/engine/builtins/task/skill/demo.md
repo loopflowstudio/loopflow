@@ -26,7 +26,7 @@ step, including when this demo runs outside a Flow.
 When this is a `human:true` Flow step, follow its Session readiness/completion
 protocol. Keep the human feedback, revised artifact references, and remaining
 work in the scratch notes; give their exact paths and a short takeaway in the
-ready summary, for example `lf session ready "See scratch/search-feedback.md:
+ready summary, for example `lf ready "See scratch/search-feedback.md:
 implement the agreed empty state; verify recovery after clearing the query"`.
 The following loop-decide interprets that evidence and chooses the explicit
 edge; this demo supplies no navigation verdict.

@@ -99,7 +99,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["user", "name", "--json"], nil)
+        let stdout = try await run(["home", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
     }
 
@@ -125,10 +125,29 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
+    public func automationStatus(cwd: String) async throws -> AutomationStatus {
+        try Self.decode(AutomationStatus.self, from: await run(["task", "automation", "--json"], cwd))
+    }
+
+    public func setAutomation(enabled: Bool, cwd: String) async throws {
+        var args = ["cron", "sync", "--repo"]
+        if !enabled { args.append("--disable") }
+        _ = try await run(args, cwd)
+    }
+
+    public func automateTask(issue: String, enabled: Bool, cwd: String) async throws {
+        _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
+    }
+
+    public func taskStatus(issue: String, cwd: String?) async throws -> TaskStatus {
+        let stdout = try await run(["task", "status", issue, "--json"], cwd)
+        return try Self.decode(TaskStatus.self, from: stdout)
+    }
+
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "changes", issue, "--base", base, "--json"], cwd)
+        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
@@ -140,8 +159,8 @@ public struct RegistryQuery: Sendable {
 
     /// Start (preparing when needed) the Task's managed Flow.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
-        var args = ["task", "run", issue]
-        if let flow { args += ["--flow", flow] }
+        var args = ["--task", issue, "flow", "start"]
+        if let flow { args.append(flow) }
         _ = try await run(args, cwd)
     }
 
@@ -158,10 +177,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
+    /// All associated Sessions, Flows and Execs, including closed history.
+    public func taskWork(task: String, cwd: String?) async throws -> TaskWork {
+        struct Snapshot: Decodable { let work: TaskWork }
+        let stdout = try await run(["task", "status", task, "--json"], cwd)
+        return try Self.decode(Snapshot.self, from: stdout).work
+    }
+
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
     public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
-        let stdout = try await run(["runs", "--task", task, "--json"], cwd)
+        let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
         return try Self.decode([SessionHistory].self, from: stdout)
     }
 
@@ -234,7 +260,7 @@ public struct RegistryQuery: Sendable {
         replacing: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "open", id, "--json"]
+        var args = ["session", "connect", id, "--json"]
         if replacing { args.append("--replace") }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
@@ -277,7 +303,7 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        if sync { _ = try await run(["wave", "sync", wave], cwd) }
+        if sync { _ = try await run(["repo", "refresh", wave], cwd) }
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
         return WavePlan(objective: objective, projects: snapshot.projects)
@@ -300,10 +326,10 @@ public struct RegistryQuery: Sendable {
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
-    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf repo tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["tokens", "--json"], repoPath)
+        let stdout = try await run(["repo", "tokens", "--json"], repoPath)
         return try Self.decode(CodeNode.self, from: stdout)
     }
 
@@ -311,7 +337,7 @@ public struct RegistryQuery: Sendable {
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["tokens", "--json", "--days", String(days)], repoPath)
+        let stdout = try await run(["repo", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 

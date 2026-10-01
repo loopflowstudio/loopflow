@@ -3,7 +3,7 @@ pub mod builtins;
 pub mod clipboard;
 pub mod command;
 pub mod config;
-pub(crate) mod context_budget;
+pub mod context_budget;
 pub mod error;
 pub mod event;
 pub mod exec;
@@ -47,14 +47,14 @@ pub use execution::{
 };
 pub use flow::{
     available_flow_names, compile_flow, find_skill_source_path, human_occurrence_ids, load_flow,
-    load_goal, load_skill, render_goal, Command, ConcreteCommand, ConcretePath, ConcreteSkill,
-    ConcreteStep, ConcreteXor, Flow, Goal, GoalRenderContext, Skill, Step, XorDef, XorPath,
+    load_skill, Command, ConcreteCommand, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor,
+    Flow, Skill, Step, XorDef, XorPath,
 };
 pub use prompt::{
-    count_tokens, drop_native_instruction_docs, format_claude_system_prompt,
-    format_claude_task_prompt, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, gather_documents, write_prompt_log, DiffTier, Document, DocumentSource,
-    GatherContextOpts, GatherSpec, PromptComponents, PromptFormatMode, Surface,
+    count_tokens, drop_duplicate_docs, format_claude_system_prompt, format_claude_task_prompt,
+    format_context_prompt, format_prompt, format_task_prompt, gather_context, gather_documents,
+    write_prompt_log, DiffTier, Document, DocumentSource, GatherContextOpts, GatherSpec,
+    PromptComponents, PromptFormatMode, Surface,
 };
 pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{

@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Command, CommandFactory};
 
 use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
-use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
+use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {
     let mut command = Cli::command();
@@ -13,21 +13,23 @@ pub fn command_tree() -> Command {
     command
 }
 
-fn named(command: &Command, name: &str) -> bool {
-    command.get_name() == name || command.get_all_aliases().any(|alias| alias == name)
-}
-
-fn descendants(command: &Command, name: &str, prefix: &[String], matches: &mut Vec<Vec<String>>) {
+fn descendants(
+    command: &Command,
+    name: &str,
+    prefix: &[String],
+    matches: &mut Vec<Vec<String>>,
+    abbreviated: bool,
+) {
     for child in command
         .get_subcommands()
         .filter(|child| !child.is_hide_set())
     {
         let mut path = prefix.to_vec();
         path.push(child.get_name().to_string());
-        if named(child, name) {
+        if child.get_name() == name || (abbreviated && child.get_name().starts_with(name)) {
             matches.push(path.clone());
         }
-        descendants(child, name, &path, matches);
+        descendants(child, name, &path, matches, abbreviated);
     }
 }
 
@@ -37,11 +39,18 @@ pub fn resolve_child(
     prefix: &[String],
 ) -> Result<Option<Vec<String>>, clap::Error> {
     // Hidden callbacks are still exact commands; they never become shortcuts.
-    if let Some(child) = command.get_subcommands().find(|child| named(child, name)) {
+    if let Some(child) = command
+        .get_subcommands()
+        .find(|child| child.get_name() == name)
+    {
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
-    descendants(command, name, &[], &mut matches);
+    descendants(command, name, &[], &mut matches, false);
+    // Exact descendant names win over abbreviations, just as exact owners do.
+    if matches.is_empty() {
+        descendants(command, name, &[], &mut matches, true);
+    }
     match matches.len() {
         0 => Ok(None),
         1 => Ok(matches.pop()),
@@ -74,13 +83,8 @@ fn flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Arg> {
     command.get_arguments().find(|arg| {
         if let Some(long) = value.strip_prefix("--") {
             arg.get_long() == Some(long)
-                || arg.get_all_aliases().unwrap_or_default().contains(&long)
         } else if let Some(short) = value.strip_prefix('-').and_then(|v| v.chars().next()) {
             arg.get_short() == Some(short)
-                || arg
-                    .get_all_short_aliases()
-                    .unwrap_or_default()
-                    .contains(&short)
         } else {
             false
         }
@@ -104,12 +108,22 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut current = &tree;
     let mut path = Vec::new();
     let mut output = vec![args[0].clone()];
+    let mut location = Vec::new();
     let mut index = 1;
     let mut boundary = false;
     let mut help = false;
     while index < args.len() {
         let value = &args[index];
         if value == "--" {
+            // Preserve a definition escape in help's positional path after
+            // Clap consumes its own option delimiter.
+            if current.get_name() == "help"
+                && output
+                    .last()
+                    .is_some_and(|owner| matches!(owner.as_str(), "run" | "skill" | "flow"))
+            {
+                output.push("--".to_string());
+            }
             output.extend_from_slice(&args[index..]);
             break;
         }
@@ -124,6 +138,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if value.starts_with('-') {
+            let output_start = output.len();
+            let selects_location = matches!(value.split('=').next(), Some("--task" | "--wt"))
+                && (path.is_empty() || flag(current, value).is_none());
             output.push(value.clone());
             let argument = flag(current, value)
                 .or_else(|| flag(&tree, value))
@@ -140,6 +157,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             {
                 index += 1;
                 output.push(args[index].clone());
+            }
+            if selects_location {
+                location.extend_from_slice(&output[output_start..]);
             }
             index += 1;
             continue;
@@ -172,7 +192,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
         index += 1;
     }
     if help {
-        let mut request = vec![args[0].clone(), "help".to_string()];
+        let mut request = vec![args[0].clone()];
+        request.extend(location);
+        request.push("help".to_string());
         request.extend(path);
         Ok(request)
     } else {
@@ -196,13 +218,8 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         command,
         Commands::Help { .. }
             | Commands::List { .. }
-            | Commands::Skill {
-                cmd: SkillCommand::List { .. } | SkillCommand::Show { .. }
-            }
             | Commands::Flow {
-                cmd: FlowCommand::List { .. }
-                    | FlowCommand::Show { .. }
-                    | FlowCommand::Validate { .. }
+                cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
             }
     ) {
         return None;
@@ -213,19 +230,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         match command {
             Commands::Help { path, all } => print!("{}", render_help(path, &repo, *all)?),
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
-            Commands::Skill {
-                cmd: SkillCommand::List { namespace, json },
-            } => {
-                let mut path = vec!["skill".to_string()];
-                path.extend(namespace.iter().cloned());
-                crate::lf::commands::list::show(&path, &repo, *json)?;
-            }
-            Commands::Skill {
-                cmd: SkillCommand::Show { name },
-            } => print!(
-                "{}",
-                definition_help(&command_tree(), &repo, name, Some(DefinitionKind::Skill))?
-            ),
             Commands::Flow {
                 cmd: FlowCommand::List { json, inventory },
             } => {
@@ -241,9 +245,6 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 anyhow::ensure!(!json, "--json requires --sessions for flow show");
                 crate::lf::commands::flow::show(name, &repo)?;
             }
-            Commands::Flow {
-                cmd: FlowCommand::Validate { name },
-            } => crate::lf::commands::flow::validate(name, &repo)?,
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -294,21 +295,28 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf task pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
-    if path.len() == 2 && matches!(path[0].as_str(), "run" | "skill" | "flow") {
-        let owner = tree
-            .find_subcommand(&path[0])
+    let definition = match path {
+        [owner, name] => Some((owner, name, false)),
+        [owner, delimiter, name] if delimiter == "--" => Some((owner, name, true)),
+        _ => None,
+    };
+    if let Some((owner, name, escaped)) =
+        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "run" | "skill" | "flow"))
+    {
+        let command = tree
+            .find_subcommand(owner)
             .expect("definition collection exists");
-        // Declared collection verbs own their names, except after `run`.
-        if path[0] == "run" || resolve_child(owner, &path[1], &path[..1])?.is_none() {
-            let kind = match path[0].as_str() {
+        // Collection verbs win unless explicitly escaped; `run` always selects a definition.
+        if escaped || owner == "run" || resolve_child(command, name, &path[..1])?.is_none() {
+            let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
                 "flow" => Some(DefinitionKind::Flow),
                 _ => None,
             };
-            return definition_help(&tree, repo, &path[1], kind);
+            return definition_help(&tree, repo, name, kind);
         }
     }
     if path.len() == 1 && resolve_child(&tree, &path[0], &[])?.is_none() {
@@ -381,11 +389,15 @@ fn definition_help(
             DefinitionKind::Skill,
             skill.content.clone().unwrap_or_default(),
         ),
-        Target::Flow(flow) => (
-            flow.name.as_str(),
-            DefinitionKind::Flow,
-            crate::lf::discovery::format_written_steps(&flow.items),
-        ),
+        Target::Flow(flow) => {
+            let mut reviews = crate::engine::human_occurrence_ids(flow, repo)?;
+            reviews.sort();
+            let mut description = crate::lf::discovery::format_written_steps(&flow.items);
+            if !reviews.is_empty() {
+                description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
+            }
+            (flow.name.as_str(), DefinitionKind::Flow, description)
+        }
     };
     let label = kind.as_str();
     let source = definition_source(repo, name, kind);

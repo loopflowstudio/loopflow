@@ -2360,29 +2360,28 @@ and FlowSession are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf debug -c
-lf gate --diff-files
+lf gate --diff files
 </code></pre>
 <p>These commands need the execution area only: discover, prompt, route, launch,
 record, return.</p>
 <h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf task checkout INF-123
+<pre tabindex="0"><code class="language-bash">lf checkout INF-123
 lf --task INF-123 research &quot;write scratch/runtime.md&quot;
 lf --task INF-123 research &quot;write scratch/prompts.md&quot;
 lf commit -m &quot;Reconcile Task research&quot;
 lf pr publish
-lf pr submit
+lf submit
 lf task status INF-123 --json
 </code></pre>
 <p><code>prepare</code> creates or reuses tracked Task Work, its one worktree, and the active
 serial PR identity. It starts no Task execution. Each <code>--task</code> command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code>,
-<code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
+Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code> and <code>land</code> therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper AgentSessions, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf --wave product wave/operate        # one finite planning pass
-lf task run INF-123
+lf --task INF-123 flow start
 lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>

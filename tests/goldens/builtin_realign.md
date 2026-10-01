@@ -20,16 +20,18 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf sync --plan                       # inspect integration strategy
-lf sync                              # apply it
+lf task sync --plan                  # inspect integration strategy
+lf task sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf pr submit                         # prepare for the user's merge click
-lf pr arm                            # prepare and request auto-merge; return
-lf pr land                           # watch CI, repair, and finish merged
+lf submit                         # prepare for the user's merge click
+lf arm                            # prepare and request auto-merge; return
+lf land                           # record delivery and return
+lf pr reconcile                      # check delivery once; repair or settle merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
+for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
+settles verified merges. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
@@ -106,7 +108,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+memories live in nested directories; discover relevant ones with ordinary
+filesystem tools. Do not create
 miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
 skills.
 
@@ -117,7 +121,7 @@ conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary contribution explicitly with
-`lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
+`lf --task <task> : "<prompt>"`. When progress genuinely requires a decision from the user,
 run `lf ask "<exact request>"`. It opens a durable session in this
 checkout and blocks until the user completes the conversation. The session
 agent marking itself ready does not complete or remove the session.
@@ -145,6 +149,9 @@ Bring the plan and the implementation into agreement with what the work has taug
    alongside the plan. Recover accepted decisions, lessons, and evidence limits
    that should shape the work. Use supplied Wave context or the repository's
    memory location; do not invent a Wave for unbound work.
+   At a parent Wave, also read its child Waves' top-level Markdown from this
+   checkout so relevant child findings can inform the parent's memory. Ordinary
+   execution context excludes children; read these files explicitly here.
    When intent is missing, ask for the specific missing decision rather than
    treating the implementation as its own specification.
 
@@ -169,6 +176,16 @@ Bring the plan and the implementation into agreement with what the work has taug
    acceptance. Keep a substantial code change explicit as remaining work.
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
+
+   Before curating the selected Wave's memory, inspect `wave/<address>/` with
+   ordinary filesystem tools for immediate child directories containing
+   `MEMORY.md`, including scopes without a `GOAL.md` or registry entry. Read
+   those memories for lessons that apply across the parent scope. For large
+   files, inspect headings and read relevant sections within the available
+   context budget; explore deeper descendants when relevant. State unread or
+   unavailable coverage honestly. Promote broadly useful lessons into the
+   selected parent's memory and keep child-specific detail in its owning file.
+   Inherited memory guides the work; curate the selected scope, not its ancestors.
 
    Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
    and write durable decisions and lessons learned from this work into its
@@ -201,5 +218,23 @@ If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-decide to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to
 the caller.
+
+## Keep authored context within budget
+
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Curate Wave memory gradually. When it exceeds either limit, retire the largest
+stale sections to git history first and bring it just under both limits. Stop
+once it fits; do not rewrite the whole memory toward a smaller target or shrink
+an in-budget memory merely for size. Continue correcting stale guidance and
+recording durable lessons where this work changes them.
+Bring over-budget scratch under both limits too: merge duplicates, summarize
+long evidence, and remove obsolete notes inherited from a stacked parent.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.
 
 </lf:skill:realign>

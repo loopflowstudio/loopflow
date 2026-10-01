@@ -9,6 +9,152 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## One main Home (LOO-342, branch evidence 2026-09-30)
+
+Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task
+workers, Flow steps and agent tools use the installed CLI and `~/.lf`; explicit
+`LF_HOME` experiments initialize once and require a fresh directory after schema
+changes. This supersedes the older branch-copy, development-promotion and retained
+development-store contracts below. Published installation and main-store migration
+recovery remain. Current behavior belongs in [CLI docs](../../docs/lf.md#use-one-home)
+and [Homes](../../docs/architecture/homes.md#one-main-home). Approval and branch
+verification do not establish release or installed acceptance.
+
+Jack deferred remaining side-store retirement until after release and after their
+processes settle. The 2026-09-30 cleanup receipt records 14 installed stores and
+415 worktree snapshots removed, with these five paths beneath `~/.lf-dev` retained
+because they had live file handles: `installed/local-04115a69e0c34b198bf110976b32f390`,
+`installed/local-0912e9bdc1194a4c9774b060dadd428d`,
+`installed/local-6bd36934695b4eb98083e81e13aad4e7`,
+`installed/local-be852452823d43d7b7fde663651a7590`, and
+`worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
+reinspect live ownership before cleanup. Older running builds can recreate side
+stores until the published cutover. No active database was removed or process killed.
+
+## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+
+Jack Heart selected the Task's checkout as its general work set: every
+AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
+SQLite reader supplies Task status and Desktop membership; the app does not
+reconstruct ownership from paths. Membership is additive, includes descendants
+at component boundaries and closed history, and survives a missing checkout.
+It changes neither recorded usage attribution nor process/Flow authority.
+
+The managed Flow remains one marked member for worker progression, claims,
+Task review settlement and worker delivery authority. Independent unfinished
+Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
+during completion, recovery and cleanup. General membership cannot settle or
+signal them. Current mechanics live in the architecture reference; this branch
+entry is not evidence of shipment or configured Desktop acceptance.
+
+## Synced planning integration (LOO-334, 2026-09-30)
+
+Main's landed current-state cutover supersedes the earlier intermediate-schema
+bridge below. Planning now migrates from released Session ownership; it does not
+restore the historical importer or old execution drafts. Managed validation uses
+the single FlowSession driver, after native recovery and completed-Task cleanup.
+Task adoption retains branch/worktree/PR identity without inferring Flow progress.
+
+## Earlier synced planning and runtime selection (LOO-334, 2026-09-29)
+
+Jack Heart approved one local planning interface, with repository-level Linear
+authority when connected and private local plans otherwise. Git shares Wave
+goals, memory, Flows, Skills and provider bindings; Linear adds shared planning.
+Shared execution between participants belongs to the paid layer. Cross-store
+discovery here serves one operator and grants no teammate execution authority.
+
+Accepted contracts below exceed the implemented planning slice:
+
+- Repository files establish Waves; never adopt every Linear Initiative during
+  a read. Jack selected one Initiative per Wave/subwave, portable `A/B` names,
+  and native parent links only when supported. Use the owning worktree's full
+  definition set, including dirty additions/deletions; context-free reads use
+  last-fetched configured remote main. Reads neither union views nor reset files.
+  No-remote/main-checkout policy and outward definition sync remain unresolved.
+- Separate presence, freshness and execution eligibility. Project-less issues
+  exist; list omission and failed refresh cannot prove deletion. Acquisition
+  timestamps are not provider revisions. Shared entities can be newer than a
+  Wave's membership observation, so its sync timestamp cannot date every field.
+- Invalid or mismatched planning must stop managed progression while ordinary
+  worktree Flows remain available without settling that Task's invocation.
+  Jack excluded automatic reconciliation. Cached-Task outage admission remains
+  undecided; retaining cached inspection does not select an execution policy.
+- Status observes PRs without completing Tasks. Chapter rollover must complete the
+  predecessor after unfinished Task transfer and preserves archival/history;
+  closure does not establish successful KRs or complete transferred Tasks.
+- Jack selected the official runtime at each new worker boundary, independently
+  of the execution store, with deliberate visible pins. This supersedes the
+  coupled runtime/store target in the LOO-321 branch notes below, while retaining
+  source isolation and verified historical pairs. It is not implemented yet.
+  On 2026-09-30 Jack required explicit locks to propagate recursively through
+  PATH into Flow children and Codex/Claude/OpenCode agent shells. Ordinary
+  installation changes must preserve Task/review continuity automatically;
+  user-supplied database paths or an owning-store choice do not satisfy acceptance.
+
+Branch `01f7814ef` implements normalized connected planning, revision-ordered
+issue and Project facts, webhook receipts and planning-only status. Inspection
+retains invalid/removed facts and their age even when hard-stale or forced
+acquisition fails. Public CLI proof now covers unavailable planning without
+execution; Rust/Swift fixtures cover the planning envelope, all with null
+execution. Managed readers still exclude invalid/removed records. Full
+execution/action parity, local lifecycle, contextual definitions and runtime
+selection remain work; inspection does not prove managed boundary enforcement.
+
+Durable lessons from this slice:
+
+- Partial webhook payloads invalidate; they never supply complete entity facts.
+  Keep revision/removal receipts even before caching or execution exists. Unknown
+  revisions cannot authorize ordered steering. Realign reproduced a missing
+  `updatedAt` content edit failing before invalidation, then routed it through
+  the existing unknown-revision invalidation path.
+  After acquisition, preserve newly arrived removal evidence: a null response
+  must not downgrade a confirmed removal to absence. A barrier-controlled lookup
+  reproduced that race; inspection now retains removal and dated facts while
+  managed reads refuse.
+- Project facts have their own revisions, independent of the enclosing issue.
+  Project `updatedAt` cannot order separate Initiative/Team relationships.
+  Contradictions persist as unresolved ownership outside the rejected ingestion
+  transaction; replay cannot repair them. Ordered relationship acquisition and
+  repair remain necessary. List omission alone cannot retire a Project.
+- Current normalized membership cannot reconstruct a predecessor chapter. The
+  chapter receipt owns frozen history. Failed assertions expecting stale snapshot
+  resurrection or never-acquired entities did not establish lost history.
+  Confirmed chapter archive acknowledgements exclude predecessors from current
+  reads, including after migration or delayed lists. The September 30 slice now
+  completes predecessors before archival, using the current status's team or
+  workspace scope. Refused or unconfirmed completion cannot archive; retry reads
+  provider state after lost responses. Its stateful local proof preserves Task/PR
+  identity and frozen KR/metric results. Existing historical receipts are not
+  retroactive proof of provider completion. External archive acquisition,
+  restoration and configured Linear completion remain unproven.
+- Repository alias repair must move Waves and normalized planning atomically.
+  Moving only the Wave stranded its planning in the old scope. Conflicts fail
+  without merging observations; this canonicalization is not cross-repository
+  relocation or local-to-Linear connection migration. Populated planning across
+  explicit repository relocation remains unproven.
+- Tracing callsite interest is process-global. The grouped OAuth log-capture
+  failure reproduced and was resolved with an isolated process/subscriber;
+  its recorded grouped run passed 15 active tests. Do not add retries or production
+  tracing hooks to satisfy a concurrent test's subscriber.
+
+Recorded lookup, mutation, receiver, migration, Rust/Swift planning and five
+installation-container proofs are local/simulated evidence, not live Linear or
+the full command story. The working design retains exact receipts and limits.
+Jack supplied successful LOO-298 coordination on 2026-09-30 from a bounded read-only
+contribution at `4f4edff9b` through `d61295196` (documentation-only difference).
+Task retains identity/Project/Wave/checkout/PR evidence; AgentSession/session_events
+owns conversation/native execution/usage; FlowSession/flow_events owns graph,
+cursor, claims and review; Exec owns process evidence. Runtime Run storage is
+removed there. Runtime child FlowSession removal and preserving migration remain
+outstanding: discovery and locks must not depend on those children. Reuse the
+narrow WorkCatalog reader, TaskExecutionSnapshot, task_run and shared skill-command
+executor. Claim acquisition is not Started; driver death is not provider death.
+Prove released and draft-Session migration frontiers separately without rewriting
+applied checksums. This contract supersedes the unregistered coordination blocker,
+but LOO-298 remains unfinished and unaccepted; its execution model is not integrated
+into this branch. Neither coordination nor the chapter proof establishes the full
+continuity acceptance, Task completion or Flow navigation.
+
 ## Session launch continuity (branch evidence, 2026-09-28)
 
 Jack assigned `jack-heart/session-launch-hardening` an independent main-based
@@ -457,8 +603,9 @@ draft preservation are discarded. Keep current Work/links, account routes and
 resumable conversations. Exactly three direct drafts remain: `record_execs`,
 `project_status_chapters` and `session_ownership`; released SQL remains immutable.
 
-**Merge and conversion have different proof.** The working merge checklist is
-`scratch/remaining-work.md` until delivery clears it. Configured provider and
+**Merge and conversion have different proof.** LOO-298 owns its merge checklist;
+this branch retains the earlier copy at `ab901f1f1:scratch/remaining-work.md`
+in Git history. Configured provider and
 Desktop continuity remain unproven; removing Jack's attendance requirement does
 not turn fixtures into acceptance. Before release conversion, quiesce old writers
 and new launches, preserve a consistent SQLite/filesystem backup and matching
@@ -1239,9 +1386,10 @@ local configuration, optional provider connection and later PM setup. Today's
   Wave never terminates successful siblings. The Mac app uses the shared
   connection path. Reconciliation polling remains recovery,
   never startup acknowledgement.
-- **Controller evidence is not an agent Run** (learned 2026-07-20). When a
-  merged PR or another controller fact completes a Task, persist the Task
-  domain transition and completion event in one transaction. Never mint a
+- **Controller evidence is not an agent Run** (learned 2026-07-20; clarified
+  by LOO-334). An authorized completion operation persists the Task domain
+  transition and completion event in one transaction. A status read observing
+  a merged PR must not perform that transition. Never mint a
   synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
   with a zero-agent-boundary fixture and repeated reads that count Runs and
   completion events.

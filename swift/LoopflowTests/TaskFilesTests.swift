@@ -32,7 +32,7 @@ struct TaskFilesTests {
 
     @Test func directoryPagesRefreshIndependentlyOfComparisonAndRetainDocuments() async throws {
         let query = RegistryQuery { args, _ in
-            if args[1] == "changes" { throw RegistryQueryError("Task has no active PR") }
+            if args.contains("--files") { throw RegistryQueryError("Task has no active PR") }
             let path = args.contains("--cursor") ? "second.txt" : "first.txt"
             var entries = [["path": path, "kind": "file"]]
             if args.contains("--show-ignored") { entries.append(["path": "ignored.txt", "kind": "file"]) }
@@ -187,7 +187,7 @@ struct TaskFilesTests {
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         }, run: { args, _ in
             let value: [String: Any]
-            if args[1] == "changes" {
+            if args.contains("--files") {
                 throw RegistryQueryError("Task has no active PR")
             } else if args[1] == "files" {
                 value = ["path": "", "entries": [["path": "note.txt", "kind": "file"]]]
@@ -366,7 +366,7 @@ struct TaskFilesTests {
             .appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let store = TaskFilesStore(issue: "TEST-1", cwd: directory.path, query: RegistryQuery { args, _ in
             let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
-            var value = root[args[1] == "files" ? "directory" : args[1] == "changes" ? "changes" : "diff"] as! [String: Any]
+            var value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"] as! [String: Any]
             if args[1] == "diff" { value["patch"] = try String(contentsOf: file, encoding: .utf8) }
             return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
         })

@@ -133,45 +133,15 @@ impl super::SqliteStore {
         Ok(conn.execute(
             "UPDATE ci_incidents
              SET claimed_landing_generation=?3,
-                 responded_at=COALESCE(responded_at, ?4),
+                 responded_at=?4,
                  updated_at=MAX(updated_at, ?4)
-             WHERE identity=?1 AND landing_id=?2
+             WHERE identity=?1 AND landing_id=?2 AND responded_at IS NULL
                AND EXISTS (
                     SELECT 1 FROM pr_landings landing
                     WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
+                      AND landing.state IN ('watching', 'repairing', 'blocked')
                )",
             params![identity, landing_id.as_str(), generation as i64, at],
-        )? > 0)
-    }
-
-    pub fn mark_ci_incident_repaired(
-        &self,
-        identity: &str,
-        landing_id: &PrLandingId,
-        generation: u64,
-        repaired_head_sha: &str,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let at = timestamp(updated_at);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE ci_incidents
-             SET repaired_head_sha=COALESCE(repaired_head_sha, ?4),
-                 updated_at=MAX(updated_at, ?5)
-             WHERE identity=?1 AND landing_id=?2
-               AND EXISTS (
-                    SELECT 1 FROM pr_landings landing
-                    WHERE landing.id=?2 AND landing.generation=?3
-                      AND landing.state IN ('watching', 'repairing')
-               )",
-            params![
-                identity,
-                landing_id.as_str(),
-                generation as i64,
-                repaired_head_sha,
-                at
-            ],
         )? > 0)
     }
 
@@ -255,7 +225,7 @@ impl super::SqliteStore {
                 ci.claimed_landing_generation, ci.responded_at, ci.green_at,
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
-                w.name, ts.issue_identifier,
+                w.slug, ts.issue_identifier,
                 ts.work_state,
                 ts.created_at,
                 EXISTS (
@@ -273,10 +243,10 @@ impl super::SqliteStore {
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
              LEFT JOIN projects p ON p.id=ts.project_id
-             LEFT JOIN waves w ON w.id=p.wave_id
+             LEFT JOIN wave_addresses w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                             ci.webhook_received_at, ci.created_at) >= ?1
-               AND (?2 IS NULL OR w.name=?2)
+               AND (?2 IS NULL OR w.slug=?2)
                AND (?3 IS NULL OR ci.repo=?3)
              ORDER BY COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                                ci.webhook_received_at, ci.created_at) DESC",

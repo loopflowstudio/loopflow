@@ -139,10 +139,12 @@ struct WorkspaceNavigationProofTests {
         snapshot["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
-            ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
+            let binding = work as? [String: String]
+            let taskIds = binding?["kind"] == "task" ? binding?["id"].map { [$0] } ?? [] : []
+            return ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
              "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated",
-             "flow_membership": ["kind": "independent"], "terminal_ids": [], "open_argv": ["must-not-launch"]]
+             "flow_membership": ["kind": "independent"], "task_ids": taskIds, "terminal_ids": [], "open_argv": ["must-not-launch"]]
         }
         let attached = [
             record("release-outcomes", title: "Release outcomes", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
@@ -609,7 +611,7 @@ struct WorkspaceNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "kind": "conversation", "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -699,7 +701,7 @@ struct WorkspaceNavigationProofTests {
         let records = try String(decoding: JSONSerialization.data(withJSONObject: ["shell-conversation", "second-conversation"].map { id in
             ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(),
              "title": id, "detail": "Local PTY", "cwd": "/tmp",
-             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "terminal_ids": [pane],
+             "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane],
              "open_argv": ["unused"]] as [String: Any]
         }), as: UTF8.self)
         let query = RegistryQuery { args, _ in
@@ -777,7 +779,7 @@ struct WorkspaceNavigationProofTests {
         let records = """
         [{"id":"review-decision", "run_id": "review-decision", "interactive": true,"kind":"flow","work":null,"work_path":null,
           "title":"Review decision","detail":"Human review","cwd":"/tmp",
-          "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],
+          "state":"ready","ready_summary":"Ready for review","title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],
           "actions":\(sessionActionFixtureJSON(kind: "flow", state: "ready")),"open_argv":["/bin/cat"]}]
         """
         let query = RegistryQuery { args, _ in
@@ -918,12 +920,12 @@ struct WorkspaceNavigationProofTests {
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }
@@ -1217,6 +1219,7 @@ private actor NamedSessionSource {
         let index = try #require(records.firstIndex { $0["id"] as? String == id })
         records[index]["interactive"] = false
         records[index]["work"] = NSNull()
+        records[index]["task_ids"] = []
         records[index]["wave_id"] = NSNull()
     }
 
@@ -1229,6 +1232,7 @@ private actor NamedSessionSource {
         #expect(args == ["session", "bind", "--json", "--task", task.id, "--", "first"])
         let index = try #require(records.firstIndex { $0["id"] as? String == "first" })
         records[index]["work"] = ["kind": "task", "id": task.id]
+        records[index]["task_ids"] = [task.id]
         records[index]["wave_id"] = "wave-1"
         return String(decoding: try JSONSerialization.data(withJSONObject: records[index]), as: UTF8.self)
     }

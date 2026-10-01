@@ -12,11 +12,12 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-const EXEC_SELECT: &str = "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
+pub(super) const EXEC_SELECT: &str =
+    "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
     e.caller_provider_generation,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error FROM execs e";
 
-fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
+pub(super) fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
     Ok(Exec {
         id: row.get(0)?,
         trace_id: row.get(1)?,
@@ -184,7 +185,7 @@ impl SqliteStore {
         repo: Option<&str>,
     ) -> StoreResult<Option<crate::id::WaveId>> {
         self.resolve_work_id(
-            "SELECT id FROM waves WHERE id=?1 OR (name=?1 AND (?2 IS NULL OR repo=?2))
+            "SELECT id FROM wave_addresses WHERE id=?1 OR (slug=?1 AND (?2 IS NULL OR repo=?2))
             ORDER BY (id=?1) DESC,id LIMIT 2",
             selector,
             repo,

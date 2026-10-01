@@ -74,8 +74,8 @@ network, browser, MCP, or credential boundary around the whole process tree.
 
 Skills can edit, commit, push, land a PR, deploy, or update GitHub and Linear
 when the matching tool and credential are present. A gate may decide that work
-is ready to ship. `lf pr submit` leaves the exact-head merge to a person;
-`arm` and `land` request GitHub auto-merge. GitHub remains authoritative for
+is ready to ship. `lf submit` leaves the exact-head merge to a person;
+`land` requests GitHub auto-merge. GitHub remains authoritative for
 whether a PR merged. Release authority is separate and depends on the target's
 configured publisher workflow and credentials.
 
@@ -208,7 +208,7 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Home store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Home. Reading another Home with `lf ssh <home-id> runs` executes the read on
+Home. Reading another Home with `lf ssh <home-id> monitor list` executes the read on
 that machine.
 
 ## Keep bridge credentials private

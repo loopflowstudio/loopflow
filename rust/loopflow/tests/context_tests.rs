@@ -1,10 +1,15 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use loopflow::engine::{
     format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents,
     PromptFormatMode, Surface,
 };
+use loopflow::id::WaveId;
+use loopflow::ops::resolve_work_binding;
+use loopflow::store::{open_ephemeral_store, StorageConfig};
+use loopflow::work::wave::Wave;
 use tempfile::TempDir;
 
 fn init_repo(dir: &Path) {
@@ -596,65 +601,107 @@ fn wave_filtering_includes_all_files_in_wave_directory() {
 }
 
 #[test]
-fn wave_memory_is_loaded_separately_from_wave_docs() {
+fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
+    // No registry or git history is needed, including in a fresh checkout.
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
-    init_repo(repo);
-
-    fs::create_dir_all(repo.join("wave/living")).unwrap();
-    fs::write(repo.join("wave/living/README.md"), "# Living").unwrap();
-    fs::write(repo.join("wave/living/plan.md"), "# Plan").unwrap();
-    fs::write(
-        repo.join("wave/living/MEMORY.md"),
-        "- keep tests focused on behavior",
-    )
-    .unwrap();
-    write_skill(repo, "implement", "Do work.");
-    make_commit(repo, "initial");
-    let wave_memory = loopflow::work::wave::context::gather_wave_memory(repo, "living");
-
-    let components = gather_context(&GatherContextOpts {
+    for (path, content) in [
+        ("MEMORY.md", "Repository decisions"),
+        ("wave/infrastructure/README.md", "Parent introduction"),
+        ("wave/infrastructure/GOAL.md", "Parent goal"),
+        ("wave/infrastructure/MEMORY.md", "Parent decisions"),
+        ("wave/infrastructure/release/GOAL.md", "Release goal"),
+        ("wave/infrastructure/release/MEMORY.md", "Release decisions"),
+        ("wave/infrastructure/release/notes.md", "Release notes"),
+        ("wave/infrastructure/auth/MEMORY.md", "Sibling secrets"),
+        (
+            "wave/infrastructure/release/child/MEMORY.md",
+            "Child details",
+        ),
+        ("wave/product/MEMORY.md", "Unrelated details"),
+        ("wave/infrastructure/release/data.json", "Not Markdown"),
+        ("scratch/deep/design.md", "Recursive scratch"),
+    ] {
+        let file = repo.join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, content).unwrap();
+    }
+    let mut components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
-        skill: Some("implement".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        files: vec![],
-        docs: vec![],
-        wave: Some("living".to_string()),
-        wave_memory,
-        related_repos: Vec::new(),
+        wave: Some("infrastructure/release".into()),
+        docs: vec!["wave/infrastructure/release/GOAL.md".into()],
         ..Default::default()
     })
     .unwrap();
-
-    let wave_docs: Vec<_> = components
+    loopflow::engine::drop_duplicate_docs(&mut components, repo);
+    let paths: Vec<_> = components
         .docs
         .iter()
-        .filter(|d| d.source == DocumentSource::Wave)
+        .filter(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Wave
+            )
+        })
+        .map(|doc| doc.path.as_str())
         .collect();
     assert_eq!(
-        wave_docs.len(),
-        2,
-        "README.md and plan.md should be wave docs"
+        paths,
+        [
+            "MEMORY.md",
+            "wave/infrastructure/README.md",
+            "wave/infrastructure/GOAL.md",
+            "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/release/GOAL.md",
+            "wave/infrastructure/release/MEMORY.md",
+            "wave/infrastructure/release/notes.md",
+        ]
     );
-    assert!(wave_docs.iter().all(|d| !d.path.ends_with("MEMORY.md")));
-
-    assert!(components.wave_memory.is_some());
-    assert_eq!(
-        components.wave_memory.as_ref().map(|doc| doc.path.as_str()),
-        Some("wave/living/MEMORY.md")
-    );
-    assert!(components
-        .wave_memory
-        .as_ref()
-        .expect("wave memory should be loaded")
-        .content
-        .contains("keep tests focused on behavior"));
-
     let prompt = render_prompt(components);
-    assert!(prompt.contains("<lf:wave-memory>"));
-    assert!(prompt.contains("keep tests focused on behavior"));
+    assert!(prompt.contains("Recursive scratch"));
+    for content in [
+        "Repository decisions",
+        "Parent introduction",
+        "Parent goal",
+        "Parent decisions",
+        "Release goal",
+        "Release decisions",
+        "Release notes",
+    ] {
+        assert_eq!(prompt.matches(content).count(), 1, "{content}");
+    }
+    assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release goal").unwrap());
+    assert!(prompt.find("Repository decisions").unwrap() < prompt.find("Parent goal").unwrap());
+    for excluded in [
+        "Sibling secrets",
+        "Child details",
+        "Unrelated details",
+        "Not Markdown",
+    ] {
+        assert!(!prompt.contains(excluded));
+    }
+}
+
+#[test]
+fn context_delivery_repository_memory_is_included_once_without_a_wave() {
+    let temp = TempDir::new().unwrap();
+    fs::write(temp.path().join("MEMORY.md"), "Repository decisions.").unwrap();
+    let mut components = gather_context(&GatherContextOpts {
+        repo_root: temp.path().to_path_buf(),
+        docs: vec!["MEMORY.md".into()],
+        ..Default::default()
+    })
+    .unwrap();
+    let decisions = loopflow::engine::drop_duplicate_docs(&mut components, temp.path());
+    assert_eq!(components.docs.len(), 1);
+    assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
+    assert!(decisions.iter().any(|decision| {
+        decision.source_path.as_deref() == Some("MEMORY.md")
+            && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
+    }));
+    let prompt = render_prompt(components);
+    assert_eq!(prompt.matches("Repository decisions.").count(), 1);
+    assert!(!prompt.contains("<lf:wave name="));
 }
 
 #[test]
@@ -673,11 +720,11 @@ fn run_outside_any_wave_assembles_no_memory_section() {
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert!(!prompt.contains("<lf:wave-memory>"));
+    assert!(!prompt.contains("<lf:wave"));
 }
 
-#[test]
-fn worktree_reads_the_origin_repos_wave_memory() {
+#[tokio::test]
+async fn worktree_reads_its_own_wave_memory() {
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
     fs::create_dir_all(&origin).unwrap();
@@ -685,9 +732,10 @@ fn worktree_reads_the_origin_repos_wave_memory() {
     fs::create_dir_all(origin.join("wave/goals")).unwrap();
     fs::write(
         origin.join("wave/goals/MEMORY.md"),
-        "- origin memory is the truth",
+        "- previous committed memory",
     )
     .unwrap();
+    fs::write(origin.join("wave/goals/GOAL.md"), "Origin goal.").unwrap();
     make_commit(&origin, "initial");
 
     // A sibling worktree, as `lf wave` bootstraps: <repo>.goals.
@@ -703,23 +751,42 @@ fn worktree_reads_the_origin_repos_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // The worktree's committed copy lags the origin: the origin must win.
+    // Uncommitted memory in the executing checkout wins over the origin.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
-        "- stale worktree copy",
+        "- checkout-local decisions",
     )
     .unwrap();
-    let wave_memory = loopflow::work::wave::context::gather_wave_memory(&worktree, "goals");
 
+    fs::write(worktree.join("wave/goals/GOAL.md"), "Checkout goal.").unwrap();
+    let store = Arc::new(
+        open_ephemeral_store(&StorageConfig::sqlite(temp.path().join("registry.db")))
+            .await
+            .unwrap(),
+    );
+    let wave = Wave::new(WaveId::new(), "goals".into(), origin.display().to_string());
+    store.create_wave(&wave).await.unwrap();
+    let binding = resolve_work_binding(&store, &worktree, "wave:goals")
+        .await
+        .unwrap();
+    assert_eq!(
+        binding.cwd.canonicalize().unwrap(),
+        worktree.canonicalize().unwrap()
+    );
     let components = gather_context(&GatherContextOpts {
-        repo_root: worktree.clone(),
-        wave: Some("goals".to_string()),
-        wave_memory,
+        repo_root: binding.cwd,
+        wave: Some(binding.wave_name),
+        message: Some(binding.context),
+        operate: true,
         ..Default::default()
     })
     .unwrap();
 
-    let memory = components.wave_memory.as_ref().expect("memory resolved");
-    assert!(memory.content.contains("origin memory is the truth"));
-    assert!(!memory.content.contains("stale worktree copy"));
+    let prompt = render_prompt(components);
+    assert_eq!(prompt.matches("checkout-local decisions").count(), 1);
+    assert_eq!(prompt.matches("Checkout goal.").count(), 1);
+    assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+    assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
+    assert!(!prompt.contains("previous committed memory"));
+    assert!(!prompt.contains("Origin goal."));
 }

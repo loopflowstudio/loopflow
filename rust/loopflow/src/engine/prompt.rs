@@ -24,7 +24,7 @@ pub enum DocumentSource {
     Skill,
     Scratch,
     Wave,
-    WaveMemory,
+    RepoMemory,
     Docs,
     Summary,
     Diff,
@@ -98,8 +98,6 @@ pub struct GatherContextOpts {
     pub files: Vec<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
-    /// Wave memory already resolved by the Work layer.
-    pub wave_memory: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
     pub include_clipboard: bool,
@@ -175,6 +173,7 @@ impl std::str::FromStr for Surface {
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
+    pub budget_notice: Option<String>,
     pub surface: Surface,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
@@ -184,7 +183,6 @@ pub struct PromptComponents {
     pub repo_root: String,
     pub clipboard: Option<String>,
     pub summaries: Vec<Document>,
-    pub wave_memory: Option<Document>,
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
@@ -343,27 +341,18 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     let mut docs = Vec::new();
     let mut summaries = Vec::new();
-    let mut wave_memory = opts.wave_memory.as_ref().map(|content| Document {
-        path: opts
-            .wave
-            .as_ref()
-            .map(|wave| format!("wave/{wave}/MEMORY.md"))
-            .unwrap_or_else(|| "wave/MEMORY.md".to_string()),
-        content: content.clone(),
-        source: DocumentSource::WaveMemory,
-    });
     let mut diff_files = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::Docs | DocumentSource::Scratch | DocumentSource::Wave => docs.push(doc),
+            DocumentSource::Docs
+            | DocumentSource::Scratch
+            | DocumentSource::Wave
+            | DocumentSource::RepoMemory => docs.push(doc),
             DocumentSource::Summary => summaries.push(doc),
-            DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-    dedup_documents(&mut diff_files);
-
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
     let (diff, diff_tier, diff_file_count) = if opts.include_diff {
@@ -402,7 +391,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         summaries,
-        wave_memory,
         wave: opts.wave.clone(),
         operate: opts.operate,
         message: opts.message.clone(),
@@ -410,6 +398,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         diff_tier,
         diff_file_count,
         budget_decisions: Vec::new(),
+        budget_notice: None,
     })
 }
 
@@ -417,8 +406,16 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve ambient ordering: scratch -> wave -> explicit docs.
+    // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    let repo_memory = spec.repo_root.join("MEMORY.md");
+    if repo_memory.is_file() {
+        docs.push(Document {
+            path: "MEMORY.md".into(),
+            content: fs::read_to_string(repo_memory)?,
+            source: DocumentSource::RepoMemory,
+        });
+    }
     docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
     if !spec.docs.is_empty() {
         let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
@@ -432,16 +429,14 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         docs.extend(explicit_docs);
     }
 
-    if !spec.include_files {
-        return Ok(docs);
+    if spec.include_files {
+        let files = if spec.files.is_empty() {
+            gather_changed_file_paths(&spec.repo_root)?
+        } else {
+            spec.files.clone()
+        };
+        docs.extend(gather_files(&spec.repo_root, &files)?);
     }
-
-    let files = if spec.files.is_empty() {
-        gather_changed_file_paths(&spec.repo_root)?
-    } else {
-        spec.files.clone()
-    };
-    docs.extend(gather_files(&spec.repo_root, &files)?);
 
     Ok(docs)
 }
@@ -536,51 +531,37 @@ pub(crate) fn render_message(message: &str) -> String {
 
 fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
-
-    if let Some(wave_name) = wave {
-        let wave_dir = repo_root.join("wave").join(wave_name);
-        if wave_dir.is_dir() {
-            // README first
-            let readme = wave_dir.join("README.md");
-            if readme.is_file() {
-                if let Ok(content) = fs::read_to_string(&readme) {
-                    docs.push(Document {
-                        path: format!("wave/{}/README.md", wave_name),
-                        content,
-                        source: DocumentSource::Wave,
-                    });
-                }
-            }
-            // Then other .md files (sorted)
-            let mut entries: Vec<_> = fs::read_dir(&wave_dir)?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let path = e.path();
-                    path.is_file()
-                        && path.extension().map(|ext| ext == "md").unwrap_or(false)
-                        && path.file_name().map(|n| n != "README.md").unwrap_or(false)
-                        // Wave memory is gathered separately as DocumentSource::WaveMemory.
-                        && path.file_name().map(|n| n != "MEMORY.md").unwrap_or(false)
-                })
-                .collect();
-            entries.sort_by_key(|e| e.path());
-            for entry in entries {
-                let path = entry.path();
-                if let Ok(content) = fs::read_to_string(&path) {
-                    docs.push(Document {
-                        path: format!(
-                            "wave/{}/{}",
-                            wave_name,
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        ),
-                        content,
-                        source: DocumentSource::Wave,
-                    });
-                }
-            }
+    let Some(wave) = wave else {
+        return Ok(docs);
+    };
+    let mut directory = PathBuf::from("wave");
+    for segment in Path::new(wave).components() {
+        directory.push(segment);
+        let absolute = repo_root.join(&directory);
+        if !absolute.is_dir() {
+            continue;
+        }
+        let mut paths = fs::read_dir(&absolute)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
+        paths.sort_by_key(|path| {
+            (
+                path.file_name().is_none_or(|name| name != "README.md"),
+                path.clone(),
+            )
+        });
+        for path in paths {
+            docs.push(Document {
+                path: directory
+                    .join(path.file_name().expect("directory entry has a name"))
+                    .to_string_lossy()
+                    .into_owned(),
+                content: fs::read_to_string(&path)?,
+                source: DocumentSource::Wave,
+            });
         }
     }
-
     Ok(docs)
 }
 
@@ -1403,45 +1384,78 @@ fn glob_to_regex(pattern: &str) -> String {
 /// avoid duplication — whichever agent runs will pick up its own file.
 const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
-/// Remove docs that duplicate any agent's natively-loaded instruction file.
-///
-/// Skips all known native files (CLAUDE.md and AGENTS.md) and any
-/// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
-pub fn drop_native_instruction_docs(
+/// Keep one delivery of a document source or the builtin operating guidance.
+/// Native instructions remain owned by provider discovery. Equal text at
+/// different paths remains distinct, including separate memory scopes.
+pub fn drop_duplicate_docs(
     components: &mut PromptComponents,
     repo_root: &Path,
-) -> Vec<Document> {
+) -> Vec<crate::trace::ContextDecision> {
+    use crate::trace::{
+        ContextAssetKind as Kind, ContextDecision, ContextDecisionKind, ContextScope,
+    };
+
     // Collect canonical paths of all native files (resolves symlinks)
     let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
         .iter()
         .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
         .collect();
 
-    let mut removed = Vec::new();
-    components.docs.retain(|doc| {
-        let name = Path::new(&doc.path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+    let mut decisions = Vec::new();
+    let mut seen = HashSet::new();
+    for docs in [&mut components.docs, &mut components.diff_files] {
+        docs.retain(|doc| {
+            let name = Path::new(&doc.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
 
-        // Drop the native files themselves
-        if AGENT_NATIVE_FILES.contains(&name) {
-            removed.push(doc.clone());
-            return false;
-        }
-
-        // Drop symlink partners (CLAUDE.md -> STYLE.md or STYLE.md -> CLAUDE.md)
-        let doc_path = repo_root.join(&doc.path);
-        if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
-            if canonical_paths.contains(&doc_canon) {
-                removed.push(doc.clone());
-                return false;
-            }
-        }
-
-        true
-    });
-    removed
+            let doc_path = repo_root.join(&doc.path);
+            let source_path = fs::canonicalize(&doc_path).unwrap_or(doc_path);
+            let (kind, scope, reason) =
+                if AGENT_NATIVE_FILES.contains(&name) || canonical_paths.contains(&source_path) {
+                    (Kind::RepoInstructions, ContextScope::Repo,
+                     "provider-native discovery owns this instruction file or its symlink target")
+                } else if components.operate
+                    && name == "LOOPFLOW.md"
+                    && doc.content.trim() == crate::engine::builtins::LOOPFLOW_DOC.trim()
+                {
+                    (
+                        Kind::OperatingInstructions,
+                        ContextScope::Global,
+                        "the system channel already supplies the builtin operating instructions",
+                    )
+                } else if !seen.insert((source_path, doc.content.clone())) {
+                    let (kind, scope) = match doc.source {
+                        DocumentSource::Scratch => (Kind::Scratch, ContextScope::Repo),
+                        DocumentSource::Wave => (Kind::Document, ContextScope::Wave),
+                        DocumentSource::Diff => (Kind::Diff, ContextScope::Repo),
+                        _ => (Kind::Document, ContextScope::Repo),
+                    };
+                    (
+                        kind,
+                        scope,
+                        "this document source is already supplied in the assembled input",
+                    )
+                } else {
+                    return true;
+                };
+            decisions.push(ContextDecision {
+                position: decisions.len() as u32,
+                kind,
+                scope,
+                label: doc.path.clone(),
+                source_path: Some(doc.path.clone()),
+                decision: ContextDecisionKind::Deduplicated,
+                reason: reason.to_string(),
+                original_bytes: Some(doc.content.len() as u64),
+                original_tokens: Some(count_tokens(&doc.content) as u64),
+                asset_position: None,
+            });
+            false
+        });
+    }
+    decisions
 }
 
 fn read_text_file(path: &Path) -> Option<String> {
@@ -1453,11 +1467,6 @@ fn read_text_file(path: &Path) -> Option<String> {
         return None;
     }
     String::from_utf8(bytes).ok()
-}
-
-fn dedup_documents(docs: &mut Vec<Document>) {
-    let mut seen = HashSet::new();
-    docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
 /// Ensure an entry exists in the repo's root .gitignore.
@@ -1519,27 +1528,30 @@ pub fn loopflow_section() -> String {
     )
 }
 
-/// The Wave memory section inherited by every run born inside a Wave, whatever
-/// the launch surface (assembled prompts and vendor-skill seeds alike). Emitted
-/// only when non-empty: no memory, no header, no tokens.
-///
-/// Memory goes through the one injector
-/// ([`crate::engine::flow::wave_memory_section`], shared with the wave
-/// agent's `render_goal`) and is skipped when the task message already
-/// carries the tag — a wave-agent seed embeds its own memory, and injecting
-/// it twice would double the context.
-pub fn format_wave_memory_section(components: &PromptComponents) -> Option<String> {
-    let message_carries_memory = components
-        .message
-        .as_deref()
-        .is_some_and(|message| message.contains("<lf:wave-memory>"));
-    if message_carries_memory {
-        return None;
+/// Render repository memory and Wave files for assembled and native skill launches.
+pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
+    let mut parts = Vec::new();
+    if let Some(wave) = &components.wave {
+        parts.push(format!(
+            "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
+             Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.\n\
+             Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
+        ));
     }
-    components
-        .wave_memory
-        .as_ref()
-        .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
+    let docs: Vec<_> = components
+        .docs
+        .iter()
+        .filter(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Wave
+            )
+        })
+        .collect();
+    if !docs.is_empty() {
+        parts.push(format_files(docs));
+    }
+    parts
 }
 
 /// Render user-content reference sections (docs, diffs, wave context, clipboard).
@@ -1554,37 +1566,12 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(user_context);
     }
 
-    // Wave context
-    if let Some(ref wave) = components.wave {
-        let memory_path = format!("wave/{wave}/MEMORY.md");
+    parts.extend(format_wave_sections(components));
 
+    if let Some(notice) = &components.budget_notice {
         parts.push(format!(
-            "<lf:wave name=\"{}\">\n\
-             You are building toward the {} program of work.\n\
-             Wave context is included in docs below.\n\n\
-             ## Wave memory\n\n\
-             Persistent memory at {}. Use the supplied memory; read relevant omitted\n\
-             sections when an excerpt names them. Its current\n\
-             contents, when any, ride this prompt's wave-memory section.\n\
-             Edit it through the ordinary repository workflow; no live Wave is required.\n\
-             `realign` reconciles memory with the plan and code. Keep durable observations,\n\
-             correct or remove stale entries, and drop session-specific notes. Use absolute dates.\n\n\
-             Organize as useful, for example:\n\
-             - Patterns: codebase conventions, architecture, how things connect\n\
-             - Preferences: user workflow, tool choices, communication norms\n\
-             - Learnings: what worked, what failed, surprises\n\n\
-             Keep memory compact enough for every iteration. Put architectural decisions\n\
-             in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.\n\
-             As sections grow, promote stable entries to wave docs or explicit docs and trim.\n\
-             </lf:wave>",
-            wave, wave, memory_path
+            "<lf:context-budget>\n{notice}\n</lf:context-budget>"
         ));
-    }
-
-    // Durable Wave memory flows into every run born inside the Wave and costs
-    // zero tokens when absent. Conversation requires explicit selection.
-    if let Some(memory) = format_wave_memory_section(components) {
-        parts.push(memory);
     }
 
     let scratch_body: Vec<String> = components
@@ -1610,11 +1597,16 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Explicit docs and wave docs.
-    let reference_docs: Vec<&Document> = components
+    // Explicit docs.
+    let reference_docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|doc| doc.source != DocumentSource::Scratch)
+        .filter(|doc| {
+            !matches!(
+                doc.source,
+                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
+            )
+        })
         .collect();
     if !reference_docs.is_empty() {
         parts.push(format_files(reference_docs));
@@ -1878,11 +1870,14 @@ mod tests {
             source: source_kind,
         };
         let components = PromptComponents {
-            docs: vec![doc(DocumentSource::Scratch), doc(DocumentSource::Docs)],
+            docs: vec![
+                doc(DocumentSource::Scratch),
+                doc(DocumentSource::Docs),
+                doc(DocumentSource::Wave),
+            ],
             diff: Some(source.into()),
             diff_files: vec![doc(DocumentSource::Diff)],
             summaries: vec![doc(DocumentSource::Summary)],
-            wave_memory: Some(doc(DocumentSource::WaveMemory)),
             clipboard: Some(source.into()),
             message: Some(format!(
                 "Use $implement.\n<lf:steers>\n{source}\n</lf:steers>\n\
@@ -1907,7 +1902,7 @@ mod tests {
         assert!(submitted
             .contains("The selected skill and live request determine the current operation."));
         assert_eq!(components.docs[0].content, source);
-        assert_eq!(components.wave_memory.unwrap().content, source);
+        assert_eq!(components.docs[2].content, source);
         assert_eq!(
             render_reference(&render_reference(source)),
             render_reference(source)
@@ -1996,21 +1991,23 @@ mod tests {
     #[test]
     fn format_prompt_does_not_trim_large_context() {
         let components = PromptComponents {
-            docs: vec![Document {
-                path: "doc.md".to_string(),
-                content: "Doc content ".repeat(200),
-                source: DocumentSource::Docs,
-            }],
+            docs: vec![
+                Document {
+                    path: "doc.md".to_string(),
+                    content: "Doc content ".repeat(200),
+                    source: DocumentSource::Docs,
+                },
+                Document {
+                    path: "wave/living/MEMORY.md".into(),
+                    content: "Wave memory content ".repeat(200),
+                    source: DocumentSource::Wave,
+                },
+            ],
             summaries: vec![Document {
                 path: "summary.md".to_string(),
                 content: "Summary content ".repeat(200),
                 source: DocumentSource::Summary,
             }],
-            wave_memory: Some(Document {
-                path: "wave/living/MEMORY.md".to_string(),
-                content: "Wave memory content ".repeat(200),
-                source: DocumentSource::WaveMemory,
-            }),
             wave: Some("living".to_string()),
             ..Default::default()
         };
@@ -2019,7 +2016,7 @@ mod tests {
 
         assert!(prompt.contains("<lf:file path=\"doc.md\">"));
         assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
-        assert!(prompt.contains("<lf:wave-memory>"));
+        assert!(prompt.contains("<lf:file path=\"wave/living/MEMORY.md\">"));
         assert!(prompt.contains("Wave memory content"));
     }
 
@@ -2051,7 +2048,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(prompt.contains("<lf:loopflow>"));
-        assert!(prompt.contains("lf commit"));
+        assert!(prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
         assert!(prompt.contains("</lf:loopflow>"));
     }
 
@@ -2064,7 +2061,7 @@ mod tests {
 
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("<lf:loopflow>"));
-        assert!(!prompt.contains("lf commit"));
+        assert!(!prompt.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
         assert!(!prompt.contains("lf chat"));
     }
 
@@ -2085,13 +2082,13 @@ mod tests {
             assert!(prompt.contains("Checks and Flow boundaries"));
             assert!(prompt.contains("Gate owns\nverification once"));
             assert!(prompt.contains("Checks must run headless"));
-            assert!(prompt.contains("lf pr land"));
+            assert!(prompt.contains("lf land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
-            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
-            for procedure in ["lf task restart", "lf wave place", "lf ps --json"] {
+            assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
+            for procedure in ["lf restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
                     name == "loopflow",
@@ -2139,125 +2136,51 @@ mod tests {
     }
 
     #[test]
-    fn format_prompt_with_wave_memory() {
-        let components = PromptComponents {
-            wave: Some("living".to_string()),
-            wave_memory: Some(Document {
-                path: "wave/living/MEMORY.md".to_string(),
-                content: "- prefer focused tests\n- run cargo fmt first".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
+    fn native_instructions_are_not_injected() {
+        let repo = init_repo();
+        write_file(repo.path(), "AGENTS.md", "Repository instructions");
+        write_file(repo.path(), "README.md", "Project documentation");
+        let mut components = PromptComponents {
+            docs: gather_documents(&GatherSpec {
+                repo_root: repo.path().to_path_buf(),
+                docs: vec!["AGENTS.md".to_string(), "README.md".to_string()],
+                ..Default::default()
+            })
+            .unwrap(),
             ..Default::default()
         };
 
+        let removed = drop_duplicate_docs(&mut components, repo.path());
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].source_path.as_deref(), Some("AGENTS.md"));
         let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Persistent memory at wave/living/MEMORY.md"));
-        assert!(prompt.contains("<lf:wave-memory>"));
-        assert!(prompt.contains("prefer focused tests"));
+        assert!(!prompt.contains("Repository instructions"));
+        assert!(prompt.contains("Project documentation"));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn wave_memory_renders_without_an_explicit_wave_block() {
-        let components = PromptComponents {
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "- land real product code".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            ..Default::default()
-        };
+    fn native_instruction_symlink_aliases_are_not_injected() {
+        for (target, link) in [
+            ("CONTRIBUTING.md", "AGENTS.md"),
+            ("AGENTS.md", "CONTRIBUTING.md"),
+        ] {
+            let repo = init_repo();
+            write_file(repo.path(), target, "Repository instructions");
+            std::os::unix::fs::symlink(repo.path().join(target), repo.path().join(link)).unwrap();
+            let mut components = PromptComponents {
+                docs: vec![Document {
+                    path: "CONTRIBUTING.md".to_string(),
+                    content: "Repository instructions".to_string(),
+                    source: DocumentSource::Docs,
+                }],
+                ..Default::default()
+            };
 
-        let prompt = render_full_prompt(components);
-        assert!(
-            !prompt.contains("<lf:wave name="),
-            "no wave block ambiently"
-        );
-        assert!(prompt.contains("<lf:wave-memory>\n- land real product code\n</lf:wave-memory>"));
-    }
-
-    #[test]
-    fn no_wave_context_renders_no_wave_sections() {
-        let prompt = render_full_prompt(PromptComponents::default());
-        assert!(!prompt.contains("<lf:wave-memory>"));
-        assert!(!prompt.contains("<lf:wave"));
-    }
-
-    #[test]
-    fn empty_wave_memory_renders_no_section() {
-        let components = PromptComponents {
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "   \n".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("<lf:wave-memory>"));
-    }
-
-    #[test]
-    fn wave_agent_seed_does_not_double_inject_memory() {
-        // The wave agent's inline run: render_goal already embedded the
-        // memory in the task message; assembly must not inject it again.
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".to_string(),
-        };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext {
-                flows: vec![],
-                memory: "- one source of truth".to_string(),
-            },
-        );
-        let components = PromptComponents {
-            wave: Some("goals".to_string()),
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "- one source of truth".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            message: Some(seed),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert_eq!(
-            prompt.matches("<lf:wave-memory>").count(),
-            1,
-            "memory appears exactly once (inside the seed message)"
-        );
-        assert_eq!(prompt.matches("- one source of truth").count(), 1);
-    }
-
-    /// The wave agent's inline run: the render_goal seed rides as the task
-    /// message of an assembled prompt (operate on), and the loopflow document
-    /// lands exactly once — from assembly, not the seed.
-    #[test]
-    fn wave_agent_seed_carries_loopflow_document_once() {
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".to_string(),
-        };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext {
-                flows: vec![],
-                memory: String::new(),
-            },
-        );
-        assert!(
-            !seed.contains("<lf:loopflow>"),
-            "the seed itself carries no loopflow section"
-        );
-
-        let components = PromptComponents {
-            operate: true,
-            wave: Some("goals".to_string()),
-            message: Some(seed),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
+            let removed = drop_duplicate_docs(&mut components, repo.path());
+            assert_eq!(removed.len(), 1);
+            assert!(!render_full_prompt(components).contains("Repository instructions"));
+        }
     }
 
     #[test]
@@ -2270,7 +2193,7 @@ mod tests {
                     source: DocumentSource::Docs,
                 },
                 Document {
-                    path: "STYLE.md".to_string(),
+                    path: "CONTRIBUTING.md".to_string(),
                     content: "# Style Guide".to_string(),
                     source: DocumentSource::Docs,
                 },
@@ -2283,37 +2206,7 @@ mod tests {
         assert!(prompt.contains("<lf:file path=\"README.md\">"));
         assert!(prompt.contains("# Test Project"));
         assert!(prompt.contains("</lf:file>"));
-        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
-        assert!(prompt.contains("# Style Guide"));
-    }
-
-    #[test]
-    fn format_prompt_claude_md_renders_as_file() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "CLAUDE.md".to_string(),
-                content: "# Instructions".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:file path=\"CLAUDE.md\">"));
-        assert!(prompt.contains("# Instructions"));
-    }
-
-    #[test]
-    fn format_prompt_style_md_renders_as_file() {
-        let components = PromptComponents {
-            docs: vec![Document {
-                path: "STYLE.md".to_string(),
-                content: "# Style Guide".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("<lf:file path=\"STYLE.md\">"));
+        assert!(prompt.contains("<lf:file path=\"CONTRIBUTING.md\">"));
         assert!(prompt.contains("# Style Guide"));
     }
 
@@ -2652,6 +2545,29 @@ mod tests {
     }
 
     #[test]
+    fn context_delivery_keeps_one_document_also_requested_as_a_changed_file() {
+        let repo = init_repo();
+        write_file(repo.path(), "guide.md", "Keep rollback available.");
+        let mut components = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["guide.md".into()],
+            files: vec!["guide.md".into()],
+            include_diff_files: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let decisions = drop_duplicate_docs(&mut components, repo.path());
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
+
+        assert_eq!(prompt.matches("Keep rollback available.").count(), 1);
+        assert!(decisions.iter().any(|decision| {
+            decision.kind == crate::trace::ContextAssetKind::Diff
+                && decision.source_path.as_deref() == Some("guide.md")
+                && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+        }));
+    }
+
+    #[test]
     fn gather_files_deduplicates_requests() {
         let repo = init_repo();
         write_file(repo.path(), "src/main.rs", "fn main() {}");
@@ -2902,34 +2818,6 @@ mod tests {
         assert!(result.is_ok());
         let components = result.unwrap();
         assert_eq!(components.wave, Some("rust-migration".to_string()));
-    }
-
-    #[test]
-    fn gather_context_uses_preassembled_wave_memory() {
-        let repo = init_repo();
-        write_file(repo.path(), "wave/living/README.md", "# Living");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.path().to_path_buf(),
-            wave: Some("living".to_string()),
-            wave_memory: Some("- always run rustfmt before commit".to_string()),
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert!(components.wave_memory.is_some());
-        assert_eq!(
-            components.wave_memory.as_ref().map(|d| d.source),
-            Some(DocumentSource::WaveMemory)
-        );
-        assert!(components
-            .wave_memory
-            .as_ref()
-            .expect("wave memory should be loaded")
-            .content
-            .contains("always run rustfmt before commit"));
     }
 
     // ==========================================================================
@@ -3271,11 +3159,15 @@ mod tests {
     #[test]
     fn gather_documents_cross_repo_docs_include_target_docs_only() {
         let source_repo = init_repo();
-        write_file(source_repo.path(), "CLAUDE.md", "source claude");
+        write_file(source_repo.path(), "AGENTS.md", "source instructions");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
-        std::fs::write(related_repo.path().join("STYLE.md"), "related style").unwrap();
+        std::fs::write(
+            related_repo.path().join("AGENTS.md"),
+            "related instructions",
+        )
+        .unwrap();
+        std::fs::write(related_repo.path().join("CONTRIBUTING.md"), "related style").unwrap();
         std::fs::create_dir_all(related_repo.path().join("src")).unwrap();
         std::fs::write(related_repo.path().join("src/README.md"), "src area doc").unwrap();
 
@@ -3295,12 +3187,12 @@ mod tests {
         // Source-repo scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .all(|d| d.path != "CLAUDE.md" && d.content != "source claude"));
+            .all(|d| d.path != "AGENTS.md" && d.content != "source instructions"));
 
         // Related repo root docs are not loaded for a directory docs target.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "[acme/widgets] CLAUDE.md" && d.content == "related claude"));
+            .any(|d| d.path == "[acme/widgets] AGENTS.md" && d.content == "related instructions"));
 
         // Related repo docs target.
         assert!(docs
@@ -3311,10 +3203,14 @@ mod tests {
     #[test]
     fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
         let source_repo = init_repo();
-        write_file(source_repo.path(), "CLAUDE.md", "source claude");
+        write_file(source_repo.path(), "AGENTS.md", "source instructions");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
+        std::fs::write(
+            related_repo.path().join("AGENTS.md"),
+            "related instructions",
+        )
+        .unwrap();
 
         let related = RelatedRepoContext {
             repo_id: RepoId::parse("acme/widgets").unwrap(),
@@ -3331,7 +3227,7 @@ mod tests {
         // Source-repo root docs are not ambient.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "source claude"));
+            .any(|d| d.path == "AGENTS.md" && d.content == "source instructions"));
 
         // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
@@ -3382,7 +3278,7 @@ mod tests {
         let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::write(related_repo.path().join("AGENTS.md"), "studio instructions").unwrap();
         std::fs::create_dir_all(related_repo.path().join("swift")).unwrap();
         std::fs::write(related_repo.path().join("swift/README.md"), "swift docs").unwrap();
 
@@ -3412,7 +3308,7 @@ mod tests {
         let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
-        std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
+        std::fs::write(related_repo.path().join("AGENTS.md"), "studio instructions").unwrap();
         std::fs::write(related_repo.path().join("README.md"), "studio readme").unwrap();
 
         let related = RelatedRepoContext {

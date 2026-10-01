@@ -257,8 +257,8 @@ fn save(
         task_error(format!(
         "Save exchanged files but could not confirm completion: {error}. Inspect recovery at {}", directory.display()))
     };
-    parent.sync_all().map_err(&after_exchange_error)?;
-    recovery.sync_all().map_err(&after_exchange_error)?;
+    parent.sync_all().map_err(after_exchange_error)?;
+    recovery.sync_all().map_err(after_exchange_error)?;
     // Saving inspects only this exchange, independent of retained history size.
     let retained = inspect_recovery(&directory, &path);
     let mut file = file_snapshot(workspace, &path).map_err(|error| {

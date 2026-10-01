@@ -1934,7 +1934,7 @@ impl CaptureHandle {
         manifest.worktree = spec.worktree;
         manifest.skill = spec.skill;
         // Preparation owns Work attribution and a human Flow step's membership;
-        // the child's --as prompt context cannot reassign that captured input.
+        // the child's Task prompt context cannot reassign that captured input.
         manifest.flow = manifest.flow.or(Some(spec.flow));
         (manifest.runtime_path, manifest.runtime_digest) = runtime_identity();
         manifest.host = gethostname::gethostname().to_string_lossy().into_owned();
@@ -1981,7 +1981,7 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
-        let home = crate::store::authority_home_dir();
+        let home = crate::store::lf_home_dir();
         let caller = inherited_caller().and_then(|id| verified_caller(&home, id));
         Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }

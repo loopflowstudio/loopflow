@@ -143,7 +143,7 @@ pub(crate) fn checkout_execution_boundary(
             repo.display()
         ))
     })?;
-    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
+    let control = crate::engine::process::execution_context().map_err(|error| {
         anyhow::anyhow!(format!(
             "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
         ))
@@ -1890,7 +1890,7 @@ fn _exec_agent_once(
     cmd.env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
-    // can request parent-shell actions (for example auto-cd after `lf wt switch`).
+    // can request parent-shell actions (for example auto-cd after `lf task wt switch`).
     // Agent sessions run arbitrary nested commands; those must not mutate the
     // invoking shell state via the top-level directive file.
     cmd.env_remove("LOOPFLOW_DIRECTIVE_FILE");
@@ -2320,10 +2320,10 @@ fn format_timeout(timeout: Option<Duration>) -> String {
 pub fn missing_agent_message(cli: &str) -> String {
     let hint = match cli {
         "claude" => {
-            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf auth connect claude`."
+            "Install it with `npm install -g @anthropic-ai/claude-code`, then sign in with `lf account connect claude`."
         }
         "codex" => {
-            "Install it with `npm install -g @openai/codex`, then sign in with `lf auth connect codex`."
+            "Install it with `npm install -g @openai/codex`, then sign in with `lf account connect codex`."
         }
         "opencode" => "Install it with `npm install -g opencode-ai`.",
         _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",

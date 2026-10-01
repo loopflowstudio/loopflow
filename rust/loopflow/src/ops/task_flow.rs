@@ -70,9 +70,9 @@ impl PinnedTaskFlow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFlowControlKind {
-    /// `lf task run ISSUE --flow FLOW`
+    /// `lf --task ISSUE flow start FLOW`
     Start,
-    /// `lf task run ISSUE`
+    /// `lf --task ISSUE flow start`
     Resume,
     /// `lf task restart ISSUE --flow FLOW`
     Restart,

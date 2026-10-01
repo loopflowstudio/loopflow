@@ -30,7 +30,7 @@ The guide reaches each audience deliberately:
 | Selected skill or goal | The agent doing that kind of work | At execution time; specialized doctrine only |
 | Runtime tools and receipts | Agents and operators | At action boundaries; enforce what prose cannot |
 
-In this repository, `STYLE.md` points maintainers here, the website publishes
+In this repository, `AGENTS.md` points maintainers here, the website publishes
 this file, and a compile-time test protects its load-bearing sections. The
 bundled `prompt` skill is self-contained; it does not depend on customer repos
 having this file.

@@ -1,12 +1,12 @@
 # Testing
 
 Publish checkpoints with working notes in `scratch/`; hosted CI defers the full
-matrix until scratch is clear. `lf pr submit`, `lf pr arm`, and `lf pr land`
+matrix until scratch is clear. `lf pr submit`, `lf land`, and `lf pr land`
 clear scratch before pushing a landing candidate. Scratch-free PRs, including
 small changes and Dependabot updates, run the full test matrix in parallel.
 Implement/compress only build changed code and run its focused test. Gate owns
 affected suites and automated acceptance once; see the verification cadence in
-[STYLE.md](STYLE.md#verification-cadence). Scratch keeps one check-result line.
+[AGENTS.md](AGENTS.md#verification-cadence). Scratch keeps one check-result line.
 Required checks run unattended; defer unavailable checks to capable CI and
 leave people's judgment to demo/review. Neither blocks earlier Flow steps.
 
@@ -228,6 +228,10 @@ uv run pytest python/tests/                          # All Python tests
 uv run pytest python/tests/test_install_script.py -v # One file
 ```
 
+After changing Infrastructure or Release's `GOAL.md` schedules, run
+`uv run pytest python/tests/test_release_automation.py` even when no Python files
+changed. It checks telemetry and release cadence under their owning Waves.
+
 After changing the CLI guide, agent API docs, published Loopflow skill, or
 builtin `LOOPFLOW.md`, run the shared inspection-command check even when no
 Python files changed:
@@ -385,6 +389,26 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Match CI's current stable toolchain before accepting a local lint pass:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+rustup update stable --no-self-update
+rustc +stable --version
+cargo +stable clippy --version
+cargo +stable fmt --all -- --check
+cargo +stable clippy --all-targets -- -D warnings
+```
+
+The installation harness pulls `rust:bookworm` on each run to follow stable
+alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
+standard-library API, run `uv run python scripts/test_task_installation.py` too;
+a local lint pass does not prove that the disposable installation builds.
+
+CI installs stable on each run. An older local compiler can miss new Clippy
+lints and standard-library deprecations. Put rustup's proxies first on `PATH`
+so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
+
 Task cancellation uses a real child CLI with a disposable scorecard effect.
 Build the sibling CLI before running this library-only proof:
 
@@ -404,6 +428,11 @@ Wave consumers in the focused check:
 ```bash
 cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
 ```
+
+When adding a command with `--wave`, classify its selection in
+`wave_resolution_matrix` and run that suite alongside the command's own tests.
+Cover repository defaults and explicit Wave selection separately from ambient
+Wave resolution.
 
 Preserve fixtures for registered Wave directories without Git metadata. Adding
 Git would hide the cached-PM context regression; global-command tests alone do
@@ -483,17 +512,11 @@ registered-Task fixtures must reuse it rather than insert a second owner.
 uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
 ```
 
-Fixtures selecting a private `LF_HOME` must also clear and restore
-`LF_CONTROL_HOME` and `LF_CONTROL_DB_PATH`: the materialized test runner pins
-control authority, and Session lookup otherwise reads outside the fixture's Home.
-Clearing inherited authority alone does not isolate a process that falls back
-to its development Home. Give each proof phase a disposable default `LF_HOME`
-and `LF_DB_PATH`; individual fixtures must clear or override both when selecting
-their own stores. Flow fixtures put the candidate `lf` on PATH, since child steps
-use ordinary executable discovery. `LF_BIN` alone does not select a Flow child.
-Reproduce executable-resolution failures with the compiled test
-binary, `LF_BIN`, `LF_CONTROL_BIN`, and `CARGO_BIN_EXE_lf` unset, and a PATH
-containing Git but no `lf`.
+Every CLI fixture must select an explicit disposable `LF_HOME` and pin
+`LF_BIN` to the compiled test CLI. Clear inherited `LF_*` execution authority.
+Without an explicit experiment a source CLI forwards to the installed CLI and
+main Home. Children use the same Home and executable; PATH and retired
+`LF_CONTROL_*` pins cannot choose a second store.
 
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-decide after work and review so navigation
@@ -558,9 +581,22 @@ cargo test -p loopflow --lib engine::skills::tests
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
-cargo test -p loopflow golden_prompt
+cargo test -p loopflow --test golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
+
+For document gathering or deduplication changes, run the complete context suite
+alongside the delivery checks; a test-name filter alone misses ancestor coverage.
+Rendering gathered documents must include the production deduplication step.
+
+```bash
+cargo test -p loopflow --test context_tests
+cargo test -p loopflow --lib context_delivery
+cargo test -p loopflow --lib skill_launch
+```
+
+Run the launch checks after syncing CLI changes; they parse the current flags
+before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
@@ -571,9 +607,9 @@ test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task controller consumers: durable work reservation retains Started
 after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Installed development
-builds record draft checksums too: add a forward draft after the owning migration
-instead of rewriting an applied draft. Preserve populated historical fixtures.
+changes; an ordinary draft build may omit the trigger. Experimental Homes record
+the exact draft checksums: use a fresh Home after changing the schema. Preserve
+populated historical fixtures for published migration coverage.
 
 For manual migration check in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization
@@ -599,6 +635,16 @@ from commit creation. Exercise takeover while the old repair is still running;
 generation fencing alone does not stop its effects. Label simulated
 provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 
+Landing changes also affect release finalization and Linear completion recovery:
+
+```bash
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::pm::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+```
+
+Detached repair proofs enter through the compiled CLI so admission records its
+Exec before launching a child. Assert the published tag and completed repair;
+an in-process `release_run` call does not exercise that execution boundary.
+
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
 binary mid-test mixes migration frontiers in a single temporary Home.
 
@@ -606,27 +652,10 @@ Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
 pass alone does not prove that an existing Home can upgrade without losing work.
 
-Prove branch data isolation against the real installed CLI after building `lf`:
-
-```bash
-uv run python scripts/verify_branch_data.py --output scratch/branch-data-proof.json
-```
-
-This opts into seeding the source-specific data directory from the current
-installation.
-It writes a synthetic remote Home observation only in that copy, proves that a
-repeat invocation retains it, and checks that the installed CLI still opens its
-store with identical schema and migration receipts. It performs no SSH calls,
-Task launch or promotion. The observation remains in the branch database. This is
-database-isolation evidence, not the complete Task-worker demo for LOO-321.
-
-`ops::task_destination::tests::managed_operations_move_before_branch_effects`
-uses paired disposable stores and a simulated installed subprocess. It proves
-operation routing before branch effects, returned installed snapshots, rejection
-of branch-only Task identities, and preservation of private writes after installed
-failure. Its test-only installation root cannot redirect production installation
-authority. It does not launch an actual Task worker or
-prove installed Session readiness, tmux, or provider execution.
+Prove explicit experimental Home continuity with `global_commands` and
+`one_home_tests`. Use a fresh `LF_HOME` for each schema version: source binaries
+without an explicit experiment forward to the installed CLI and main Home.
+Never run candidate mutation checks against the main Home.
 
 Run the real CLI resume regressions with isolated installation authority:
 
@@ -636,64 +665,66 @@ uv run python scripts/test_task_installation.py
 uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
-This copies source into a disposable Linux container and creates an OS account
-whose installation records select the compiled CLI. An ELF trailer gives
-the installed CLI a distinct identity: byte-identical copies are installed too,
-regardless of path. No host Home, credentials or installation is mounted.
-These installation tests run only through
-this harness (`task-installation` in CI); ordinary Rust runs mark them ignored.
-They prove Task continuation’s auto-merge revocation and review continuity, agent
-selection read from the installed database while branch reads remain private, and direct-open
-refusal without changing the owned development database/WAL bytes. Review
-completion rejects branch-only feedback and a stale readiness token, resolves
-both Session and captured-input selectors, records the exact installed feedback once,
-and preserves the branch Flow and events. The same review scenario proves agent
-persistence and repeated `task run` retaining its invocation, cursor and prepared
-review Session. It also rejects a missing replacement Flow before changing the installed
-review or committing a restart checkpoint. Managed-operation CLI assertions belong
-in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
-host account's installation authority. Read-only Flow projections stay in the
-ordinary suite.
+Pass several names after `--test` to share one disposable build across related proofs.
+The default container tracks stable Rust, matching the other CI Rust jobs, and
+logs its compiler version. When adopting a newer standard-library API or Clippy
+fix, verify the installation harness uses the same toolchain policy; a host lint
+pass does not verify the container build. Use `--image` to reproduce an older
+toolchain explicitly.
+
+CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+to verify builtin operation labels, plus the affected proofs above. The regular
+Rust suite skips those installation proofs; a skipped case is not verification.
+Task status and automation must also handle the saved cursor past the last step
+while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
+for that boundary; a fast mechanical Flow can finish while its start command reads status.
+Managed Task fixtures must bind the checkout's Team and Initiative before
+creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
+
+When changing Task planning lookup or provider response shapes, run the affected
+installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
+the deletion test, and the regular Rust suite skips installation proofs. Keep
+simulated provider revisions and checkout Team/Initiative bindings consistent
+with the planning records those workflows resolve. Exercise unfinished work
+before confirmed removal; do not resurrect deleted Tasks by resetting only
+execution tables while retaining planning tombstones.
+
+This copies source into a disposable Linux container, materializes its draft
+migrations and builds the development CLI with two Cargo jobs. It checks
+populated planning upgrades from the released schema. Intermediate branch
+schemas follow the current-state cutover policy and are not imported. Installation-copy succession is no longer a
+product contract; its two cross-store promotion/continuation cases were removed.
+
+The adoption case starts with planning and no Task row. Public checkout/run
+reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
+retain the PR identity, and preserve a saved later Flow cursor after source
+changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
+
+The disposable OS account authors fixture installation records for routing proofs;
+Task adoption uses an explicit experimental Home. No host Home, credentials or installation
+is mounted. Default executable routing uses two real source CLI processes and
+a simulated installed executable. It runs in this disposable account because
+`HOME` and `LF_HOME` cannot isolate machine installation records. The ordinary
+`pr_tests` suite covers Task continuation's auto-merge revocation and review
+continuity in an explicit experimental Home.
+
+The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
+normalized local planning, proving that inspection creates no execution or worktree.
+That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+acquisition with simulated Linear responses, including missing Projects, partial
+responses, absence, and provider failure. Neither is configured live-provider proof.
 
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
 captured Flow after the template disappears and records an ordinary child Exec without creating an AgentSession.
-The executable-discovery proof removes `lf` from PATH, exercises driver and
-selected-installation fallback, then puts another `lf` first on PATH. It checks
-the child Exec executable and its Flow store. The declaration proof starts Task Y
+The default-Home proof sends two nested source CLI processes through a simulated
+installed executable and checks that both select the main Home despite stale
+control pins. The explicit-Home Flow proof runs locally in `one_home_tests`. The declaration proof starts Task Y
 from Task X's agent and checks Y attribution while retaining X as the causal parent.
 
-The recovery check adds a draft unknown to the branch, preserves both
-databases and independent private writes, recommends the
-installed executable/database pair only after its real exact-store preflight,
-and refuses
-that recommendation after the installed schema changes or executable disappears.
-The focused `incompatible_seed_preserves_source_receipts_and_private_writes`
-unit check covers a newer source snapshot, its WAL, and reseeding without replacing
-private work. GitHub is
-simulated and review Sessions are prepared without launching a provider. These are
-real current-CLI operation tests, not older-version compatibility, promotion
-or configured worker acceptance.
 The harness keeps Docker build/registry caches, serializes use of its build
 cache, and destroys the account and installation after each attempt.
-
-The `store::branch_data::tests` private-data subprocess fixture checks ordinary
-storage, observation, captured artifacts, and child context with stale control pins,
-including a relative custom database and malformed inherited control path.
-`global_commands` has focused real-CLI tests for explicit data-directory
-reads/writes and
-Task-bound promotion refusal with read-only candidate preflight. These use
-disposable stores; they do not prove installed worker routing or a live demo.
-
-After rebasing across a release cut, run the installed-development migration
-tests as well as the new migration's tests. Adoption fixtures must include the
-draft receipts for every pending release; a fixture pinned to one released
-draft stops representing an adoptable Home when another release is appended.
-
-```bash
-cargo test -p loopflow --lib installed_development_
-```
 
 Session history has focused storage, harness, reducer, and reader checks:
 
@@ -708,7 +739,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf runs --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Home with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.
@@ -742,19 +773,17 @@ completed history, retained PRs/files, retries, planning sync, diagnostics and
 rejection of the removed `pm`/`work` groups. No installation or live provider is
 used.
 
-Exercise Linear expiry and rejection through an installed development CLI:
+Exercise Linear expiry and rejection through an explicit experimental CLI:
 
 ```bash
-# Inside a disposable Linux container, after candidate promotion:
-uv run tests/e2e/linear_oauth.py --lf /root/.local/bin/lf
+# Inside a disposable Linux container with a freshly built candidate:
+LF_HOME="$(mktemp -d)" uv run tests/e2e/linear_oauth.py --lf target/debug/lf
 ```
 
 Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
-`uv`. Install the published CLI fallback and promote the candidate with
-`lf install promote --from-build ...` first. That Home needs a registered
-repository. Never mount a real
-Home or credentials into this container: the fixture replaces its Linear row
-and seeds planning data in the selected development store.
+`uv`. The experiment needs a registered repository. Never mount a real Home
+or credentials into this container: the fixture replaces its Linear row
+and seeds planning data in the explicit disposable store.
 
 The fixture serves synthetic Linear HTTPS on port 443 with a temporary CA
 trusted only by its CLI children. It enters through the installed launcher and
@@ -868,6 +897,23 @@ the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
+Launch proofs use provider-written evidence and terminal receipts. Session
+completion gives the asynchronous telemetry recorder only 250 ms to drain;
+returning successfully does not guarantee `events.jsonl` is complete. Keep
+usage and account-event assertions in the recorder tests, rather than racing
+its queue in subprocess-launch tests. Reproduce suspected races with a temporary
+recorder delay beyond that drain window; remove the delay before publication.
+
+Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
+`LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables
+are removed before provider launch.
+
+When changing Home selection, run the affected fixtures with `LF_HOME` unset in
+the test runner; the materialization wrapper's shared test Home can mask missing
+fixture setup. CLI fixtures must select their own disposable Home. Upgrade proofs
+must use published migration authority against a temporary shared store; opening
+an existing experiment intentionally validates its schema without upgrading it.
+
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
 runner. The materialization wrapper clears only its listed variables; it does not
@@ -877,10 +923,19 @@ fake provider and launch the real one. A temporary `LF_HOME` alone does not prev
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
 
+Default-runtime selection reads the OS account's installation records. Use the
+installation harness for default-runtime proofs; never replace the machine's
+selection to make tests pass. Flow/Session tests with an explicit experimental
+`LF_HOME` and source `LF_BIN` stay within that experiment.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+
+When a subprocess fixture signals readiness with file contents, write a sibling
+temporary file and rename it into place after closing it. File existence alone
+can expose an empty file between creation and the first write.
 
 ### Shared identity fixtures
 

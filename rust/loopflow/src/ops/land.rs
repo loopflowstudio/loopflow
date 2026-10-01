@@ -34,8 +34,7 @@ pub struct LandOptions {
 /// marked ready.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Finalize {
-    /// Arm GitHub auto-merge so the PR merges itself once checks pass. `arm`
-    /// returns here; `land` continues into the watched lifecycle.
+    /// Request auto-merge and retain delivery for later finite checks.
     AutoMerge,
     /// Assign the PR to the current user and leave it for a required, manual
     /// merge click. Used by `submit` — nothing merges without that one click.
@@ -191,7 +190,7 @@ fn prepare_pr(
     };
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
-            "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+            "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
         )));
     }
     let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
@@ -290,13 +289,17 @@ pub fn arm(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Required,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
 /// Continue land after owned recovery already verified and pushed integration.
@@ -305,13 +308,17 @@ pub(crate) fn finish_arm_after_sync(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(
+    let pr = prepare_pr(
         repo,
         options,
         Finalize::AutoMerge,
         Integration::Completed,
         progress,
-    )
+    )?;
+    if let Some(pr) = &pr {
+        crate::ops::pr_landing::record_armed_pr(repo, options, pr)?;
+    }
+    Ok(pr)
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, sync onto main,
@@ -475,7 +482,7 @@ fn ensure_pr(
             .map(Some);
         } else {
             return Err(OpsError::Message(format!(
-                "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
+                "no open PR found for branch '{feature_branch}'; run lf task pr open or use --create-pr"
             )));
         }
     }

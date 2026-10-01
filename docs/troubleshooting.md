@@ -25,7 +25,7 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf runs --task INF-123 --json
+lf usage --days 0 --task INF-123 --json
 lf session list
 ```
 
@@ -41,7 +41,7 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Recover advancement through Task
 controls; reserve bound helper conversations for distinct contributions.
 
-Task status and `lf runs` show up to 50 Runs started in the last seven days.
+Task status and `lf monitor list` show up to 50 Runs started in the last seven days.
 Inspect an exact Run ID for older evidence; an empty recent list does not prove
 that no worker or Session remains active.
 
@@ -49,15 +49,15 @@ Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf session open <session-id>
-lf session complete <session-id>    # return saved review or Ask feedback
-lf task comment INF-123 "address the latest feedback"
-lf task interrupt INF-123
-lf task run INF-123
-lf task run INF-123 --reason "provider credentials repaired"
+lf session connect <session-id>
+lf session complete <session-id>       # return saved review or Ask feedback
+lf comment INF-123 "address the latest feedback"
+lf interrupt INF-123
+lf --task INF-123 flow start
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-`task run` continues the captured Flow with the Task Work, Steers, worktree, and
+`flow start` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
 is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
@@ -84,7 +84,7 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task run INF-123 --reason "provider credentials repaired"
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
 Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
@@ -104,8 +104,8 @@ List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
-lf wt prune --dry-run    # show clean terminal or week-stale worktrees
-lf wt prune              # remove those worktrees and their branches
+lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
+lf wt prune                            # remove those worktrees and their branches
 ```
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
@@ -113,7 +113,7 @@ or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf sync
+lf task sync
 ```
 
 Refreshes the local default branch, preserving its unpublished commits and edits,
@@ -143,11 +143,11 @@ resume the provider. There is no Run slot or PR-limit counter to clear.
 
 **Symptom:** Task fails with context/token limit errors.
 
-The default context is already minimal: agent doc (CLAUDE.md/AGENTS.md), `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
+The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `wave/`. Reduce further:
 
 ```bash
-lf qa --no-loopflow         # skip LOOPFLOW.md
-lf qa --docs src/small/     # limit --docs to a narrower path or glob
+lf qa --no-loopflow                    # skip LOOPFLOW.md
+lf qa --docs src/small/                # limit --docs to a narrower path or glob
 ```
 
 `--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
@@ -165,7 +165,7 @@ the install command. For Claude Code:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-lf auth connect claude
+lf account connect claude
 ```
 
 With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and

@@ -50,9 +50,14 @@ pub struct CronSchedule {
     expression: String,
     hour: u32,
     minute: u32,
+    every_minute: bool,
 }
 
 impl CronSchedule {
+    pub(crate) fn every_minute(&self) -> bool {
+        self.every_minute
+    }
+
     pub fn expression(&self) -> &str {
         &self.expression
     }
@@ -72,6 +77,7 @@ impl CronSchedule {
 pub enum CronTargetKind {
     Flow,
     Skill,
+    Repository,
 }
 
 impl CronTargetKind {
@@ -79,6 +85,7 @@ impl CronTargetKind {
         match self {
             Self::Flow => "flow",
             Self::Skill => "skill",
+            Self::Repository => "repository",
         }
     }
 }
@@ -90,6 +97,7 @@ impl FromStr for CronTargetKind {
         match value {
             "flow" => Ok(Self::Flow),
             "skill" => Ok(Self::Skill),
+            "repository" => Ok(Self::Repository),
             _ => Err(OpsError::Parse(format!(
                 "unknown cron target kind {value:?}"
             ))),
@@ -219,7 +227,9 @@ pub fn add_cron(
     launchctl: &dyn Launchctl,
 ) -> OpsResult<InstalledCron> {
     fs::create_dir_all(launch_agents_dir)?;
-    fs::create_dir_all(spec.working_directory.join(".lf/logs"))?;
+    if let Some(parent) = spec.log_path().parent() {
+        fs::create_dir_all(parent)?;
+    }
     let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
@@ -304,6 +314,7 @@ pub(crate) fn list_cron_obligations(launch_agents_dir: &Path) -> OpsResult<Vec<C
 
 pub fn parse_schedule(value: &str) -> OpsResult<CronSchedule> {
     match value {
+        "every-minute" => schedule_from_cron("0 * * * * *"),
         "daily" => schedule_from_cron("0 0 3 * * *"),
         _ => schedule_from_cron(value),
     }
@@ -312,11 +323,20 @@ pub fn parse_schedule(value: &str) -> OpsResult<CronSchedule> {
 /// The launchd [`CronSchedule`] for a declared cron expression, or an error
 /// describing why launchd can't run it.
 pub fn schedule_from_cron(expr: &str) -> OpsResult<CronSchedule> {
+    if matches!(expr.trim(), "0 * * * * *" | "0 * * * * * *") {
+        return Ok(CronSchedule {
+            expression: expr.to_string(),
+            hour: 0,
+            minute: 0,
+            every_minute: true,
+        });
+    }
     let (hour, minute) = daily_time_of(expr)?;
     Ok(CronSchedule {
         expression: expr.to_string(),
         hour,
         minute,
+        every_minute: false,
     })
 }
 
@@ -452,6 +472,12 @@ pub fn run_cron(
 
     let result = spawn_cron_target(&spec);
     receipt.finished_at = Some(Utc::now().timestamp());
+    let result = result.inspect(|_| {
+        if spec.schedule.every_minute {
+            // Coverage needs the latest outcomes, not one file per minute forever.
+            let _ = prune_minute_receipts(&root, &spec, &receipt.id);
+        }
+    });
     match result {
         Ok(status) if status.success() => {
             receipt.outcome = CronOutcome::Succeeded;
@@ -767,17 +793,25 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
         .create(true)
         .append(true)
         .open(spec.log_path())?;
+    if spec.schedule.every_minute && stdout.metadata()?.len() > MINUTE_LOG_LIMIT {
+        stdout.set_len(0)?;
+    }
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
-    command
-        .args([
+    if spec.target_kind == CronTargetKind::Repository {
+        command.args(["task", "reconcile", "--json"]);
+    } else {
+        command.args([
             "--wave",
             &spec.wave,
-            "--batch",
+            "--mode",
+            "batch",
             spec.target_kind.as_str(),
             "--",
             &spec.flow,
-        ])
+        ]);
+    }
+    command
         .current_dir(&spec.working_directory)
         .env_clear()
         .env("PATH", &spec.host.path_env)
@@ -872,6 +906,36 @@ fn read_receipts(root: &Path, wave: &str, flow: Option<&str>) -> OpsResult<Vec<C
     Ok(receipts)
 }
 
+const MINUTE_RECEIPTS_KEPT: usize = 10;
+const MINUTE_LOG_LIMIT: u64 = 1024 * 1024;
+
+/// Keep recent receipts plus the latest success and failure.
+fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) -> OpsResult<()> {
+    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.flow))?;
+    receipts.sort_by_key(|receipt| std::cmp::Reverse(receipt.started_at));
+    let latest = |outcome| {
+        receipts
+            .iter()
+            .find(|receipt| receipt.outcome == outcome)
+            .map(|receipt| receipt.id.clone())
+    };
+    let kept = [latest(CronOutcome::Succeeded), latest(CronOutcome::Failed)];
+    let dir = root
+        .join(safe_component(&spec.wave))
+        .join(safe_component(&spec.flow));
+    for receipt in receipts.iter().skip(MINUTE_RECEIPTS_KEPT) {
+        if &receipt.id == current || kept.contains(&Some(receipt.id.clone())) {
+            continue;
+        }
+        fs::remove_file(dir.join(format!(
+            "{}-{}.json",
+            receipt.started_at,
+            receipt.id.as_str()
+        )))?;
+    }
+    Ok(())
+}
+
 fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     let dir = root
         .join(safe_component(&receipt.wave))
@@ -918,6 +982,15 @@ fn plist_path(dir: &Path, wave: &str, flow: &str) -> PathBuf {
     dir.join(format!("{}.plist", label(wave, flow).replace('/', ".")))
 }
 
+pub fn repository_cron_key(repo: &Path, home: &HomeId) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(repo.as_os_str().as_encoded_bytes());
+    hash.update([0]);
+    hash.update(home.as_str());
+    format!("repository-{}", &hex::encode(hash.finalize())[..24])
+}
+
 fn label(wave: &str, flow: &str) -> String {
     format!("loopflow.cron.{wave}.{flow}").replace('/', ".")
 }
@@ -929,10 +1002,19 @@ fn is_cron_plist(name: &str) -> bool {
 }
 
 fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
-    let interval = format!(
+    let interval = if spec.schedule.every_minute {
+        format!(
+            "    <key>StartCalendarInterval</key>\n    <array>{}</array>",
+            (0..60)
+                .map(|minute| format!("<dict><key>Minute</key><integer>{minute}</integer></dict>"))
+                .collect::<String>()
+        )
+    } else {
+        format!(
         "    <key>StartCalendarInterval</key>\n    <dict>\n        <key>Hour</key>\n        <integer>{}</integer>\n        <key>Minute</key>\n        <integer>{}</integer>\n    </dict>",
         spec.schedule.hour, spec.schedule.minute
-    );
+    )
+    };
     let args = [
         spec.lf_path.to_string_lossy().to_string(),
         "cron".to_string(),
@@ -1286,6 +1368,76 @@ mod tests {
     }
 
     #[test]
+    fn repository_tick_runs_each_minute_with_no_agent_or_wave() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let executable = temp.path().join("fake-lf");
+        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut cron = spec(temp.path(), &executable);
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        let plist = super::render_plist(&cron, 0);
+        assert_eq!(plist.matches("<key>Minute</key>").count(), 60);
+        assert!(!plist.contains("<key>Hour</key>"));
+        assert!(!plist.contains("KeepAlive"));
+        assert!(super::spawn_cron_target(&cron).unwrap().success());
+        assert_eq!(
+            fs::read_to_string(cron.log_path()).unwrap(),
+            "task\nreconcile\n--json\n"
+        );
+        assert_ne!(
+            cron.flow,
+            super::repository_cron_key(&cron.working_directory, &HomeId::new())
+        );
+    }
+
+    #[test]
+    fn minute_checks_keep_bounded_receipts_and_the_latest_success() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
+        cron.wave.clear();
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.target_kind = CronTargetKind::Repository;
+        cron.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&cron.working_directory).unwrap();
+        add_cron(&agents, &cron, &launchctl).unwrap();
+        let run = || {
+            run_cron(
+                &agents,
+                "",
+                &cron.flow,
+                &cron.host.home_id,
+                &cron.host.home_id,
+                CronSource::Scheduled,
+            )
+        };
+        for _ in 0..14 {
+            run().unwrap();
+        }
+        let root = receipt_root(&cron.host.lf_home);
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 1);
+        assert_eq!(receipts[0].outcome, CronOutcome::Succeeded);
+
+        let mut failing = cron.clone();
+        failing.lf_path = PathBuf::from("/usr/bin/false");
+        add_cron(&agents, &failing, &launchctl).unwrap();
+        for _ in 0..14 {
+            assert!(run().is_err());
+        }
+        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 2);
+        assert!(receipts
+            .iter()
+            .any(|receipt| receipt.outcome == CronOutcome::Succeeded));
+    }
+
+    #[test]
     fn parse_schedule_accepts_alias_and_cron_expression() {
         assert_eq!(
             parse_schedule("daily").unwrap(),
@@ -1293,6 +1445,7 @@ mod tests {
                 expression: "0 0 3 * * *".to_string(),
                 hour: 3,
                 minute: 0,
+                every_minute: false,
             }
         );
         assert_eq!(
@@ -1301,6 +1454,7 @@ mod tests {
                 expression: "0 30 17 * * *".to_string(),
                 hour: 17,
                 minute: 30,
+                every_minute: false,
             }
         );
     }
@@ -1469,13 +1623,14 @@ mod tests {
             let cron = named_spec(
                 temp.path(),
                 &executable,
-                "reliability",
+                "infrastructure/release",
                 name,
                 "0 0 3 * * *",
                 kind,
             );
             fs::create_dir_all(&cron.working_directory).unwrap();
             add_cron(&agents, &cron, &launchctl).unwrap();
+            assert!(cron.log_path().parent().unwrap().is_dir());
             run_cron(
                 &agents,
                 &cron.wave,

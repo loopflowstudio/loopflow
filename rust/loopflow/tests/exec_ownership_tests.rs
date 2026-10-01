@@ -42,7 +42,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         result.stdout
     };
     let first: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--parent",
@@ -62,7 +62,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     assert_eq!(first.entries[0].outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
     let second: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--parent",
@@ -84,12 +84,16 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: Exec =
-        serde_json::from_slice(&invoke(&["exec", "show", &ids[1].as_str()[..20], "--json"]))
-            .unwrap();
+    let detail: Exec = serde_json::from_slice(&invoke(&[
+        "monitor",
+        "show",
+        &ids[1].as_str()[..20],
+        "--json",
+    ]))
+    .unwrap();
     assert_eq!(detail, second.entries[0]);
     let caller: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--caller",
@@ -123,9 +127,16 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
-        vec!["exec", "list", "--all", "--task", "PROOF-1", "--json"],
-        vec!["exec", "list", "--all", "--task", task.as_str(), "--json"],
-        vec!["exec", "list", "--all", "--wave", "historical", "--json"],
+        vec!["monitor", "list", "--all", "--task", "PROOF-1", "--json"],
+        vec![
+            "monitor",
+            "list",
+            "--all",
+            "--task",
+            task.as_str(),
+            "--json",
+        ],
+        vec!["monitor", "list", "--all", "--wave", "historical", "--json"],
     ] {
         let page: ExecPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
@@ -176,7 +187,7 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         let result = command(
             home.path(),
             repo.path(),
-            &["exec", "list", "--wave", "historical", "--json"],
+            &["monitor", "list", "--wave", "historical", "--json"],
         )
         .output()
         .unwrap();
@@ -190,14 +201,14 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     let ambiguous = command(
         home.path(),
         repos[0].path(),
-        &["exec", "list", "--all", "--wave", "historical", "--json"],
+        &["monitor", "list", "--all", "--wave", "historical", "--json"],
     )
     .output()
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
     let explicit: ExecPage = serde_json::from_slice(&invoke(&[
-        "exec",
+        "monitor",
         "list",
         "--all",
         "--wave",
@@ -206,9 +217,13 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
     ]))
     .unwrap();
     assert_eq!(explicit.entries[0].id, ids[0]);
-    let zero = command(home.path(), home.path(), &["exec", "list", "--limit", "0"])
-        .output()
-        .unwrap();
+    let zero = command(
+        home.path(),
+        home.path(),
+        &["monitor", "list", "--limit", "0"],
+    )
+    .output()
+    .unwrap();
     assert_eq!(zero.status.code(), Some(2));
 }
 
@@ -308,33 +323,21 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 }
 
 #[tokio::test]
-async fn early_observation_preserves_preflight_target_and_screenshot_child_ancestry() {
+async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     drop(store);
-    let target = home.path().join("incompatible.db");
-    std::fs::write(&target, b"unchanged preflight target").unwrap();
     let output = command(
         home.path(),
         home.path(),
-        &[
-            "install",
-            "local-preflight",
-            "--store",
-            target.to_str().unwrap(),
-            "--json",
-        ],
+        &["install", "preflight", "--json"],
     )
     .output()
     .unwrap();
     assert!(!output.status.success(), "{output:?}");
-    assert_eq!(
-        std::fs::read(&target).unwrap(),
-        b"unchanged preflight target"
-    );
     // No browser executable is available; both actual lf processes still exist.
     let output = command(
         home.path(),
@@ -961,4 +964,158 @@ fn serve_gate(
             });
         }
     })
+}
+
+#[test]
+fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
+    let home = tempfile::tempdir().unwrap();
+    let directory = home.path().join("runtime/exec-processes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let receipt = directory.join("4294967295.json");
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "schema_version": 1,
+        "trace_id": "stale-trace",
+        "exec_id": "stale-exec",
+        "pid": u32::MAX,
+        "started_at": 1,
+    }))
+    .unwrap();
+
+    for json in [false, true] {
+        std::fs::write(&receipt, &bytes).unwrap();
+        for dry_run in [true, false] {
+            let mut args = vec!["mon", "prune"];
+            if dry_run {
+                args.push("--dry-run");
+            }
+            if json {
+                args.push("--json");
+            }
+            let output = command(home.path(), home.path(), &args).output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert_eq!(receipt.exists(), dry_run, "{args:?}");
+            if dry_run {
+                assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
+            }
+            if json {
+                let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(report["dry_run"], dry_run);
+                assert_eq!(report["removed_exec_receipts"], u32::from(!dry_run));
+            } else {
+                let action = if dry_run { "WOULD PRUNE" } else { "PRUNED" };
+                assert!(String::from_utf8_lossy(&output.stdout).contains(action));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn monitor_separates_waiting_finished_and_missing_observations() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    for id in ["waiting", "finished", "unobserved"] {
+        reserve_session(&store, id, home.path());
+    }
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "UPDATE agent_sessions SET ready_summary='Review the API' WHERE id='waiting'",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE agent_sessions SET completed_at=2 WHERE id='finished'",
+            [],
+        )
+        .unwrap();
+    let output = command(home.path(), home.path(), &["monitor", "--all", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let overview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let items = overview["items"].as_array().unwrap();
+    for (id, state, reason, action) in [
+        (
+            "waiting",
+            "waiting",
+            "Review the API",
+            "lf session connect waiting",
+        ),
+        (
+            "finished",
+            "finished",
+            "completion is recorded",
+            "lf session history finished",
+        ),
+        (
+            "unobserved",
+            "unknown",
+            "No current provider observation",
+            "lf session history unobserved",
+        ),
+    ] {
+        let item = items.iter().find(|item| item["id"] == id).unwrap();
+        assert_eq!(item["state"], state);
+        assert!(item["reason"].as_str().unwrap().contains(reason));
+        assert_eq!(item["next_action"], action);
+    }
+    assert!(overview["recent_commands"]["entries"].is_array());
+    assert!(overview["active"]["gaps"].is_array());
+    assert!(overview["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["state"] != "active"));
+    for args in [["ps", "--help"], ["top", "--help"], ["mon", "--help"]] {
+        let help = command(home.path(), home.path(), &args).output().unwrap();
+        assert!(help.status.success(), "{help:?}");
+        assert!(String::from_utf8_lossy(&help.stdout).contains("monitor"));
+    }
+}
+
+#[tokio::test]
+async fn inspection_records_one_completed_exec_without_starting_work() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("LF_")
+            || key.to_string_lossy().starts_with("LOOPFLOW_")
+        {
+            command.env_remove(key);
+        }
+    }
+    let output = command
+        .args(["session", "list", "--all", "--json"])
+        .current_dir(home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_DB_PATH", &database)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let (count, completed): (i64, i64) = connection
+        .query_row(
+            "SELECT count(*), count(completed_at) FROM execs WHERE outcome='succeeded'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("every parsed lf command has an Exec row");
+    assert_eq!((count, completed), (1, 1));
+    let work: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(work, 0, "inspection must not reserve agent or Task work");
 }

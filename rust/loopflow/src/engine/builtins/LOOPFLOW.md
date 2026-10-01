@@ -19,16 +19,18 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf sync --plan                       # inspect integration strategy
-lf sync                              # apply it
+lf task sync --plan                  # inspect integration strategy
+lf task sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf pr submit                         # prepare for the user's merge click
-lf pr arm                            # prepare and request auto-merge; return
-lf pr land                           # watch CI, repair, and finish merged
+lf submit                         # prepare for the user's merge click
+lf arm                            # prepare and request auto-merge; return
+lf land                           # record delivery and return
+lf pr reconcile                      # check delivery once; repair or settle merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
+for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
+settles verified merges. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
@@ -105,6 +107,8 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+memories live in nested directories; discover relevant ones with ordinary
+filesystem tools. Do not create
 miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
 skills.

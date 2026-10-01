@@ -26,7 +26,7 @@ const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 /// Why an account's subscription state could not be read. `NeedsLogin` is an
 /// answer, not a failure: the account exists but its credential was revoked
-/// or expired beyond refresh, and only `lf auth connect` fixes that.
+/// or expired beyond refresh, and only `lf account connect` fixes that.
 #[derive(Debug, thiserror::Error)]
 pub enum SubscriptionError {
     #[error("needs re-login: {0}")]

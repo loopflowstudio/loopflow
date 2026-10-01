@@ -11,19 +11,18 @@ use super::{
 use crate::durable::FlowSession;
 use crate::engine::invocation::QueuedInvocation;
 use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
-use crate::id::WaveId;
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
-use crate::work::wave::Wave;
-use crate::work::wave::WaveLocator;
+use crate::work::wave::{ensure_wave_row, WaveLocator};
 use time::OffsetDateTime;
 
 fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
     PmProject {
+        revision: None,
         id: id.into(),
         name: name.into(),
         slug: name.into(),
@@ -141,6 +140,8 @@ fn lost_creation_has_one_identity_on_every_home() {
 
 fn task(state: &str) -> PmItem {
     PmItem {
+        branch_name: None,
+        revision: None,
         id: "issue".into(),
         identifier: "FIX-1".into(),
         url: None,
@@ -149,8 +150,8 @@ fn task(state: &str) -> PmItem {
         rank: 0,
         completed: state == "completed",
         state: Some(state.into()),
-        project_id: "old".into(),
-        project: "old".into(),
+        project_id: Some("old".into()),
+        project: Some("old".into()),
         team_id: "team-1".into(),
         assignee: None,
     }
@@ -235,6 +236,7 @@ struct Provider {
     projects: BTreeMap<String, Value>,
     issues: BTreeMap<String, Value>,
     mutations: usize,
+    revision: i64,
     interrupt_after: Option<usize>,
     unavailable: bool,
     status_change_at_final_inventory: Option<(String, String)>,
@@ -255,6 +257,37 @@ async fn graphql(
     if provider.unavailable {
         return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
     }
+    for project in provider.projects.values_mut() {
+        project
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+    }
+    for issue in provider.issues.values_mut() {
+        issue
+            .as_object_mut()
+            .unwrap()
+            .entry("updatedAt")
+            .or_insert(json!("1970-01-01T00:00:00Z"));
+        issue["branchName"] = Value::Null;
+    }
+    let prior_projects = provider.projects.clone();
+    let prior_issues = provider.issues.clone();
+    // Apply an external status change only once the predecessor's dispositions finish.
+    if provider.status_change_at_final_inventory.is_some()
+        && vars["initiativeId"] == "initiative-a"
+        && provider.issues["a-started"]["project"]["id"] != "a-old"
+        && provider.issues["a-backlog"]["state"]["type"] == "canceled"
+    {
+        if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
+            provider.revision += 1;
+            let revision = fixture_revision(provider.revision);
+            let project = provider.projects.get_mut(&id).unwrap();
+            project["status"]["type"] = json!(status);
+            project["updatedAt"] = revision;
+        }
+    }
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ListInitiatives") {
@@ -263,16 +296,6 @@ async fn graphql(
             json!({"id":"initiative-b","name":"B","description":""}),
         ])})
     } else if query.contains("query ListInitiativeProjects") {
-        // Apply an external status change only once the predecessor's dispositions finish.
-        if provider.status_change_at_final_inventory.is_some()
-            && vars["initiativeId"] == "initiative-a"
-            && provider.issues["a-started"]["project"]["id"] != "a-old"
-            && provider.issues["a-backlog"]["state"]["type"] == "canceled"
-        {
-            if let Some((id, status)) = provider.status_change_at_final_inventory.take() {
-                provider.projects.get_mut(&id).unwrap()["status"]["type"] = json!(status);
-            }
-        }
         let initiative = &vars["initiativeId"];
         json!({"initiative":{"projects":page(provider.projects.values().filter(|project|
             project["archivedAt"].is_null() && project["initiatives"]["nodes"].as_array().unwrap().iter().any(|node| &node["id"] == initiative)).cloned().collect())}})
@@ -339,12 +362,32 @@ async fn graphql(
     };
     if query.starts_with("mutation") {
         provider.mutations += 1;
+        provider.revision += 1;
+        let revision = fixture_revision(provider.revision);
+        for (id, project) in &mut provider.projects {
+            if prior_projects.get(id) != Some(project) {
+                project["updatedAt"] = revision.clone();
+            }
+        }
+        for (id, issue) in &mut provider.issues {
+            if prior_issues.get(id) != Some(issue) {
+                issue["updatedAt"] = revision.clone();
+            }
+        }
         if provider.interrupt_after == Some(provider.mutations) {
             provider.unavailable = true;
             return Json(json!({"errors":[{"message":"fixture lost mutation response"}]}));
         }
     }
     Json(json!({"data":data}))
+}
+
+fn fixture_revision(revision: i64) -> Value {
+    json!(
+        (OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(revision))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    )
 }
 
 fn provider_fixture() -> Provider {
@@ -376,14 +419,7 @@ async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> P
             .unwrap(),
     );
     for name in ["a", "b"] {
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                name.into(),
-                repo.display().to_string(),
-            ))
-            .await
-            .unwrap();
+        ensure_wave_row(&store, repo, name).await.unwrap();
     }
     store
         .upsert_provider_token(&ProviderToken {
@@ -771,9 +807,11 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     })
     .await
     .unwrap();
-    assert_eq!(provider.lock().await.projects["a-old"], expected);
+    let mut observed = provider.lock().await.projects["a-old"].clone();
+    assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
+    assert_eq!(observed, expected);
     let snapshot = store.pm_snapshot(&task.wave_id).await.unwrap().unwrap();
-    let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+    let snapshot = snapshot.snapshot;
     let synced = snapshot
         .projects
         .iter()
@@ -1006,7 +1044,7 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
             .unwrap()
             .unwrap();
         let snapshot = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&snapshot.payload).unwrap();
+        let snapshot = snapshot.snapshot;
         let successor = successor_id(&format!("initiative-{name}"), "next");
         let current = super::select_current(name, &snapshot.projects).unwrap();
         assert_eq!(current.id, successor);
@@ -1025,10 +1063,10 @@ async fn a_second_home_adopts_completed_rotation_through_planning_sync() {
         assert_eq!(adopted.wave_id, *wave.id());
         assert_eq!(adopted.plan.id.as_str(), successor);
         assert_eq!(adopted.plan.status, ProjectStatus::Started);
-        assert!(snapshot
-            .items
-            .iter()
-            .any(|item| { item.id == format!("{name}-started") && item.project_id == successor }));
+        assert!(snapshot.items.iter().any(|item| {
+            item.id == format!("{name}-started")
+                && item.project_id.as_deref() == Some(successor.as_str())
+        }));
         if name == "a" {
             assert_eq!(previous.id, task.project_id);
             let moved = store.get_task(&task.id).await.unwrap().unwrap();
@@ -1136,7 +1174,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert!(snapshot
                 .items
                 .iter()
-                .any(|item| item.id == "a-started" && item.project_id == "a-old"));
+                .any(|item| item.id == "a-started" && item.project_id.as_deref() == Some("a-old")));
             let store = super::pm_store().await.unwrap();
             assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);

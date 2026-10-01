@@ -21,6 +21,7 @@ use crate::work::task::{Task, TaskId};
 
 #[cfg(test)]
 pub(crate) mod action_test;
+pub(crate) mod primary;
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
@@ -40,8 +41,7 @@ pub(crate) fn reserved_capture(
         return Ok(None);
     };
     let reservation: ReviewCaptureReservation = serde_json::from_str(&raw.to_string_lossy())?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(&reservation.session_id)?
         .ok_or_else(|| anyhow!("review reservation disappeared"))?;
@@ -85,9 +85,19 @@ pub(crate) struct FlowSessionToken {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum HumanSessionToken {
-    Flow { token: Box<FlowSessionToken> },
-    Ask { id: String },
-    StandaloneFlow { id: String },
+    Flow {
+        token: Box<FlowSessionToken>,
+    },
+    Ask {
+        id: String,
+    },
+    StandaloneFlow {
+        id: String,
+    },
+    /// A scope's ongoing conversation; no caller or Flow waits on it.
+    Primary {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +218,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub caller_session_id: Option<String>,
     pub workspace: Option<SessionWorkspace>,
@@ -428,7 +439,7 @@ async fn launch_keyed_ask<F: Future<Output = Result<AgentSession>>>(
         && !ask_exec_is_running(&id).await?
     {
         // Keep the Session on failure. A retry can start the same Session;
-        // a published native Run is reopened only through `lf session open`.
+        // a published native Run is reopened only through `lf session connect`.
         exec_ask(&session).await.with_context(|| {
             format!("launch human Ask {id}; retry the same boundary to recover")
         })?;
@@ -538,7 +549,7 @@ pub(crate) async fn task_waiting_unblock(
 
 fn report_ask_wait(id: &str) {
     eprintln!(
-        "Waiting for human session {id}. Open it in Loopflow or with `lf session open {id}`."
+        "Waiting for human session {id}. Open it in Loopflow or with `lf session connect {id}`."
     );
 }
 
@@ -872,6 +883,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         caller_session_id: session.caller_session_id.clone(),
         workspace: remote.map(|home| SessionWorkspace {
@@ -1036,6 +1048,9 @@ pub(crate) async fn mark_ready(store: &SharedStore, summary: &str) -> Result<()>
     let id = match active_session_token()? {
         HumanSessionToken::Flow { token } => flow_token_id(&token),
         HumanSessionToken::StandaloneFlow { id } | HumanSessionToken::Ask { id } => id,
+        HumanSessionToken::Primary { .. } => {
+            bail!("a primary Session has no caller waiting on readiness")
+        }
     };
     // The store fences readiness on the Session's current Run.
     store
@@ -1064,7 +1079,7 @@ async fn complete_flow(store: &SharedStore, task: &Task, position: &FlowSession)
     drop(launch_lock);
     launch.with_context(|| {
         format!(
-            "Review feedback saved; continue with `lf task run {}`",
+            "Review feedback saved; continue with `lf --task {} flow start`",
             task.plan.identifier
         )
     })
@@ -1120,7 +1135,7 @@ async fn stop_flow_run(store: &SharedStore, task: &Task, position: &FlowSession)
         let command = vec![
             "lf".to_string(),
             "session".to_string(),
-            "stop-run".to_string(),
+            "stop-client".to_string(),
             run_id.to_string(),
         ];
         tokio::task::spawn_blocking(move || {
@@ -1191,8 +1206,7 @@ async fn serve_flow_locked(
         bail!("review session cannot start: {}", failure.reason);
     }
     let message = flow_message(&task, &token);
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
-    let selector = format!("task:{}", token.task_id);
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
         token: Box::new(token.clone()),
     })?;
@@ -1208,7 +1222,14 @@ async fn serve_flow_locked(
     };
     let mut command = tokio::process::Command::new(lf);
     command
-        .args(["--tui", "--model", &agent, "--as", &selector])
+        .args([
+            "--mode",
+            "tui",
+            "--model",
+            &agent,
+            "--task",
+            task.id.as_str(),
+        ])
         .args(["skill", "--", &token.skill.name, &message])
         .current_dir(&task.worktree)
         .env(HUMAN_SESSION_ENV, serialized)
@@ -1259,7 +1280,11 @@ fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
             id: session.id.clone(),
         },
-        _ => HumanSessionToken::Ask {
+        // Only a primary conversation launches from a prepared input.
+        crate::session::SessionKind::Conversation => HumanSessionToken::Primary {
+            id: session.id.clone(),
+        },
+        crate::session::SessionKind::Ask => HumanSessionToken::Ask {
             id: session.id.clone(),
         },
     })
@@ -1271,7 +1296,7 @@ async fn serve_locked(
     session: &AgentSession,
     launch_lock: File,
 ) -> Result<()> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session)?;
     command
@@ -1298,7 +1323,8 @@ async fn serve_locked(
 
 async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "--mode".to_string(),
+        "tui".to_string(),
         "--model".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
@@ -1311,14 +1337,18 @@ async fn ask_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<Str
             .await
             .is_ok()
         {
-            args.extend(["--as".to_string(), selector]);
+            let (kind, value) = selector.split_once(':').expect("Work selector has a kind");
+            args.extend([format!("--{kind}"), value.to_string()]);
         }
     }
     match &session.skill {
         Some(skill) => args.extend(["skill".to_string(), "--".to_string(), skill.clone()]),
         None => args.push(":".to_string()),
     }
-    args.push(ask_message(session.request.as_deref().unwrap_or_default()));
+    args.push(match session.kind {
+        crate::session::SessionKind::Conversation => PRIMARY_MESSAGE.to_string(),
+        _ => ask_message(session.request.as_deref().unwrap_or_default()),
+    });
     args
 }
 
@@ -1342,8 +1372,7 @@ pub(crate) fn publish_capture_binding(
     if reservation.run_id != *run_id {
         bail!("review Run differs from its reservation");
     }
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     store.publish_review_capture(
         &reservation.session_id,
         reservation.captured,
@@ -1381,10 +1410,21 @@ pub(crate) async fn open(
             if session.kind == crate::session::SessionKind::Conversation =>
         {
             let native = NativeSession::of(session)?;
-            let provider_session = store
-                .sqlite
-                .input_provider_session(&session.artifact_key)?
-                .ok_or_else(|| anyhow!("Session {} has no provider history yet", session.id))?;
+            let Some(provider_session) =
+                store.sqlite.input_provider_session(&session.artifact_key)?
+            else {
+                // A primary conversation's first launch has no history to resume.
+                anyhow::ensure!(
+                    store.sqlite.primary_scope(&session.id)?.is_some(),
+                    "Session {} has no provider history yet",
+                    session.id
+                );
+                let surface = surface(store, session).await?;
+                if resume {
+                    open_waiting(store, &session.id).await?;
+                }
+                return Ok(surface);
+            };
             if resume {
                 crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
                 if mode == OpenMode::Replace {
@@ -1554,19 +1594,6 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     #[cfg(test)]
     action_test::after_lookup("complete", session_id).await;
     let session = session_surface(store, &target).await?;
-    if matches!(&target, SessionTarget::Flow { .. }) {
-        if let Some(destination) = super::task_destination::destination()? {
-            // The full boundary id includes Task, invocation, node and iteration.
-            // The installed operation reads its own readiness/feedback; none is copied.
-            super::task_destination::execute(
-                &destination,
-                &std::env::current_dir()?,
-                &["session".into(), "complete".into(), session.id.clone()],
-                None,
-            )?;
-            return Ok(session);
-        }
-    }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
         SessionTarget::Row { session }
@@ -1707,7 +1734,7 @@ async fn open_flow_locked(
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
-    match crate::session_record::resolve_manifest(&crate::store::observability_home_dir(), run_id) {
+    match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), run_id) {
         Ok((dir, _)) => Ok(dir.join("prepared").is_file()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session Run"),
@@ -1830,6 +1857,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         },
     };
     let mut reading = SessionRecord {
+        task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         caller_session_id: session
             .caller_artifact_key
@@ -1889,7 +1917,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
         return Ok(None);
     };
     let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.name().to_string(),
+        Some(wave) => wave.slug().to_string(),
         None => format!("Wave {wave_id} (unavailable)"),
     };
     Ok(Some(match &session.task_id {
@@ -1902,7 +1930,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
 }
 
 fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
-    crate::session_record::record_dir(&crate::store::observability_home_dir(), run_id)
+    crate::session_record::record_dir(&crate::store::lf_home_dir(), run_id)
 }
 
 /// Rename a Session through its Run and return the authoritative record.
@@ -2029,7 +2057,7 @@ pub(crate) async fn spawn_session_exec(
     command: &mut tokio::process::Command,
     run_id: &String,
 ) -> Result<tokio::process::Child> {
-    let home = crate::store::observability_home_dir();
+    let home = crate::store::lf_home_dir();
     let executable = Path::new(command.as_std().get_program());
     let digest = fs::read(executable)
         .ok()
@@ -2039,7 +2067,7 @@ pub(crate) async fn spawn_session_exec(
         Some(cwd) => cwd.to_path_buf(),
         None => std::env::current_dir()?,
     };
-    let database = crate::store::observability_database_path()?;
+    let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
     // never start; the opening Run must retain enough evidence to diagnose it.
     // Arguments and environment values can contain prompts or credentials.
@@ -2129,7 +2157,7 @@ pub(crate) fn stop_session_client(run_id: &String) -> Result<()> {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
-        &crate::store::observability_database_path()?,
+        &crate::store::database_path_from_env()?,
     )
     .context("cannot resolve the provider for this Session input")?;
     let input = store
@@ -2170,7 +2198,7 @@ pub(crate) fn human_open_argv(
     worktree: Option<&Path>,
     id: &str,
 ) -> Result<Vec<String>> {
-    let context = crate::engine::process::current_home_execution_context()?;
+    let context = crate::engine::process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
@@ -2190,7 +2218,7 @@ pub(crate) fn human_open_argv(
         }
         argv.push(home_id.to_string());
     }
-    argv.extend(["session".to_string(), "open".to_string(), id.to_string()]);
+    argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
     Ok(argv)
 }
 
@@ -2259,13 +2287,15 @@ fn ask_message(request: &str) -> String {
     )
 }
 
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. No caller is waiting on it and it is not a review: do not run `lf session ready`. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+
 async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
     let step = position.current();
     let node_id = step
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
-    let lf = crate::engine::process::resolve_current_home_lf_binary();
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
@@ -2282,7 +2312,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
 
 /// Hand the conversation to a durable terminal, as a child of the asking Run.
 async fn exec_ask(session: &AgentSession) -> Result<()> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary();
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
@@ -2294,10 +2324,9 @@ async fn exec_ask(session: &AgentSession) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("Ask {} has no caller input", session.id))?
         .to_string();
-    let caller_dir =
-        crate::session_record::resolve_manifest(&crate::store::observability_home_dir(), &caller)
-            .ok()
-            .map(|(directory, _)| directory.to_string_lossy().to_string());
+    let caller_dir = crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), &caller)
+        .ok()
+        .map(|(directory, _)| directory.to_string_lossy().to_string());
     let mut env = vec![(crate::durable::RUN_ID_ENV, caller.as_str())];
     if let Some(directory) = &caller_dir {
         env.push((RUN_DIR_ENV, directory.as_str()));
@@ -2390,7 +2419,7 @@ fn flow_token_id(token: &FlowSessionToken) -> String {
 }
 
 pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
-    let directory = crate::store::current_home_lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
+    let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
     fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
     let path = directory.join(format!(".{name}.launch.lock"));
@@ -2525,7 +2554,7 @@ pub fn active_flow_skill(requested: &str) -> Result<Option<Skill>> {
             }
             Ok(Some(token.skill))
         }
-        HumanSessionToken::Ask { .. } => Ok(None),
+        HumanSessionToken::Ask { .. } | HumanSessionToken::Primary { .. } => Ok(None),
     }
 }
 
@@ -2567,6 +2596,7 @@ mod tests {
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
             caller_session_id: None,
+            task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -2680,14 +2710,14 @@ mod tests {
     pub(super) static FAILED_ASK_LAUNCHERS: LazyLock<Mutex<HashSet<String>>> =
         LazyLock::new(|| Mutex::new(HashSet::new()));
 
-    struct AskHome {
+    pub(super) struct AskHome {
         home: tempfile::TempDir,
         previous: Vec<(&'static str, Option<OsString>)>,
         _ambient: crate::test_ambient::EnvGuard,
     }
 
     impl AskHome {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             ASK_LAUNCHERS.lock().unwrap().clear();
             FAILED_ASK_LAUNCHERS.lock().unwrap().clear();
             let ambient = crate::test_ambient::EnvGuard::new();
@@ -2738,7 +2768,7 @@ mod tests {
             }
         }
 
-        async fn store(&self) -> SharedStore {
+        pub(super) async fn store(&self) -> SharedStore {
             std::sync::Arc::new(
                 open_ephemeral_store(&StorageConfig::sqlite(self.home.path().join("registry.db")))
                     .await
@@ -3721,16 +3751,11 @@ mod tests {
     #[test]
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let argv = human_open_argv(None, None, "ask_123");
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        let argv = argv.unwrap();
+        let home = AskHome::new();
+        let argv = human_open_argv(None, None, "ask_123").unwrap();
 
-        assert_eq!(&argv[argv.len() - 3..], ["session", "open", "ask_123"]);
+        assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
+        assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }
 

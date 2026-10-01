@@ -1073,16 +1073,22 @@ pub fn create_named_worktree(
 }
 
 pub fn plan_placement(repo: &Path, segment: WorktreeSegment) -> Result<PlacementPlan, GitError> {
-    let default_branch = get_default_branch(repo)?;
-    let user = git_user(repo)?;
+    plan_branch_placement(repo, segment, None)
+}
 
+pub(crate) fn plan_branch_placement(
+    repo: &Path,
+    segment: WorktreeSegment,
+    branch: Option<&str>,
+) -> Result<PlacementPlan, GitError> {
+    let user = git_user(repo)?;
     let id = WorktreeName::new(&user, segment).ok_or_else(|| GitError::CommandFailed {
         command: "git worktree add".to_string(),
         stderr: format!("invalid worktree author: {user}"),
     })?;
-    let base_ref = default_branch;
-    let branch = id.branch();
+    let branch = branch.map(str::to_string).unwrap_or_else(|| id.branch());
     let planned_path = worktree_dir(repo, &id);
+    let base_ref = get_default_branch(repo)?;
 
     let existing_worktree_path =
         list_porcelain(repo)?
@@ -1111,20 +1117,15 @@ pub fn create_from_placement_plan(
     repo: &Path,
     plan: &PlacementPlan,
 ) -> Result<CreateWorktreeResult, GitError> {
+    if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
+        return Err(GitError::CommandFailed {
+            command: "git worktree add".to_string(),
+            stderr: format!("worktree path already exists: {:?}", plan.worktree_path),
+        });
+    }
     match plan.strategy {
-        PlacementStrategy::UseExistingWorktree => Ok(CreateWorktreeResult {
-            path: plan.worktree_path.clone(),
-            branch: plan.branch.clone(),
-            base_branch: None,
-            base_commit: None,
-        }),
+        PlacementStrategy::UseExistingWorktree => {}
         PlacementStrategy::CheckoutExisting => {
-            if plan.worktree_path.exists() {
-                return Err(GitError::CommandFailed {
-                    command: "git worktree add".to_string(),
-                    stderr: format!("worktree path already exists: {:?}", plan.worktree_path),
-                });
-            }
             let remote_branch = format!("origin/{}", plan.branch);
             let mode = if branch_exists(repo, &plan.branch)? {
                 WorktreeBranch::Existing
@@ -1134,20 +1135,8 @@ pub fn create_from_placement_plan(
                 }
             };
             worktree_add(repo, &plan.worktree_path, &plan.branch, mode)?;
-            Ok(CreateWorktreeResult {
-                path: plan.worktree_path.clone(),
-                branch: plan.branch.clone(),
-                base_branch: None,
-                base_commit: None,
-            })
         }
         PlacementStrategy::Create => {
-            if plan.worktree_path.exists() {
-                return Err(GitError::CommandFailed {
-                    command: "git worktree add".to_string(),
-                    stderr: format!("worktree path already exists: {:?}", plan.worktree_path),
-                });
-            }
             if branch_exists(repo, &plan.branch)? {
                 return Err(GitError::CommandFailed {
                     command: "git worktree add".to_string(),
@@ -1163,14 +1152,14 @@ pub fn create_from_placement_plan(
                 },
             )?;
             schedule_upstream_sync(plan.worktree_path.clone(), plan.branch.clone());
-            Ok(CreateWorktreeResult {
-                path: plan.worktree_path.clone(),
-                branch: plan.branch.clone(),
-                base_branch: None,
-                base_commit: None,
-            })
         }
     }
+    Ok(CreateWorktreeResult {
+        path: plan.worktree_path.clone(),
+        branch: plan.branch.clone(),
+        base_branch: None,
+        base_commit: None,
+    })
 }
 
 /// Resolve or create an author-scoped sibling worktree for a main agent.
@@ -1786,7 +1775,7 @@ mod tests {
     fn main_placement_creates_flat_branch() {
         let repo = init_repo();
         let segment = WorktreeSegment::parse("child").unwrap();
-        let plan = plan_placement(repo.path(), segment).expect("plan task worktree");
+        let plan = plan_placement(repo.path(), segment).expect("plan task wt");
 
         assert_eq!(plan.branch, "tester/child");
         assert_eq!(plan.base_ref, "main");

@@ -97,25 +97,33 @@ impl Step {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Command {
-    #[serde(deserialize_with = "deserialize_command_name")]
     pub command: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
 }
 
-// Saved invocations outlive CLI spellings. Migrate the stored operation name;
-// preserve captured arguments and topology instead of reloading today's Flow.
-fn deserialize_command_name<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<String, D::Error> {
-    let name = String::deserialize(deserializer)?;
-    Ok(if name == "rebase" {
-        "sync".to_string()
-    } else {
-        name
-    })
+// Saved invocations outlive CLI spellings. Migrate their operation owner while
+// retaining the captured arguments and topology instead of reloading a Flow.
+impl<'de> Deserialize<'de> for Command {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct SavedCommand {
+            command: String,
+            #[serde(default)]
+            args: Vec<String>,
+        }
+        let mut saved = SavedCommand::deserialize(deserializer)?;
+        if matches!(saved.command.as_str(), "rebase" | "sync") {
+            saved.command = "task".into();
+            saved.args.insert(0, "sync".into());
+        }
+        Ok(Self {
+            command: saved.command,
+            args: saved.args,
+        })
+    }
 }
 
 impl Command {
@@ -160,17 +168,6 @@ pub struct XorPath {
 pub struct Flow {
     pub name: String,
     pub items: Vec<Step>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Goal {
-    pub prompt: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GoalRenderContext {
-    pub flows: Vec<String>,
-    pub memory: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -292,68 +289,6 @@ pub(crate) fn repo_flow_names(repo: &Path) -> Vec<String> {
     names.sort();
     names.dedup();
     names
-}
-
-pub fn load_goal(name: &str, repo: &Path) -> Result<Goal, LoadError> {
-    if let Ok(goal_path) = find_goal_path(name, repo) {
-        let content = fs::read_to_string(goal_path)?;
-        let prompt = split_frontmatter(&content)
-            .map(|(_, body)| body)
-            .unwrap_or(content);
-        return Ok(Goal { prompt });
-    }
-
-    if let Some(key) = crate::engine::builtins::resolve_builtin_goal(name) {
-        let prompt = crate::engine::builtins::get_builtin_goal(key)
-            .expect("resolve_builtin_goal returned a known key");
-        return Ok(Goal {
-            prompt: prompt.to_string(),
-        });
-    }
-
-    Err(LoadError::GoalNotFound(name.to_string()))
-}
-
-/// The one wave-memory injector. Both the wave agent's goal seed
-/// ([`render_goal`]) and ambient context assembly
-/// ([`crate::engine::prompt::format_content_sections`]) emit memory through
-/// this, so it appears under one tag — and at most once per prompt (assembly
-/// skips it when the task message already carries the tag).
-///
-/// `None` when the memory is empty: an absent section costs zero tokens.
-pub fn wave_memory_section(memory: &str) -> Option<String> {
-    let trimmed = memory.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let reference = crate::engine::prompt::render_reference(trimmed);
-    Some(format!("<lf:wave-memory>\n{reference}\n</lf:wave-memory>"))
-}
-
-/// Sections run stable → volatile so providers can prefix-cache the front of
-/// the seed: goal prompt and flow list rarely change between passes, while
-/// MEMORY.md is rewritten every pass — it goes last so a memory edit doesn't
-/// invalidate the cacheable bytes ahead of it.
-pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
-    let flows = if ctx.flows.is_empty() {
-        "No flows are available.".to_string()
-    } else {
-        ctx.flows
-            .iter()
-            .map(|flow| format!("- {flow}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let memory = wave_memory_section(&ctx.memory).unwrap_or_else(|| {
-        "<lf:wave-memory>\nNo wave memory is recorded.\n</lf:wave-memory>".to_string()
-    });
-
-    format!(
-        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>\n\n{}",
-        goal.prompt.trim(),
-        flows,
-        memory,
-    )
 }
 
 /// Load an authored flow without adapting a skill into a flow.
@@ -566,7 +501,7 @@ fn warn_retired_interactive(name: &str, content: &str) {
     });
     if has_interactive && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed) {
         eprintln!(
-            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --batch now select the launch surface"
+            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and --mode batch now select the launch surface"
         );
     }
 }
@@ -749,52 +684,6 @@ pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
     }
     let path = agent_skill_path(name, repo);
     path.is_file().then_some(path)
-}
-
-fn find_goal_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    let wave_goal = repo.join("wave").join(name).join("GOAL.md");
-    if exact_path_exists(&wave_goal) {
-        return Ok(wave_goal);
-    }
-
-    if let Some((prefix, goal_name)) = name.split_once('/') {
-        let repo_ns = markdown_path(&repo.join(".lf/goals").join(prefix), goal_name);
-        if repo_ns.exists() {
-            return Ok(repo_ns);
-        }
-        if let Some(home) = home_dir() {
-            let home_ns = markdown_path(&home.join(".lf/goals").join(prefix), goal_name);
-            if home_ns.exists() {
-                return Ok(home_ns);
-            }
-        }
-    }
-
-    if let Some(path) = first_existing_path([markdown_path(&repo.join(".lf/goals"), name)]) {
-        return Ok(path);
-    }
-
-    if let Some(home) = home_dir() {
-        if let Some(path) = first_existing_path([markdown_path(&home.join(".lf/goals"), name)]) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::GoalNotFound(name.to_string()))
-}
-
-fn exact_path_exists(path: &Path) -> bool {
-    let Some(parent) = path.parent() else {
-        return false;
-    };
-    let Some(file_name) = path.file_name() else {
-        return false;
-    };
-    std::fs::read_dir(parent).is_ok_and(|entries| {
-        entries
-            .filter_map(Result::ok)
-            .any(|entry| entry.file_name() == file_name)
-    })
 }
 
 /// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
@@ -1194,8 +1083,8 @@ mod tests {
 
     use super::{
         build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_goal, load_skill, render_goal, ConcreteStep,
-        DefinitionLoader, Flow, Goal, GoalRenderContext, Skill, Step, XorDef, XorPath,
+        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader, Flow, Skill,
+        Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1224,52 +1113,6 @@ mod tests {
         let skill = load_skill("myskill", tmp.path()).unwrap();
         assert_eq!(skill.name, "myskill");
         assert!(skill.content.unwrap().contains("Do the thing"));
-    }
-
-    #[test]
-    fn load_goal_finds_repo_goal_override() {
-        let tmp = TempDir::new().unwrap();
-        let goals_dir = tmp.path().join(".lf/goals");
-        fs::create_dir_all(&goals_dir).unwrap();
-        fs::write(goals_dir.join("ship-roadmap.md"), "Repo goal prompt.").unwrap();
-
-        let goal = load_goal("ship-roadmap", tmp.path()).unwrap();
-        assert_eq!(goal.prompt, "Repo goal prompt.");
-    }
-
-    #[test]
-    fn load_goal_prefers_wave_goal_md() {
-        let tmp = TempDir::new().unwrap();
-        let goals_dir = tmp.path().join(".lf/goals");
-        let wave_dir = tmp.path().join("wave/goals");
-        fs::create_dir_all(&goals_dir).unwrap();
-        fs::create_dir_all(&wave_dir).unwrap();
-        fs::write(goals_dir.join("goals.md"), "Repo goal prompt.").unwrap();
-        fs::write(
-            wave_dir.join("GOAL.md"),
-            "---\nmetrics:\n  - tests pass\n---\nWave goal prompt.",
-        )
-        .unwrap();
-
-        let goal = load_goal("goals", tmp.path()).unwrap();
-        assert_eq!(goal.prompt, "Wave goal prompt.");
-    }
-
-    #[test]
-    fn load_goal_ignores_legacy_goal_paths() {
-        let tmp = TempDir::new().unwrap();
-        let singular_dir = tmp.path().join(".lf/goal");
-        let root_dir = tmp.path().join("goal");
-        let wave_dir = tmp.path().join("wave/custom");
-        fs::create_dir_all(&singular_dir).unwrap();
-        fs::create_dir_all(&root_dir).unwrap();
-        fs::create_dir_all(&wave_dir).unwrap();
-        fs::write(singular_dir.join("custom.md"), "Singular goal.").unwrap();
-        fs::write(root_dir.join("custom.md"), "Root goal.").unwrap();
-        fs::write(wave_dir.join("goal.md"), "Lowercase wave goal.").unwrap();
-
-        let err = load_goal("custom", tmp.path()).unwrap_err();
-        assert!(matches!(err, LoadError::GoalNotFound(name) if name == "custom"));
     }
 
     #[test]
@@ -1405,53 +1248,15 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
+        fs::write(
+            flows.join("invalid.yaml"),
+            "- cmd: task sync\n  human: true\n",
+        )
+        .unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()
             .contains("valid only on skill nodes"));
-    }
-
-    #[test]
-    fn render_goal_includes_flows_and_memory() {
-        let goal = Goal {
-            prompt: "Drive the work.".to_string(),
-        };
-        let rendered = render_goal(
-            &goal,
-            &GoalRenderContext {
-                flows: vec!["build".to_string(), "qa".to_string()],
-                memory: "Last loop found the docs drift.".to_string(),
-            },
-        );
-
-        assert!(rendered.contains("Drive the work."));
-        assert!(rendered.contains("<lf:wave-memory>"));
-        assert!(rendered.contains("Last loop found the docs drift."));
-        assert!(rendered.contains("- build"));
-        assert!(rendered.contains("- qa"));
-        // Stable → volatile: memory is rewritten between passes, so it must
-        // trail the stable goal and flow list to keep the prefix cacheable.
-        let memory_at = rendered.find("<lf:wave-memory>").expect("memory section");
-        let flows_at = rendered.find("<lf:goal-context>").expect("flow section");
-        assert!(flows_at < memory_at, "memory renders after the flow list");
-    }
-
-    #[test]
-    fn render_goal_handles_empty_memory() {
-        let goal = Goal {
-            prompt: "Drive the work.".to_string(),
-        };
-        let rendered = render_goal(
-            &goal,
-            &GoalRenderContext {
-                flows: Vec::new(),
-                memory: String::new(),
-            },
-        );
-
-        assert!(rendered.contains("<lf:wave-memory>\nNo wave memory is recorded."));
-        assert!(rendered.contains("No flows are available."));
     }
 
     #[test]
@@ -1778,7 +1583,7 @@ Design the feature.
     #[test]
     fn parse_command_mapping_accepts_command_and_args() {
         let yaml = r#"
-- cmd: pr land
+- cmd: task pr land
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1789,8 +1594,8 @@ Design the feature.
                 target: Target::Command(item),
                 ..
             } => {
-                assert_eq!(item.command, "pr");
-                assert_eq!(item.args, vec!["land"]);
+                assert_eq!(item.command, "task");
+                assert_eq!(item.args, vec!["pr", "land"]);
             }
             other => panic!("expected command item, got {other:?}"),
         }
@@ -1981,7 +1786,7 @@ Design the feature.
         fs::write(tmp.path().join(".lf/skills/work.md"), "Captured work").unwrap();
         fs::write(
             tmp.path().join(".lf/flows/inner.yaml"),
-            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: pr land --local\n",
+            "- step:\n    name: work\n    id: review\n    human: true\n- cmd: task pr land --local\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".lf/flows/outer.yaml"),
@@ -2015,7 +1820,7 @@ Design the feature.
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
             panic!("command")
         };
-        assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);
+        assert_eq!(command.item.argv(), ["lf", "task", "pr", "land", "--local"]);
     }
 
     #[test]

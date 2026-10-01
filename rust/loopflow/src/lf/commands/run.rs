@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, exec_agent, load_config_or_default, missing_agent_message, parse_agent,
-    prepare_exec_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextSourceOverrides, ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill,
-    SkillSyncOptions, StreamFormat, Surface,
+    check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
+    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
+    StreamFormat, Surface,
 };
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -59,8 +59,7 @@ pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
         return Ok(None);
     };
     let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let flow = store
         .flow(&token.invocation)?
         .ok_or_else(|| anyhow!("Flow disappeared"))?;
@@ -83,8 +82,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
     );
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let binding = implicit_binding(cli)?;
     let task = binding.as_ref().and_then(|binding| match &binding.work {
         crate::durable::WorkRef::Task(id) => Some(id.clone()),
@@ -102,7 +100,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         "command does not name the selected Flow skill"
     );
     let mut launch = cli.exec_options();
-    launch.batch = true;
+    launch.mode = Some(crate::lf::LaunchMode::Batch);
     launch.task = task.as_ref().map(ToString::to_string);
     launch.wave = flow
         .wave_id
@@ -110,7 +108,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
         .map(|id| {
             store
                 .get_wave(id)?
-                .map(|wave| wave.name().to_owned())
+                .map(|wave| wave.slug().to_owned())
                 .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
         })
         .transpose()?;
@@ -340,7 +338,7 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::prepare(&store, &task, wave.name()).await?;
+        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
         Ok(Some((store, seed)))
     })
 }
@@ -368,7 +366,7 @@ fn build_prompt_at(
         .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
     let message = task_message.as_deref().or(message);
     let config_start = Instant::now();
-    let config = load_config_or_default(Some(&repo_root));
+    let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -394,9 +392,9 @@ fn build_prompt_at(
 
     info!("preparing launch prompt");
     let prepare_start = Instant::now();
-    let exec_target = if cli.ide {
+    let exec_target = if cli.mode == Some(crate::lf::LaunchMode::Ide) {
         ExecTarget::Ide
-    } else if cli.tui || skill == Some("loopflow") {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) || skill == Some("loopflow") {
         ExecTarget::Tui
     } else {
         config.session.launch
@@ -413,9 +411,6 @@ fn build_prompt_at(
         .wave
         .clone()
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
-    let wave_memory = wave
-        .as_deref()
-        .and_then(|wave| crate::work::wave::context::gather_wave_memory(&repo_root, wave));
     let prepared = prepare_exec_prompt(
         &config,
         ExecPromptInput {
@@ -425,7 +420,6 @@ fn build_prompt_at(
             surface,
             docs: cli.docs.clone(),
             wave,
-            wave_memory,
             message: message.map(|value| value.to_string()),
             no_loopflow: cli.no_loopflow,
             agent: task_input
@@ -475,6 +469,7 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
+    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
     if confine {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
@@ -493,6 +488,13 @@ fn build_prompt_at(
             && exec_target == ExecTarget::Ide
             && use_native_skill_exec
             && should_exec_via_skill(skill_name)
+            // Wave seeds refer to assembled documents, including GOAL.md.
+            // The short vendor seed carries no document section.
+            && !prepared
+                .components
+                .docs
+                .iter()
+                .any(|doc| doc.source == crate::engine::DocumentSource::Wave)
         {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
@@ -500,38 +502,47 @@ fn build_prompt_at(
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
-            let wave_memory =
-                crate::engine::prompt::format_wave_memory_section(&prepared.components);
+            let wave_context =
+                crate::engine::prompt::format_wave_sections(&prepared.components).join("\n\n");
             prompt = skill_exec_seed(
                 &harness,
                 surface,
                 skill_name,
                 prepared.components.message.as_deref(),
                 prepared.components.operate,
-                wave_memory.as_deref(),
+                Some(&wave_context),
                 prepared.components.user_name.as_deref(),
             );
+            if let Some(notice) = &prepared.components.budget_notice {
+                prompt.push_str(&format!(
+                    "\n\n<lf:context-budget>\n{notice}\n</lf:context-budget>"
+                ));
+            }
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
         } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
             warn!(
                 skill = skill_name,
-                "external skill uses assembled prompt fallback"
+                "skill launch requires assembled prompt context"
             );
         }
     }
 
     let mut components = prepared.components;
     components.message_context = message_context;
-    let deduplicated_docs = prepared.deduplicated_docs;
+    let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    crate::engine::context_budget::check_input(&effective_system, &agent_config.task_prompt)?;
+    crate::engine::context_budget::check_input(
+        &effective_system,
+        &agent_config.task_prompt,
+        &budgets,
+    )?;
     let context = attributed_context(
         &components,
         &effective_system,
         &agent_config.task_prompt,
-        &deduplicated_docs,
+        &deduplication_decisions,
     );
     Ok(PromptBuild {
         repo_root,
@@ -567,10 +578,11 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    cli.tui
-        || cli.ide
-        || cli.interactive
-        || (!cli.batch && (attached_tty || (skill.is_none() && message.is_none())))
+    match cli.mode {
+        Some(crate::lf::LaunchMode::Batch) => false,
+        Some(_) => true,
+        None => attached_tty || (skill.is_none() && message.is_none()),
+    }
 }
 
 fn should_exec_via_skill(skill_name: &str) -> bool {
@@ -593,7 +605,7 @@ fn skill_exec_seed(
     skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    wave_memory: Option<&str>,
+    wave_context: Option<&str>,
     user_name: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
@@ -609,9 +621,9 @@ fn skill_exec_seed(
         seed.push_str("\n\n");
         seed.push_str(&user_context);
     }
-    if let Some(memory) = wave_memory {
+    if let Some(context) = wave_context.filter(|context| !context.is_empty()) {
         seed.push_str("\n\n");
-        seed.push_str(&crate::engine::prompt::render_reference(memory));
+        seed.push_str(&crate::engine::prompt::render_reference(context));
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
@@ -651,9 +663,9 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     // use explicit flags first, then the configured launch target.
     let forced_target = if built.skill_name.as_deref() == Some("loopflow") {
         Some(ExecTarget::Tui)
-    } else if cli.ide {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Ide) {
         Some(ExecTarget::Ide)
-    } else if cli.tui {
+    } else if cli.mode == Some(crate::lf::LaunchMode::Tui) {
         Some(ExecTarget::Tui)
     } else {
         None
@@ -776,7 +788,7 @@ fn exec_headless_prompt(
     process.capture = Some(capture.clone().into());
 
     // Set up directive relay so agent skills can issue shell directives
-    // (e.g. `cd` after `lf pr land` rotates worktrees).
+    // (e.g. `cd` after `lf task wt switch`).
     let directive_file = std::env::var("LOOPFLOW_DIRECTIVE_FILE").ok();
     let mut agent_config = prepared_config.clone();
     let relay_path = directive_file.as_ref().and_then(|_| {
@@ -860,7 +872,7 @@ fn begin_run_capture(
                 .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
             &built.context,
             |_artifact| {
-                let path = crate::store::observability_database_path()
+                let path = crate::store::database_path_from_env()
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
                 crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
                     &token.invocation,
@@ -902,7 +914,7 @@ pub(crate) fn attributed_context(
     components: &PromptComponents,
     system_prompt: &str,
     task_prompt: &str,
-    deduplicated_docs: &[crate::engine::Document],
+    deduplication_decisions: &[crate::trace::ContextDecision],
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -988,28 +1000,15 @@ pub(crate) fn attributed_context(
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
-        push(
-            goal,
-            Kind::Goal,
-            Scope::Wave,
-            wave.clone(),
-            Some(format!("wave/{wave}/GOAL.md")),
-            "wave",
-        );
-    }
-    if let Some(memory) = &components.wave_memory {
-        push(
-            &memory.content,
-            Kind::Memory,
-            Scope::Wave,
-            "wave memory".to_string(),
-            Some(memory.path.clone()),
-            "wave",
-        );
+        push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
             Kind::Scratch
+        } else if document.source == DocumentSource::RepoMemory
+            || (document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md"))
+        {
+            Kind::Memory
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
         } else {
@@ -1018,10 +1017,18 @@ pub(crate) fn attributed_context(
         push(
             &document.content,
             kind,
-            Scope::Repo,
+            if document.source == DocumentSource::Wave {
+                Scope::Wave
+            } else {
+                Scope::Repo
+            },
             document.path.clone(),
             Some(document.path.clone()),
-            "docs",
+            if document.source == DocumentSource::Wave {
+                "wave"
+            } else {
+                "docs"
+            },
         );
     }
     for document in &components.diff_files {
@@ -1107,22 +1114,7 @@ pub(crate) fn attributed_context(
         );
     }
 
-    let mut decisions = Vec::new();
-    for (position, document) in deduplicated_docs.iter().enumerate() {
-        decisions.push(ContextDecision {
-            position: position as u32,
-            kind: Kind::RepoInstructions,
-            scope: Scope::Repo,
-            label: document.path.clone(),
-            source_path: Some(document.path.clone()),
-            decision: ContextDecisionKind::Deduplicated,
-            reason: "provider-native instruction discovery owns this file or its symlink target"
-                .to_string(),
-            original_bytes: Some(document.content.len() as u64),
-            original_tokens: Some(crate::engine::prompt::count_tokens(&document.content) as u64),
-            asset_position: None,
-        });
-    }
+    let mut decisions = deduplication_decisions.to_vec();
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
@@ -1251,6 +1243,69 @@ mod tests {
     }
 
     #[test]
+    fn context_choices_override_config_and_omission_inherits() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_branch("context-choice");
+        repo.create_file("changed.txt", "changed file body\n");
+        repo.stage_all();
+        repo.commit("Add changed content");
+        for configured in [false, true] {
+            repo.create_file(
+                ".lf/config.yaml",
+                &format!(
+                "diff: {configured}\ndiff_files: {configured}\nchrome: {configured}\npaste: false\n"
+            ),
+            );
+            for (choice, files, patch) in [
+                (None, configured, configured),
+                (Some("files"), true, false),
+                (Some("patch"), false, true),
+                (Some("both"), true, true),
+                (Some("none"), false, false),
+            ] {
+                let mut args = vec!["lf", "--mode", "batch"];
+                if let Some(choice) = choice {
+                    args.extend(["--diff", choice]);
+                }
+                for browser in [None, Some("on"), Some("off")] {
+                    let mut args = args.clone();
+                    if let Some(browser) = browser {
+                        args.extend(["--chrome", browser]);
+                    }
+                    let cli = Cli::parse_from(args);
+                    let built =
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
+                            .unwrap();
+                    assert_eq!(
+                        built
+                            .components
+                            .diff_files
+                            .iter()
+                            .any(|file| file.content.contains("changed file body")),
+                        files
+                    );
+                    assert_eq!(
+                        built
+                            .components
+                            .diff
+                            .as_ref()
+                            .is_some_and(|diff| diff.contains("+changed file body")),
+                        patch
+                    );
+                    assert_eq!(
+                        built.capabilities.chrome,
+                        browser.map_or(configured, |value| value == "on")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
         let _restore = EnvironmentRestore::capture(&[
@@ -1271,7 +1326,7 @@ mod tests {
             ".lf/config.yaml",
             "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
 
         for name in ["Jack", "Jacqueline", "  "] {
             std::fs::write(
@@ -1331,7 +1386,7 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--batch"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
@@ -1482,8 +1537,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
-        let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
 
         let mut implicit_launch = built.agent_config.clone();
         implicit_launch.env.insert(
@@ -1511,20 +1564,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(implicit_run_dir.join("manifest.json").is_file());
         assert!(implicit_run_dir.join("terminal.json").is_file());
         assert!(!implicit_run_dir.join("owner.json").exists());
-        let implicit_events =
-            std::fs::read_to_string(implicit_run_dir.join("events.jsonl")).unwrap();
-        assert_eq!(
-            implicit_events.matches("provider_attempt_started").count(),
-            2
-        );
-        let accounts: Vec<serde_json::Value> = implicit_events
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .filter(|event: &serde_json::Value| event["type"] == "provider_account_selected")
-            .collect();
-        assert_eq!(accounts.len(), 2);
-        assert!(accounts.iter().all(|event| event["account_id"].is_null()));
-        assert_ne!(accounts[0]["attempt_key"], accounts[1]["attempt_key"]);
+        // Completion does not wait for all telemetry. The provider evidence above
+        // proves retry identity; session_record tests own usage and account events.
         assert!(registry.is_file());
         let db = rusqlite::Connection::open(&registry).unwrap();
         let tasks: i64 = db
@@ -1706,7 +1747,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
 
         let cli = Cli {
-            batch: true,
+            mode: Some(crate::lf::LaunchMode::Batch),
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
@@ -1742,7 +1783,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.stage_all();
         repo.commit("bound basis");
         let cli = Cli {
-            interactive: true,
+            mode: Some(crate::lf::LaunchMode::Interactive),
             ..Cli::default()
         };
 
@@ -1780,14 +1821,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "gate"]);
 
         assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
     fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--batch", "design"]);
+        let cli = Cli::parse_from(["lf", "--mode", "batch", "design"]);
         assert!(!is_interactive_run(&cli, Some("design"), None));
     }
 
@@ -1815,7 +1856,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "--mode", "tui", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1834,6 +1875,44 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(built.prompt.contains("verify the result"));
         assert!(!built.prompt.starts_with("/proof"));
         assert!(!built.prompt.starts_with("$proof"));
+    }
+
+    #[test]
+    fn ide_wave_skill_launch_delivers_the_authored_goal() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        // A regression into native skill sync must never write personal skills.
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("LF_HOME", home.path().join(".lf"));
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let goal =
+            "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
+        repo.create_file("wave/release/GOAL.md", goal);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
+        let built = build_prompt_at(
+            Some("design"),
+            Some("plan the release"),
+            &cli,
+            repo.path().to_path_buf(),
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.prompt.matches(goal).count(), 1);
+        assert!(built
+            .context
+            .task
+            .assets
+            .iter()
+            .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
     }
 
     #[test]
@@ -1940,7 +2019,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             None,
         );
         assert!(!seed.contains("<lf:loopflow>"));
-        assert!(!seed.contains("lf commit"));
+        assert!(!seed.contains(crate::engine::builtins::LOOPFLOW_DOC.trim()));
     }
 
     #[test]
@@ -1965,20 +2044,48 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_exec_seed_carries_wave_memory_before_the_message() {
-        let memory = "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>";
+    fn skill_exec_seed_carries_wave_files_before_the_message() {
+        let components = PromptComponents {
+            wave: Some("infrastructure/release".into()),
+            docs: vec![
+                Document {
+                    path: "MEMORY.md".into(),
+                    content: "Repository decisions.".into(),
+                    source: DocumentSource::RepoMemory,
+                },
+                Document {
+                    path: "wave/infrastructure/MEMORY.md".into(),
+                    content: "Inherited decisions.".into(),
+                    source: DocumentSource::Wave,
+                },
+                Document {
+                    path: "wave/infrastructure/release/GOAL.md".into(),
+                    content: "Deliver releases.".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
+            ..Default::default()
+        };
+        let context = crate::engine::prompt::format_wave_sections(&components).join("\n\n");
         let seed = skill_exec_seed(
             "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
             false,
-            Some(memory),
+            Some(&context),
             None,
         );
-        let memory_pos = seed.find("<lf:wave-memory>").unwrap();
-        let message_pos = seed.find("<lf:message>").unwrap();
-        assert!(memory_pos < message_pos);
+        assert!(
+            seed.find("Inherited decisions.").unwrap() < seed.find("Deliver releases.").unwrap()
+        );
+        assert!(
+            seed.find("Repository decisions.").unwrap()
+                < seed.find("Inherited decisions.").unwrap()
+        );
+        assert_eq!(seed.matches("Repository decisions.").count(), 1);
+        assert!(seed.find("Deliver releases.").unwrap() < seed.find("<lf:message>").unwrap());
+        assert_eq!(seed.matches("Inherited decisions.").count(), 1);
     }
 
     #[test]
@@ -2000,16 +2107,18 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn attributed_context_keeps_escaped_reference_sources() {
         let components = PromptComponents {
-            docs: vec![Document {
-                path: "scratch/intent.md".into(),
-                content: "> $kickoff".into(),
-                source: DocumentSource::Scratch,
-            }],
-            wave_memory: Some(Document {
-                path: "wave/product/MEMORY.md".into(),
-                content: "Earlier $design".into(),
-                source: DocumentSource::WaveMemory,
-            }),
+            docs: vec![
+                Document {
+                    path: "scratch/intent.md".into(),
+                    content: "> $kickoff".into(),
+                    source: DocumentSource::Scratch,
+                },
+                Document {
+                    path: "wave/product/MEMORY.md".into(),
+                    content: "Earlier $design".into(),
+                    source: DocumentSource::Wave,
+                },
+            ],
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
@@ -2042,11 +2151,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn attributed_context_keeps_nested_message_and_repeated_channel_sources() {
         let components = PromptComponents {
-            wave_memory: Some(Document {
+            docs: vec![Document {
                 path: "wave/product/MEMORY.md".to_string(),
                 content: "MEMORY".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
+                source: DocumentSource::Wave,
+            }],
             message: Some("outer MEMORY remainder".to_string()),
             message_context: Some((ContextAssetKind::Goal, ContextScope::Step)),
             ..PromptComponents::default()

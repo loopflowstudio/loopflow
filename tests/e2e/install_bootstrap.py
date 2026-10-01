@@ -45,7 +45,7 @@ def invoke(user: str, cwd: Path, *args: str, succeeds: bool = True) -> str:
             user,
             "--",
             "env",
-            "-i",
+            "--mode", "interactive",
             f"HOME=/home/{user}",
             "PATH=/usr/bin:/bin",
             "NO_COLOR=1",

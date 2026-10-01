@@ -2074,7 +2074,7 @@ mod durable_store_tests {
         );
         assert!(store.start_task_flow(&task_id, &original).is_err());
 
-        // `lf task run --flow other` while the review waits: the review closes
+        // `lf --task --flow flow start other` while the review waits: the review closes
         // as replaced and its Session stops listing.
         let replacement = store
             .start_task_flow(&task_id, &autonomous_position(&task_id))

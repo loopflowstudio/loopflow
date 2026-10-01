@@ -38,71 +38,20 @@ use crate::build_info::{self, MigrationAuthority};
 use crate::store::migrations;
 
 mod published;
-mod recovery;
 pub use published::{latest, schedule};
-pub(crate) use recovery::development_store_recovery;
 
 pub(crate) fn guard_task_checkout() -> Result<()> {
     let cwd = std::env::current_dir()?;
     if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_some()
         || crate::repo::discover_repo_root(&cwd)?.is_some()
     {
-        crate::ops::task::require_unmanaged_checkout(&cwd)?;
+        crate::ops::task::require_unmanaged_checkout(&cwd, None)?;
+        crate::ops::task::require_unmanaged_checkout(
+            &cwd,
+            Some(&crate::store::production_database_path()),
+        )?;
     }
     Ok(())
-}
-
-/// Bounds re-exec depth in the local-promotion delegation chain.
-///
-/// Local promotion hands the job between the candidate build and the machine's
-/// active install coordinator. When those two binaries are built from divergent
-/// revisions their routing rules can disagree — one sends the job to the
-/// coordinator, the other bounces it back to the candidate — and, absent a
-/// bound, they re-exec each other forever and fork-bomb the machine. This
-/// counter rides every promotion re-exec through the process environment (even
-/// across a non-cooperating older binary, which inherits and forwards it), so
-/// the chain fails closed with a legible diagnostic instead of running away.
-pub const INSTALL_PROMOTE_HOP_ENV: &str = "LF_INSTALL_PROMOTE_HOP";
-
-/// How many delegation re-execs to tolerate before declaring non-convergence.
-/// A healthy promotion converges in one hop; anything past a handful is two
-/// binaries disagreeing about who owns the switch.
-const MAX_PROMOTE_HOPS: u32 = 6;
-
-/// The current delegation depth, read from the inherited environment.
-fn current_promote_hop() -> u32 {
-    std::env::var(INSTALL_PROMOTE_HOP_ENV)
-        .ok()
-        .and_then(|value| value.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-/// The pure convergence decision: reject once the chain has re-exec'd past the
-/// bound. Split from the environment read so it is testable without touching
-/// process-global state.
-fn check_promote_hop(hop: u32) -> Result<u32> {
-    if hop >= MAX_PROMOTE_HOPS {
-        return Err(anyhow!(
-            "local promotion did not converge after {hop} delegation hops; the machine's \
-             active install coordinator and this candidate disagree on routing (usually because \
-             the active dev install was built from a divergent branch). Reset to a published \
-             install with `lf install`, then promote again."
-        ));
-    }
-    Ok(hop)
-}
-
-/// Fail closed if the promotion delegation chain is not converging. Called at
-/// the top of every `promote` entry so a routing disagreement between divergent
-/// builds terminates instead of fork-bombing.
-fn guard_promote_hop() -> Result<u32> {
-    check_promote_hop(current_promote_hop())
-}
-
-/// Stamp the next hop count on a promotion re-exec so the depth accumulates
-/// across the delegation chain.
-fn stamp_next_promote_hop(command: &mut Command, hop: u32) {
-    command.env(INSTALL_PROMOTE_HOP_ENV, (hop + 1).to_string());
 }
 
 /// The candidate binary's identity. The process running `lf install` *is* the
@@ -467,55 +416,6 @@ fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility 
     _executable_compatibility(&connection)
 }
 
-fn _read_local_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
-    let directory = match tempfile::tempdir() {
-        Ok(directory) => directory,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("create local candidate validation directory: {error}"),
-            }
-        }
-    };
-    let candidate_path = directory.path().join("candidate.db");
-    if let Err(error) = _copy_store_for_candidate(store_path, &candidate_path) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("copy disposable store for candidate validation: {error}"),
-        };
-    }
-    let connection = match rusqlite::Connection::open(&candidate_path) {
-        Ok(connection) => connection,
-        Err(error) => {
-            return ExecutableCompatibility::Unreadable {
-                reason: format!("open local candidate validation store: {error}"),
-            }
-        }
-    };
-    if let Err(error) = migrations::apply_installed_development_sqlite(
-        &connection,
-        build_info::migration_draft_manifest(),
-    ) {
-        return ExecutableCompatibility::Unreadable {
-            reason: format!("apply local candidate migrations to validation store: {error}"),
-        };
-    }
-    _executable_compatibility(&connection)
-}
-
-fn _local_store_is_exact(store_path: &Path) -> Result<String> {
-    let connection = rusqlite::Connection::open_with_flags(
-        store_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("open local promotion store {}", store_path.display()))?;
-    migrations::validate_installed_development_sqlite(
-        &connection,
-        build_info::migration_draft_manifest(),
-    )
-    .map_err(|error| migrations::development_store_diagnostic(&connection, error))?;
-    Ok(migrations::latest_applied_version_sqlite(&connection)?
-        .unwrap_or_else(|| "uninitialized".to_string()))
-}
-
 fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCompatibility {
     let references = match _read_executable_references(connection) {
         Ok(references) => references,
@@ -563,7 +463,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     }
     if absent > 0 {
         // Never silent: a large count is a signal the registry has drifted from
-        // the filesystem and wants a `lf prune`/reconcile sweep.
+        // the filesystem and wants a `lf mon prune`/reconcile sweep.
         eprintln!(
             "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
              (dead worktrees); they cannot run and do not gate promotion"
@@ -589,39 +489,6 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let verdict = decide(
         candidate.authority,
         &pending_migration_drafts,
-        &compatibility,
-        &executable_compatibility,
-    );
-    PromotionPreview {
-        candidate,
-        database_path,
-        compatibility,
-        executable_compatibility,
-        verdict,
-    }
-}
-
-fn build_local_preview(store_path: &Path) -> PromotionPreview {
-    let candidate = CandidateIdentity::current();
-    let database_path = store_path.display().to_string();
-    let executable_compatibility = _read_local_executable_compatibility(store_path);
-    let compatibility = match (_local_store_is_exact(store_path), &executable_compatibility) {
-        (Ok(frontier), _) => Compatibility::Exact { frontier },
-        (Err(error), ExecutableCompatibility::Unreadable { .. }) => Compatibility::Incompatible {
-            reason: error.to_string(),
-        },
-        (Err(_), _) => Compatibility::AheadPending {
-            applied_frontier: migrations::latest_known_version(),
-            latest_known: format!(
-                "{} plus {} development draft(s)",
-                migrations::latest_known_version(),
-                build_info::migration_draft_manifest().len()
-            ),
-        },
-    };
-    let verdict = decide(
-        MigrationAuthority::Published,
-        &[],
         &compatibility,
         &executable_compatibility,
     );
@@ -722,19 +589,6 @@ pub fn preflight(json: bool) -> Result<()> {
     }
 }
 
-pub fn local_preflight(store_path: &Path, json: bool) -> Result<()> {
-    let preview = build_local_preview(store_path);
-    if json {
-        println!("{}", promotion_preview_json(&preview)?);
-    } else {
-        render_human(&preview);
-    }
-    match preview.verdict {
-        Verdict::Reject { .. } => Err(anyhow!("local promotion preflight refused")),
-        Verdict::Promote | Verdict::PromoteAndMigrate => Ok(()),
-    }
-}
-
 fn promotion_preview_json(preview: &PromotionPreview) -> Result<String> {
     Ok(serde_json::to_string(&PromotionPreviewWire {
         preview,
@@ -745,8 +599,8 @@ fn promotion_preview_json(preview: &PromotionPreview) -> Result<String> {
 #[cfg(test)]
 mod compatibility_tests {
     use super::{
-        _read_local_executable_compatibility, build_preview, decide, promotion_preview_json,
-        read_store_evidence, store_is_exact, Compatibility, ExecutableCompatibility, Verdict,
+        build_preview, decide, promotion_preview_json, read_store_evidence, store_is_exact,
+        Compatibility, ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
 
@@ -811,35 +665,6 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn local_candidate_schema_is_validated_on_an_isolated_copy() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = directory.path().join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
-        let conn = rusqlite::Connection::open(&store).unwrap();
-        conn.execute(
-            "INSERT INTO waves (id, name, repo, created_at, work_state)
-             VALUES ('w-ready', 'ready', ?1, 0, 'ready')",
-            [directory.path().to_str().unwrap()],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
-             SELECT 'w-ready', id, 1, 0 FROM homes WHERE route='local'",
-            [],
-        )
-        .unwrap();
-        drop(conn);
-        let compatibility = _read_local_executable_compatibility(&store);
-        assert!(
-            matches!(
-                compatibility,
-                ExecutableCompatibility::Compatible { references: 1 }
-            ),
-            "{compatibility:?}"
-        );
-    }
-
-    #[test]
     fn a_placed_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
@@ -873,7 +698,8 @@ mod compatibility_tests {
             .unwrap();
         drop(conn);
 
-        let compatibility = _read_local_executable_compatibility(&store);
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        let compatibility = super::_executable_compatibility(&connection);
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
@@ -1391,25 +1217,6 @@ fn read_binary_preview(binary: &Path) -> Result<PromotionPreview> {
     })
 }
 
-fn read_local_binary_preview(binary: &Path, store_path: &Path) -> Result<PromotionPreview> {
-    let mut command = Command::new(binary);
-    isolate_candidate_command(&mut command);
-    let output = command
-        .args(["install", "local-preflight", "--store"])
-        .arg(store_path)
-        .arg("--json")
-        .output()
-        .with_context(|| format!("run local binary {} preflight", binary.display()))?;
-    serde_json::from_slice(&output.stdout).with_context(|| {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        format!(
-            "binary {} did not return a local promotion preview: {}",
-            binary.display(),
-            stderr.trim()
-        )
-    })
-}
-
 fn validate_staged_app_helper(
     staged_app: &Path,
     expected_candidate: &CandidateIdentity,
@@ -1874,67 +1681,6 @@ fn bootstrap_published_install(
     Ok(active)
 }
 
-fn restore_selected_app_bundle(
-    target: &Path,
-    artifact_set: &crate::machine_install::ArtifactSet,
-    preflight: &BinaryPreflight,
-) -> Result<()> {
-    artifact_set.verify(&required_machine_artifact_roles(true))?;
-    if preflight.candidate.source_revision != artifact_set.source_revision
-        || preflight.candidate.source_identity != artifact_set.source_identity
-    {
-        return Err(anyhow!(
-            "artifact set {} CLI does not match its recorded source",
-            artifact_set.id
-        ));
-    }
-    let app = artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::App)
-        .expect("validated app artifact set has an app");
-    let source = bundle_for_app_artifact(&app.path)?;
-    let plan = AppPromotion {
-        source,
-        target,
-        superseded: None,
-        expected_candidate: &preflight.candidate,
-        expected_verdict: &preflight.verdict,
-    };
-    let staged = stage_app_copy(source, target)?;
-    if let Some(superseded) = commit_app_bundle(&staged, &plan)? {
-        remove_path(&superseded)?;
-    }
-    verify_selected_app_bundle(target, artifact_set)
-}
-
-fn active_install_for_local_promotion(
-    root: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-) -> Result<crate::machine_install::ActiveInstall> {
-    let active = match crate::machine_install::read_state(root)? {
-        crate::machine_install::MachineInstallState::Legacy => {
-            bootstrap_published_install(root, artifacts)?
-        }
-        crate::machine_install::MachineInstallState::Settled(active) => *active,
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before another promotion",
-                receipt.id
-            ))
-        }
-    };
-    active
-        .selection
-        .artifact_set
-        .verify(&[crate::machine_install::ArtifactRole::Cli])?;
-    active
-        .published_fallback
-        .verify(&required_machine_artifact_roles(
-            artifacts.app_source.is_some(),
-        ))
-        .with_context(|| "the complete published fallback is unavailable; run `lf install`")?;
-    Ok(active)
-}
-
 fn active_selection_has_settled_receipt(
     root: &Path,
     selection: &crate::machine_install::InstallSelection,
@@ -2034,56 +1780,19 @@ fn active_install_matches_candidate(
     Ok(true)
 }
 
-fn discard_unadvanced_disposable_store(
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> Result<()> {
-    if !receipt.disposable_store_owned {
-        return Ok(());
-    }
-    if receipt.target_store_advance_started {
-        return Err(anyhow!(
-            "install switch {} cannot discard its target after candidate handoff",
-            receipt.id
-        ));
-    }
-    let directory = receipt
-        .target
-        .store
-        .parent()
-        .ok_or_else(|| anyhow!("disposable store has no installation directory"))?;
-    let expected = crate::machine_install::account_home()?.join(".lf-dev/installed");
-    if directory.parent() != Some(expected.as_path()) {
-        return Err(anyhow!(
-            "refusing to discard receipt-owned store outside {}: {}",
-            expected.display(),
-            directory.display()
-        ));
-    }
-    remove_path(directory)
-}
-
-fn restore_before_local_advance(
+fn restore_before_advance(
     root: &Path,
     receipt: &crate::machine_install::SwitchReceipt,
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let cleanup = discard_unadvanced_disposable_store(receipt);
-    let clear = if cleanup.is_ok() {
-        crate::machine_install::clear_switch(root, &receipt.id)
-    } else {
-        Err(anyhow!("disposable target cleanup failed"))
-    };
+    let clear = crate::machine_install::clear_switch(root, &receipt.id);
     drop(lock);
     let app = resume_switch_app(receipt);
-    match (cleanup, clear, app) {
-        (Ok(()), Ok(()), Ok(())) => error,
-        (cleanup, clear, app) => anyhow!(
-            "{error}; restoring the prior install also failed (target: {}, receipt: {}, app: {})",
-            cleanup
-                .err()
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "ok".to_string()),
+    match (clear, app) {
+        (Ok(()), Ok(())) => error,
+        (clear, app) => anyhow!(
+            "{error}; restoring the prior install also failed (receipt: {}, app: {})",
             clear
                 .err()
                 .map(|error| error.to_string())
@@ -2092,397 +1801,6 @@ fn restore_before_local_advance(
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| "ok".to_string())
         ),
-    }
-}
-
-fn promote_local_candidate(
-    artifacts: PromotionArtifacts<'_>,
-    candidate_binary: &Path,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let lock = crate::promotion_lock::acquire_exclusive()
-        .context("acquire the exclusive promotion lock")?;
-    let root = crate::machine_install::root()?;
-    let state = crate::machine_install::read_state(&root)?;
-    let retained = reuse_home
-        .map(|id| crate::machine_install::retained_development_home(&root, id))
-        .transpose()?;
-    let preview_store = match (&state, &retained) {
-        (crate::machine_install::MachineInstallState::Switching(receipt), _) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before another promotion",
-                receipt.id
-            ));
-        }
-        (_, Some(selection)) => selection.store.clone(),
-        (crate::machine_install::MachineInstallState::Settled(active), None)
-            if active.selection.source == crate::machine_install::InstallSource::Development
-                && !fresh =>
-        {
-            active.selection.store.clone()
-        }
-        _ => crate::store::production_database_path(),
-    };
-    let preview = read_local_binary_preview(candidate_binary, &preview_store)?;
-    if preview.candidate.authority != MigrationAuthority::ValidationOnly {
-        return Err(anyhow!(
-            "--from-build requires an unpublished development build"
-        ));
-    }
-    render_human(&preview);
-    if let Verdict::Reject { reasons } = &preview.verdict {
-        return Err(anyhow!(
-            "local promotion refused; every target is unchanged:\n  - {}",
-            reasons.join("\n  - ")
-        ));
-    }
-    if preview_only {
-        println!("  (preview only: no target changed)");
-        return Ok(());
-    }
-
-    let prior = active_install_for_local_promotion(&root, &artifacts)?;
-    let standard_preflight = read_binary_preflight(candidate_binary)?;
-    if standard_preflight.candidate != preview.candidate {
-        return Err(anyhow!(
-            "local candidate identity changed between preflights: expected revision {}, got {}",
-            preview.candidate.source_revision,
-            standard_preflight.candidate.source_revision
-        ));
-    }
-    let prior_app_preflight = artifacts
-        .app_target
-        .map(|_| {
-            let cli = prior
-                .selection
-                .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::Cli)
-                .expect("validated active install has a CLI");
-            read_binary_preflight(&cli.path)
-        })
-        .transpose()?;
-    if !fresh
-        && retained
-            .as_ref()
-            .is_none_or(|home| home.installation_id == prior.selection.installation_id)
-        && matches!(preview.verdict, Verdict::Promote)
-        && active_install_matches_candidate(
-            &root,
-            &prior,
-            &artifacts,
-            candidate_binary,
-            &preview.candidate,
-            &standard_preflight.verdict,
-            &preview_store,
-        )?
-    {
-        println!(
-            "development {} is already installed (store {})",
-            preview.candidate.display_version(),
-            prior.selection.store.display()
-        );
-        return Ok(());
-    }
-    let switch_id = format!("switch-{}", Uuid::new_v4().simple());
-    let prepared = prepare_artifacts(
-        &artifacts,
-        candidate_binary,
-        &preview,
-        &switch_id,
-        Some(&standard_preflight.verdict),
-    )?;
-    let target_set = machine_artifact_set(
-        &root,
-        crate::machine_install::InstallSource::Development,
-        &preview.candidate,
-        &prepared.cli_binary,
-        artifacts.app_source,
-    )?;
-    let reused_home = retained.as_ref().or_else(|| {
-        (prior.selection.source == crate::machine_install::InstallSource::Development && !fresh)
-            .then_some(&prior.selection)
-    });
-    let reuse = reused_home.is_some();
-    let installation_id = if reuse {
-        reused_home
-            .expect("reuse has an existing Home")
-            .installation_id
-            .clone()
-    } else {
-        format!("local-{}", Uuid::new_v4().simple())
-    };
-    let target_store = if reuse {
-        reused_home
-            .expect("reuse has an existing Home")
-            .store
-            .clone()
-    } else {
-        crate::machine_install::account_home()?
-            .join(".lf-dev/installed")
-            .join(&installation_id)
-            .join("loopflow.db")
-    };
-    let target = crate::machine_install::InstallSelection {
-        installation_id,
-        source: crate::machine_install::InstallSource::Development,
-        artifact_set: target_set,
-        store: target_store.clone(),
-    };
-    let mut switch = crate::machine_install::SwitchReceipt {
-        schema_version: 1,
-        id: switch_id,
-        prior: Some(prior.selection.clone()),
-        target: target.clone(),
-        published_fallback: Some(prior.published_fallback.clone()),
-        target_published_fallback: None,
-        phase: crate::machine_install::SwitchPhase::Planned,
-        recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
-        target_store_advance_started: false,
-        target_store_advanced: false,
-        active_selection_committed: false,
-        coordinator: target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated local candidate has a CLI")
-            .clone(),
-        candidate: target
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated local candidate has a CLI")
-            .clone(),
-        activation: crate::machine_install::ActivationTargets {
-            cli: artifacts.cli_target.to_path_buf(),
-            daemon: None,
-            app: artifacts.app_target.map(Path::to_path_buf),
-            legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
-        },
-        app_was_running: false,
-        disposable_store_owned: false,
-    };
-    crate::machine_install::write_switch(&root, &switch)?;
-
-    if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
-    }
-    let repair = (|| {
-        if let Some(app) = switch.activation.app.as_deref() {
-            if verify_selected_app_bundle(app, &prior.selection.artifact_set).is_err() {
-                restore_selected_app_bundle(
-                    app,
-                    &prior.selection.artifact_set,
-                    prior_app_preflight
-                        .as_ref()
-                        .expect("app promotion captured prior app preflight"),
-                )?;
-            }
-        }
-        entry_gate_targets(&root, &switch.candidate.path, &switch.activation)?;
-        if let Some(app) = switch.activation.app.as_deref() {
-            verify_selected_app_bundle(app, &prior.selection.artifact_set)?;
-        }
-        Ok(())
-    })();
-    if let Err(error) = repair {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
-    }
-    switch.phase = crate::machine_install::SwitchPhase::Quiesced;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
-    }
-
-    if !reuse {
-        let parent = target_store
-            .parent()
-            .expect("disposable store has an installation directory");
-        let installed = parent
-            .parent()
-            .expect("disposable installation directory has a root");
-        if let Err(error) = fs::create_dir_all(installed) {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                lock,
-                error.into(),
-            ));
-        }
-        if parent.exists() {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                lock,
-                anyhow!(
-                    "new disposable store directory {} already exists",
-                    parent.display()
-                ),
-            ));
-        }
-        if let Err(error) = fs::create_dir(parent) {
-            return Err(restore_before_local_advance(
-                &root,
-                &switch,
-                lock,
-                error.into(),
-            ));
-        }
-        switch.disposable_store_owned = true;
-        if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-            return Err(restore_before_local_advance(&root, &switch, lock, error));
-        }
-        if let Err(error) =
-            _copy_store_for_candidate(&crate::store::production_database_path(), &target_store)
-        {
-            return Err(restore_before_local_advance(&root, &switch, lock, error));
-        }
-    }
-    switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
-    }
-    switch = advance_switch_store(&root, switch, &preview.verdict)?;
-
-    activate_prepared_machine_switch(
-        &root,
-        &switch,
-        &prepared,
-        &preview.candidate,
-        &standard_preflight.verdict,
-    )?;
-    switch.phase = crate::machine_install::SwitchPhase::Activated;
-    crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior.retained_published_sets.clone();
-    if !retained
-        .iter()
-        .any(|set| set.id == prior.published_fallback.id)
-    {
-        retained.push(prior.published_fallback.clone());
-    }
-    let active = crate::machine_install::ActiveInstall {
-        schema_version: 1,
-        selection: target,
-        published_fallback: prior.published_fallback,
-        retained_published_sets: retained,
-    };
-    settle_app_artifacts(&prepared)?;
-    resume_switch_app(&switch)?;
-    settle_switch(&root, &mut switch, &active)?;
-    println!(
-        "promoted local {}: {} -> {} (store {})",
-        preview.candidate.display_version(),
-        prepared.cli_target.display(),
-        switch.candidate.path.display(),
-        target_store.display()
-    );
-    if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
-            eprintln!(
-                "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-            );
-        }
-    }
-    drop(lock);
-    Ok(())
-}
-
-fn delegate_local_promotion(
-    build: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let mut command = Command::new(build);
-    command
-        .args(["install", "promote", "--from-build"])
-        .arg(build)
-        .arg("--cli-target")
-        .arg(artifacts.cli_target);
-    if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
-        command
-            .arg("--app-source")
-            .arg(source)
-            .arg("--app-target")
-            .arg(target);
-    }
-    if let Some(target) = artifacts.legacy_app_target {
-        command.arg("--legacy-app-target").arg(target);
-    }
-    if sync_skills {
-        command.arg("--sync-skills");
-    }
-    if preview_only {
-        command.arg("--preview");
-    }
-    if fresh {
-        command.arg("--fresh");
-    }
-    if let Some(home) = reuse_home {
-        command.arg("--reuse-home").arg(home);
-    }
-    stamp_next_promote_hop(&mut command, current_promote_hop());
-    let status = command
-        .status()
-        .with_context(|| format!("run local promotion candidate {}", build.display()))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("local promotion candidate exited {status}"))
-    }
-}
-
-fn delegate_to_active_coordinator(
-    coordinator: &Path,
-    candidate: &Path,
-    artifacts: &PromotionArtifacts<'_>,
-    sync_skills: bool,
-    preview_only: bool,
-    fresh: bool,
-    reuse_home: Option<&str>,
-) -> Result<()> {
-    let mut command = Command::new(coordinator);
-    command
-        .args(["install", "promote", "--coordinated-build"])
-        .arg(candidate)
-        .arg("--from-build")
-        .arg(candidate)
-        .arg("--cli-target")
-        .arg(artifacts.cli_target);
-    if let (Some(source), Some(target)) = (artifacts.app_source, artifacts.app_target) {
-        command
-            .arg("--app-source")
-            .arg(source)
-            .arg("--app-target")
-            .arg(target);
-    }
-    if let Some(target) = artifacts.legacy_app_target {
-        command.arg("--legacy-app-target").arg(target);
-    }
-    if sync_skills {
-        command.arg("--sync-skills");
-    }
-    if preview_only {
-        command.arg("--preview");
-    }
-    if fresh {
-        command.arg("--fresh");
-    }
-    if let Some(home) = reuse_home {
-        command.arg("--reuse-home").arg(home);
-    }
-    stamp_next_promote_hop(&mut command, current_promote_hop());
-    let status = command.status().with_context(|| {
-        format!(
-            "run receipt-pinned install coordinator {}",
-            coordinator.display()
-        )
-    })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("active install coordinator exited {status}"))
     }
 }
 
@@ -2577,7 +1895,9 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
 }
 
 pub fn advance_switch(switch_id: &str) -> Result<()> {
-    guard_task_checkout()?;
+    // The initiating promotion checked Task ownership before writing this
+    // receipt. Continuation uses its pinned authority, not ordinary selection:
+    // a first installation has no selected runtime until this operation finishes.
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
     let root = crate::machine_install::root()?;
@@ -2633,16 +1953,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
     }
     match receipt.target.source {
         crate::machine_install::InstallSource::Development => {
-            if candidate.authority != MigrationAuthority::ValidationOnly {
-                return Err(anyhow!(
-                    "install switch {} development target has published candidate authority",
-                    receipt.id
-                ));
-            }
-            crate::store::sqlite::SqliteStore::open_as_local_promotion_boundary(
-                &receipt.target.store,
-            )
-            .map_err(|error| anyhow!("advance disposable development store: {error}"))?;
+            return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
         crate::machine_install::InstallSource::Published => {
             if candidate.authority != MigrationAuthority::Published {
@@ -2770,7 +2081,6 @@ fn settle_switch(
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
-    guard_task_checkout()?;
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
     let root = crate::machine_install::root()?;
@@ -2808,6 +2118,19 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
     expected.verify()?;
 
+    // Recovery is a new caller of the saved operation. Check its Task ownership
+    // in the receipt's store without selecting or migrating an ordinary runtime.
+    let database = if receipt.target_store_advanced {
+        &receipt.target.store
+    } else {
+        receipt
+            .prior
+            .as_ref()
+            .map(|prior| &prior.store)
+            .unwrap_or(&receipt.target.store)
+    };
+    crate::ops::task::require_unmanaged_checkout(&std::env::current_dir()?, Some(database))?;
+
     if receipt.phase == crate::machine_install::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
@@ -2818,7 +2141,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
 
     if !receipt.target_store_advance_started {
-        discard_unadvanced_disposable_store(&receipt)?;
         crate::machine_install::clear_switch(&root, &receipt.id)?;
         drop(lock);
         resume_switch_app(&receipt)?;
@@ -2833,10 +2155,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             )?;
             match receipt.target.source {
                 crate::machine_install::InstallSource::Development => {
-                    crate::store::sqlite::SqliteStore::open_as_local_promotion_boundary(
-                        &receipt.target.store,
-                    )
-                    .map_err(|error| anyhow!("recover disposable development store: {error}"))?;
+                    return Err(anyhow!(
+                        "development installations are disposable and cannot be recovered"
+                    ));
                 }
                 crate::machine_install::InstallSource::Published => {
                     crate::store::sqlite::SqliteStore::open_as_promotion_boundary(
@@ -3018,15 +2339,15 @@ fn promote_published_from_machine_install(
     };
     crate::machine_install::write_switch(&root, &switch)?;
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::Quiesced;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
     if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
-        return Err(restore_before_local_advance(&root, &switch, lock, error));
+        return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
     activate_prepared_machine_switch(
@@ -3075,162 +2396,14 @@ pub fn promote(
     artifacts: PromotionArtifacts<'_>,
     sync_skills: bool,
     preview_only: bool,
-    from_build: Option<&Path>,
-    coordinated_build: Option<&Path>,
-    fresh: bool,
-    reuse_home: Option<&str>,
 ) -> Result<()> {
-    if (fresh || reuse_home.is_some()) && from_build.is_none() && coordinated_build.is_none() {
-        return Err(anyhow!(
-            "--fresh and --reuse-home require --from-build during local promotion"
-        ));
-    }
     guard_task_checkout()?;
-    guard_promote_hop()?;
-    let root = crate::machine_install::root()?;
-    let state = crate::machine_install::read_state(&root)?;
-    if let crate::machine_install::MachineInstallState::Switching(receipt) = &state {
-        return delegate_switch_recovery(receipt);
-    }
-    let current = fs::canonicalize(
-        std::env::current_exe().context("resolve running promotion coordinator")?,
-    )?;
-    if let (Some(from_build), Some(coordinated_build)) = (from_build, coordinated_build) {
-        let from_build = fs::canonicalize(from_build)
-            .with_context(|| format!("resolve promotion build {}", from_build.display()))?;
-        let coordinated_build = fs::canonicalize(coordinated_build).with_context(|| {
-            format!(
-                "resolve coordinated promotion build {}",
-                coordinated_build.display()
-            )
-        })?;
-        if from_build != coordinated_build {
-            return Err(anyhow!(
-                "--from-build and --coordinated-build must name the same candidate"
-            ));
-        }
-    }
-    let requested = coordinated_build.or(from_build);
-    let candidate = requested
-        .map(|build| {
-            fs::canonicalize(build)
-                .with_context(|| format!("resolve promotion build {}", build.display()))
-        })
-        .transpose()?
-        .unwrap_or_else(|| current.clone());
-
-    if reuse_home.is_some()
-        && read_binary_preflight(&candidate)?.candidate.authority
-            != MigrationAuthority::ValidationOnly
+    if let crate::machine_install::MachineInstallState::Switching(receipt) =
+        crate::machine_install::read_state(&crate::machine_install::root()?)?
     {
-        return Err(anyhow!(
-            "--reuse-home requires an unpublished development build"
-        ));
+        return delegate_switch_recovery(&receipt);
     }
-
-    if let crate::machine_install::MachineInstallState::Settled(active) = &state {
-        if active.selection.source == crate::machine_install::InstallSource::Development {
-            let candidate_identity = read_binary_preflight(&candidate)?.candidate;
-            if candidate_identity.authority == MigrationAuthority::ValidationOnly {
-                if from_build.is_none() {
-                    return Err(anyhow!(
-                        "promoting a development candidate requires --from-build"
-                    ));
-                }
-                if current != candidate {
-                    return delegate_local_promotion(
-                        &candidate,
-                        &artifacts,
-                        sync_skills,
-                        preview_only,
-                        fresh,
-                        reuse_home,
-                    );
-                }
-                return promote_local_candidate(
-                    artifacts,
-                    &candidate,
-                    sync_skills,
-                    preview_only,
-                    fresh,
-                    reuse_home,
-                );
-            }
-            let coordinator = active
-                .selection
-                .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::Cli)
-                .expect("validated active development install has a CLI");
-            coordinator.verify()?;
-            if current != coordinator.path {
-                if coordinated_build.is_some() {
-                    return Err(anyhow!(
-                        "only active install coordinator {} may consume --coordinated-build",
-                        coordinator.path.display()
-                    ));
-                }
-                return delegate_to_active_coordinator(
-                    &coordinator.path,
-                    &candidate,
-                    &artifacts,
-                    sync_skills,
-                    preview_only,
-                    fresh,
-                    reuse_home,
-                );
-            }
-            return promote_published_from_machine_install(
-                artifacts,
-                &candidate,
-                sync_skills,
-                preview_only,
-            );
-        }
-    }
-    if coordinated_build.is_some() {
-        return Err(anyhow!(
-            "--coordinated-build requires an active development installation"
-        ));
-    }
-    if let Some(build) = from_build {
-        let build = fs::canonicalize(build)
-            .with_context(|| format!("resolve local promotion build {}", build.display()))?;
-        if build != current {
-            return delegate_local_promotion(
-                &build,
-                &artifacts,
-                sync_skills,
-                preview_only,
-                fresh,
-                reuse_home,
-            );
-        }
-        return promote_local_candidate(
-            artifacts,
-            &build,
-            sync_skills,
-            preview_only,
-            fresh,
-            reuse_home,
-        );
-    }
-    match state {
-        crate::machine_install::MachineInstallState::Settled(_) => {
-            return promote_published_from_machine_install(
-                artifacts,
-                &current,
-                sync_skills,
-                preview_only,
-            );
-        }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
-            return Err(anyhow!(
-                "install switch {} is unsettled; recover it before publishing another artifact set",
-                receipt.id
-            ));
-        }
-        _ => {}
-    }
+    let current = fs::canonicalize(std::env::current_exe()?)?;
     promote_published_from_machine_install(artifacts, &current, sync_skills, preview_only)
 }
 
@@ -3271,24 +2444,6 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
     validate_rollback_verdict(&preflight.verdict)?;
     activate_rollback(cli_target, &candidate, &preflight.verdict)?;
     Ok(candidate)
-}
-
-#[cfg(test)]
-mod hop_guard_tests {
-    use super::{check_promote_hop, MAX_PROMOTE_HOPS};
-
-    #[test]
-    fn a_converging_chain_is_allowed_and_a_runaway_fails_closed() {
-        // Every hop below the bound proceeds — a healthy promotion converges in one.
-        for hop in 0..MAX_PROMOTE_HOPS {
-            assert_eq!(check_promote_hop(hop).unwrap(), hop);
-        }
-        // At the bound the delegation is declared non-convergent and fails closed,
-        // so two divergent builds can never fork-bomb the machine.
-        let error = check_promote_hop(MAX_PROMOTE_HOPS).unwrap_err().to_string();
-        assert!(error.contains("did not converge"), "diagnostic: {error}");
-        assert!(check_promote_hop(MAX_PROMOTE_HOPS + 1).is_err());
-    }
 }
 
 #[cfg(test)]

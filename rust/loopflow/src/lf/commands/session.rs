@@ -8,6 +8,9 @@ use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
+    if let SessionCommand::Ask { ask } = command {
+        return super::ask::run(ask);
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
@@ -28,6 +31,7 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Ask { .. } => unreachable!("Ask dispatch precedes the Session runtime"),
         SessionCommand::History {
             id,
             json,
@@ -102,6 +106,18 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             open(id, *json, mode).await
         }
+        SessionCommand::Ensure { wave, json } => {
+            let store = open_shared_store().await?;
+            let repo = crate::repo::find_repo_root()?;
+            let session =
+                crate::ops::human_session::primary::ensure(&store, &repo, wave.as_deref()).await?;
+            report_primary(&session, *json)
+        }
+        SessionCommand::Replace { id, json } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::primary::replace(&store, id).await?;
+            report_primary(&session, *json)
+        }
         SessionCommand::Complete { id } => complete(id).await,
         SessionCommand::Rename {
             id,
@@ -167,12 +183,12 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             )
             .await
         }
-        SessionCommand::ServeAsk { run_id } => {
+        SessionCommand::ServeAsk { input } => {
             let store = open_shared_store().await?;
-            crate::ops::human_session::serve_ask(&store, run_id).await
+            crate::ops::human_session::serve_ask(&store, input).await
         }
-        SessionCommand::StopRun { run_id } => {
-            crate::ops::human_session::stop_session_client(run_id)
+        SessionCommand::StopClient { input } => {
+            crate::ops::human_session::stop_session_client(input)
         }
     }
 }
@@ -245,6 +261,23 @@ async fn open(id: &str, json: bool, mode: OpenMode) -> anyhow::Result<()> {
     let session = crate::ops::human_session::open(&store, id, mode, !json).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
+    }
+    Ok(())
+}
+
+fn report_primary(
+    session: &crate::ops::human_session::SessionRecord,
+    json: bool,
+) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(session)?);
+    } else {
+        println!(
+            "Session {} is {}'s conversation. Open it with `lf session connect {}`.",
+            session.id,
+            session.work_path.as_deref().unwrap_or("this repository"),
+            session.id
+        );
     }
     Ok(())
 }

@@ -20,16 +20,18 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf sync --plan                       # inspect integration strategy
-lf sync                              # apply it
+lf task sync --plan                  # inspect integration strategy
+lf task sync                         # apply it
 lf pr publish --title "..."          # push and create/update PR
-lf pr submit                         # prepare for the user's merge click
-lf pr arm                            # prepare and request auto-merge; return
-lf pr land                           # watch CI, repair, and finish merged
+lf submit                         # prepare for the user's merge click
+lf arm                            # prepare and request auto-merge; return
+lf land                           # record delivery and return
+lf pr reconcile                      # check delivery once; repair or settle merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
+for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
+settles verified merges. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
@@ -106,7 +108,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+memories live in nested directories; discover relevant ones with ordinary
+filesystem tools. Do not create
 miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
 skills.
 
@@ -117,7 +121,7 @@ conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
 Work's perspective, launch an ordinary contribution explicitly with
-`lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
+`lf --task <task> : "<prompt>"`. When progress genuinely requires a decision from the user,
 run `lf ask "<exact request>"`. It opens a durable session in this
 checkout and blocks until the user completes the conversation. The session
 agent marking itself ready does not complete or remove the session.
@@ -147,7 +151,7 @@ Before starting, orient yourself in this branch:
 - Read wave/PM context only when the seed names the exact wave, task, project,
   or a concrete coordination question; never infer it or repair access as a
   prerequisite.
-- Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
+- Read the repo's agent doc (`AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
 re-derive what these already record.
@@ -157,6 +161,20 @@ re-derive what these already record.
 Working code with rough edges beats perfect code that took too long.
 
 Produce a working change, resolve reversible ambiguity, and verify it. Preserve the intended outcome across internal slices; a first draft does not satisfy unfinished acceptance.
+
+## Keep authored context within budget
+
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill implement`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Bring over-budget material under both token and byte limits as part of this step.
+Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
+stacked parent, and keep historical detail in git rather than ambient context.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.
 
 ## Workflow
 
@@ -255,6 +273,6 @@ contradiction and keep building on it.
 
 ## Adaptation
 
-If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (CLAUDE.md, STYLE.md) so the next session doesn't have to rediscover it.
+If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (AGENTS.md) so the next session doesn't have to rediscover it.
 
 </lf:skill:implement>

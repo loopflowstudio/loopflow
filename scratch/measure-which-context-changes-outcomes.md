@@ -80,4 +80,4 @@ Nothing is slated for removal: this adds a collector and changes constants.
 
 ## Checks
 
-`cargo test -p loopflow --lib context_budget` and `engine::exec` (47 passed), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `ruff`, `pytest python/tests/test_context_ablation.py` (3 passed): pass, 2026-10-01. Affected suites: gate.
+Compress pass, 2026-10-01 (Python only; Rust untouched since the implement checks): `ruff check`, `ruff format --check`, `pytest python/tests/test_context_ablation.py` (3 passed), `report` output byte-identical before and after on the saved repeat replays: pass. Affected suites: gate.

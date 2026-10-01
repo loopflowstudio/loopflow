@@ -36,6 +36,10 @@ def _block(tag: str) -> re.Pattern[str]:
 _SCRATCH_FILE = re.compile(r'^<lf:file path="(scratch/[^"]+)">\n(.*?)^</lf:file>\n?', re.M | re.S)
 
 
+def _record(runs: Path, run: str) -> Path:
+    return runs / run.removeprefix("run_")[:2] / run
+
+
 def _events(directory: Path) -> list[dict[str, Any]]:
     path = directory / "events.jsonl"
     if not path.exists():
@@ -97,6 +101,7 @@ def observe(directory: Path) -> dict[str, Any]:
         for match in re.finditer(r"\blf flow (?:decide\s+)?(?!decide\b)(\w+)", command)
     ]
     stated = re.search(r"\b(advance|iterate|blocked|retry)\b", (final or "")[:200], re.I)
+    decision = verdicts[0] if verdicts else stated.group(1) if stated else None
     return {
         "outcome": receipt["outcome"] if receipt else None,
         "minutes": (_timestamp(receipt["ended_at"]) - _timestamp(manifest["created_at"])) / 60
@@ -107,9 +112,7 @@ def observe(directory: Path) -> dict[str, Any]:
         "cost_usd": usage.get("cost_usd"),
         "commands": len(commands),
         "checks": checks,
-        "decision": (verdicts or [stated.group(1) if stated else None])[0].lower()
-        if verdicts or stated
-        else None,
+        "decision": decision.lower() if decision else None,
         "final_text": final,
     }
 
@@ -158,9 +161,7 @@ def replayable(runs: Path) -> list[tuple[Path, dict[str, Any]]]:
     return records
 
 
-def _spread(values: list[float]) -> dict[str, float] | None:
-    if not values:
-        return None
+def _spread(values: list[float]) -> dict[str, float]:
     ordered = sorted(values)
     return {
         "median": statistics.median(ordered),
@@ -197,19 +198,19 @@ def census(runs: Path, since: str | None = None) -> dict[str, Any]:
                     observed[measure].append(turn[measure])
             if "loopflow-progress" in manifest[_request_key(manifest)]["task_prompt"]:
                 counts["agent_comment_markers"] += 1
-        submitted = sum(sources["submitted"])
+        submitted = sum(sources.get("submitted", []))
         steps[step] = {
             **counts,
             "sources": {
                 source: {
                     "present_in": len(values),
                     "share_of_submitted": sum(values) / submitted if submitted else None,
-                    **(_spread(values) or {}),
+                    **_spread(values),
                 }
                 for source, values in sorted(sources.items())
             },
             "turns": {
-                measure: {"n": len(values), **(_spread(values) or {})}
+                measure: {"n": len(values), **_spread(values)}
                 for measure, values in sorted(observed.items())
             },
         }
@@ -299,7 +300,7 @@ def launch_commit(manifest: dict[str, Any]) -> str | None:
 
 
 def _stage(
-    source: dict[str, Any], arm: str, repo: Path, commit: str, out: Path
+    source: dict[str, Any], variant_prompt: str, repo: Path, commit: str, out: Path
 ) -> tuple[Path, Path, str, str]:
     checkout, home = out / "checkout", out / "home"
     subprocess.run(
@@ -308,8 +309,7 @@ def _stage(
     _git(checkout, "remote", "remove", "origin")
     _git(checkout, "checkout", "--quiet", "--detach", commit)
     key = _request_key(source)
-    prompt = source[key]["task_prompt"]
-    for path, body in _SCRATCH_FILE.findall(prompt):
+    for path, body in _SCRATCH_FILE.findall(source[key]["task_prompt"]):
         target = checkout / path
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -331,14 +331,14 @@ def _stage(
     variant.update(
         artifact_key=identity,
         caller_artifact_key=None,
-        exec={**source[key], "task_prompt": ARMS[arm](prompt, source)},
+        exec={**source[key], "task_prompt": variant_prompt},
         flow=None,
         context=None,
         cwd=str(checkout),
         repo=str(checkout),
         worktree=str(checkout),
     )
-    record = home / "runs" / identity.removeprefix("run_")[:2] / identity
+    record = _record(home / "runs", identity)
     record.mkdir(parents=True)
     (record / "manifest.json").write_text(json.dumps(variant))
     (record / "prepared").touch()
@@ -375,13 +375,15 @@ def replay(
     minutes: float,
     commit: str | None,
 ) -> dict[str, Any]:
-    directory = runs / run.removeprefix("run_")[:2] / run
+    directory = _record(runs, run)
     source = json.loads((directory / "manifest.json").read_text())
     commit = commit or launch_commit(source)
     if commit is None:
         raise SystemExit(f"{run}: launch commit is not recoverable; pass --commit")
     out = out / run / arm
-    checkout, home, identity, start = _stage(source, arm, repo, commit, out)
+    request = source[_request_key(source)]
+    variant = ARMS[arm](request["task_prompt"], source)
+    checkout, home, identity, start = _stage(source, variant, repo, commit, out)
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -411,8 +413,6 @@ def replay(
     for line in _git(checkout, "diff", "--cached", "--numstat", start).splitlines():
         added, removed, path = line.split("\t")
         changed[path] = [int(added) if added != "-" else 0, int(removed) if removed != "-" else 0]
-    request = source[_request_key(source)]
-    variant = ARMS[arm](request["task_prompt"], source)
     result = {
         "run": run,
         "arm": arm,
@@ -460,9 +460,10 @@ def report(runs: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
             for arm, path in sorted(arm_dirs.items())
         }
         baseline = arms.get("baseline")
-        original = observe(runs / directory.name.removeprefix("run_")[:2] / directory.name)
+        original = observe(_record(runs, directory.name))
         rows = {}
         for arm, result in arms.items():
+            # Read the record again: a saved result holds what an older reader saw.
             turn = _replayed_turn(arm_dirs[arm]) or {}
             rows[arm] = {
                 "exit": result["exit"],
@@ -523,8 +524,7 @@ def main() -> None:
     if args.command == "census":
         result = census(args.runs, args.since)
     elif args.command == "arms":
-        directory = args.runs / args.run.removeprefix("run_")[:2] / args.run
-        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest = json.loads((_record(args.runs, args.run) / "manifest.json").read_text())
         result = {"arms": applicable_arms(manifest), "commit": launch_commit(manifest)}
     elif args.command == "replay":
         result = replay(

@@ -1,0 +1,567 @@
+{
+  "schema_version": 1,
+  "steps": [
+    {
+      "run": "run_4872be8330474d1daba5f78875054a13",
+      "skill": "loop-decide",
+      "original": {
+        "outcome": "completed",
+        "minutes": 0.6906591812769572,
+        "peak_input_tokens": 52608,
+        "output_tokens": 962,
+        "cost_usd": null,
+        "commands": 9,
+        "checks": 0,
+        "decision": "iterate"
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 1.7436927477518718,
+          "peak_input_tokens": 55096,
+          "output_tokens": 913,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.9569550355275472,
+          "peak_input_tokens": 54986,
+          "output_tokens": 983,
+          "cost_usd": null,
+          "commands": 8,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 113887,
+          "minutes": 0.6879961808522542,
+          "peak_input_tokens": 37190,
+          "output_tokens": 656,
+          "cost_usd": null,
+          "commands": 4,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "own-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 56428,
+          "minutes": 0.9340671499570211,
+          "peak_input_tokens": 50199,
+          "output_tokens": 997,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        }
+      }
+    },
+    {
+      "run": "run_51bfced0a5694e7180daa5601913cbec",
+      "skill": "loop-decide",
+      "original": {
+        "outcome": "completed",
+        "minutes": 0.753439199924469,
+        "peak_input_tokens": 59485,
+        "output_tokens": 1019,
+        "cost_usd": null,
+        "commands": 7,
+        "checks": 0,
+        "decision": "iterate"
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.6233481804529826,
+          "peak_input_tokens": 53202,
+          "output_tokens": 841,
+          "cost_usd": null,
+          "commands": 9,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.7222733656565349,
+          "peak_input_tokens": 54780,
+          "output_tokens": 868,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 115556,
+          "minutes": 0.7528951684633891,
+          "peak_input_tokens": 40547,
+          "output_tokens": 947,
+          "cost_usd": null,
+          "commands": 8,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "own-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 56518,
+          "minutes": 0.7590441187222798,
+          "peak_input_tokens": 49112,
+          "output_tokens": 887,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        }
+      }
+    },
+    {
+      "run": "run_61725520af914573b7fb074bd108d9b0",
+      "skill": "compress",
+      "original": {
+        "outcome": "completed",
+        "minutes": 2.094134851296743,
+        "peak_input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": 0.7433523999999999,
+        "commands": 11,
+        "checks": 3,
+        "decision": null
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 3.8851670662562054,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 0.9794746,
+          "commands": 16,
+          "checks": 1,
+          "decision": null,
+          "files_changed": 5,
+          "lines_changed": 243,
+          "file_overlap_with_baseline": 1.0
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 3.7392599026362103,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 0.830735,
+          "commands": 14,
+          "checks": 1,
+          "decision": null,
+          "files_changed": 4,
+          "lines_changed": 113,
+          "file_overlap_with_baseline": 0.8
+        },
+        "no-memory": {
+          "exit": 0,
+          "prompt_bytes_removed": 24444,
+          "minutes": 5.157559883594513,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 0.9145236000000002,
+          "commands": 19,
+          "checks": 2,
+          "decision": null,
+          "files_changed": 4,
+          "lines_changed": 135,
+          "file_overlap_with_baseline": 0.8
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 3409,
+          "minutes": 2.5209577004114787,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 0.7435418,
+          "commands": 12,
+          "checks": 2,
+          "decision": null,
+          "files_changed": 3,
+          "lines_changed": 78,
+          "file_overlap_with_baseline": 0.3333333333333333
+        }
+      }
+    },
+    {
+      "run": "run_84d7ffb3f0e74aa38ba73e602be141de",
+      "skill": "loop-decide",
+      "original": {
+        "outcome": "completed",
+        "minutes": 0.7226255019505818,
+        "peak_input_tokens": 59784,
+        "output_tokens": 1089,
+        "cost_usd": null,
+        "commands": 9,
+        "checks": 0,
+        "decision": "iterate"
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.8716845035552978,
+          "peak_input_tokens": 56045,
+          "output_tokens": 917,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.8933597524960836,
+          "peak_input_tokens": 56390,
+          "output_tokens": 1064,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 125883,
+          "minutes": 0.7105875134468078,
+          "peak_input_tokens": 38740,
+          "output_tokens": 760,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "own-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 56637,
+          "minutes": 0.6661645174026489,
+          "peak_input_tokens": 43993,
+          "output_tokens": 785,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "iterate",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        }
+      }
+    },
+    {
+      "run": "run_b07bc6d402b54cec9a94e42b4690da37",
+      "skill": "implement",
+      "original": {
+        "outcome": "completed",
+        "minutes": 9.836778716246288,
+        "peak_input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": 3.0524432,
+        "commands": 47,
+        "checks": 1,
+        "decision": null
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 11.660251780351002,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 4.054993,
+          "commands": 80,
+          "checks": 7,
+          "decision": null,
+          "files_changed": 16,
+          "lines_changed": 853,
+          "file_overlap_with_baseline": 1.0
+        },
+        "no-memory": {
+          "exit": 0,
+          "prompt_bytes_removed": 24444,
+          "minutes": 12.86542964776357,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 4.323754,
+          "commands": 72,
+          "checks": 6,
+          "decision": null,
+          "files_changed": 21,
+          "lines_changed": 823,
+          "file_overlap_with_baseline": 0.48
+        },
+        "trim-memory": {
+          "exit": 0,
+          "prompt_bytes_removed": 8309,
+          "minutes": 10.327813148498535,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 4.4934586,
+          "commands": 75,
+          "checks": 6,
+          "decision": null,
+          "files_changed": 18,
+          "lines_changed": 1001,
+          "file_overlap_with_baseline": 0.6190476190476191
+        }
+      }
+    },
+    {
+      "run": "run_b3b7dc529faa438ba98e4953738241e3",
+      "skill": "implement",
+      "original": {
+        "outcome": "completed",
+        "minutes": 4.718887118498484,
+        "peak_input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": 1.5325873999999995,
+        "commands": 19,
+        "checks": 1,
+        "decision": null
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 3.451256215572357,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 1.1694068000000002,
+          "commands": 20,
+          "checks": 1,
+          "decision": null,
+          "files_changed": 2,
+          "lines_changed": 226,
+          "file_overlap_with_baseline": 1.0
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 8.185546449820201,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 1.443848,
+          "commands": 24,
+          "checks": 4,
+          "decision": null,
+          "files_changed": 5,
+          "lines_changed": 294,
+          "file_overlap_with_baseline": 0.4
+        },
+        "no-memory": {
+          "exit": 0,
+          "prompt_bytes_removed": 37015,
+          "minutes": 3.8494614998499554,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 1.1824344,
+          "commands": 24,
+          "checks": 1,
+          "decision": null,
+          "files_changed": 4,
+          "lines_changed": 268,
+          "file_overlap_with_baseline": 0.5
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 9692,
+          "minutes": 4.9280441999435425,
+          "peak_input_tokens": null,
+          "output_tokens": null,
+          "cost_usd": 1.4300880000000002,
+          "commands": 26,
+          "checks": 1,
+          "decision": null,
+          "files_changed": 5,
+          "lines_changed": 294,
+          "file_overlap_with_baseline": 0.4
+        }
+      }
+    },
+    {
+      "run": "run_be5c5e5b8af44771958ce419a6c4b6e9",
+      "skill": "loop-decide",
+      "original": {
+        "outcome": "completed",
+        "minutes": 2.4004294514656066,
+        "peak_input_tokens": 50150,
+        "output_tokens": 1631,
+        "cost_usd": null,
+        "commands": 8,
+        "checks": 0,
+        "decision": "blocked"
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 2.1546649813652037,
+          "peak_input_tokens": 51165,
+          "output_tokens": 1363,
+          "cost_usd": null,
+          "commands": 8,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.5647054513295492,
+          "peak_input_tokens": 48572,
+          "output_tokens": 549,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 101401,
+          "minutes": 0.7813401301701863,
+          "peak_input_tokens": 42244,
+          "output_tokens": 716,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "own-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 36363,
+          "minutes": 0.626514716943105,
+          "peak_input_tokens": 49825,
+          "output_tokens": 732,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "blocked",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        }
+      }
+    },
+    {
+      "run": "run_c37c40e595b84ad291bcb52763ac7ee1",
+      "skill": "loop-decide",
+      "original": {
+        "outcome": "completed",
+        "minutes": 0.7843055963516236,
+        "peak_input_tokens": 57064,
+        "output_tokens": 1024,
+        "cost_usd": null,
+        "commands": 11,
+        "checks": 0,
+        "decision": "advance"
+      },
+      "arms": {
+        "baseline": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.6436437328656515,
+          "peak_input_tokens": 51119,
+          "output_tokens": 733,
+          "cost_usd": null,
+          "commands": 5,
+          "checks": 0,
+          "decision": "advance",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "baseline-repeat": {
+          "exit": 0,
+          "prompt_bytes_removed": 0,
+          "minutes": 0.8674651662508647,
+          "peak_input_tokens": 55532,
+          "output_tokens": 1033,
+          "cost_usd": null,
+          "commands": 6,
+          "checks": 0,
+          "decision": "advance",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "no-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 94405,
+          "minutes": 0.9381911834081014,
+          "peak_input_tokens": 43420,
+          "output_tokens": 881,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "advance",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        },
+        "own-scratch": {
+          "exit": 0,
+          "prompt_bytes_removed": 43865,
+          "minutes": 0.8391968687375386,
+          "peak_input_tokens": 42784,
+          "output_tokens": 750,
+          "cost_usd": null,
+          "commands": 7,
+          "checks": 0,
+          "decision": "advance",
+          "files_changed": 0,
+          "lines_changed": 0,
+          "file_overlap_with_baseline": null
+        }
+      }
+    }
+  ]
+}

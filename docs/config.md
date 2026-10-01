@@ -89,7 +89,7 @@ Edit the existing repo `.lf/config.yaml`:
 ```yaml
 context_budgets:
   memory_tokens: 6000
-  scratch_tokens: 12000
+  scratch_tokens: 8000
 ```
 
 Override individual fields for a Wave in `wave/<name>/GOAL.md` frontmatter:
@@ -106,6 +106,9 @@ the compiled default. `lf context` shows the winning source for every value.
 The same block supports `memory_bytes`, `scratch_bytes`, `goal_tokens`,
 `goal_bytes`, `input_tokens`, and `input_bytes`. Values must be positive integers.
 Run `lf context` to see defaults; no settings file is needed to use them.
+Scratch defaults to 12,000 tokens and 96 KiB, enough for a Task's own notes;
+the [ablation study](../performance/context-ablation.md) records why each
+default stands.
 
 Usage covers gathered Wave memory (including applicable ancestors), recursive
 scratch Markdown, the selected Work's launch message, and total assembled input.

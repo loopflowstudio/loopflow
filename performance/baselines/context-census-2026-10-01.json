@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "since": null,
+  "steps": {
+    "compress": {
+      "records": 46,
+      "sources": {
+        "assembly": {
+          "present_in": 46,
+          "share_of_submitted": 0.013024089330787348,
+          "median": 265.5,
+          "p90": 2963,
+          "sum": 32719
+        },
+        "document": {
+          "present_in": 19,
+          "share_of_submitted": 0.003912520982680059,
+          "median": 569,
+          "p90": 573,
+          "sum": 9829
+        },
+        "goal": {
+          "present_in": 19,
+          "share_of_submitted": 0.00693418613473259,
+          "median": 1059,
+          "p90": 1739,
+          "sum": 17420
+        },
+        "instructions": {
+          "present_in": 46,
+          "share_of_submitted": 0.057366657232670606,
+          "median": 1912.0,
+          "p90": 5353,
+          "sum": 144116
+        },
+        "memory": {
+          "present_in": 19,
+          "share_of_submitted": 0.06426661030152564,
+          "median": 7828,
+          "p90": 9357,
+          "sum": 161450
+        },
+        "scratch_older": {
+          "present_in": 34,
+          "share_of_submitted": 0.7724719179393605,
+          "median": 19811.0,
+          "p90": 181075,
+          "sum": 1940597
+        },
+        "scratch_own": {
+          "present_in": 40,
+          "share_of_submitted": 0.07883317789133071,
+          "median": 3301.0,
+          "p90": 12257,
+          "sum": 198044
+        },
+        "submitted": {
+          "present_in": 46,
+          "share_of_submitted": 1.0,
+          "median": 21950.5,
+          "p90": 198821,
+          "sum": 2512191
+        },
+        "user_message": {
+          "present_in": 12,
+          "share_of_submitted": 0.0031908401869125396,
+          "median": 733.0,
+          "p90": 932,
+          "sum": 8016
+        }
+      },
+      "turns": {
+        "cost_usd": {
+          "n": 15,
+          "median": 1.3513632,
+          "p90": 4.987312800000001,
+          "sum": 35.1657472
+        },
+        "minutes": {
+          "n": 44,
+          "median": 3.8154489000638323,
+          "p90": 11.284567149480184,
+          "sum": 316.5687140425046
+        },
+        "output_tokens": {
+          "n": 29,
+          "median": 5976,
+          "p90": 10924,
+          "sum": 200735
+        },
+        "peak_input_tokens": {
+          "n": 29,
+          "median": 111233,
+          "p90": 180422,
+          "sum": 3414441
+        }
+      }
+    },
+    "implement": {
+      "records": 44,
+      "sources": {
+        "assembly": {
+          "present_in": 44,
+          "share_of_submitted": 0.01449054037700185,
+          "median": 208.0,
+          "p90": 3242,
+          "sum": 35203
+        },
+        "document": {
+          "present_in": 24,
+          "share_of_submitted": 0.004978228995240757,
+          "median": 551.5,
+          "p90": 573,
+          "sum": 12094
+        },
+        "goal": {
+          "present_in": 24,
+          "share_of_submitted": 0.008915862414165272,
+          "median": 616.5,
+          "p90": 1980,
+          "sum": 21660
+        },
+        "instructions": {
+          "present_in": 44,
+          "share_of_submitted": 0.05890890590101664,
+          "median": 2700.0,
+          "p90": 4373,
+          "sum": 143112
+        },
+        "memory": {
+          "present_in": 24,
+          "share_of_submitted": 0.07577083516850815,
+          "median": 7824.5,
+          "p90": 9357,
+          "sum": 184076
+        },
+        "scratch_older": {
+          "present_in": 32,
+          "share_of_submitted": 0.7375040030822705,
+          "median": 10945.5,
+          "p90": 181128,
+          "sum": 1791676
+        },
+        "scratch_own": {
+          "present_in": 35,
+          "share_of_submitted": 0.09473247884849538,
+          "median": 5170,
+          "p90": 12414,
+          "sum": 230141
+        },
+        "steers": {
+          "present_in": 3,
+          "share_of_submitted": 0.000407923344987894,
+          "median": 147,
+          "p90": 697,
+          "sum": 991
+        },
+        "submitted": {
+          "present_in": 44,
+          "share_of_submitted": 1.0,
+          "median": 20408.0,
+          "p90": 201122,
+          "sum": 2429378
+        },
+        "user_message": {
+          "present_in": 20,
+          "share_of_submitted": 0.004699145213301512,
+          "median": 611.5,
+          "p90": 932,
+          "sum": 11416
+        }
+      },
+      "turns": {
+        "cost_usd": {
+          "n": 19,
+          "median": 8.648848800000001,
+          "p90": 14.253046,
+          "sum": 164.5407384
+        },
+        "minutes": {
+          "n": 31,
+          "median": 18.108028014500935,
+          "p90": 29.676676666736604,
+          "sum": 614.517966345946
+        },
+        "output_tokens": {
+          "n": 17,
+          "median": 22117,
+          "p90": 42237,
+          "sum": 406683
+        },
+        "peak_input_tokens": {
+          "n": 17,
+          "median": 157180,
+          "p90": 196650,
+          "sum": 2372076
+        }
+      }
+    },
+    "loop-decide": {
+      "records": 5,
+      "sources": {
+        "assembly": {
+          "present_in": 5,
+          "share_of_submitted": 0.010133000831255195,
+          "median": 264,
+          "p90": 264,
+          "sum": 1219
+        },
+        "instructions": {
+          "present_in": 5,
+          "share_of_submitted": 0.08341645885286783,
+          "median": 2007,
+          "p90": 2007,
+          "sum": 10035
+        },
+        "scratch_older": {
+          "present_in": 5,
+          "share_of_submitted": 0.41402327514546966,
+          "median": 10922,
+          "p90": 10954,
+          "sum": 49807
+        },
+        "scratch_own": {
+          "present_in": 5,
+          "share_of_submitted": 0.4837406483790524,
+          "median": 11251,
+          "p90": 13111,
+          "sum": 58194
+        },
+        "submitted": {
+          "present_in": 5,
+          "share_of_submitted": 1.0,
+          "median": 24167,
+          "p90": 26762,
+          "sum": 120300
+        },
+        "user_message": {
+          "present_in": 5,
+          "share_of_submitted": 0.008686616791354946,
+          "median": 95,
+          "p90": 426,
+          "sum": 1045
+        }
+      },
+      "turns": {
+        "minutes": {
+          "n": 5,
+          "median": 0.753439199924469,
+          "p90": 2.4004294514656066,
+          "sum": 5.351458930969239
+        },
+        "output_tokens": {
+          "n": 5,
+          "median": 1024,
+          "p90": 1631,
+          "sum": 5725
+        },
+        "peak_input_tokens": {
+          "n": 5,
+          "median": 57064,
+          "p90": 59784,
+          "sum": 279091
+        }
+      }
+    }
+  },
+  "method": "Replayable implement, compress and loop-decide launches. Source tokens are the record's captured asset weights (cl100k_base); steers are a byte share of the task channel. Peak input and output tokens exist only where the provider reported them. Native resumed history is never part of a recorded launch request."
+}

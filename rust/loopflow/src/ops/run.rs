@@ -229,7 +229,7 @@ pub async fn resolve_work_selection(
 }
 
 /// Resolve checkout ownership before an ancestor's explicit declaration.
-/// This command's --as is resolved by the CLI before reaching this fallback.
+/// This command's Task selector is resolved by the CLI before reaching this fallback.
 pub async fn resolve_execution_binding(
     store: &SharedStore,
     cwd: &Path,

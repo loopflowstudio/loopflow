@@ -498,56 +498,16 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     })
 }
 
-/// Address the existing PR/sync operation through its owning Task.
-pub fn task_operation(
-    repo: &Path,
-    issue: &str,
-    operation: &str,
-    args: &[String],
-    agent: Option<&str>,
-) -> OpsResult<()> {
-    if !matches!(operation, "pr" | "sync") {
-        return Err(task_error("expected a PR or sync operation"));
-    }
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        crate::ops::task_destination::check_task(&destination, issue).map_err(task_error)?;
-        let mut forwarded = vec!["task".into(), operation.into(), issue.into()];
-        forwarded.extend_from_slice(args);
-        let output = crate::ops::task_destination::execute(&destination, repo, &forwarded, None)
-            .map_err(task_error)?;
-        print!("{}", String::from_utf8_lossy(&output));
-        return Ok(());
-    }
-    let task = block_on_task(async {
-        task_store()
-            .await?
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| {
-                task_error(format!(
-                    "no placed Task for {issue}; use task checkout first"
-                ))
-            })
-    })?;
-    if !task.worktree.exists() {
-        return Err(task_error(format!(
-            "Task checkout is absent; recover it with `lf task checkout {issue}`"
-        )));
-    }
-    let mut command = std::process::Command::new(std::env::current_exe()?);
-    command.current_dir(&task.worktree);
-    if let Some(agent) = agent {
-        command.args(["--model", agent]);
-    }
-    command.arg(operation).args(args);
-    let status = command.status()?;
-    if !status.success() {
-        return Err(task_error(format!(
-            "Task {issue} {operation} failed ({status})"
-        )));
-    }
-    Ok(())
+/// Move selected Task operations with their executable, data and launch options.
+pub fn redirect_task_operation(repo: &Path, issue: &str, args: &[String]) -> OpsResult<bool> {
+    let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? else {
+        return Ok(false);
+    };
+    crate::ops::task_destination::check_task(&destination, issue).map_err(task_error)?;
+    let output = crate::ops::task_destination::execute(&destination, repo, args, None)
+        .map_err(task_error)?;
+    print!("{}", String::from_utf8_lossy(&output));
+    Ok(true)
 }
 
 /// Resolve placed Task operations through retained Wave ownership, even after

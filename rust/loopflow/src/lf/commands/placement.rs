@@ -10,10 +10,8 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         let name = match command {
-            WaveCommand::Forget { name, .. }
-            | WaveCommand::Place { name, .. }
-            | WaveCommand::Retire { name, .. } => name,
-            WaveCommand::Relocate { wave, .. } => wave,
+            WaveCommand::Place { name, .. } => name,
+            WaveCommand::Rename { wave, .. } => wave,
             _ => unreachable!("Wave placement dispatcher"),
         };
         let wave_id = match WaveId::parse(name) {
@@ -29,65 +27,50 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             .clone(),
         };
         let work = WorkRef::Wave(wave_id.clone());
-        if !matches!(command, WaveCommand::Relocate { .. }) {
+        if !matches!(command, WaveCommand::Rename { .. }) {
             require_work_repository(&store, &work, repo).await?;
         }
         match command {
-            WaveCommand::Forget { dry_run, json, .. } => {
-                let wave = store
-                    .get_wave(&wave_id)
-                    .await?
-                    .ok_or_else(|| anyhow!("Wave {name} not found"))?;
-                let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
-                if Path::new(wave.repo())
-                    .join("wave")
-                    .join(wave.name())
-                    .join("GOAL.md")
-                    .exists()
-                {
-                    return Err(anyhow!(
-                        "Wave {} still has an authored GOAL.md",
-                        wave.name()
-                    ));
-                }
-                store.forget_wave(&wave_id, *dry_run).await?;
-                print(
-                    &serde_json::json!({"wave": snapshot, "forgotten": !dry_run}),
-                    *json,
-                    &format!(
-                        "{} Wave {}",
-                        if *dry_run { "Would forget" } else { "Forgot" },
-                        wave.name()
-                    ),
-                )
-            }
             WaveCommand::Place { home_id, json, .. } => print(
                 &store.place_work(&work, home_id).await?,
                 *json,
                 &format!("Wave {name}: placed on {home_id}"),
             ),
-            WaveCommand::Relocate {
+            WaveCommand::Rename {
                 repo: target,
                 name,
                 json,
+                title,
                 ..
-            } => print(
-                &crate::work::wave::relocate::relocate_wave(
-                    &store,
-                    &wave_id,
-                    repo,
-                    target.as_deref(),
-                    name.as_deref(),
+            } => {
+                if let Some(title) = title {
+                    let selected = store
+                        .get_wave(&wave_id)
+                        .await?
+                        .ok_or_else(|| anyhow!("Wave {wave_id} not found"))?;
+                    crate::ops::pm::pm_rename_async(
+                        repo,
+                        &crate::ops::pm::PmRenameOptions {
+                            wave: Some(selected.name().to_string()),
+                            title: title.clone(),
+                        },
+                        &crate::ops::NullProgress,
+                    )
+                    .await?;
+                }
+                print(
+                    &crate::work::wave::relocate::relocate_wave(
+                        &store,
+                        &wave_id,
+                        repo,
+                        target.as_deref(),
+                        name.as_deref(),
+                    )
+                    .await?,
+                    *json,
+                    &format!("Wave {wave_id}: renamed"),
                 )
-                .await?,
-                *json,
-                &format!("Wave {wave_id}: relocated"),
-            ),
-            WaveCommand::Retire { reason, json, .. } => print(
-                &store.abandon(&work, reason).await?,
-                *json,
-                &format!("Wave {name}: retired"),
-            ),
+            }
             _ => unreachable!("Wave placement dispatcher"),
         }
     })

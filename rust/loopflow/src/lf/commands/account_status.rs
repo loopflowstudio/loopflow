@@ -355,7 +355,7 @@ async fn managed_rows(
             && presence == crate::provider_auth::CredentialPresence::Present
         {
             diagnostic =
-                Some("current credential identity is unverified; run lf auth status claude".into());
+                Some("current credential identity is unverified; run lf account claude".into());
             Verification::Unavailable
         } else if verify {
             diagnostic = Some("no readable managed credential".into());

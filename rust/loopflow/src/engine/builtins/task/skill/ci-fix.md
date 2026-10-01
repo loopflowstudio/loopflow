@@ -15,7 +15,7 @@ GitHub and completes the Task only after an authoritative merge.
 ## Workflow
 
 1. **Sync first**
-   - Preserve existing work with `lf commit` when needed, then run `lf sync`.
+   - Preserve existing work with `lf commit` when needed, then run `lf task sync`.
    - Resolve conflicts and continue the sync before investigating CI. Keep
      the watched failed SHA as evidence even when the local head changes.
 
@@ -47,11 +47,11 @@ GitHub and completes the Task only after an authoritative merge.
 4. **Publish and enable auto-merge**
    - Inspect the complete diff and keep unrelated work out of the repair.
    - Commit with `lf commit -m "ci-fix: <what failed and why>"`, then run
-     `lf arm`. Arm prepares the exact head, pushes it, enables auto-merge,
+     `lf land`. Arm prepares the exact head, pushes it, enables auto-merge,
      and returns without waiting for CI or merge.
-   - Use the supervisor's supplied arm command verbatim: `lf arm -c`
-     preserves Task completion, and `lf arm --next <slug>` preserves rotation.
-     Outside a watched landing, use bare `lf arm` unless the user requested
+   - Use the supervisor's supplied merge-request command verbatim: `lf land -c`
+     preserves Task completion, and `lf land --next <slug>` preserves rotation.
+     Outside a watched landing, use bare `lf land` unless the user requested
      a Task disposition.
    - Verify the published `headRefOid` matches local `HEAD` and GitHub shows
      auto-merge enabled (or already merged). Local edits or a local commit

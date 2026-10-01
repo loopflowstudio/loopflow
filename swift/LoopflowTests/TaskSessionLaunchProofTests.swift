@@ -195,7 +195,7 @@ struct TaskSessionLaunchProofTests {
                     .text().string() == checkout.lastPathComponent)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
-                #expect(args.hasPrefix("--mode\ninteractive\n--as\ntask:W2-131\n:\n"))
+                #expect(args.hasPrefix("--mode\ninteractive\n--task\nW2-131\n:\n"))
                 let cwd = try String(contentsOf: directory.appendingPathComponent("conversation-cwd"), encoding: .utf8)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 #expect(URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path == checkout.resolvingSymlinksInPath().path)

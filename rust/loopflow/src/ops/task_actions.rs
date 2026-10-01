@@ -154,7 +154,7 @@ fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
     } else {
-        action(TaskAction::Resume, "ensure the next Task Flow worker with `lf task run`; inspect independent Runs before starting additional work")
+        action(TaskAction::Resume, "continue the saved Task Flow with `lf flow start`; inspect independent Sessions before starting additional work")
     }
 }
 

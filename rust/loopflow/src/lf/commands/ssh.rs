@@ -12,7 +12,7 @@
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
 //! store rather than the environment. The remote `resolve_pm_token` reads
-//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf wave sync` works.
+//! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf repo refresh` works.
 //!
 //! Secrets policy: `lf ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
@@ -167,7 +167,7 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
     if matches!(
-        crate::lf::Cli::try_parse_from(args),
+        crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?),
         Ok(crate::lf::Cli {
             command: Some(crate::lf::Commands::Home {
                 cmd: crate::lf::HomeCommand::Ssh { .. }

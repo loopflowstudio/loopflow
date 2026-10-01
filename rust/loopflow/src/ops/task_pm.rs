@@ -65,7 +65,7 @@ pub(crate) async fn resolve_task_async(
     let (wave, item_id) = match matches.len() {
         0 => {
             return Err(OpsError::Message(format!(
-                "task {issue:?} is absent from local PM snapshots. Run `lf wave sync --wave <wave>`."
+                "task {issue:?} is absent from local PM snapshots. Run `lf repo refresh <wave>`."
             )))
         }
         1 => matches.pop().expect("one task match"),
@@ -83,7 +83,7 @@ pub(crate) async fn resolve_task_async(
         .cloned()
         .ok_or_else(|| {
             OpsError::Message(format!(
-                "task {issue:?} disappeared from wave/{wave}; run `lf wave sync --wave {wave}`"
+                "task {issue:?} disappeared from wave/{wave}; run `lf repo refresh {wave}`"
             ))
         })?;
     let project = project_for_item(&snapshot, &item, &team_id)?;
@@ -203,7 +203,7 @@ fn project_for_item(snapshot: &PmShowResult, item: &PmItem, team_id: &str) -> Op
     validate_project_ownership(snapshot, &project, team_id)?;
     if item.project != project.slug {
         return Err(OpsError::Message(format!(
-            "task {} carries stale Project slug {:?}, expected {:?}; run `lf wave sync --wave {}`",
+            "task {} carries stale Project slug {:?}, expected {:?}; run `lf repo refresh {}`",
             item.identifier, item.project, project.slug, snapshot.wave
         )));
     }

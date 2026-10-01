@@ -510,7 +510,15 @@ fn task_review_completion_consumes_only_installed_readiness() {
     let started = command(
         branch,
         home.path(),
-        &["-m", "claude:sonnet", "task", "run", "INF-123", "--json"],
+        &[
+            "-m",
+            "claude:sonnet",
+            "--task",
+            "INF-123",
+            "flow",
+            "start",
+            "--json",
+        ],
     )
     .env("LF_BIN", branch)
     .output()
@@ -539,9 +547,13 @@ fn task_review_completion_consumes_only_installed_readiness() {
         .unwrap()
         .unwrap();
     assert!(position.review_artifact_key().is_some());
-    let repeated = command(branch, home.path(), &["task", "run", "INF-123", "--json"])
-        .output()
-        .unwrap();
+    let repeated = command(
+        branch,
+        home.path(),
+        &["--task", "INF-123", "flow", "start", "--json"],
+    )
+    .output()
+    .unwrap();
     assert!(
         repeated.status.success(),
         "{}",
@@ -1202,7 +1214,10 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .reason
         .contains(&missing_path.display().to_string()));
     assert!(snapshot.actions.reason.contains(&branch));
-    assert!(snapshot.actions.reason.contains("lf task run INF-123"));
+    assert!(snapshot
+        .actions
+        .reason
+        .contains("lf --task INF-123 flow start"));
     assert!(snapshot
         .actions
         .reason

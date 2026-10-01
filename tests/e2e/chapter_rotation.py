@@ -483,7 +483,7 @@ def _exercise_step_controls(
     output = root / "resume-command.log"
     with output.open("w") as log:
         with subprocess.Popen(
-            [str(lf), "task", "run", "FIX-1", "--json"], cwd=repo, env=env, stdout=log, stderr=log
+            [str(lf), "--task", "FIX-1", "flow", "start", "--json"], cwd=repo, env=env, stdout=log, stderr=log
         ) as resume:
             try:
                 time.sleep(1)
@@ -604,12 +604,12 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
             "'automatic',?,?)",
             (str(provider_home), int(time.time()), int(time.time())),
         )
-    _cli("wave", "sync", "--all")
+    _cli("repo", "refresh", "--all")
     _cli("task", "checkout", "FIX-1", "--name", "chapter-task", "--json")
     with sqlite3.connect(env["LF_DB_PATH"]) as db:
         assert db.execute("SELECT started_at FROM tasks").fetchall() == [(None,)]
     _cli(
-        "--docs", "extra.md", "task", "run", "FIX-1", "--json"
+        "--docs", "extra.md", "--task", "FIX-1", "flow", "start", "--json"
     )  # Deliberately no --flow, even on checkout.
     dead_worker = None
     if env["CHAPTER_STEP_CONTROLS"] == "1":
@@ -778,7 +778,7 @@ def _exercise(lf: Path, root: Path, env: dict[str, str], server: ThreadingHTTPSe
         LF_CONTROL_HOME=str(second),
         LF_CONTROL_DB_PATH=str(second / "loopflow.db"),
     )
-    _cli("wave", "sync", "--all")  # The sole adoption command in Home B.
+    _cli("repo", "refresh", "--all")  # The sole adoption command in Home B.
     after = _snapshot(second / "loopflow.db")
     _preserved(before, after)
     assert after["task"]["project_id"] != before["task"]["project_id"]

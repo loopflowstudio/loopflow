@@ -273,7 +273,14 @@ impl Fixture {
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
 const PATIENCE: Duration = Duration::from_secs(180);
 
-const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
+const LAUNCH: [&str; 6] = [
+    "--mode",
+    "tui",
+    "--model",
+    "opencode",
+    ":",
+    "Review the parser",
+];
 
 #[test]
 fn conversation_keeps_its_name_and_identity_until_completed() {
@@ -713,7 +720,8 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let later = launch(&[
         "--task",
         "INF-123",
-        "--tui",
+        "--mode",
+        "tui",
         "--model",
         "opencode",
         ":",
@@ -855,12 +863,13 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
-        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
+        "argv": [env!("CARGO_BIN_EXE_lf"), "--mode", "tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
-        "--as",
-        "task:INF-123",
-        "--tui",
+        "--task",
+        "INF-123",
+        "--mode",
+        "tui",
         "--model",
         "opencode",
         ":",
@@ -962,19 +971,13 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "--json"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "--json"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture.run(&[
-        "--as",
-        "task:INF-124",
-        "--tui",
-        "--model",
-        "opencode",
-        ":",
-        "Start Y",
+        "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
     ]);
     assert!(output.status.success(), "{output:?}");
     let result: Value = serde_json::from_slice(
@@ -1014,10 +1017,11 @@ fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     }
 }
 
-const BOUND_LAUNCH: [&str; 7] = [
+const BOUND_LAUNCH: [&str; 8] = [
     "--task",
     "INF-123",
-    "--tui",
+    "--mode",
+    "tui",
     "--model",
     "opencode",
     ":",
@@ -1232,7 +1236,14 @@ fn failed_exec_observation_cannot_admit_a_provider() {
         .unwrap();
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
     ] {
         let output = fixture.run(args);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -1253,7 +1264,14 @@ fn malformed_caller_cannot_use_library_agent_admission() {
     let fixture = Fixture::new(false);
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
     ] {
         let output = fixture
             .command(args)
@@ -1289,13 +1307,21 @@ fn unavailable_store_starts_no_provider_or_ask() {
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
-        &["-b", "--model", "opencode", ":", "Tidy the parser"],
+        &[
+            "--mode",
+            "batch",
+            "--model",
+            "opencode",
+            ":",
+            "Tidy the parser",
+        ],
         &[
             "--model",
             "opencode",
             "flow",
             "work-then-decide",
-            "-b",
+            "--mode",
+            "batch",
             "--no-loopflow",
         ],
         &["ask", "Which release target?"],
@@ -1324,12 +1350,13 @@ fn unavailable_store_starts_no_provider_or_ask() {
     );
 }
 
-const REVIEW_FLOW: [&str; 6] = [
+const REVIEW_FLOW: [&str; 7] = [
     "--model",
     "opencode",
     "flow",
     "review-first",
-    "-b",
+    "--mode",
+    "batch",
     "--no-loopflow",
 ];
 
@@ -1531,7 +1558,8 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let output = fixture.run(&[
         "--wave",
         "task-pr-tests",
-        "-b",
+        "--mode",
+        "batch",
         "--model",
         "opencode",
         ":",
@@ -1713,7 +1741,8 @@ raise SystemExit(1 if failed else 0)
         "claude",
         "flow",
         "work-then-review",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     let stderr = String::from_utf8_lossy(&blocked.stderr);
@@ -1862,7 +1891,8 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "opencode",
             "flow",
             "work-then-decide",
-            "-b",
+            "--mode",
+            "batch",
             "--no-loopflow",
         ]);
         assert_eq!(
@@ -1901,7 +1931,8 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
         "opencode",
         "flow",
         "choose",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1935,7 +1966,8 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1984,7 +2016,8 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(!output.status.success(), "{output:?}");
@@ -2026,7 +2059,8 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         "opencode",
         "flow",
         "work-then-decide",
-        "-b",
+        "--mode",
+        "batch",
         "--no-loopflow",
     ]);
     assert!(

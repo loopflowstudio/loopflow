@@ -490,8 +490,8 @@ fn interactive_run_records_checkout_and_declared_work() {
     assert_eq!(fixture.run_parents(&unbound), (None, None, None));
 
     let declared = launch(&[
-        "--as",
-        "task:INF-123",
+        "--task",
+        "INF-123",
         "--mode",
         "tui",
         "--model",
@@ -835,8 +835,8 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 
     std::thread::sleep(Duration::from_secs(2));
     let later = launch(&[
-        "--as",
-        "task:INF-123",
+        "--task",
+        "INF-123",
         "--mode",
         "tui",
         "--model",
@@ -1007,8 +1007,8 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
         "argv": [env!("CARGO_BIN_EXE_lf"), "--mode", "tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
-        "--as",
-        "task:INF-123",
+        "--task",
+        "INF-123",
         "--mode",
         "tui",
         "--model",
@@ -1112,20 +1112,13 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "--json"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "--json"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture.run(&[
-        "--as",
-        "task:INF-124",
-        "--mode",
-        "tui",
-        "--model",
-        "opencode",
-        ":",
-        "Start Y",
+        "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
     ]);
     assert!(output.status.success(), "{output:?}");
     let result: Value = serde_json::from_slice(
@@ -1166,8 +1159,8 @@ fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
 }
 
 const BOUND_LAUNCH: [&str; 8] = [
-    "--as",
-    "task:INF-123",
+    "--task",
+    "INF-123",
     "--mode",
     "tui",
     "--model",
@@ -1873,7 +1866,7 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     let declared = Some("declared".to_string());
 
     // A headless Run that names only a Wave.
-    let of_wave = launch(&mut headless(&["--as", "wave:task-pr-tests"]));
+    let of_wave = launch(&mut headless(&["--wave", "task-pr-tests"]));
     assert_eq!(
         fixture.run_parents(&of_wave),
         (None, Some(wave_id.clone()), declared.clone())
@@ -1886,8 +1879,8 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     // A Task conversation and a child agent it launches. The
     // child carries the explicit --as declaration, independently of its parent.
     let of_task = launch(&mut headless(&[
-        "--as",
-        "task:INF-123",
+        "--task",
+        "INF-123",
         "--__cwd",
         fixture.repo.path().to_str().unwrap(),
     ]));
@@ -1936,8 +1929,8 @@ fn every_launch_is_one_row_and_every_reader_lists_it_once() {
     // Runs name the Flow's invocation.
     let before = fixture.launches().len();
     let waiting = fixture.run(&[
-        "--as",
-        "wave:task-pr-tests",
+        "--wave",
+        "task-pr-tests",
         "--model",
         "opencode",
         "flow",
@@ -2207,6 +2200,7 @@ raise SystemExit(1 if failed else 0)
             observed_email: None,
             observed_subject: None,
             observed_plan: None,
+            observed_credential_digest: None,
             credential_state: loopflow::store::CredentialState::Connected,
             routing_state: loopflow::store::RoutingState::Automatic,
             plan: None,
@@ -2230,8 +2224,8 @@ raise SystemExit(1 if failed else 0)
         .unwrap();
     std::fs::write(fixture.home.path().join("fail-once"), "").unwrap();
     let blocked = fixture.run(&[
-        "--as",
-        "task:INF-123",
+        "--task",
+        "INF-123",
         "--model",
         "claude",
         "flow",

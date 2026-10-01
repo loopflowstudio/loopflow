@@ -194,7 +194,7 @@ mod tests {
         let design = get_builtin_skill("design").expect("design prompt");
         let wave = get_builtin_skill("wave/operate").expect("Wave operation");
 
-        // The roadmap lives in Linear, reached via `lf wave sync` — no local N-*.md files.
+        // The roadmap lives in Linear, reached via `lf repo refresh` — no local N-*.md files.
         assert!(design.contains("lf wave status"));
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
@@ -251,8 +251,8 @@ mod tests {
             "Keep that core in this Task",
             "lf task create --run",
             "--flow <chosen-flow>",
-            "lf task checkout <issue> --json",
-            "lf task run <issue> --flow <chosen-flow>",
+            "lf checkout <issue> --json",
+            "lf --task <issue> flow start <chosen-flow>",
             "Use the Flow the user selected",
         ] {
             assert!(
@@ -310,7 +310,7 @@ mod tests {
             "lf wave list --json",
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
-            "lf task run <ISSUE-ID>",
+            "lf --task <ISSUE-ID> flow start",
             "lf observe <home-id>",
             "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
@@ -335,7 +335,7 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
         let wave = get_builtin_skill("wave/operate").expect("wave operate");
-        assert!(wave.contains("lf task run <issue-id>"));
+        assert!(wave.contains("lf --task <issue-id> flow start"));
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("Tasks progress independently"));
         assert!(wave.contains("S5 · Identity"));

@@ -88,8 +88,8 @@ struct ConversationLaunchTests {
     func scopeDefaults() {
         let cases: [(ConversationScope, [String], String)] = [
             (.repo("/repo"), [], "repository"),
-            (.wave(repo: "/repo", id: "product"), ["--as", "wave:product"], "Wave"),
-            (.task(repo: "/repo.task", id: "LOO-123"), ["--as", "task:LOO-123"], "Task"),
+            (.wave(repo: "/repo", id: "product"), ["--wave", "product"], "Wave"),
+            (.task(repo: "/repo.task", id: "LOO-123"), ["--task", "LOO-123"], "Task"),
         ]
         for (scope, binding, subject) in cases {
             let launch = ConversationLaunch(scope: scope)

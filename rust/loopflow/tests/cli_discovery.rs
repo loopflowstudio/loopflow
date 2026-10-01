@@ -73,7 +73,10 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["task", "wt", "create", "--help"],
             vec!["wt", "create", "--help"],
         ],
-        vec![vec!["task", "rebase", "--help"], vec!["reb", "--help"]],
+        vec![
+            vec!["task", "sync", "--help"],
+            vec!["task", "syn", "--help"],
+        ],
         vec![
             vec!["help", "land"],
             vec!["land", "--help"],
@@ -234,8 +237,8 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["--ide"][..],
         &["-i"][..],
         &["-b"][..],
-        &["--wave", "exports"][..],
-        &["--task", "EXP-12"][..],
+        &["--as", "wave:exports"][..],
+        &["task", "run", "EXP-12"][..],
         &["--mode", "invalid"][..],
         &["--no-diff"][..],
         &["--diff-files"][..],
@@ -627,5 +630,27 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
     .unwrap();
     let output = success(run(repo.path(), home.path(), &["help", "flow", "validate"]));
     assert!(String::from_utf8_lossy(&output).contains("solo"));
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
+    std::fs::write(
+        repo.path().join("wave/parent/GOAL.md"),
+        "# Parent\n\nKeep exports reliable.\n",
+    )
+    .unwrap();
+    std::fs::write(repo.path().join("wave/parent/child/GOAL.md"), "").unwrap();
+    let rows = json_entries(repo.path(), home.path(), &["list", "wave", "--json"]);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["name"], "parent");
+    assert_eq!(rows[1]["name"], "parent/child");
+    assert!(rows[1]["description"]
+        .as_str()
+        .unwrap()
+        .contains("Empty goal"));
     assert!(!home.path().join(".lf").exists());
 }

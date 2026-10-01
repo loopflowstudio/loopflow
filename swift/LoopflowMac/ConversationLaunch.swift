@@ -32,8 +32,8 @@ struct ConversationLaunch: Equatable {
     func arguments(lf: String) -> [String] {
         let binding: [String] = switch scope {
         case .repo: []
-        case .wave(_, let id): ["--as", "wave:\(id)"]
-        case .task(_, let id): ["--as", "task:\(id)"]
+        case .wave(_, let id): ["--wave", "\(id)"]
+        case .task(_, let id): ["--task", "\(id)"]
         }
         return [lf, "--mode", "interactive"] + binding + [":", prompt]
     }

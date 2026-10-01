@@ -51,6 +51,25 @@ pub fn list_children(path: &[String], repo: &Path) -> Result<Vec<Entry>> {
 
 fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<Entry>> {
     let mut entries = Vec::new();
+    if path.is_empty() || path == ["wave"] {
+        for name in crate::ops::pm::list_local_waves(repo)? {
+            let summary = crate::work::wave::config::read_wave_summary(repo, &name)?;
+            entries.push(Entry {
+                source: format!("wave/{name}/GOAL.md"),
+                invocation: format!("lf repo connect {name}"),
+                name,
+                kind: "wave".to_string(),
+                description: if summary.is_empty() {
+                    "Empty goal; edit GOAL.md before planning".to_string()
+                } else {
+                    summary
+                },
+            });
+        }
+        if !path.is_empty() {
+            return Ok(entries);
+        }
+    }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
         let (local, global, builtin, external) = list_all_skills(Some(repo));
         let names: BTreeSet<_> = local

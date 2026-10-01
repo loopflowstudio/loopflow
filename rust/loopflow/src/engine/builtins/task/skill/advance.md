@@ -26,11 +26,11 @@ does not become a Task by being closed.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`, then use `lf task run <issue>`.
+Read `lf task status <issue> --json`, then use `lf --task <issue> flow start`.
 It continues the saved Flow or reports the current driver. An interactive review
 waits for its Session's completion. A blocker needs its stated recovery,
 and completed work is not restarted. If there is no active Flow, select one using
-`lf task run <issue> --flow <flow>` only when the current request identifies the
+`lf --task <issue> flow start <flow>` only when the current request identifies the
 next work—for example, implementation after an accepted design. A finished Flow
 alone is not a request to run it again.
 

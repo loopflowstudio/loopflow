@@ -116,7 +116,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         .unwrap();
     assert!(remote.status.success());
     assert!(remote.stdout.is_empty(), "commit pushed the branch");
-    run(&["task", "rebase", "--plan"]);
+    run(&["task", "sync", "--plan"]);
     assert_eq!(repo.head_sha(), committed);
     let worktrees: serde_json::Value =
         serde_json::from_slice(&run(&["task", "wt", "list", "--json"])).unwrap();
@@ -981,7 +981,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     );
 
     assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf wave sync")),
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no valid provider URL") && message.contains("lf repo refresh")),
         "missing provider identity should be actionable: {result:?}"
     );
     assert!(!github_marker.exists(), "GitHub must not mutate");
@@ -1368,7 +1368,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
 
     let installation = installation::Installation::new(home.path());
     let output = Command::new(&installation.cli)
-        .args(["task", "run", "INF-123", "--json"])
+        .args(["--task", "INF-123", "flow", "start", "--json"])
         .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .current_dir(repo.path())

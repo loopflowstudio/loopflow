@@ -8,6 +8,17 @@ historical; the [compiled catalog](cli-command-catalog.md) is this branch's
 baseline. Recommendations below are implementation requirements unless marked
 as a real demo choice. No external service was mutated.
 
+## Final dispositions after landed-model integration
+
+Jack Heart delegated the earlier demo choices. The final catalog retains scoped
+preview controls, explicit mutations and current exit codes; PR Open still
+publishes a draft. Monitor preserves distinct process, conversation, accounting
+and planning queries, with one Exec list. Root Task/worktree location and Wave
+context replace `--as`. Authored goals use `list wave`; portfolio planning and
+unplaced issues use roadmap. `flow start [template]` continues the managed Task
+Flow; Session Connect owns conversation continuation. These settle the choices
+below; historical comparison notes do not reintroduce a demo boundary.
+
 ## Fresh comparison
 
 Official references checked on 2026-09-30. These are documented contracts,

@@ -16,17 +16,17 @@ lf land -c                             # complete the Task after merge
 lf land --next <slug>                  # continue its serial PR chain
 ```
 
-The operation owns preparation, sync, publication, exact-head auto-merge,
-CI observation and repair. It consumes valid prepared copy or generates it
+The operation owns preparation, sync, publication and exact-head auto-merge.
+It returns after the request. It consumes valid prepared copy or generates it
 through pr-message; use explicit title/body only for an intentional override.
-Check the resulting PR's scope, claims and evidence limits. Do not duplicate
-its Git/GitHub mutations or launch another landing watcher.
+Check the resulting PR's scope, claims and evidence limits.
 
-If sync or CI fails, use the named recovery path in this checkout and retry
-with the same disposition. Rerunning land resumes a retained blocker without
-inventing an empty commit. Preserve uncertainty about external effects and
-require authoritative merge evidence before reporting success or completion.
+If the caller requested a merged PR, observe that PR with `gh pr view --json
+state,mergeCommit` and `lf pr checks`. Resolve failed checks with ci-fix, preserve
+unrelated changes and renew the same landing disposition when the head changes.
+Do not report success or Task completion until GitHub supplies merged evidence.
+A pending request remains pending; polling does not acquire Flow authority.
 
-Use `lf arm` when the requested endpoint is prepare/request/return rather
-than watching to merge. Reviewer-owned merge uses `lf submit`. Keep those
-endpoints distinct; invocation alone is not proof of merge.
+A prepare/request/return endpoint finishes after `lf land` succeeds. Reviewer-owned
+merge uses `lf submit`. Keep those endpoints distinct; invocation alone is not
+proof of merge.

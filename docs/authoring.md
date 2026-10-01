@@ -69,7 +69,7 @@ explicitly; this also lets a flow call its own same-named skill without a cycle.
 An invalid flow reports its error instead of falling back to the skill.
 
 Skills that need another Work's perspective launch it directly with
-`lf --as <work> : "<prompt>"`. Skills that genuinely need a decision from the user use
+`lf --task <task> : "<prompt>"`. Skills that genuinely need a decision from the user use
 `lf ask "<request>"`; the caller blocks while a durable AgentSession works in the
 same checkout, then resumes when the user completes that conversation.
 
@@ -163,7 +163,7 @@ execution interpret backward edges through the same transition rules.
 
 ```bash
 lf feature
-lf task run DES-123 --flow feature
+lf --task DES-123 flow start feature
 ```
 
 A loop is a backward edge in that Flow. It returns from a deciding step to an
@@ -268,7 +268,7 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 |-------|-------------|
 | `agent` | Preferred agent harness/model |
 | `crons` | Flow schedules installed through `lf cron sync` |
-| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
+| `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf repo connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:
 

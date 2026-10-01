@@ -35,7 +35,7 @@ struct LocalWaveAgentLauncherTests {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
         #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "run", "W2-131",
+            lf, "--task", "W2-131", "flow", "start",
         ])
         #expect(LocalWaveAgentLauncher.taskCreateCommand(
             lfPath: lf,
@@ -48,7 +48,7 @@ struct LocalWaveAgentLauncherTests {
             "--json",
         ])
         #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "run", "W2-131",
+            lf, "--task", "W2-131", "flow", "start",
         ])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",

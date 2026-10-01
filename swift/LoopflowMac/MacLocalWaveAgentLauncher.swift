@@ -94,7 +94,7 @@ enum LocalWaveAgentLauncher {
     }
 
     static func taskRunCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "run", issue]
+        [lfPath, "--task", issue, "flow", "start"]
     }
 
     static func taskCreateCommand(

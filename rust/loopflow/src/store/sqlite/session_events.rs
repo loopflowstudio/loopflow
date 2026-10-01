@@ -83,6 +83,19 @@ impl SqliteStore {
             .collect()
     }
 
+    /// When each retained event of one input was observed, in input order.
+    pub(crate) fn input_event_times(&self, input: &str) -> StoreResult<Vec<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT unixepoch(json_extract(e.payload,'$.evidence.observed_at')) AS observed FROM session_events e
+             JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
+             WHERE e.kind='observed' AND substr(e.receipt_key,1,length(?1)+14)=?1||':events.jsonl:' AND observed IS NOT NULL
+             ORDER BY CAST(substr(e.receipt_key,length(?1)+15) AS INTEGER),e.seq",
+        )?;
+        let rows = query.query_map([input], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<FinalAnswer>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -559,6 +572,48 @@ mod tests {
         assert_eq!(summary[1].payload["evidence"], events[2]);
         assert_eq!(store.input_events(&input).unwrap(), events);
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn event_times_follow_input_order_and_skip_untimed_events() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let input =
+            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
+                .unwrap();
+        let session = store.session("conversation").unwrap().unwrap();
+        // Retained out of order: the later event is imported first.
+        for (seq, evidence) in [
+            (
+                2,
+                json!({"observed_at":"2026-10-01T00:20:00.5Z","type":"usage"}),
+            ),
+            (
+                0,
+                json!({"observed_at":"2026-10-01T00:00:00Z","type":"user_input"}),
+            ),
+            (1, json!({"unparsed":"partial historical event"})),
+        ] {
+            let source = format!("events.jsonl:{seq}");
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: input.clone(),
+                        source: source.clone(),
+                        observed_at: 1,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            store.input_event_times(&input).unwrap(),
+            [1_790_812_800, 1_790_814_000]
+        );
     }
 
     #[test]

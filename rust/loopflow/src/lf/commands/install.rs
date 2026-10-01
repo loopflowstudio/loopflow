@@ -46,11 +46,10 @@ pub(crate) fn guard_task_checkout() -> Result<()> {
         || crate::repo::discover_repo_root(&cwd)?.is_some()
     {
         crate::ops::task::require_unmanaged_checkout(&cwd, None)?;
-        if let Some(selection) =
-            crate::machine_install::current_selection(&crate::machine_install::root()?)?
-        {
-            crate::ops::task::require_unmanaged_checkout(&cwd, Some(&selection.store))?;
-        }
+        crate::ops::task::require_unmanaged_checkout(
+            &cwd,
+            Some(&crate::store::production_database_path()),
+        )?;
     }
     Ok(())
 }

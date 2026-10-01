@@ -353,6 +353,14 @@ pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
             crate::store::CONTROL_HOME_ENV.to_string(),
             execution.lf_home.to_string_lossy().to_string(),
         ),
+        (
+            "LF_DB_PATH".to_string(),
+            execution.db_path.to_string_lossy().to_string(),
+        ),
+        (
+            "LF_HOME".to_string(),
+            execution.lf_home.to_string_lossy().to_string(),
+        ),
     ]);
     if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
         .filter(|value| !value.is_empty())
@@ -965,6 +973,7 @@ mod tests {
             .unwrap();
         let snapshot = PmSnapshot {
             projects: vec![PmProject {
+                revision: None,
                 id: "project-api".to_string(),
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),
@@ -988,7 +997,7 @@ mod tests {
                 provider: "linear".to_string(),
                 initiative: "initiative-1".to_string(),
                 synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-                payload: serde_json::to_string(&snapshot).unwrap(),
+                snapshot,
             })
             .await
             .unwrap();

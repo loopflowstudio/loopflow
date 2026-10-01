@@ -84,46 +84,30 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
         }
     }
 
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
-
-    PathBuf::from("lf")
+    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
 }
 
-/// A recursive executable lock puts its `lf` first on PATH. Ordinary step
-/// discovery uses that same shell order, then the selected installation, then
-/// this driver. Historical control pins never override a newly selected lf.
+fn current_or_sibling_lf_binary() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    if current.file_name().is_some_and(|name| name == "lf") {
+        return Some(current);
+    }
+    let sibling = current.parent()?.join("lf");
+    sibling.exists().then_some(sibling)
+}
+
+/// Select the official runtime at each step boundary. Ambient PATH and control
+/// pins are not explicit locks; PATH remains a fallback on uninstalled machines.
 pub(crate) fn resolve_step_lf_binary(cwd: &Path) -> Result<PathBuf> {
+    if let Some(cli) = official_lf_binary()? {
+        return Ok(cli);
+    }
     let search_path = std::env::var_os("PATH").unwrap_or_default();
     if let Some(path) = std::env::split_paths(&search_path)
         .map(|directory| cwd.join(directory).join("lf"))
         .find(|candidate| candidate.is_file())
     {
         return Ok(path);
-    }
-    if let Some(selection) =
-        crate::machine_install::current_selection(&crate::machine_install::root()?)?
-    {
-        if let Some(cli) = selection
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .filter(|cli| cli.path.is_file())
-        {
-            return Ok(cli.path.clone());
-        }
     }
     std::env::current_exe().context("resolve Flow driver executable as final fallback")
 }
@@ -162,6 +146,9 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
+    if let Some(selection) = crate::machine_install::selection_for_current_executable()? {
+        return Ok(selection.verified_cli()?.to_path_buf());
+    }
     let candidate = resolve_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
@@ -209,17 +196,7 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
     })
 }
 
-/// Resolve the current Home's CLI. Installation owns both its executable and
-/// store; ordinary overrides apply only to uninstalled source execution.
-pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
-    if let Ok(Some(selection)) = crate::machine_install::selection_for_current_executable() {
-        if let Some(cli) = selection
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-        {
-            return cli.path.clone();
-        }
-    }
+fn uninstalled_lf_binary() -> PathBuf {
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
     }
@@ -241,28 +218,16 @@ pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
     if let Some(installed) = which_on_path(Path::new("lf")) {
         return installed;
     }
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "lf")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.exists() {
-                return sibling;
-            }
-        }
-    }
-    PathBuf::from("lf")
+    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
 }
 
-/// The current Home `lf`, resolved to an absolute path that exists. Mirrors
-/// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
+/// Resolve the selected installation at this child boundary, independently of
+/// execution placement. Uninstalled machines retain source execution.
 pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_current_home_lf_binary();
+    if let Some(cli) = official_lf_binary()? {
+        return Ok(cli);
+    }
+    let candidate = uninstalled_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {
             Ok(candidate)
@@ -279,6 +244,20 @@ pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
             candidate.display()
         )
     })
+}
+
+fn official_lf_binary() -> Result<Option<PathBuf>> {
+    #[cfg(test)]
+    let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
+        Some(root) => PathBuf::from(root),
+        None => return Ok(None),
+    };
+    #[cfg(not(test))]
+    let root = crate::machine_install::root()?;
+    let Some(selection) = crate::machine_install::current_selection(&root)? else {
+        return Ok(None);
+    };
+    Ok(Some(selection.verified_cli()?.to_path_buf()))
 }
 
 /// Resolve the current Home execution context for launching Work: the

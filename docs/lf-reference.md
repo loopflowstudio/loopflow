@@ -429,6 +429,18 @@ preserves the Task's identity and prepares its worktree. Repeating checkout
 reuses that placement; repeating run continues the saved workflow or reports
 the active worker.
 
+When Linear supplies a branch name, checkout and run reuse that branch and its
+existing Git worktree, including dirty work, and retain its open PR. Without a
+provider branch, the normal title-based branch is reused when it exists.
+Adoption does not create or edit a PR. Git and PR state never supply a Flow
+cursor; the Task's captured progress remains authoritative.
+
+Managed continuation and each new driver boundary require nonterminal planning
+that still matches the recorded Project, Wave and configured Team. Fresh cached
+facts suffice; a due refresh failure stops managed execution and preserves its
+saved Flow. Status retains the dated evidence. Independent Flows can still run
+in the checkout, including after its Task is removed.
+
 `--stack-on` gives a dependent Task its own worktree and PR, based on the
 parent Task's published PR. Its PR initially targets the parent branch and
 can move to the default branch after the parent merges.
@@ -937,7 +949,7 @@ snapshot retains recorded Home IDs and placements; it does not register a new
 execution Home or move work to another machine.
 
 ```bash
-target/debug/lf task run LOO-321       # reports the installed executable and data directory
+target/debug/lf task run LOO-321       # continues through the selected installation
 target/debug/lf task status LOO-321    # reads the independent branch copy
 ```
 
@@ -952,8 +964,12 @@ copying branch feedback. Direct branch workers are refused while an installation
 owns execution. With no installation, the source build runs workers against its
 own branch data directory; installation is not a prerequisite for development.
 Later `target/debug/lf task status` reads still show the private branch copy.
-Follow managed execution with the installed executable and data directory reported
-by the operation; the two data copies do not synchronize.
+Use ordinary installed `lf task status` to follow managed execution. Worker
+boundaries select the verified current installation; ambient PATH and inherited
+`LF_BIN` do not pin that selection. Without an installation, Flow steps use PATH,
+then the driver executable. Review launchers use the same verified runtime;
+missing or changed installed bytes report an error. The data copies do not
+synchronize.
 A private data copy does not isolate external effects such
 as provider issue deletion or shared worktree edits.
 

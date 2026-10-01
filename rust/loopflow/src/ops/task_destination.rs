@@ -1,4 +1,4 @@
-//! Managed operations move as a whole; branch data is never the installed worker's store.
+//! Route managed Task operations through the selected installation.
 
 use std::collections::BTreeSet;
 use std::io::{Seek, Write};
@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 use crate::child::ChildExecutionContext;
 use crate::lf::commands::work_catalog::WorkCatalog;
 use crate::lf::commands::WorkFilter;
-use crate::machine_install::{self, ArtifactRole};
+use crate::machine_install;
 use crate::ops::task::TaskExecOptions;
 
 pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
@@ -33,13 +33,8 @@ pub(super) fn destination() -> Result<Option<ChildExecutionContext>> {
         // selection, when present, owns the executable and database together.
         return Ok(None);
     };
-    let cli = selection
-        .artifact_set
-        .artifact(&ArtifactRole::Cli)
-        .context("selected installation has no CLI")?;
-    cli.verify()?;
     Ok(Some(ChildExecutionContext {
-        lf_bin: cli.path.clone(),
+        lf_bin: selection.verified_cli()?.to_path_buf(),
         lf_home: selection
             .store
             .parent()
@@ -59,12 +54,17 @@ pub(crate) fn require_worker_destination() -> Result<()> {
 /// Compare stable identities without opening either schema for migration. A
 /// branch-only Task (including a locally recovered successor) is not a transfer.
 pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result<()> {
-    let ids = |path: &Path| -> Result<BTreeSet<String>> {
-        Ok(WorkCatalog::new(
-            crate::store::sqlite::SqliteStore::open_read_only(path)?.work_identities()?,
-        )?
+    let local = task_ids(&crate::store::observability_database_path()?, issue)?;
+    if !local.is_empty() && local != task_ids(&context.db_path, issue)? {
+        return Err(anyhow!("Task {issue} has different identities in the branch and installed databases; its branch evidence remains private, and no Task was transferred"));
+    }
+    Ok(())
+}
+
+fn task_ids(path: &Path, issue: &str) -> Result<BTreeSet<String>> {
+    Ok(WorkCatalog::load_at(path)?
         .owners
-        .values()
+        .into_values()
         .filter(|owner| {
             owner.work.kind() == "task"
                 && owner.matches(WorkFilter {
@@ -75,12 +75,6 @@ pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result
         })
         .map(|owner| owner.work.id().to_string())
         .collect())
-    };
-    let local = ids(&crate::store::observability_database_path()?)?;
-    if !local.is_empty() && local != ids(&context.db_path)? {
-        return Err(anyhow!("Task {issue} has different identities in the branch and installed databases; its branch evidence remains private, and no Task was transferred"));
-    }
-    Ok(())
 }
 
 pub(super) fn exec_args(operation: &str, options: &TaskExecOptions) -> Vec<String> {
@@ -114,12 +108,7 @@ pub(super) fn json<T: DeserializeOwned>(
         .context("read installed Task operation result")
 }
 
-pub(super) fn execute(
-    context: &ChildExecutionContext,
-    cwd: &Path,
-    args: &[String],
-    input: Option<&str>,
-) -> Result<Vec<u8>> {
+fn command(context: &ChildExecutionContext, cwd: &Path, args: &[String]) -> Command {
     let mut command = Command::new(&context.lf_bin);
     command.current_dir(cwd).args(args).stderr(Stdio::inherit());
     // A different data copy cannot inherit Run, worker, account or switch authority.
@@ -147,6 +136,16 @@ pub(super) fn execute(
     for name in ["LF_BIN", "LF_CONTROL_BIN"] {
         command.env(name, &context.lf_bin);
     }
+    command
+}
+
+pub(super) fn execute(
+    context: &ChildExecutionContext,
+    cwd: &Path,
+    args: &[String],
+    input: Option<&str>,
+) -> Result<Vec<u8>> {
+    let mut command = command(context, cwd, args);
     // A file avoids pipe capacity limits for large Task reports.
     if let Some(input) = input {
         let mut stdin = tempfile::tempfile()?;
@@ -156,11 +155,6 @@ pub(super) fn execute(
     } else {
         command.stdin(Stdio::null());
     }
-    eprintln!(
-        "Managed Task execution uses {} with installed data directory {}.",
-        context.lf_bin.display(),
-        context.lf_home.display()
-    );
     #[cfg(unix)]
     command.process_group(0);
     let child = command
@@ -438,5 +432,17 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("Task workers run through"));
         assert_eq!(fs::read(&branch_db).unwrap(), before_failure);
+
+        // A selected runtime cannot silently fall back to an inherited binary
+        // when its recorded bytes change or disappear.
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        assert_eq!(
+            crate::engine::process::resolve_current_home_lf_binary_checked().unwrap(),
+            cli
+        );
+        fs::write(&cli, "changed installed bytes").unwrap();
+        assert!(crate::engine::process::resolve_current_home_lf_binary_checked().is_err());
+        fs::remove_file(&cli).unwrap();
+        assert!(crate::engine::process::resolve_current_home_lf_binary_checked().is_err());
     }
 }

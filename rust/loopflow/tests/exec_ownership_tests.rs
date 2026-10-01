@@ -308,33 +308,21 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 }
 
 #[tokio::test]
-async fn early_observation_preserves_preflight_target_and_screenshot_child_ancestry() {
+async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     drop(store);
-    let target = home.path().join("incompatible.db");
-    std::fs::write(&target, b"unchanged preflight target").unwrap();
     let output = command(
         home.path(),
         home.path(),
-        &[
-            "install",
-            "local-preflight",
-            "--store",
-            target.to_str().unwrap(),
-            "--json",
-        ],
+        &["install", "preflight", "--json"],
     )
     .output()
     .unwrap();
     assert!(!output.status.success(), "{output:?}");
-    assert_eq!(
-        std::fs::read(&target).unwrap(),
-        b"unchanged preflight target"
-    );
     // No browser executable is available; both actual lf processes still exist.
     let output = command(
         home.path(),

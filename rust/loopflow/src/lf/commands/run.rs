@@ -59,8 +59,7 @@ pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
         return Ok(None);
     };
     let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let flow = store
         .flow(&token.invocation)?
         .ok_or_else(|| anyhow!("Flow disappeared"))?;
@@ -83,8 +82,7 @@ fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &C
     );
     let exec = crate::journal::current_exec_id()
         .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let binding = implicit_binding(cli)?;
     let task = binding.as_ref().and_then(|binding| match &binding.work {
         crate::durable::WorkRef::Task(id) => Some(id.clone()),
@@ -866,7 +864,7 @@ fn begin_run_capture(
                 .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
             &built.context,
             |_artifact| {
-                let path = crate::store::observability_database_path()
+                let path = crate::store::database_path_from_env()
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
                 crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
                     &token.invocation,

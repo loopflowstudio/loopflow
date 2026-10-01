@@ -1242,14 +1242,6 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate this exact local candidate against one receipt-selected store.
-    #[command(hide = true)]
-    LocalPreflight {
-        #[arg(long)]
-        store: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {
@@ -1262,18 +1254,6 @@ pub enum InstallCommand {
     /// schema or persisted executable evidence.
     #[command(hide = true)]
     Promote {
-        /// Promote this exact unpublished local lf into a disposable installed Home.
-        #[arg(long)]
-        from_build: Option<PathBuf>,
-        /// Candidate delegated to the receipt-pinned active coordinator.
-        #[arg(long, hide = true)]
-        coordinated_build: Option<PathBuf>,
-        /// Abandon an incompatible disposable Home and fork published data again.
-        #[arg(long, requires = "from_build")]
-        fresh: bool,
-        /// Reuse a retained development installation and its existing Home data.
-        #[arg(long, requires = "from_build", conflicts_with = "fresh")]
-        reuse_home: Option<String>,
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
@@ -2930,40 +2910,6 @@ mod tests {
         assert!(
             matches!(Cli::try_parse_from(["lf", "rebase"]).unwrap().command, Some(Commands::External(parts)) if parts == ["rebase"])
         );
-    }
-
-    #[test]
-    fn install_promote_requires_a_local_build_for_fresh_forks() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "install",
-            "promote",
-            "--from-build",
-            "/tmp/lf",
-            "--fresh",
-            "--cli-target",
-            "/tmp/bin/lf",
-        ])
-        .expect("parse local promotion");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Install {
-                cmd: Some(InstallCommand::Promote {
-                    from_build: Some(_),
-                    fresh: true,
-                    ..
-                })
-            })
-        ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "install",
-            "promote",
-            "--fresh",
-            "--cli-target",
-            "/tmp/bin/lf",
-        ])
-        .is_err());
     }
 
     #[test]

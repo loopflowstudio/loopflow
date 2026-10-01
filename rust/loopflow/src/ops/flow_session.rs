@@ -19,8 +19,7 @@ fn current_skill(flow: &FlowSession) -> Result<&ConcreteSkill> {
 
 /// The Skill a review's agent runs: the one captured at the waiting step.
 pub(crate) fn pinned_skill(session_id: &str, requested: &str) -> Result<Skill> {
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let flow = store.waiting_review(session_id)?;
     let skill = &current_skill(&flow)?.skill;
     ensure!(

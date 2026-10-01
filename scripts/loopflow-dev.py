@@ -584,9 +584,8 @@ def _write_dev_control_config(resources_dir: Path) -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. Compile its bundled control binary against the installed Home,
-    # but never grant it migration authority. Ordinary development binaries
-    # keep their isolated `.lf-dev` stores.
+    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # it has no authority to migrate the main Home.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",

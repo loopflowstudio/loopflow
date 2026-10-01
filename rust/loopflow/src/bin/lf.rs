@@ -1170,8 +1170,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Pr { issue, args } => run_task_operation(repo, issue, "pr", args, agent),
-        TaskCommand::Sync { issue, args } => run_task_operation(repo, issue, "sync", args, agent),
+        TaskCommand::Pr { issue, args } => run_task_operation(issue, "pr", args, agent),
+        TaskCommand::Sync { issue, args } => run_task_operation(issue, "sync", args, agent),
         TaskCommand::Complete {
             issue,
             summary,
@@ -1315,7 +1315,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
 }
 
 fn run_task_operation(
-    repo: &Path,
     issue: &str,
     operation: &str,
     args: &[String],
@@ -1328,7 +1327,7 @@ fn run_task_operation(
             .into_iter()
             .chain(args.iter().map(String::as_str)),
     )?;
-    loopflow::ops::task::task_operation(repo, issue, operation, args, agent)?;
+    loopflow::ops::task::task_operation(issue, operation, args, agent)?;
     Ok(())
 }
 
@@ -1397,20 +1396,13 @@ fn run() -> anyhow::Result<()> {
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
     let bypasses_machine_startup_gate = matches!(&cli.command, Some(Commands::Install { .. }));
-    if !bypasses_machine_startup_gate {
-        let switch_id = std::env::var(loopflow::machine_install::INSTALL_SWITCH_ENV)
-            .ok()
-            .filter(|value| !value.is_empty());
-        loopflow::machine_install::authorize_current_for_switch(
-            &loopflow::machine_install::ArtifactRole::Cli,
-            switch_id.as_deref(),
-        )?;
-        if !matches!(
+    if !bypasses_machine_startup_gate
+        && !matches!(
             &cli.command,
             Some(Commands::Screenshot { .. } | Commands::ScreenshotSupervisor { .. })
-        ) {
-            loopflow::store::isolate_branch_data()?;
-        }
+        )
+    {
+        loopflow::machine_install::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
@@ -1456,17 +1448,10 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
             }
-            Some(InstallCommand::LocalPreflight { store, json }) => {
-                loopflow::lf::commands::install::local_preflight(store, *json)
-            }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
             }
             Some(InstallCommand::Promote {
-                from_build,
-                coordinated_build,
-                fresh,
-                reuse_home,
                 cli_target,
 
                 app_source,
@@ -1484,10 +1469,6 @@ fn run() -> anyhow::Result<()> {
                 },
                 *sync_skills,
                 *preview,
-                from_build.as_deref(),
-                coordinated_build.as_deref(),
-                *fresh,
-                reuse_home.as_deref(),
             ),
             Some(InstallCommand::Rollback {
                 cli_target,

@@ -9,6 +9,28 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## One main Home (LOO-342, branch evidence 2026-09-30)
+
+Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task
+workers, Flow steps and agent tools use the installed CLI and `~/.lf`; explicit
+`LF_HOME` experiments initialize once and require a fresh directory after schema
+changes. This supersedes the older branch-copy, development-promotion and retained
+development-store contracts below. Published installation and main-store migration
+recovery remain. Current behavior belongs in [CLI docs](../../docs/lf.md#use-one-home)
+and [Homes](../../docs/architecture/homes.md#one-main-home). Approval and branch
+verification do not establish release or installed acceptance.
+
+Jack deferred remaining side-store retirement until after release and after their
+processes settle. The 2026-09-30 cleanup receipt records 14 installed stores and
+415 worktree snapshots removed, with these five paths beneath `~/.lf-dev` retained
+because they had live file handles: `installed/local-04115a69e0c34b198bf110976b32f390`,
+`installed/local-0912e9bdc1194a4c9774b060dadd428d`,
+`installed/local-6bd36934695b4eb98083e81e13aad4e7`,
+`installed/local-be852452823d43d7b7fde663651a7590`, and
+`worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
+reinspect live ownership before cleanup. Older running builds can recreate side
+stores until the published cutover. No active database was removed or process killed.
+
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
 Jack Heart selected the Task's checkout as its general work set: every

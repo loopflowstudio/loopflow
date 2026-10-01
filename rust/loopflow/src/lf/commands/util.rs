@@ -332,7 +332,7 @@ pub(crate) fn stop_provider_session(dir: &Path, harness: &str) -> Result<()> {
 
 pub(crate) fn require_provider_session_exec(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_execs_read_only(&crate::store::observability_database_path()?)?;
+    let store = SqliteStore::open_execs_read_only(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Home"))?;

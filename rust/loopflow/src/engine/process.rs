@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 /// The SSH destination by which the current foreground `lf` was reached.
@@ -69,74 +69,30 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
 }
 
 pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if let Some(path) = select_binary_override(
-        crate::build_info::provenance(),
-        std::env::var_os(crate::store::CONTROL_BIN_ENV),
-        std::env::var_os("LF_BIN"),
-    ) {
-        return path;
+    if crate::store::custom_home_selected() {
+        if let Some(path) = std::env::var_os("LF_BIN").filter(|value| !value.is_empty()) {
+            return PathBuf::from(path);
+        }
+        if let Some(path) = std::env::var_os("CARGO_BIN_EXE_lf") {
+            return PathBuf::from(path);
+        }
+    } else if let Ok(Some(cli)) =
+        crate::machine_install::root().and_then(|root| crate::machine_install::installed_cli(&root))
+    {
+        return cli.path;
     }
-
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
+    if let Ok(current) = std::env::current_exe() {
+        if current.file_name().is_some_and(|name| name == "lf") {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lf");
+            if sibling.is_file() {
+                return sibling;
+            }
         }
     }
-
-    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
-}
-
-fn current_or_sibling_lf_binary() -> Option<PathBuf> {
-    let current = std::env::current_exe().ok()?;
-    if current.file_name().is_some_and(|name| name == "lf") {
-        return Some(current);
-    }
-    let sibling = current.parent()?.join("lf");
-    sibling.exists().then_some(sibling)
-}
-
-/// Select the official runtime at each step boundary. Ambient PATH and control
-/// pins are not explicit locks; PATH remains a fallback on uninstalled machines.
-pub(crate) fn resolve_step_lf_binary(cwd: &Path) -> Result<PathBuf> {
-    if let Some(cli) = official_lf_binary()? {
-        return Ok(cli);
-    }
-    let search_path = std::env::var_os("PATH").unwrap_or_default();
-    if let Some(path) = std::env::split_paths(&search_path)
-        .map(|directory| cwd.join(directory).join("lf"))
-        .find(|candidate| candidate.is_file())
-    {
-        return Ok(path);
-    }
-    std::env::current_exe().context("resolve Flow driver executable as final fallback")
-}
-
-fn select_binary_override(
-    provenance: crate::build_info::BuildProvenance,
-    control: Option<std::ffi::OsString>,
-    ordinary: Option<std::ffi::OsString>,
-) -> Option<PathBuf> {
-    let selected = if provenance.is_release() {
-        control.or(ordinary)
-    } else {
-        ordinary
-    }?;
-    if selected.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(selected))
-    }
-}
-
-/// The launch-boundary counterpart to [`select_binary_override`]: it takes only
-/// the ordinary `LF_BIN` value and has no control input at all. The current
-/// Home is never resolved through `LF_CONTROL_BIN`, in any provenance — that
-/// pin is the historical binary a legacy body must stop relaunching through.
-fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    ordinary
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    which_on_path(Path::new("lf")).unwrap_or_else(|| PathBuf::from("lf"))
 }
 
 /// Resolve the `lf` a Work launch will use: an absolute path that exists.
@@ -146,8 +102,12 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
-    if let Some(selection) = crate::machine_install::selection_for_current_executable()? {
-        return Ok(selection.verified_cli()?.to_path_buf());
+    if !crate::store::custom_home_selected() {
+        if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
+        {
+            cli.verify()?;
+            return Ok(cli.path);
+        }
     }
     let candidate = resolve_lf_binary();
     if candidate.is_absolute() {
@@ -172,108 +132,20 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 ///
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
 /// may repoint it while a resident body is running, so the body carries the
-/// canonical target in `LF_CONTROL_BIN`. A later body launch deliberately
+/// canonical target in `LF_BIN`. A later body launch deliberately
 /// resolves the current Home again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
     std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
 }
 
-/// Capture the current process's control context — this process's `lf`, store,
-/// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
-/// build this honors `LF_CONTROL_*`, so a running body hands its own Run context
-/// (not the machine's Home) to the provider CLI it spawns.
-///
-/// This is NOT the launch resolver. Use [`current_home_execution_context`] to
-/// launch or relaunch Work: launching through the control context would
-/// perpetuate the historical binary a legacy body was created with.
-pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
+/// Capture the resolved CLI and Home for a provider child.
+pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
     Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_pinned_lf_binary()?,
         db_path,
         lf_home: crate::store::lf_home_dir(),
-    })
-}
-
-fn uninstalled_lf_binary() -> PathBuf {
-    if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
-        return bin;
-    }
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lf") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    if !crate::build_info::provenance().is_release()
-        && crate::machine_install::selection_for_current_executable()
-            .is_ok_and(|selection| selection.is_none())
-    {
-        let development = resolve_lf_binary();
-        if development.is_absolute() {
-            return development;
-        }
-    }
-    if let Some(installed) = which_on_path(Path::new("lf")) {
-        return installed;
-    }
-    current_or_sibling_lf_binary().unwrap_or_else(|| PathBuf::from("lf"))
-}
-
-/// Resolve the selected installation at this child boundary, independently of
-/// execution placement. Uninstalled machines retain source execution.
-pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
-    if let Some(cli) = official_lf_binary()? {
-        return Ok(cli);
-    }
-    let candidate = uninstalled_lf_binary();
-    if candidate.is_absolute() {
-        return if candidate.exists() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the current Home lf",
-                candidate.display()
-            ))
-        };
-    }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-fn official_lf_binary() -> Result<Option<PathBuf>> {
-    #[cfg(test)]
-    let root = match std::env::var_os("LF_TEST_TASK_INSTALL_ROOT") {
-        Some(root) => PathBuf::from(root),
-        None => return Ok(None),
-    };
-    #[cfg(not(test))]
-    let root = crate::machine_install::root()?;
-    let Some(selection) = crate::machine_install::current_selection(&root)? else {
-        return Ok(None);
-    };
-    Ok(Some(selection.verified_cli()?.to_path_buf()))
-}
-
-/// Resolve the current Home execution context for launching Work: the
-/// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
-///
-/// This is the launch/relaunch boundary resolver. Work created under one
-/// binary and resumed under another launches through the current Home — its
-/// worktree, provider history, and directives are unaffected by which binary
-/// first created it.
-pub(crate) fn current_home_execution_context() -> Result<crate::child::ChildExecutionContext> {
-    let db_path = crate::store::current_home_database_path()
-        .map_err(|error| anyhow!("cannot resolve the current Home database path: {error}"))?;
-    Ok(crate::child::ChildExecutionContext {
-        lf_bin: resolve_current_home_lf_binary_checked()?,
-        db_path,
-        lf_home: crate::store::current_home_lf_home_dir(),
     })
 }
 
@@ -295,7 +167,7 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let context = pinned_execution_context()?;
+    let context = execution_context()?;
     start_session_with_context(session, cwd, argv, env, context).await
 }
 
@@ -324,7 +196,7 @@ async fn start_session_with_context(
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone())),
     );
-    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    extend_session_control_context(&mut child_env, &context);
     let environment = child_env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -336,42 +208,15 @@ async fn start_session_with_context(
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
     context: &crate::child::ChildExecutionContext,
-    provenance: crate::build_info::BuildProvenance,
 ) {
     let pinned = [
-        (
-            crate::store::CONTROL_BIN_ENV,
-            context.lf_bin.to_string_lossy().to_string(),
-        ),
-        (
-            crate::store::CONTROL_HOME_ENV,
-            context.lf_home.to_string_lossy().to_string(),
-        ),
-        (
-            crate::store::CONTROL_DB_PATH_ENV,
-            context.db_path.to_string_lossy().to_string(),
-        ),
+        ("LF_BIN", context.lf_bin.to_string_lossy().to_string()),
+        ("LF_HOME", context.lf_home.to_string_lossy().to_string()),
+        ("LF_DB_PATH", context.db_path.to_string_lossy().to_string()),
     ];
     for (key, value) in pinned {
         if !child_env.iter().any(|(existing, _)| existing == key) {
             child_env.push((key.to_string(), value));
-        }
-    }
-    if !provenance.is_release() {
-        for (ordinary, control) in [
-            ("LF_HOME", crate::store::CONTROL_HOME_ENV),
-            ("LF_DB_PATH", crate::store::CONTROL_DB_PATH_ENV),
-        ] {
-            if child_env.iter().any(|(existing, _)| existing == ordinary) {
-                continue;
-            }
-            let value = child_env
-                .iter()
-                .find(|(key, _)| key == control)
-                .map(|(_, value)| value.clone());
-            if let Some(value) = value {
-                child_env.push((ordinary.to_string(), value));
-            }
         }
     }
 }
@@ -471,14 +316,11 @@ pub(crate) fn tmux_session_slug(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, DISCORD_TOKEN_ENV,
+        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
+        DISCORD_TOKEN_ENV,
     };
-    use crate::build_info::BuildProvenance;
-    use crate::child::ChildExecutionContext;
 
     #[test]
     fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
@@ -500,76 +342,6 @@ mod tests {
             std::fs::read(std::fs::canonicalize(&installed).unwrap()).unwrap(),
             b"new"
         );
-    }
-
-    #[test]
-    fn development_ignores_stale_control_binary_override() {
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Development,
-                Some("/production/lf".into()),
-                Some("/development/lf".into()),
-            ),
-            Some(PathBuf::from("/development/lf"))
-        );
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Release,
-                Some("/production/lf".into()),
-                Some("/ambient/lf".into()),
-            ),
-            Some(PathBuf::from("/production/lf"))
-        );
-    }
-
-    /// The launch boundary must resolve the current Home lf (B), never the
-    /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
-    /// legacy Work bodies. Contrast the two selectors under release provenance:
-    /// the old override picks the control pin A, the current-Home selector
-    /// picks B and has no way to reach A at all.
-    #[test]
-    fn current_home_binary_never_resolves_through_the_control_pin() {
-        // Old behavior (the bug): a release build prefers LF_CONTROL_BIN (A),
-        // even when the current Home LF_BIN (B) is present.
-        assert_eq!(
-            select_binary_override(
-                BuildProvenance::Release,
-                Some("/old/A/lf".into()),
-                Some("/current/B/lf".into()),
-            ),
-            Some(PathBuf::from("/old/A/lf")),
-        );
-        // Fixed: the current-Home selector has no control input, so with
-        // LF_BIN=B it resolves B — A is unreachable, in any provenance.
-        assert_eq!(
-            select_current_home_binary(Some("/current/B/lf".into())),
-            Some(PathBuf::from("/current/B/lf")),
-        );
-        // Empty or absent LF_BIN falls through to PATH/installed lf, never to A.
-        assert_eq!(select_current_home_binary(None), None);
-        assert_eq!(select_current_home_binary(Some("".into())), None);
-    }
-
-    #[test]
-    fn persisted_control_binary_wins_over_relaunching_callers_binary() {
-        let mut environment = vec![(
-            crate::store::CONTROL_BIN_ENV.to_string(),
-            "/persisted/lf".to_string(),
-        )];
-        let caller = ChildExecutionContext {
-            lf_bin: PathBuf::from("/caller/lf"),
-            lf_home: PathBuf::from("/caller/home"),
-            db_path: PathBuf::from("/caller/loopflow.db"),
-        };
-
-        extend_session_control_context(&mut environment, &caller, BuildProvenance::Release);
-
-        assert!(environment.iter().any(|(key, value)| {
-            key == crate::store::CONTROL_BIN_ENV && value == "/persisted/lf"
-        }));
-        assert!(!environment
-            .iter()
-            .any(|(key, value)| { key == crate::store::CONTROL_BIN_ENV && value == "/caller/lf" }));
     }
 
     #[test]
@@ -701,7 +473,7 @@ pub(crate) async fn start_home_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let context = current_home_execution_context()?;
+    let context = execution_context()?;
     let lf_bin = context.lf_bin.to_string_lossy().to_string();
     let mut environment = vec![("LF_BIN", lf_bin.as_str())];
     environment.extend_from_slice(env);

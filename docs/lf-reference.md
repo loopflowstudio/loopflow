@@ -930,46 +930,23 @@ lf wave forget <wave-id> --json
 Forget an abandoned, empty registration after removing its authored
 `GOAL.md`. The command leaves repository files alone and refuses registrations
 with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
-Use installed `lf` to change installed data; development binaries use private
-branch data directories.
-
-When a source build inherits the installed data directory from a Session, it
-reports and uses `~/.lf-dev/worktrees/<source-identity>` instead. Its first database open
-starts from a SQLite snapshot of the installed store, including committed WAL
-data. Later invocations keep branch writes; they never copy them back. Explicit
-disposable data directories still work. The snapshot does not copy captured payloads
-or account files, and does not transfer the launching Session's execution authority.
-An explicit private `LF_HOME` also selects the observation and execution destination,
-even when the Session supplied installed control paths. Child processes use
-that same data directory; re-entering it preserves its own execution context.
-`LF_HOME` is the data-directory setting, not a Home placement selector. The
-snapshot retains recorded Home IDs and placements; it does not register a new
-execution Home or move work to another machine.
+Every ordinary command uses the installed `lf` and `~/.lf`, including source
+CLI invocations, Task workers, Flow steps and commands issued by agents. They
+read and write the same Tasks, Sessions and planning data. Builds do not create
+branch databases or select another Home.
 
 ```bash
-target/debug/lf task run LOO-321       # continues through the selected installation
-target/debug/lf task status LOO-321    # reads the independent branch copy
+target/debug/lf task status EXP-12   # forwards to installed lf, reads ~/.lf
+LF_HOME="$(mktemp -d)" target/debug/lf wave list --json  # explicit experiment
 ```
 
-When an installation exists, managed Task operations use its CLI and store from
-the start: `run`, `create --run`, `restart`, and Task review Session completion.
-Preparation, issue creation, checkpoints and worker claims happen there.
-The returned Task state comes from the installed database. Non-launching data
-commands keep using the branch copy. A Task that exists only in the branch is preserved there;
-these commands do not register it in installation. Review completion names the
-exact invocation boundary and consumes the installed Session's readiness, without
-copying branch feedback. Direct branch workers are refused while an installation
-owns execution. With no installation, the source build runs workers against its
-own branch data directory; installation is not a prerequisite for development.
-Later `target/debug/lf task status` reads still show the private branch copy.
-Use ordinary installed `lf task status` to follow managed execution. Worker
-boundaries select the verified current installation; ambient PATH and inherited
-`LF_BIN` do not pin that selection. Without an installation, Flow steps use PATH,
-then the driver executable. Review launchers use the same verified runtime;
-missing or changed installed bytes report an error. The data copies do not
-synchronize.
-A private data copy does not isolate external effects such
-as provider issue deletion or shared worktree edits.
+An explicit `LF_HOME` selects a disposable experiment. Children inherit it,
+even when they invoke another `lf` executable. Experiments start empty and are
+never seeded from the main Home, upgraded, repaired, restored or promoted.
+Use a fresh directory after changing schemas. `LF_DB_PATH` selects a database
+within that explicit experiment. Neither setting changes remote Home placement.
+An experimental data directory does not isolate external provider effects or
+shared checkout edits. Use fixtures for those effects.
 
 `lf wave status` focuses one Wave's local
 planning and runtime projection. `lf roadmap` overlays the current

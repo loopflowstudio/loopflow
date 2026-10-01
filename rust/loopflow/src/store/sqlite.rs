@@ -351,20 +351,6 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
-fn development_open_error(conn: &Connection, error: StoreError) -> StoreError {
-    let error = super::migrations::development_store_diagnostic(conn, error);
-    match error {
-        StoreError::IncompatibleDevelopment(reason) => {
-            StoreError::IncompatibleDevelopment(format!(
-                "{reason}\nData directory: {}\n{}",
-                super::lf_home_dir().display(),
-                crate::lf::commands::install::development_store_recovery()
-            ))
-        }
-        error => error,
-    }
-}
-
 impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn assert_no_historical_runs(&self) {
@@ -394,7 +380,7 @@ impl SqliteStore {
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_installed_development_sqlite(
+        super::migrations::validate_experimental_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )
@@ -405,31 +391,6 @@ impl SqliteStore {
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
         Self::open(path, super::FrontierAdvance::Authorized)
-    }
-
-    /// Advance one disposable installed-development store through this build's
-    /// canonical migrations and exact embedded draft tail.
-    pub(crate) fn open_as_local_promotion_boundary(path: &Path) -> StoreResult<Self> {
-        super::guard_development_database(
-            path,
-            crate::build_info::provenance(),
-            &super::machine_home_dir(),
-        )
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| {
-                StoreError::InvalidData(format!("failed to create db dir: {error}"))
-            })?;
-        }
-        let conn = Connection::open(path)?;
-        configure_write_connection(&conn, path)?;
-        super::migrations::apply_installed_development_sqlite(
-            &conn,
-            crate::build_info::migration_draft_manifest(),
-        )?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
     }
 
     /// Open a hermetic, fully-migrated store at `path`: the base canonical
@@ -447,7 +408,7 @@ impl SqliteStore {
         }
         let conn = Connection::open(path)?;
         configure_write_connection(&conn, path)?;
-        super::migrations::apply_installed_development_sqlite(
+        super::migrations::initialize_experimental_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )?;
@@ -478,88 +439,20 @@ impl SqliteStore {
         advance: super::FrontierAdvance,
     ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
-        let installed_selection = crate::machine_install::selection_for_current_executable()
-            .map_err(|error| {
-                StoreError::InvalidData(format!("resolve machine install selection: {error}"))
-            })?;
-        let store_installation = match installed_selection {
-            Some(selection)
-                if super::same_database_file(
-                    path,
-                    &super::installed_execution_database(&selection)
-                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                )
-                .map_err(|error| {
-                    StoreError::InvalidData(format!("resolve installed store identity: {error}"))
-                })? =>
-            {
-                Some(selection)
-            }
-            _ => None,
-        };
-        if advance == super::FrontierAdvance::Forbidden && store_installation.is_none() {
-            let stores = super::branch_data::owned_stores()
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-            if super::branch_data::is_owned_store(path, &stores)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            {
-                return Err(StoreError::InvalidData(format!(
-                    "store {} belongs to another installation; use its installed lf or this build's branch data directory",
-                    path.display()
-                )));
-            }
-        }
-        let addressed_execution = store_installation.as_ref().is_some_and(|selection| {
-            !super::same_database_file(path, &selection.store).unwrap_or(false)
-        });
-        let installed_development = store_installation.as_ref().is_some_and(|selection| {
-            selection.source == crate::machine_install::InstallSource::Development
-        });
-        if addressed_execution {
-            // Runtime choice grants no migration authority over execution found
-            // elsewhere. Validate before journal mode or any writable connection.
-            let connection =
-                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-            let validation = if installed_development {
-                super::migrations::validate_installed_development_sqlite(
-                    &connection,
-                    crate::build_info::migration_draft_manifest(),
-                )
-            } else {
-                super::migrations::validate_sqlite(&connection).and_then(|()| {
-                    if let Some(pending) = super::migrations::pending_shared_migration(&connection)?
-                    {
-                        return Err(StoreError::InvalidData(format!(
-                            "pending migration {pending}"
-                        )));
-                    }
-                    Ok(())
-                })
-            };
-            validation.map_err(|error| {
-                StoreError::InvalidData(format!(
-                    "selected lf cannot continue execution in {}: {error}",
-                    path.display()
-                ))
-            })?;
-        }
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
         // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
         // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations = !addressed_execution
-            && super::may_apply_migrations(path, authority, home, advance).map_err(|error| {
+        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
+            .map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
         let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
             .map_err(|error| {
                 StoreError::InvalidData(format!("resolve shared store identity: {error}"))
             })?;
-        let initializes_private_development = !installed_development
-            && !shared_database
-            && may_apply_migrations
-            && crate::build_info::provenance() == crate::build_info::BuildProvenance::Development;
+
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
@@ -579,18 +472,12 @@ impl SqliteStore {
         // itself meet another process opening the same WAL database.
         configure_write_connection(&conn, path)?;
 
-        if installed_development {
-            super::migrations::validate_installed_development_sqlite(
+        if !shared_database {
+            super::migrations::initialize_experimental_sqlite(
                 &conn,
                 crate::build_info::migration_draft_manifest(),
             )
-            .map_err(|error| development_open_error(&conn, error))?;
-        } else if initializes_private_development {
-            super::migrations::apply_installed_development_sqlite(
-                &conn,
-                crate::build_info::migration_draft_manifest(),
-            )
-            .map_err(|error| development_open_error(&conn, error))?;
+            .map_err(|error| super::migrations::experimental_store_diagnostic(&conn, error))?;
         } else if !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
             // and store-ahead errors), then refuse if this binary knows a migration

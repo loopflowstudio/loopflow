@@ -482,13 +482,16 @@ mod tests {
     use rusqlite::{params, Connection};
     use serde_json::json;
 
+    use crate::build_info::MigrationAuthority;
     use crate::id::WaveId;
-    use crate::store::{open_ephemeral_store, PlanningState, StorageConfig};
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[tokio::test]
     async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("planning.db");
+        let database = directory.path().join(".lf/loopflow.db");
+        std::fs::create_dir_all(database.parent().unwrap()).unwrap();
         let wave = WaveId::new();
         let snapshot = json!({"projects":[{
             "id":"project", "slug":"chapter", "name":"Chapter", "summary":"Proof",
@@ -509,9 +512,22 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO pm_snapshots(wave_id,provider,initiative,synced_at,payload) VALUES(?1,'linear','initiative',42,?2)",params![wave,snapshot.to_string()]).unwrap();
         }
-        let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-            .await
-            .unwrap();
+        // Upgrades belong to the published installation, not an experiment.
+        let sqlite = SqliteStore::open_with(
+            &database,
+            MigrationAuthority::Published,
+            directory.path(),
+            FrontierAdvance::Authorized,
+        )
+        .unwrap();
+        for name in [
+            "normalize_pm_planning",
+            "pm_issue_revisions",
+            "pm_project_evidence",
+        ] {
+            sqlite.apply_migration_for_test(name).unwrap();
+        }
+        let store = Store { sqlite };
         let observation = store
             .pm_task_observation("/repo", "linear", "fix-1")
             .await

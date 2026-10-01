@@ -383,15 +383,6 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 }
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult<TaskSnapshot> {
-    if let Some(destination) = super::task_destination::destination().map_err(task_error)? {
-        super::task_destination::check_task(&destination, issue).map_err(task_error)?;
-        if let Some(parent) = &options.stack_on {
-            super::task_destination::check_task(&destination, parent).map_err(task_error)?;
-        }
-        let mut args = super::task_destination::exec_args("run", &options);
-        args.push(issue.into());
-        return super::task_destination::json(&destination, repo, args, None).map_err(task_error);
-    }
     prepare_task(repo, issue, options, true).and_then(|task| task_snapshot(&task))
 }
 
@@ -1008,24 +999,6 @@ pub fn task_create(
     report: Option<String>,
     options: Option<TaskExecOptions>,
 ) -> OpsResult<TaskCreateResult> {
-    if let Some(options) = &options {
-        if let Some(destination) = super::task_destination::destination().map_err(task_error)? {
-            if let Some(parent) = &options.stack_on {
-                super::task_destination::check_task(&destination, parent).map_err(task_error)?;
-            }
-            let mut args = super::task_destination::exec_args("create", options);
-            args.push("--run".into());
-            if let Some(wave) = wave {
-                args.extend(["--wave".into(), wave.into()]);
-            }
-            if let Some(title) = &title {
-                args.extend(["--title".into(), title.clone()]);
-            }
-            return super::task_destination::json(&destination, repo, args, report.as_deref())
-                .map(TaskCreateResult::Started)
-                .map_err(task_error);
-        }
-    }
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let project =
@@ -2556,7 +2529,6 @@ pub(crate) async fn exec_task_process(
     task: &mut Task,
     selected_flow: Option<&str>,
 ) -> OpsResult<()> {
-    super::task_destination::require_worker_destination().map_err(task_error)?;
     let _declaration = crate::lf::commands::flow::EnvVarGuard::set(
         crate::lf::WORK_DECLARATION_ENV,
         &format!("task:{}", task.id),
@@ -4978,21 +4950,6 @@ pub fn task_restart(
     flow: Option<String>,
     agent: Option<String>,
 ) -> OpsResult<TaskSnapshot> {
-    if let Some(destination) = super::task_destination::destination().map_err(task_error)? {
-        super::task_destination::check_task(&destination, issue).map_err(task_error)?;
-        let options = TaskExecOptions {
-            agent: agent.clone(),
-            flow: flow.clone(),
-            ..Default::default()
-        };
-        let mut args = super::task_destination::exec_args("restart", &options);
-        args.push(issue.into());
-        if let Some(advice) = &advice {
-            args.push(advice.clone());
-        }
-        return super::task_destination::json(&destination, &std::env::current_dir()?, args, None)
-            .map_err(task_error);
-    }
     let issue = issue.to_string();
     let advice = advice
         .map(|value| value.trim().to_string())

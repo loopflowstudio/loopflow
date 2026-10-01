@@ -137,8 +137,8 @@ fn build_report(steps: &[Step], binds: &[SessionBind]) -> BindReport {
     for step in steps {
         sessions.entry(&step.session_id).or_default().push(step);
     }
-    let mut tasks = BTreeMap::<&str, Usage>::new();
-    let mut waves = BTreeMap::<&str, Usage>::new();
+    let mut tasks = BTreeMap::<&str, Vec<&Step>>::new();
+    let mut waves = BTreeMap::<&str, Vec<&Step>>::new();
     let bound = binds
         .iter()
         .map(|bind| {
@@ -162,13 +162,13 @@ fn build_report(steps: &[Step], binds: &[SessionBind]) -> BindReport {
                 } else {
                     session.during.add(step);
                 }
-                tasks.entry(&bind.task).or_default().add(step);
+                tasks.entry(&bind.task).or_default().push(step);
                 if let Some(wave) = bind
                     .wave
                     .as_deref()
                     .filter(|wave| step.wave.as_deref() != Some(wave))
                 {
-                    waves.entry(wave).or_default().add(step);
+                    waves.entry(wave).or_default().push(step);
                 }
             }
             session
@@ -183,41 +183,34 @@ fn build_report(steps: &[Step], binds: &[SessionBind]) -> BindReport {
 }
 
 /// Each owner's recorded total beside the total with its bound Sessions' earlier
-/// usage added. Largest move first.
+/// steps added. Largest move first.
 fn compared<'a>(
     steps: &'a [Step],
-    moved: BTreeMap<&str, Usage>,
+    moved: BTreeMap<&str, Vec<&Step>>,
     owner: impl Fn(&'a Step) -> Option<&'a str>,
 ) -> Vec<RuleUsage> {
-    let mut rows: Vec<(i64, RuleUsage)> = moved
+    let mut rows: Vec<RuleUsage> = moved
         .into_iter()
         .map(|(name, moved)| {
             let mut prospective = Usage::default();
             for step in steps.iter().filter(|step| owner(step) == Some(name)) {
                 prospective.add(step);
             }
-            let post_hoc = Usage {
-                steps: prospective.steps + moved.steps,
-                unmeasured_steps: prospective.unmeasured_steps + moved.unmeasured_steps,
-                input_tokens: prospective.input_tokens + moved.input_tokens,
-                output_tokens: prospective.output_tokens + moved.output_tokens,
-                cost_usd: match (prospective.cost_usd, moved.cost_usd) {
-                    (None, None) => None,
-                    (recorded, moved) => Some(recorded.unwrap_or(0.0) + moved.unwrap_or(0.0)),
-                },
-            };
-            (
-                moved.input_tokens,
-                RuleUsage {
-                    name: name.to_string(),
-                    prospective,
-                    post_hoc,
-                },
-            )
+            let mut post_hoc = prospective.clone();
+            for step in moved {
+                post_hoc.add(step);
+            }
+            RuleUsage {
+                name: name.to_string(),
+                prospective,
+                post_hoc,
+            }
         })
         .collect();
-    rows.sort_by_key(|(moved, _)| std::cmp::Reverse(*moved));
-    rows.into_iter().map(|(_, row)| row).collect()
+    rows.sort_by_key(|row| {
+        std::cmp::Reverse(row.post_hoc.input_tokens - row.prospective.input_tokens)
+    });
+    rows
 }
 
 fn report_text(report: &BindReport) -> String {

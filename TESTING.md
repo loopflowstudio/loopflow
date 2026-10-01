@@ -636,15 +636,41 @@ uv run python scripts/test_task_installation.py
 uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
 ```
 
-This copies source into a disposable Linux container and creates an OS account
-whose installation records select the compiled CLI. An ELF trailer gives
-the installed CLI a distinct identity: byte-identical copies are installed too,
-regardless of path. No host Home, credentials or installation is mounted.
-These installation tests run only through
-this harness (`task-installation` in CI); ordinary Rust runs mark them ignored.
-They prove Task continuation’s auto-merge revocation and review continuity, agent
-selection read from the installed database while branch reads remain private, and direct-open
-refusal without changing the owned development database/WAL bytes. Review
+Pass several names after `--test` to share one disposable build across related proofs.
+
+When changing Task planning lookup or provider response shapes, run the affected
+installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
+the deletion test, and the regular Rust suite skips installation proofs. Keep
+simulated provider revisions and checkout Team/Initiative bindings consistent
+with the planning records those workflows resolve. Exercise unfinished work
+before confirmed removal; do not resurrect deleted Tasks by resetting only
+execution tables while retaining planning tombstones.
+
+This copies source into a disposable Linux container, materializes its draft
+migrations and builds the development CLI with two Cargo jobs. It checks
+populated planning upgrades from the released schema. Intermediate branch
+schemas follow the current-state cutover policy and are not imported. Installation-copy succession is no longer a
+product contract; its two cross-store promotion/continuation cases were removed.
+
+The adoption case starts with planning and no Task row. Public checkout/run
+reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
+retain the PR identity, and preserve a saved later Flow cursor after source
+changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
+
+The installation cases author installation records selecting the compiled CLI.
+An ELF trailer gives the installed CLI a distinct identity: byte-identical copies
+are installed too, regardless of path. No host Home, credentials or installation
+is mounted.
+The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
+normalized local planning, proving that inspection creates no execution or worktree.
+That CLI case exercises cached planning; `ops::pm::planning_lookup_tests` covers
+acquisition with simulated Linear responses, including missing Projects, partial
+responses, absence, and provider failure. Neither is configured live-provider proof.
+The installation-authority tests run only through this harness (`task-installation`
+in CI); ordinary Rust runs mark those cases ignored.
+The remaining cases cover Task continuation’s auto-merge revocation and review
+continuity, installed agent selection while branch reads remain private, and
+direct-open refusal without changing the owned development database/WAL bytes. Review
 completion rejects branch-only feedback and a stale readiness token, resolves
 both Session and captured-input selectors, records the exact installed feedback once,
 and preserves the branch Flow and events. The same review scenario proves agent
@@ -876,6 +902,13 @@ to PATH, so an inherited CLI directory containing `claude` can outrank a fixture
 fake provider and launch the real one. A temporary `LF_HOME` alone does not prevent
 this. Keep the failed evidence if this occurs, stop the test group, and verify the
 fixture under the corrected executable context before completing the suite.
+
+Official-runtime selection also reads the OS account's installation records,
+independently of `HOME`, `LF_HOME`, `LF_BIN`, and PATH. Flow/Session child-launch
+tests therefore need an uninstalled OS account or a disposable container when
+the machine's selected runtime differs from the test build. Clearing environment
+variables alone does not isolate those tests. Use the installation harness for
+installed-runtime proofs; never replace the machine's selection to make tests pass.
 
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.

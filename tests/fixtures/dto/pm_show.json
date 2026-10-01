@@ -39,7 +39,9 @@
       "project": "gmail",
       "team_id": "team-loo",
       "assignee": null,
-      "state": "unstarted"
+      "state": "unstarted",
+      "revision": "2026-09-29T12:00:00.123Z",
+      "branch_name": null
     }
   ]
 }

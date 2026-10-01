@@ -432,7 +432,7 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
 pub struct SweepEntry {
     pub wave: String,
     pub project: String,
-    pub issue: String,
+    pub issue: Option<String>,
     pub outcome: String,
 }
 
@@ -447,9 +447,22 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     }
     block_on_task(async {
         let store = task_store().await?;
-        let candidates = crate::ops::pm::chapter_sweep_candidates(repo).await?;
-        let mut entries = Vec::new();
-        for (wave, project, item) in candidates {
+        let sweep = crate::ops::pm::chapter_sweep_candidates(repo).await?;
+        let mut entries: Vec<_> = sweep
+            .skipped_projects
+            .into_iter()
+            .map(|(wave, project)| SweepEntry {
+                wave,
+                project: project.name,
+                issue: None,
+                outcome: format!(
+                    "skipped: foreign-Team Project {} belongs to Teams [{}]",
+                    project.id,
+                    project.team_ids.join(", ")
+                ),
+            })
+            .collect();
+        for (wave, project, item) in sweep.candidates {
             let task = resolve_task(&store, &item.id).await?;
             let outcome = match prepare_abandon(repo, &store, task.as_ref(), &item.id, false, true)
                 .await
@@ -477,7 +490,7 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
             entries.push(SweepEntry {
                 wave,
                 project,
-                issue: item.identifier,
+                issue: Some(item.identifier),
                 outcome,
             });
         }

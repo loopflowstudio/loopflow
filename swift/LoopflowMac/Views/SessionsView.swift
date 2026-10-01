@@ -331,6 +331,7 @@ struct SessionsView: View {
     private let worktreeLayout: WorktreeLayoutStore
     @ObservedObject private var store: SessionsStore
     @State private var layoutRevision = 0
+    @State private var restorePaletteFocus = true
     @State private var launchError: String?
     @State private var completing: String?
     @Environment(\.palette) private var palette
@@ -396,7 +397,7 @@ struct SessionsView: View {
                     VStack(spacing: 0) {
                         WorkspaceBreadcrumbBar(
                             model: model,
-                            crumb: model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId),
+                            crumb: model.breadcrumb,
                             onOpenSession: openSession, onMonitor: showMonitor
                         ) {
                             if taskPath != nil {
@@ -477,9 +478,28 @@ struct SessionsView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
+            }
+        }
+        .background {
+            WorkspacePaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
+                restorePaletteFocus = true
+                navigation.palette = .search
+            }.frame(width: 0, height: 0)
+        }
+        .sheet(isPresented: Binding(
+            get: { navigation.palette != nil },
+            set: { if !$0 { navigation.palette = nil } }
+        )) {
+            switch navigation.palette {
+            case .flow(let name):
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation)
+            case .search:
+                WorkspacePalette(model: model, activate: navigate)
+            case nil:
+                EmptyView()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
@@ -513,6 +533,38 @@ struct SessionsView: View {
             Button("OK") { launchError = nil }
         } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
+    }
+
+    private func navigate(_ destination: WorkspaceDestination) {
+        // Refreshes can remove an action while the palette is open.
+        guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
+        restorePaletteFocus = false
+        navigation.palette = nil
+        switch destination {
+        case .wave(let id): model.select(.wave(id: id))
+        case .task(let id):
+            Task { await model.openPaletteTask(id) }
+            return
+        case .session(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            openSession(record)
+        case .flow(let name): navigation.palette = .flow(name)
+        case .chooseFlow(let id):
+            guard let found = model.task(id: id) else { return }
+            model.select(.task(id: id))
+            let hasInvocation: Bool
+            if case .pinned = found.task.flow.record { hasInvocation = true } else { hasInvocation = false }
+            navigation.flowDrafts[id, default: TaskFlowDraft()].picker = hasInvocation ? .restart : .preview
+        case .rename(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            openSession(record)
+            model.beginSessionRename(record)
+        case .bind(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            model.beginSessionBinding(record)
+        case .monitor(let id): showMonitor(id)
+        }
+        model.remember(destination)
     }
 
     private func openSession(_ record: SessionRecord) {

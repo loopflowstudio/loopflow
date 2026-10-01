@@ -304,6 +304,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var commandBlockMouseDown = false
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
+    private var inputEnabled = true
     /// Open from a key press until the next display-link draw.
     private var keyToDraw: OSSignpostIntervalState?
 
@@ -366,6 +367,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func updateFocus(isFocused: Bool, isEnabled: Bool) {
+        inputEnabled = isEnabled
         let requested = isEnabled && isFocused
         let changed = focusRequested != requested
         focusRequested = requested
@@ -571,9 +573,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         setupTrackingArea()
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { inputEnabled }
 
     override func becomeFirstResponder() -> Bool {
+        guard inputEnabled else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted, let surface {
             ghostty_surface_set_focus(surface, true)

@@ -350,20 +350,6 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
-fn development_open_error(conn: &Connection, error: StoreError) -> StoreError {
-    let error = super::migrations::development_store_diagnostic(conn, error);
-    match error {
-        StoreError::IncompatibleDevelopment(reason) => {
-            StoreError::IncompatibleDevelopment(format!(
-                "{reason}\nData directory: {}\n{}",
-                super::lf_home_dir().display(),
-                "Custom Homes are disposable. Start a new experiment with a fresh LF_HOME; this Home will not be upgraded or repaired."
-            ))
-        }
-        error => error,
-    }
-}
-
 impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn assert_no_historical_runs(&self) {
@@ -393,7 +379,7 @@ impl SqliteStore {
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_installed_development_sqlite(
+        super::migrations::validate_experimental_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )
@@ -421,7 +407,7 @@ impl SqliteStore {
         }
         let conn = Connection::open(path)?;
         configure_write_connection(&conn, path)?;
-        super::migrations::apply_installed_development_sqlite(
+        super::migrations::initialize_experimental_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )?;
@@ -486,18 +472,11 @@ impl SqliteStore {
         configure_write_connection(&conn, path)?;
 
         if !shared_database {
-            if existing_database {
-                super::migrations::validate_installed_development_sqlite(
-                    &conn,
-                    crate::build_info::migration_draft_manifest(),
-                )
-                .map_err(|error| development_open_error(&conn, error))?;
-            } else {
-                super::migrations::apply_installed_development_sqlite(
-                    &conn,
-                    crate::build_info::migration_draft_manifest(),
-                )?;
-            }
+            super::migrations::initialize_experimental_sqlite(
+                &conn,
+                crate::build_info::migration_draft_manifest(),
+            )
+            .map_err(|error| super::migrations::experimental_store_diagnostic(&conn, error))?;
         } else if !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
             // and store-ahead errors), then refuse if this binary knows a migration

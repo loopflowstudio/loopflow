@@ -76,15 +76,10 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
         if let Some(path) = std::env::var_os("CARGO_BIN_EXE_lf") {
             return PathBuf::from(path);
         }
-    } else if let Ok(Some(selection)) = crate::machine_install::current_selection(
-        &crate::machine_install::root().expect("resolve machine installation"),
-    ) {
-        if let Some(cli) = selection
-            .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-        {
-            return cli.path.clone();
-        }
+    } else if let Ok(Some(cli)) =
+        crate::machine_install::root().and_then(|root| crate::machine_install::installed_cli(&root))
+    {
+        return cli.path;
     }
     if let Ok(current) = std::env::current_exe() {
         if current.file_name().is_some_and(|name| name == "lf") {
@@ -98,11 +93,6 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
         }
     }
     which_on_path(Path::new("lf")).unwrap_or_else(|| PathBuf::from("lf"))
-}
-
-/// Flow steps inherit the same executable and Home as ordinary nested commands.
-pub(crate) fn resolve_step_lf_binary(_cwd: &Path) -> Result<PathBuf> {
-    resolve_pinned_lf_binary()
 }
 
 /// Resolve the `lf` a Work launch will use: an absolute path that exists.
@@ -135,64 +125,20 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 ///
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
 /// may repoint it while a resident body is running, so the body carries the
-/// canonical target in `LF_CONTROL_BIN`. A later body launch deliberately
+/// canonical target in `LF_BIN`. A later body launch deliberately
 /// resolves the current Home again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
     std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
 }
 
 /// Capture the resolved CLI and Home for a provider child.
-pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
+pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
     Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_pinned_lf_binary()?,
         db_path,
         lf_home: crate::store::lf_home_dir(),
-    })
-}
-
-/// Resolve the installed CLI, or the explicitly selected experimental CLI.
-pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
-    resolve_lf_binary()
-}
-
-/// The current Home `lf`, resolved to an absolute path that exists. Mirrors
-/// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
-pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
-    let candidate = resolve_current_home_lf_binary();
-    if candidate.is_absolute() {
-        return if candidate.exists() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the current Home lf",
-                candidate.display()
-            ))
-        };
-    }
-    which_on_path(&candidate).ok_or_else(|| {
-        anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the current Home lf",
-            candidate.display()
-        )
-    })
-}
-
-/// Resolve the current Home execution context for launching Work: the
-/// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
-///
-/// This is the launch/relaunch boundary resolver. Work created under one
-/// binary and resumed under another launches through the current Home — its
-/// worktree, provider history, and directives are unaffected by which binary
-/// first created it.
-pub(crate) fn current_home_execution_context() -> Result<crate::child::ChildExecutionContext> {
-    let db_path = crate::store::current_home_database_path()
-        .map_err(|error| anyhow!("cannot resolve the current Home database path: {error}"))?;
-    Ok(crate::child::ChildExecutionContext {
-        lf_bin: resolve_current_home_lf_binary_checked()?,
-        db_path,
-        lf_home: crate::store::current_home_lf_home_dir(),
     })
 }
 
@@ -214,7 +160,7 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let context = pinned_execution_context()?;
+    let context = execution_context()?;
     start_session_with_context(session, cwd, argv, env, context).await
 }
 
@@ -520,7 +466,7 @@ pub(crate) async fn start_home_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    let context = current_home_execution_context()?;
+    let context = execution_context()?;
     let lf_bin = context.lf_bin.to_string_lossy().to_string();
     let mut environment = vec![("LF_BIN", lf_bin.as_str())];
     environment.extend_from_slice(env);

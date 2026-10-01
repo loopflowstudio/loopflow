@@ -95,7 +95,7 @@ impl Drop for NativeClients {
 
 fn assert_launch_locked(session: &str) {
     let name = hex::encode(&Sha256::digest(session.as_bytes())[..16]);
-    let path = crate::store::current_home_lf_home_dir()
+    let path = crate::store::lf_home_dir()
         .join(super::LAUNCH_LOCK_DIRECTORY)
         .join(format!(".{name}.launch.lock"));
     let probe = OpenOptions::new()

@@ -148,80 +148,37 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
 }
 
-/// Apply the exact draft manifest embedded in an installed development build.
-///
-/// Drafts are durable only in the disposable installed-development store. The
-/// release ledger adopts only byte-identical drafts packaged by a later release.
-/// Reuse otherwise accepts only an exact applied prefix; changed, unmatched or
-/// reordered SQL requires a compatible build, preserving the existing store.
-pub(crate) fn apply_installed_development_sqlite(
+/// Initialize an empty experiment with this build's exact schema.
+/// Concurrent initializers recheck under the writer lock; existing schemas are
+/// validated without appending drafts, adopting releases or creating backups.
+pub(crate) fn initialize_experimental_sqlite(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
-    _validate_draft_manifest(drafts)?;
-    // A current store needs only a read snapshot. Release that snapshot before
-    // taking the writer lock, then make every migration decision again under it.
-    let current = _read_snapshot(conn, |conn| {
-        if requires_migration_sqlite(conn)? {
+    if _read_snapshot(conn, |conn| {
+        if user_tables(conn)?.is_empty() {
             return Ok(false);
         }
-        _validate_canonical_history_for_development(conn)?;
-        let applied = _applied_development_migrations(conn)?;
-        _validate_applied_draft_prefix(&applied, drafts)?;
-        _validate_development_schema(conn, &drafts[..applied.len()])?;
-        Ok(applied.len() == drafts.len())
-    })?;
-    if current {
+        validate_experimental_sqlite(conn, drafts)?;
+        Ok(true)
+    })? {
         return Ok(());
     }
-    // A canonical-only upgrade still needs its previous-generation backup.
-    // Prepare WAL before the transaction so that backup can read its committed
-    // snapshot while the one migration transaction excludes other writers.
-    let _lock = if drafts.is_empty() {
-        conn.path()
-            .filter(|path| !path.is_empty())
-            .map(|path| {
-                conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
-                let lock = migration_lock(Path::new(path))?;
-                conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-                Ok::<_, StoreError>(lock)
-            })
-            .transpose()?
-    } else {
-        None
-    };
-    _migration_transaction(conn, |conn| _apply_development_in(conn, drafts))
+    _validate_draft_manifest(drafts)?;
+    _migration_transaction(conn, |conn| _initialize_experiment_in(conn, drafts))
 }
 
-fn _apply_development_in(
+fn _initialize_experiment_in(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
-    let has_draft_ledger = user_tables(conn)?
-        .iter()
-        .any(|table| table == DEVELOPMENT_MIGRATIONS_TABLE);
-    if !has_draft_ledger && drafts.is_empty() {
-        // Already inside the migration transaction. Recheck the previous
-        // generation under this lock; do not enter another transaction owner.
-        if let Some(path) = conn.path().filter(|path| !path.is_empty()) {
-            backup_before_migration(conn, Path::new(path))?;
-        }
+    if !user_tables(conn)?.is_empty() {
+        return validate_experimental_sqlite(conn, drafts);
     }
-    if has_draft_ledger {
-        adopt_released_development_drafts(conn, drafts)?;
-        _validate_canonical_history_for_development(conn)?;
-    } else {
-        apply_set(conn, MIGRATIONS)?;
-        validate_foreign_keys(conn)?;
-        validate_persisted_json(conn)?;
-    }
-
-    let applied = _applied_development_migrations(conn)?;
-    _validate_applied_draft_prefix(&applied, drafts)?;
-    _validate_development_schema(conn, &drafts[..applied.len()])?;
-    if applied.len() < drafts.len() {
+    apply_set(conn, MIGRATIONS)?;
+    if !drafts.is_empty() {
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS development_migrations (
+            "CREATE TABLE development_migrations (
                  position INTEGER NOT NULL UNIQUE,
                  id TEXT PRIMARY KEY,
                  name TEXT NOT NULL UNIQUE,
@@ -229,7 +186,7 @@ fn _apply_development_in(
                  applied_at INTEGER NOT NULL
              );",
         )?;
-        for (position, draft) in drafts.iter().enumerate().skip(applied.len()) {
+        for (position, draft) in drafts.iter().enumerate() {
             conn.execute_batch(draft.sql)?;
             conn.execute(
                 "INSERT INTO development_migrations (
@@ -240,10 +197,11 @@ fn _apply_development_in(
         }
     }
     validate_foreign_keys(conn)?;
+    validate_persisted_json(conn)?;
     _validate_development_schema(conn, drafts)
 }
 
-pub(crate) fn validate_installed_development_sqlite(
+pub(crate) fn validate_experimental_sqlite(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
@@ -251,7 +209,6 @@ pub(crate) fn validate_installed_development_sqlite(
         _validate_draft_manifest(drafts)?;
         _validate_canonical_history_for_development(conn)?;
         let applied = _applied_development_migrations(conn)?;
-        _validate_applied_draft_prefix(&applied, drafts)?;
         if applied.len() != drafts.len() {
             return Err(StoreError::IncompatibleDevelopment(format!(
                 "store has {} applied draft(s), candidate requires {}",
@@ -259,6 +216,7 @@ pub(crate) fn validate_installed_development_sqlite(
                 drafts.len()
             )));
         }
+        _validate_applied_drafts(&applied, drafts)?;
         _validate_development_schema(conn, drafts)?;
         validate_foreign_keys(conn)
     })
@@ -271,77 +229,6 @@ struct AppliedDevelopmentMigration {
     checksum: String,
 }
 
-/// A release packages draft SQL that may already have run in this Home. Adopt
-/// matching receipts without replaying applied SQL, then apply any pending suffix.
-/// The caller holds the migration transaction across inspection and adoption.
-fn adopt_released_development_drafts(
-    conn: &rusqlite::Connection,
-    drafts: &[crate::build_info::MigrationDraft],
-) -> StoreResult<()> {
-    let applied = applied_versions(conn)?;
-    let pending = pending_migrations(&applied, MIGRATIONS)?;
-    if pending.is_empty() {
-        return Ok(());
-    }
-    validate_applied_checksums(conn, MIGRATIONS)?;
-    let development = _applied_development_migrations(conn)?;
-    let mut consumed = 0;
-    for migration in pending {
-        let Some(sql) = migration.sql.strip_prefix("-- draft: ") else {
-            return Err(StoreError::IncompatibleDevelopment(format!(
-                "release {} has no draft provenance",
-                migration.version()
-            )));
-        };
-        for block in sql.split("\n\n-- draft: ") {
-            let Some((name, body)) = block.split_once('\n') else {
-                return Err(StoreError::IncompatibleDevelopment(format!(
-                    "release {} has incomplete draft provenance",
-                    migration.version()
-                )));
-            };
-            // The release packer separates blocks with a blank line and emits
-            // exactly one final newline. Only identical draft bytes are adopted.
-            let body = format!("{}\n", body.trim_end_matches('\n'));
-            let checksum = hex::encode(Sha256::digest(body.as_bytes()));
-            if let Some(draft) = development.get(consumed) {
-                if draft.name != name || draft.checksum != checksum {
-                    return Err(StoreError::IncompatibleDevelopment(format!(
-                        "release {} does not match applied draft {name}",
-                        migration.version()
-                    )));
-                }
-                consumed += 1;
-            } else {
-                // This Home stopped at an earlier verified development prefix.
-                // Apply the remaining release bytes in the same transaction;
-                // existing names/checksums are never replaced or replayed.
-                conn.execute_batch(&body)?;
-            }
-        }
-    }
-    let remaining = &development[consumed..];
-    _validate_applied_draft_prefix(remaining, drafts)?;
-    for (offset, migration) in pending.iter().enumerate() {
-        let parent = migration_prefix_fingerprint(&MIGRATIONS[..applied.len() + offset]);
-        insert_applied_migration(conn, migration, &parent)?;
-    }
-    conn.execute(
-        "DELETE FROM development_migrations WHERE position < ?1",
-        [consumed as i64],
-    )?;
-    // Preserve IDs, timestamps and checksums of drafts not yet released.
-    for (position, draft) in remaining.iter().enumerate() {
-        conn.execute(
-            "UPDATE development_migrations SET position = ?1 WHERE id = ?2",
-            (position as i64, &draft.id),
-        )?;
-    }
-    _validate_development_schema(conn, &drafts[..remaining.len()])?;
-    validate_foreign_keys(conn)?;
-    validate_applied_checksums(conn, MIGRATIONS)
-}
-
 fn _validate_draft_manifest(drafts: &[crate::build_info::MigrationDraft]) -> StoreResult<()> {
     let mut ids = HashSet::new();
     let mut names = HashSet::new();
@@ -352,14 +239,14 @@ fn _validate_draft_manifest(drafts: &[crate::build_info::MigrationDraft]) -> Sto
     for draft in drafts {
         if !ids.insert(draft.id) || !names.insert(draft.name) {
             return Err(StoreError::InvalidData(format!(
-                "installed development draft manifest repeats {}",
+                "experimental draft manifest repeats {}",
                 draft.name
             )));
         }
         for dependency in draft.dependencies {
             if draft_names.contains(dependency) && !names.contains(dependency) {
                 return Err(StoreError::InvalidData(format!(
-                    "installed development draft {} precedes dependency {}",
+                    "experimental draft {} precedes dependency {}",
                     draft.name, dependency
                 )));
             }
@@ -367,7 +254,7 @@ fn _validate_draft_manifest(drafts: &[crate::build_info::MigrationDraft]) -> Sto
         let checksum = hex::encode(Sha256::digest(draft.sql.as_bytes()));
         if checksum != draft.checksum {
             return Err(StoreError::InvalidData(format!(
-                "installed development draft {} checksum does not match its SQL",
+                "experimental draft {} checksum does not match its SQL",
                 draft.name
             )));
         }
@@ -420,15 +307,10 @@ fn _applied_development_migrations(
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-fn _validate_applied_draft_prefix(
+fn _validate_applied_drafts(
     applied: &[AppliedDevelopmentMigration],
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
-    if applied.len() > drafts.len() {
-        return Err(StoreError::IncompatibleDevelopment(
-            "candidate removed or canonicalized an applied draft".to_string(),
-        ));
-    }
     for (position, (applied, draft)) in applied.iter().zip(drafts).enumerate() {
         if applied.id != draft.id
             || applied.name != draft.name
@@ -455,13 +337,13 @@ fn _validate_development_schema(
     )?;
     if product_schema(conn)?.as_slice() != expected.as_ref() {
         return Err(StoreError::IncompatibleDevelopment(
-            "schema does not match the applied draft prefix".to_string(),
+            "schema does not match this experiment".to_string(),
         ));
     }
     Ok(())
 }
 
-pub(crate) fn development_store_diagnostic(
+pub(crate) fn experimental_store_diagnostic(
     conn: &rusqlite::Connection,
     error: StoreError,
 ) -> StoreError {
@@ -478,7 +360,7 @@ pub(crate) fn development_store_diagnostic(
         Err(error) => format!("draft receipts unreadable: {error}"),
     };
     StoreError::IncompatibleDevelopment(format!(
-        "{reason}\nDatabase: {}\nApplied drafts:\n  {receipts}\nPreserve this database and its WAL; use a build that recognizes these receipts. Replacing executable bytes does not reverse migrations.",
+        "{reason}\nDatabase: {}\nApplied drafts:\n  {receipts}\nCustom Homes are disposable. Start a new experiment with a fresh LF_HOME; this Home will not be upgraded or repaired.",
         conn.path().unwrap_or(":memory:")
     ))
 }
@@ -1421,17 +1303,17 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        _applied_development_migrations, _apply_development_in, _read_snapshot, user_tables,
+        _applied_development_migrations, _initialize_experiment_in, _read_snapshot, user_tables,
     };
     use rusqlite::OptionalExtension;
     use sha2::{Digest, Sha256};
 
     use super::{
-        active_namespace, applied_versions, apply_installed_development_sqlite, apply_set,
-        apply_sqlite, apply_sqlite_transaction, apply_sqlite_with_backup, backup_before_migration,
+        active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
+        apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
-        validate_foreign_keys, validate_installed_development_sqlite, validate_persisted_json,
+        validate_experimental_sqlite, validate_foreign_keys, validate_persisted_json,
         validate_schema, validate_set, validate_sqlite, Migration, MigrationId,
         DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
@@ -1485,8 +1367,6 @@ mod tests {
         dependencies: &'static [&'static str],
         sql: &'static str,
     ) -> crate::build_info::MigrationDraft {
-        use sha2::{Digest, Sha256};
-
         crate::build_info::MigrationDraft {
             id,
             name,
@@ -1502,12 +1382,12 @@ mod tests {
         let path = directory.path().join("loopflow.db");
         let writer = rusqlite::Connection::open(&path).unwrap();
         writer.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
-        apply_installed_development_sqlite(&writer, &[]).unwrap();
+        initialize_experimental_sqlite(&writer, &[]).unwrap();
         writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
 
         let reader = rusqlite::Connection::open(&path).unwrap();
         reader.busy_timeout(Duration::ZERO).unwrap();
-        apply_installed_development_sqlite(&reader, &[]).unwrap();
+        initialize_experimental_sqlite(&reader, &[]).unwrap();
         assert_eq!(
             latest_version_sqlite(&reader).unwrap(),
             latest_known_version()
@@ -1516,43 +1396,39 @@ mod tests {
     }
 
     #[test]
-    fn installed_development_store_appends_only_an_exact_draft_prefix() {
+    fn experiment_schema_changes_require_a_fresh_store() {
         let conn = open();
         let first = development_draft(
             "11111111111111111111111111111111",
             "local_feature",
             &[],
-            "CREATE TABLE local_feature (id TEXT PRIMARY KEY);",
+            "CREATE TABLE local_feature (note TEXT); INSERT INTO local_feature VALUES ('retained');",
         );
-        apply_installed_development_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
-        validate_installed_development_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
-
+        initialize_experimental_sqlite(&conn, std::slice::from_ref(&first)).unwrap();
         let second = development_draft(
             "22222222222222222222222222222222",
             "extend_local_feature",
             &["local_feature"],
-            "ALTER TABLE local_feature ADD COLUMN note TEXT;",
+            "ALTER TABLE local_feature ADD COLUMN extra TEXT;",
         );
-        apply_installed_development_sqlite(&conn, &[first.clone(), second.clone()]).unwrap();
-        validate_installed_development_sqlite(&conn, &[first.clone(), second]).unwrap();
-        let applied: i64 = conn
-            .query_row("SELECT COUNT(*) FROM development_migrations", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(applied, 2);
-
-        let changed = development_draft(
-            first.id,
-            first.name,
-            &[],
-            "CREATE TABLE local_feature (id TEXT PRIMARY KEY, changed TEXT);",
-        );
-        let error = apply_installed_development_sqlite(&conn, &[changed]).unwrap_err();
-        assert!(matches!(
-            error,
-            crate::store::StoreError::IncompatibleDevelopment(_)
-        ));
+        let schema = product_schema(&conn).unwrap();
+        let ledger = _applied_development_migrations(&conn).unwrap();
+        for drafts in [vec![], vec![first.clone(), second]] {
+            assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
+            assert_eq!(product_schema(&conn).unwrap(), schema);
+            assert_eq!(_applied_development_migrations(&conn).unwrap(), ledger);
+            assert_eq!(
+                conn.query_row("SELECT note FROM local_feature", [], |row| row
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "retained"
+            );
+        }
+        let older = open();
+        apply_set(&older, &MIGRATIONS[..1]).unwrap();
+        let history = applied_versions(&older).unwrap();
+        assert!(initialize_experimental_sqlite(&older, &[]).is_err());
+        assert_eq!(applied_versions(&older).unwrap(), history);
     }
 
     #[test]
@@ -1594,11 +1470,11 @@ mod tests {
         );
         let drafts = std::slice::from_ref(&draft);
         let valid = open();
-        apply_installed_development_sqlite(&valid, drafts).unwrap();
-        validate_installed_development_sqlite(&valid, drafts).unwrap();
+        initialize_experimental_sqlite(&valid, drafts).unwrap();
+        validate_experimental_sqlite(&valid, drafts).unwrap();
 
         let conn = open();
-        apply_installed_development_sqlite(&conn, drafts).unwrap();
+        initialize_experimental_sqlite(&conn, drafts).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         for (mutation, reason) in [
             (
@@ -1629,13 +1505,13 @@ mod tests {
         ] {
             conn.execute_batch("SAVEPOINT drift").unwrap();
             conn.execute_batch(mutation).unwrap();
-            let error = validate_installed_development_sqlite(&conn, drafts).unwrap_err();
+            let error = validate_experimental_sqlite(&conn, drafts).unwrap_err();
             assert!(error.to_string().contains(reason), "{mutation}: {error}");
             conn.execute_batch("ROLLBACK TO drift; RELEASE drift")
                 .unwrap();
-            validate_installed_development_sqlite(&conn, drafts).unwrap();
+            validate_experimental_sqlite(&conn, drafts).unwrap();
         }
-        validate_installed_development_sqlite(&valid, drafts).unwrap();
+        validate_experimental_sqlite(&valid, drafts).unwrap();
     }
 
     struct WaitingMigration {
@@ -1656,150 +1532,87 @@ mod tests {
         })
     }
 
-    fn _seed_released_drafts(conn: &rusqlite::Connection) {
-        let (release, prior) = MIGRATIONS.split_last().unwrap();
-        apply_set(conn, prior).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE development_migrations (
-                 position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
-                 name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL
-             );",
-        )
-        .unwrap();
-        for block in release
-            .sql
-            .strip_prefix("-- draft: ")
-            .unwrap()
-            .split("\n\n-- draft: ")
-        {
-            let (name, body) = block.split_once('\n').unwrap();
-            let body = format!("{}\n", body.trim_end_matches('\n'));
-            conn.execute_batch(&body).unwrap();
-            conn.execute(
-                "INSERT INTO development_migrations
-                 SELECT COUNT(*), ?1, ?1, ?2, 1 FROM development_migrations",
-                (name, hex::encode(Sha256::digest(body.as_bytes()))),
-            )
-            .unwrap();
-        }
-    }
-
     #[test]
-    fn development_initializers_recheck_after_another_writer_commits() {
-        for phase in ["first", "append", "adopt"] {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("loopflow.db");
-            let winner = rusqlite::Connection::open(&path).unwrap();
-            winner.pragma_update(None, "journal_mode", "WAL").unwrap();
-            let first = development_draft(
-                "11111111111111111111111111111111",
-                "race_note",
-                &[],
-                "CREATE TABLE race_note (note TEXT); INSERT INTO race_note VALUES ('original');",
-            );
-            let second = development_draft(
-                "22222222222222222222222222222222",
-                "race_append",
-                &["race_note"],
-                "UPDATE race_note SET note = note || ' appended';",
-            );
-            let drafts = vec![first, second];
-            match phase {
-                "first" => {}
-                "append" => {
-                    apply_installed_development_sqlite(&winner, &drafts[..1]).unwrap();
-                    winner
-                        .execute("UPDATE development_migrations SET applied_at = 17", [])
-                        .unwrap();
-                }
-                "adopt" => {
-                    _seed_released_drafts(&winner);
-                    winner.execute_batch(drafts[0].sql).unwrap();
-                    winner
-                        .execute(
-                            "INSERT INTO development_migrations
-                         SELECT COUNT(*), ?1, ?2, ?3, 17 FROM development_migrations",
-                            (drafts[0].id, drafts[0].name, drafts[0].checksum),
-                        )
-                        .unwrap();
-                }
-                _ => unreachable!(),
-            }
-            winner.execute_batch("BEGIN EXCLUSIVE").unwrap();
-            _apply_development_in(&winner, &drafts).unwrap();
-            let (reached_tx, reached_rx) = sync_channel(1);
-            let (resume_tx, resume_rx) = sync_channel(1);
-            let contender = std::thread::spawn(move || {
-                let conn = rusqlite::Connection::open(path).unwrap();
-                WAITING_MIGRATION.with(|waiting| {
-                    *waiting.borrow_mut() = Some(WaitingMigration {
-                        reached: reached_tx,
-                        resume: resume_rx,
-                    });
+    fn experimental_initializers_recheck_after_another_writer_commits() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let winner = rusqlite::Connection::open(&path).unwrap();
+        winner.pragma_update(None, "journal_mode", "WAL").unwrap();
+        let first = development_draft(
+            "11111111111111111111111111111111",
+            "race_note",
+            &[],
+            "CREATE TABLE race_note (note TEXT); INSERT INTO race_note VALUES ('original');",
+        );
+        let second = development_draft(
+            "22222222222222222222222222222222",
+            "race_append",
+            &["race_note"],
+            "UPDATE race_note SET note = note || ' appended';",
+        );
+        let drafts = vec![first, second];
+        winner.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        _initialize_experiment_in(&winner, &drafts).unwrap();
+        let (reached_tx, reached_rx) = sync_channel(1);
+        let (resume_tx, resume_rx) = sync_channel(1);
+        let contender = std::thread::spawn(move || {
+            let conn = rusqlite::Connection::open(path).unwrap();
+            WAITING_MIGRATION.with(|waiting| {
+                *waiting.borrow_mut() = Some(WaitingMigration {
+                    reached: reached_tx,
+                    resume: resume_rx,
                 });
-                conn.busy_handler(Some(_wait_for_migration_writer)).unwrap();
-                apply_installed_development_sqlite(&conn, &drafts)?;
-                validate_installed_development_sqlite(&conn, &drafts)
             });
-            // The contender has read the committed predecessor and is waiting
-            // for BEGIN EXCLUSIVE. Commit precisely at that boundary.
-            reached_rx.recv_timeout(Duration::from_secs(30)).unwrap();
-            winner.execute_batch("COMMIT").unwrap();
-            resume_tx.send(()).unwrap();
-            contender.join().unwrap().unwrap();
-            assert_eq!(
-                winner
-                    .query_row("SELECT note FROM race_note", [], |row| row
-                        .get::<_, String>(0))
-                    .unwrap(),
-                "original appended",
-                "{phase}: draft SQL replayed",
-            );
-            assert_eq!(_applied_development_migrations(&winner).unwrap().len(), 2);
-            assert_eq!(applied_versions(&winner).unwrap().len(), MIGRATIONS.len());
-            if phase != "first" {
-                assert_eq!(
-                    winner
-                        .query_row(
-                            "SELECT applied_at FROM development_migrations WHERE position = 0",
-                            [],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .unwrap(),
-                    17
-                );
-            }
-        }
+            conn.busy_handler(Some(_wait_for_migration_writer)).unwrap();
+            initialize_experimental_sqlite(&conn, &drafts)?;
+            validate_experimental_sqlite(&conn, &drafts)
+        });
+        // The contender is waiting for BEGIN EXCLUSIVE. Commit the first
+        // initialization precisely at that boundary.
+        reached_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        winner.execute_batch("COMMIT").unwrap();
+        resume_tx.send(()).unwrap();
+        contender.join().unwrap().unwrap();
+        assert_eq!(
+            winner
+                .query_row("SELECT note FROM race_note", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            "original appended",
+            "draft SQL replayed",
+        );
+        assert_eq!(_applied_development_migrations(&winner).unwrap().len(), 2);
+        assert_eq!(applied_versions(&winner).unwrap().len(), MIGRATIONS.len());
     }
 
     #[test]
-    fn development_validation_keeps_one_snapshot_without_blocking_a_writer() {
+    fn experiment_validation_does_not_block_a_writer() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let reader = rusqlite::Connection::open(&path).unwrap();
         reader.pragma_update(None, "journal_mode", "WAL").unwrap();
-        let drafts = [development_draft(
-            "11111111111111111111111111111111",
-            "snapshot_note",
-            &[],
-            "CREATE TABLE snapshot_note (note TEXT);",
-        )];
-        apply_installed_development_sqlite(&reader, &[]).unwrap();
+        initialize_experimental_sqlite(&reader, &[]).unwrap();
         let writer = rusqlite::Connection::open(&path).unwrap();
         writer.busy_timeout(Duration::ZERO).unwrap();
         _read_snapshot(&reader, |reader| {
-            validate_sqlite(reader)?;
-            validate_installed_development_sqlite(reader, &[])?;
-            apply_installed_development_sqlite(&writer, &drafts)?;
-            validate_sqlite(reader)?;
-            validate_installed_development_sqlite(reader, &[])
+            validate_experimental_sqlite(reader, &[])?;
+            writer.execute(
+                "INSERT INTO blob_tokens(sha,lines,bytes,tokens) VALUES('concurrent',1,2,3)",
+                [],
+            )?;
+            validate_experimental_sqlite(reader, &[])
         })
         .unwrap();
-        validate_installed_development_sqlite(&reader, &drafts).unwrap();
-        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-        reader.busy_timeout(Duration::ZERO).unwrap();
-        apply_installed_development_sqlite(&reader, &drafts).unwrap();
-        writer.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(
+            reader
+                .query_row(
+                    "SELECT tokens FROM blob_tokens WHERE sha='concurrent'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            3
+        );
     }
 
     #[test]
@@ -1812,152 +1625,17 @@ mod tests {
             &[],
             "CREATE TABLE unfinished (id TEXT); INSERT INTO missing_table VALUES (1);",
         )];
-        assert!(apply_installed_development_sqlite(&conn, &drafts).is_err());
+        assert!(initialize_experimental_sqlite(&conn, &drafts).is_err());
         assert!(user_tables(&conn).unwrap().is_empty());
         assert!(conn.is_autocommit());
         assert!(conn
             .pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
             .unwrap());
-        apply_installed_development_sqlite(&conn, &[]).unwrap();
+        initialize_experimental_sqlite(&conn, &[]).unwrap();
     }
 
     #[test]
-    fn installed_development_home_keeps_projects_when_its_drafts_are_released() {
-        let conn = project_development_home();
-        let receipt: String = conn
-            .query_row("SELECT project_prompt_context FROM projects", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert!(validate_installed_development_sqlite(&conn, &[]).is_err());
-        apply_installed_development_sqlite(&conn, &[]).unwrap();
-        validate_installed_development_sqlite(&conn, &[]).unwrap();
-        assert_eq!(
-            conn.query_row("SELECT project_prompt_context FROM projects", [], |r| {
-                r.get::<_, String>(0)
-            })
-            .unwrap(),
-            receipt
-        );
-        assert!(_applied_development_migrations(&conn).unwrap().is_empty());
-        let history = applied_versions(&conn).unwrap();
-        apply_installed_development_sqlite(&conn, &[]).unwrap();
-        assert_eq!(applied_versions(&conn).unwrap(), history);
-        assert_eq!(
-            conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-    }
-
-    #[test]
-    fn installed_development_release_keeps_unreleased_drafts() {
-        let conn = project_development_home();
-        let draft = development_draft(
-            "22222222222222222222222222222222",
-            "chapter_annotation",
-            &[],
-            "CREATE TABLE chapter_annotation (note TEXT);",
-        );
-        conn.execute_batch(draft.sql).unwrap();
-        conn.execute(
-            "INSERT INTO chapter_annotation VALUES ('keep this note')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO development_migrations
-             SELECT COUNT(*), ?1, ?2, ?3, 2 FROM development_migrations",
-            (draft.id, draft.name, draft.checksum),
-        )
-        .unwrap();
-        apply_installed_development_sqlite(&conn, std::slice::from_ref(&draft)).unwrap();
-        validate_installed_development_sqlite(&conn, std::slice::from_ref(&draft)).unwrap();
-        assert_eq!(
-            conn.query_row("SELECT note FROM chapter_annotation", [], |r| r
-                .get::<_, String>(0))
-                .unwrap(),
-            "keep this note"
-        );
-        assert_eq!(
-            conn.query_row(
-                "SELECT position, id, applied_at FROM development_migrations",
-                [],
-                |r| Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?
-                ))
-            )
-            .unwrap(),
-            (0, draft.id.to_string(), 2)
-        );
-    }
-
-    #[test]
-    fn installed_development_release_rejects_changed_evidence_without_losing_data() {
-        for schema_changed in [false, true] {
-            let conn = project_development_home();
-            if schema_changed {
-                conn.execute_batch("ALTER TABLE projects ADD COLUMN unexpected TEXT;")
-                    .unwrap();
-            } else {
-                conn.execute("UPDATE development_migrations SET checksum = 'changed'", [])
-                    .unwrap();
-            }
-            let history = applied_versions(&conn).unwrap();
-            let drafts = _applied_development_migrations(&conn).unwrap();
-            let schema = product_schema(&conn).unwrap();
-            assert!(apply_installed_development_sqlite(&conn, &[]).is_err());
-            assert_eq!(applied_versions(&conn).unwrap(), history);
-            assert_eq!(_applied_development_migrations(&conn).unwrap(), drafts);
-            assert_eq!(product_schema(&conn).unwrap(), schema);
-            assert_eq!(
-                conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))
-                    .unwrap(),
-                1
-            );
-        }
-    }
-
-    fn project_development_home() -> rusqlite::Connection {
-        let conn = open();
-        let (index, _, _) = draft_location("wave_chapters");
-        apply_set(&conn, &MIGRATIONS[..index]).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE development_migrations (
-                position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL
-             );",
-        )
-        .unwrap();
-        // Model a development Home whose applied drafts now span every pending
-        // release, including releases appended after wave_chapters shipped.
-        for migration in &MIGRATIONS[index..] {
-            let sql = migration.sql.strip_prefix("-- draft: ").unwrap();
-            for block in sql.split("\n\n-- draft: ") {
-                let (name, body) = block.split_once('\n').unwrap();
-                let body = format!("{}\n", body.trim_end_matches('\n'));
-                conn.execute_batch(&body).unwrap();
-                conn.execute(
-                    "INSERT INTO development_migrations
-                     SELECT COUNT(*), ?1, ?1, ?2, 1 FROM development_migrations",
-                    (name, hex::encode(Sha256::digest(body.as_bytes()))),
-                )
-                .unwrap();
-            }
-        }
-        conn.execute_batch(
-            "INSERT INTO waves (id, name, repo, created_at) VALUES ('demo-wave', 'product', '/repo', 1);
-             INSERT INTO projects (id, wave_id, external_project_id, created_at, project_prompt_context)
-             VALUES ('retained-project', 'demo-wave', 'provider-project', 1,
-                     '{\"phase\":\"complete\",\"authored\":\"preserve the original plan\"}');"
-        ).unwrap();
-        conn
-    }
-
-    #[test]
-    fn installed_development_draft_accepts_a_released_dependency() {
+    fn experimental_draft_accepts_a_released_dependency() {
         let conn = open();
         let draft = development_draft(
             "33333333333333333333333333333333",
@@ -1966,7 +1644,7 @@ mod tests {
             "CREATE TABLE local_after_released (id TEXT PRIMARY KEY);",
         );
 
-        apply_installed_development_sqlite(&conn, &[draft]).unwrap();
+        initialize_experimental_sqlite(&conn, &[draft]).unwrap();
     }
 
     fn baseline() -> Migration {
@@ -4519,54 +4197,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_draft_initialization_and_upgrade_preserve_canonical_history() {
-        let memory = open();
-        apply_installed_development_sqlite(&memory, &[]).unwrap();
-        validate_installed_development_sqlite(&memory, &[]).unwrap();
-        for existing in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
-            let path = directory.path().join("loopflow.db");
-            let conn = rusqlite::Connection::open(&path).unwrap();
-            if existing {
-                apply_set(&conn, &MIGRATIONS[..1]).unwrap();
-                conn.execute(
-                    "INSERT INTO blob_tokens(sha,lines,bytes,tokens) VALUES('retained',1,2,3)",
-                    [],
-                )
-                .unwrap();
-            }
-            apply_installed_development_sqlite(&conn, &[]).unwrap();
-            validate_installed_development_sqlite(&conn, &[]).unwrap();
-            assert_eq!(
-                latest_version_sqlite(&conn).unwrap(),
-                latest_known_version()
-            );
-            apply_installed_development_sqlite(&conn, &[]).unwrap();
-            if existing {
-                let backup = rusqlite::Connection::open(find_backup(
-                    directory.path(),
-                    "loopflow.db.backup-0.10.001_initial-",
-                ))
-                .unwrap();
-                assert_eq!(
-                    latest_applied_version_sqlite(&backup).unwrap().as_deref(),
-                    Some("0.10.001_initial")
-                );
-                for connection in [&conn, &backup] {
-                    let tokens: i64 = connection
-                        .query_row(
-                            "SELECT tokens FROM blob_tokens WHERE sha='retained'",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .unwrap();
-                    assert_eq!(tokens, 3);
-                }
-            }
-        }
-    }
-
-    #[test]
     fn release_migration_publishes_a_complete_previous_generation_backup() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
@@ -4685,10 +4315,7 @@ mod tests {
         writer.execute_batch("ROLLBACK").unwrap();
     }
 
-    /// What a process killed mid-migration leaves: the file keeps its header,
-    /// the tables are gone. `SqliteStore::new` still routes it to the migrate
-    /// path, because `existing_database` asks whether the file has bytes, not
-    /// whether it holds a schema.
+    /// An interrupted first initialization can leave a header without a schema.
     #[test]
     fn an_existing_schema_less_database_still_gets_its_schema() {
         let directory = tempfile::tempdir().unwrap();
@@ -4708,8 +4335,7 @@ mod tests {
         // on the first read of a table it never created.
         assert!(store.execs_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
-        validate_installed_development_sqlite(&conn, crate::build_info::migration_draft_manifest())
-            .unwrap();
+        validate_experimental_sqlite(&conn, crate::build_info::migration_draft_manifest()).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap().last(),
             Some(&latest_known_version())

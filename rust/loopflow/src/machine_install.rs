@@ -765,25 +765,9 @@ pub fn dispatch_default_cli() -> Result<()> {
         return Ok(());
     }
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let selected = current_selection(&root()?)?;
-    let destination = if let Some(selection) = selected {
-        let artifacts = if selection.source == InstallSource::Development {
-            // Retire the former development selection without opening its data.
-            match read_state(&root()?)? {
-                MachineInstallState::Settled(active) => active.published_fallback,
-                MachineInstallState::Switching(receipt) => receipt
-                    .published_fallback
-                    .context("interrupted development installation has no published fallback")?,
-                MachineInstallState::Legacy => unreachable!("selection came from a receipt"),
-            }
-        } else {
-            selection.artifact_set
-        };
-        let cli = artifacts
-            .artifact(&ArtifactRole::Cli)
-            .context("installed CLI is missing")?;
+    let destination = if let Some(cli) = installed_cli(&root()?)? {
         cli.verify()?;
-        cli.path.clone()
+        cli.path
     } else {
         let installed = account_home()?.join(".local/bin/lf");
         match fs::canonicalize(&installed) {
@@ -917,15 +901,23 @@ pub fn read_state(root: &Path) -> Result<MachineInstallState> {
     Ok(MachineInstallState::Legacy)
 }
 
-/// The executable/store pair selected for ordinary machine operations.
-pub(crate) fn current_selection(root: &Path) -> Result<Option<InstallSelection>> {
-    match read_state(root)? {
-        MachineInstallState::Legacy => Ok(None),
-        MachineInstallState::Settled(active) => Ok(Some(active.selection)),
-        MachineInstallState::Switching(receipt) => {
-            startup_selection_during_switch(&receipt).map(Some)
-        }
-    }
+/// Ordinary launches use published artifacts even if an old development
+/// installation is still selected. Its store never participates in routing.
+pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
+    let active = match read_state(root)? {
+        MachineInstallState::Legacy => return Ok(None),
+        MachineInstallState::Settled(active) => *active,
+        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
+    };
+    let artifacts = match active.selection.source {
+        InstallSource::Published => active.selection.artifact_set,
+        InstallSource::Development => active.published_fallback,
+    };
+    artifacts
+        .artifact(&ArtifactRole::Cli)
+        .cloned()
+        .map(Some)
+        .context("installed CLI is missing")
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1613,6 +1605,31 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
+    }
+
+    #[test]
+    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("authority");
+        assert!(super::installed_cli(&root).unwrap().is_none());
+        let published = selection(directory.path(), "published", InstallSource::Published);
+        let development = selection(directory.path(), "development", InstallSource::Development);
+        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
+        for selected in [published.clone(), development.clone()] {
+            let active = active(selected, published.artifact_set.clone());
+            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
+            assert_eq!(
+                super::installed_cli(&root).unwrap().as_ref(),
+                Some(expected)
+            );
+        }
+        let next = selection(directory.path(), "next", InstallSource::Published);
+        let receipt = switch(development, next, published.artifact_set.clone());
+        write_switch(&root, &receipt).unwrap();
+        assert_eq!(
+            super::installed_cli(&root).unwrap().as_ref(),
+            Some(expected)
+        );
     }
 
     #[test]

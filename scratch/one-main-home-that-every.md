@@ -21,6 +21,8 @@ exact schema afterward; schema changes require a new experiment.
 - `ops/task_destination.rs` and its per-operation cross-store dispatch consumers.
 - Receipt-based selection of Home paths and retained development handoffs.
 - Installer `local --use` and exclusive development-promotion fixtures.
+- Experimental-store draft append/adoption/backup paths and their upgrade fixtures.
+- Separate authority, observation and current-Home resolvers; all consumers use the same Home and execution context.
 
 Preserve published artifact verification, promotion recovery, the main database
 migration boundary, explicit experimental isolation, and ordinary Task/Session
@@ -47,5 +49,13 @@ identity and continuation. No automatic data merging or Task transfer.
   working directory. Startup canonicalizes both paths before child execution.
 - The Task resume regression no longer needs a development installation fixture;
   it now runs in the ordinary suite using an explicit experiment.
+- Experimental initialization still carried draft append, release adoption and
+  backup machinery. It now initializes an empty schema once and validates later
+  opens; header-only files and concurrent first opens remain supported.
+- Home aliases and duplicate execution-context resolvers obscured the single
+  destination. Their callers now use the same Home, database and CLI resolvers.
+- Startup and child launches now share published-artifact selection, including
+  the fallback from a retired development selection. Diagnostics give one
+  disposable-Home instruction instead of contradictory recovery advice.
 
-Checks: `cargo test` focused Home/global/harness/frontier/install/Task-resume checks passed (28); `uv run pytest python/tests/test_install_script.py -q` passed (8); `swift test --package-path swift --filter ActiveRunsObservationTests` passed (8); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all --check`, changed-file Ruff and `git diff --check` passed; disposable-account routing proof deferred to gate.
+Checks: `cargo test -p loopflow --lib store::migrations::tests:: -- --test-threads=4` passed (79); focused published-CLI selection and WAL-lock regressions passed; `cargo test -p loopflow --test one_home_tests --test global_commands` passed (10, one disposable-account proof deferred to gate); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all --check` and `git diff --check` passed; prior installer Python (8) and Swift observation (8) passes remain applicable.

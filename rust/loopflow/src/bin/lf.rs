@@ -1118,8 +1118,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
             }
             Ok(())
         }
-        TaskCommand::Pr { issue, args } => run_task_operation(repo, issue, "pr", args, agent),
-        TaskCommand::Sync { issue, args } => run_task_operation(repo, issue, "sync", args, agent),
+        TaskCommand::Pr { issue, args } => run_task_operation(issue, "pr", args, agent),
+        TaskCommand::Sync { issue, args } => run_task_operation(issue, "sync", args, agent),
         TaskCommand::Complete {
             issue,
             summary,
@@ -1263,7 +1263,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
 }
 
 fn run_task_operation(
-    repo: &Path,
     issue: &str,
     operation: &str,
     args: &[String],
@@ -1276,7 +1275,7 @@ fn run_task_operation(
             .into_iter()
             .chain(args.iter().map(String::as_str)),
     )?;
-    loopflow::ops::task::task_operation(repo, issue, operation, args, agent)?;
+    loopflow::ops::task::task_operation(issue, operation, args, agent)?;
     Ok(())
 }
 

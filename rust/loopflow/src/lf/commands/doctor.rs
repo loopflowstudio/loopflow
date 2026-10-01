@@ -228,7 +228,7 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Err(error) => migration_error = Some(error.to_string()),
                 }
                 let validation = if crate::store::custom_home_selected() {
-                    crate::store::migrations::validate_installed_development_sqlite(
+                    crate::store::migrations::validate_experimental_sqlite(
                         &connection,
                         crate::build_info::migration_draft_manifest(),
                     )

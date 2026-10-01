@@ -15,13 +15,13 @@ lf cron history --wave infrastructure --days 35
 ```
 
 ```bash
-LF_HOME="$(mktemp -d)" local-bin/lf wave list --json  # explicit disposable experiment
-lf install                                   # return to the latest published release
+lf install                                   # install the latest published release
 uv run python scripts/install.py local        # build only under local-bin/
+LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`scripts/install.py local` builds this worktree's `lf`,
+`scripts/install.py local` builds this worktree's `lf`
 and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
 migration authority. Local builds never change the installed CLI or main Home.
 Use an explicit disposable `LF_HOME` for experiments.
@@ -91,8 +91,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local` | Build validation-only `lf`, and `Loopflow.app` into `local-bin/` | No |
-| Local | `scripts/install.py local` | Build experimental artifacts under `local-bin/` | No |
+| Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the

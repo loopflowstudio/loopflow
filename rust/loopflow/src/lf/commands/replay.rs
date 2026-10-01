@@ -9,7 +9,7 @@ use crate::engine::{
 use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec};
 
 pub fn run(selector: &str) -> Result<()> {
-    let home = crate::store::observability_home_dir();
+    let home = crate::store::lf_home_dir();
     let run_id = replay_at(&home, selector)?;
     println!("replayed {selector} as {run_id}");
     Ok(())

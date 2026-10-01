@@ -483,7 +483,6 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
 
 /// Address the existing PR/sync operation through its owning Task.
 pub fn task_operation(
-    _repo: &Path,
     issue: &str,
     operation: &str,
     args: &[String],

@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::durable::{render_steers, Steer, TaskId, WorkRef};
-use crate::engine::process::{
-    current_home_execution_context, pin_control_binary, start_lf_session_with_env,
-};
+use crate::engine::process::{execution_context, pin_control_binary, start_lf_session_with_env};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -309,7 +307,7 @@ pub(crate) struct TaskWorkerExec {
 
 pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
     let mut environment = request.environment;
-    let execution = current_home_execution_context()
+    let execution = execution_context()
         .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
     let control_bin = pin_control_binary(&execution.lf_bin)
         .to_string_lossy()

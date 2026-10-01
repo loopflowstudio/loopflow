@@ -143,7 +143,7 @@ pub(crate) fn checkout_execution_boundary(
             repo.display()
         ))
     })?;
-    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
+    let control = crate::engine::process::execution_context().map_err(|error| {
         anyhow::anyhow!(format!(
             "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
         ))

@@ -270,7 +270,7 @@ pub fn observe_process(command: &[String]) {
         return;
     }
     let observe = || -> anyhow::Result<()> {
-        let path = crate::store::observation_database_path()?;
+        let path = crate::store::database_path_from_env()?;
         let ledger = SqliteStore::open_existing_execs(&path)?;
         let directory = std::env::current_dir()?;
         let fields = LfEventFields {
@@ -923,7 +923,7 @@ pub(crate) fn task_worker_owner_evidence(
         return receipt.process_evidence();
     }
 
-    let Ok(path) = crate::store::observability_database_path() else {
+    let Ok(path) = crate::store::database_path_from_env() else {
         return ProcessIdentityEvidence::Unknown;
     };
     if !path.exists() {

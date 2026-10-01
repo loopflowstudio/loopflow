@@ -824,7 +824,7 @@ pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResul
 }
 
 pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
-    let path = crate::store::current_home_lf_home_dir().join("chapter-locks");
+    let path = crate::store::lf_home_dir().join("chapter-locks");
     #[cfg(test)]
     let path = super::pm::PM_TEST_CONTEXT
         .try_with(|context| context.path.with_extension("chapter-locks"))

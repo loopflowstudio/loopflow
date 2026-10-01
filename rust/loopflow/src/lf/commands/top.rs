@@ -345,7 +345,7 @@ pub fn run_top(json: bool) -> Result<()> {
 
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = crate::store::observability_home_dir();
+    let lf_home = crate::store::lf_home_dir();
     let processes = observe_processes(now, &lf_home)?;
     let (stale_exec_receipt_pids, orphaned_opencode_process_groups) =
         resolve_prune_targets(&processes);
@@ -451,8 +451,8 @@ pub fn running_workspace_paths() -> HashSet<PathBuf> {
 
 fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = crate::store::observability_home_dir();
-    let path = crate::store::observability_database_path()?;
+    let lf_home = crate::store::lf_home_dir();
+    let path = crate::store::database_path_from_env()?;
     let processes = observe_processes(now, &lf_home)?;
     let process_by_pid = processes
         .processes

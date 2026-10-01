@@ -101,23 +101,6 @@ pub(crate) fn production_database_path() -> PathBuf {
     machine_home_dir().join(".lf/loopflow.db")
 }
 
-/// An explicit experimental Home is inherited unchanged by child commands.
-pub(crate) fn authority_home_dir() -> PathBuf {
-    lf_home_dir()
-}
-
-pub(crate) fn observability_home_dir() -> PathBuf {
-    lf_home_dir()
-}
-
-pub(crate) fn observability_database_path() -> Result<PathBuf, std::io::Error> {
-    database_path_from_env()
-}
-
-pub(crate) fn observation_database_path() -> Result<PathBuf, std::io::Error> {
-    database_path_from_env()
-}
-
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
     sqlite::read_nonterminal_task_worktrees(path)
 }
@@ -149,14 +132,6 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
             .filter(|value| !value.is_empty()),
         lf_home_dir(),
     )
-}
-
-pub(crate) fn current_home_lf_home_dir() -> PathBuf {
-    lf_home_dir()
-}
-
-pub(crate) fn current_home_database_path() -> Result<PathBuf, std::io::Error> {
-    database_path_from_env()
 }
 
 fn resolve_database_path(
@@ -1245,8 +1220,8 @@ mod tests {
         assert!(!may_apply_migrations(&production, published, home, Forbidden).unwrap());
         assert!(may_apply_migrations(&production, published, home, Authorized).unwrap());
 
-        // A private/isolated store is always the caller's to initialize and
-        // advance, regardless of authority or boundary.
+        // A private store may initialize regardless of published authority.
+        // Its schema must match exactly on subsequent opens.
         let isolated = home.join(".lf-dev/branch/loopflow.db");
         assert!(may_apply_migrations(&isolated, validation_only, home, Forbidden).unwrap());
         assert!(may_apply_migrations(&isolated, published, home, Forbidden).unwrap());

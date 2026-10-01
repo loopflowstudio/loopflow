@@ -29,7 +29,7 @@ use crate::chat::types::ConversationEvent;
 use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
-    let context = crate::engine::process::pinned_execution_context()?;
+    let context = crate::engine::process::execution_context()?;
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home, &context.db_path)
 }
 

@@ -1621,6 +1621,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             let mut provider = state.lock().await;
             provider.current_project_id = Some("prior-project".into());
             provider.issues[0]["project"]["id"] = json!("prior-project");
+            mark_issue_updated(&mut provider.issues[0]);
             // Duplicate foreign membership still yields one preview entry.
             provider.project_name = None;
             provider.extra_projects.push(foreign.clone());

@@ -93,9 +93,13 @@ input and was corrected to compare the retained review input.
 
 Final proof: prompt goldens (1), documentation (3), builtin contracts (14),
 all-target Clippy, formatting, architecture, migration history and diff checks
-passed. Main merged locally at `5091f9f0a`; the finishing checkpoint contains
-follow-up cull edits. The first continuation correctly named those remaining
-tracked edits after recording the merge; it published nothing.
+passed. Main merged locally at `5091f9f0a`; implementation checkpoint `41b8e9d28`
+contains the follow-up cull edits. The first continuation named remaining
+tracked edits after recording the merge. After checkpointing, no continuation
+receipt remained; `lf sync --manual de074a2ebd2cb54e6f7dde799400dae36c87bbbe`
+then succeeded against the already-integrated target without changing HEAD.
+The checkout is clean and the pinned main commit is an ancestor. Nothing was
+pushed, published, landed or marked complete; shipment belongs to the supervisor.
 Gate/CI retain affected-suite and release validation; these focused proofs are
 not a hosted gate receipt. Final compiled counts: 126 commands below root,
 419 flags, 84 positionals, 16 hidden commands and zero registered aliases.

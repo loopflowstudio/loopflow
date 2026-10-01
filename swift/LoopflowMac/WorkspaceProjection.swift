@@ -360,7 +360,15 @@ struct TaskFlowDraft: Equatable {
 @Observable
 final class WorkspaceNavigation {
     enum Content { case overview, details, terminals }
+    enum Palette: Equatable {
+        case search
+        case flow(String)
+    }
     var content: Content = .overview
+    var palette: Palette?
+    var recentDestinations: [WorkspacePaletteRow] = []
+    /// Source revisions isolate disclosure from changed definitions and repositories.
+    var expandedTemplateGroups: [String: Set<String>] = [:]
     var showsActivity = false
     var presentation: WorkspacePresentation = .compact
     var selectedSessionId: String? {

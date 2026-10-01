@@ -160,3 +160,15 @@ and supported `--json` output in scripts.
 
 [Full command reference](lf-reference.md) · [Authoring](authoring.md) ·
 [Configuration](config.md)
+
+### Open a Task in the desktop
+
+```sh
+open 'loopflow://task/LOO-303'
+lf roadmap --task LOO-303 --all --json
+```
+
+Task links open details without starting work, including retained and completed
+Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
+Task destinations open details; selecting a Flow opens its folded template.

@@ -1193,7 +1193,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
                 for entry in entries {
                     println!(
                         "{} / {}: {} — {}",
-                        entry.wave, entry.project, entry.issue, entry.outcome
+                        entry.wave,
+                        entry.project,
+                        entry.issue.as_deref().unwrap_or("Project"),
+                        entry.outcome
                     );
                 }
             }
@@ -1797,9 +1800,12 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Roadmap { wave, json, all }) => {
-            loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json, *all)
-        }
+        Some(Commands::Roadmap {
+            wave,
+            task,
+            json,
+            all,
+        }) => loopflow::lf::commands::waves::roadmap(wave.as_deref(), task.as_deref(), *json, *all),
         Some(Commands::Activity {
             since,
             limit,

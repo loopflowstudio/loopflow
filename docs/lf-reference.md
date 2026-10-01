@@ -493,7 +493,11 @@ open; they never equate a closed PR with an abandoned Task.
 
 Sweep reads every linked Wave's Initiative, including archived Projects, and
 compares issue membership with that Wave's current chapter. Current-chapter and
-terminal issues are excluded. Worker claims, open PRs, unreconciled merges,
+terminal issues are excluded. Projects owned entirely by other Teams are skipped
+and named once in the preview (`issue: null` in JSON). Wave sync and planning
+refresh also omit them; sync never renames them. Missing Team ownership and
+Projects shared with the repository Team still require resolution.
+Worker claims, open PRs, unreconciled merges,
 dirty checkouts and unavailable evidence are reported without canceling those
 Tasks. Preview and apply check retained unmerged PRs even after local abandonment.
 Apply rechecks ownership and chapter membership, uses Task abandonment,

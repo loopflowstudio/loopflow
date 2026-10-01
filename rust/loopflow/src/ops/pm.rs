@@ -2423,6 +2423,18 @@ async fn pm_sync_async(
             .map_err(pm_to_ops)?;
         let mut slugs = BTreeMap::new();
         for project in projects {
+            if team_id
+                .as_deref()
+                .is_some_and(|team| project_is_foreign(&project, team))
+            {
+                diagnostics.push(format!(
+                    "skipped foreign-Team Project `{}` ({}) in wave/{wave}: Teams [{}]",
+                    project.name,
+                    project.id,
+                    project.team_ids.join(", ")
+                ));
+                continue;
+            }
             if let Some(existing_wave) = seen_projects.insert(project.id.clone(), wave.clone()) {
                 let message = format!(
                     "Linear Project `{}` ({}) appears under both wave/{existing_wave} and wave/{wave}",
@@ -2543,6 +2555,10 @@ async fn pm_sync_async(
             super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
             let title_path = canonical_wave_title_path_async(repo, wave).await?;
             for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
+                if project_is_foreign(&project, &team_id) {
+                    continue;
+                }
+                validate_project_ownership(&project, wave, &initiative, &team_id)?;
                 let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
                 let expected_name = format!("{title_path} — {canonical_name}");
                 if project.name != expected_name {
@@ -2818,7 +2834,7 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
     Ok(())
 }
 
-/// List a Wave's Projects and enforce repository Team + singular Initiative ownership.
+/// List repository Projects and enforce singular Team + Initiative ownership.
 pub(crate) async fn checked_projects(
     repo: &Path,
     ctx: &PmContext,
@@ -2876,6 +2892,7 @@ async fn checked_projects_with_store(
             projects.push(adopted);
         }
     }
+    projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
         project.name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2883,6 +2900,10 @@ async fn checked_projects_with_store(
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
+}
+
+fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+    !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
@@ -3029,12 +3050,18 @@ fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
 }
 
+#[derive(Debug)]
+pub(crate) struct ChapterSweep {
+    pub candidates: Vec<(String, String, PmItem)>,
+    pub skipped_projects: Vec<(String, PmProject)>,
+}
+
 /// Read every linked Initiative, including archived predecessor Projects.
-pub(crate) async fn chapter_sweep_candidates(
-    repo: &Path,
-) -> OpsResult<Vec<(String, String, PmItem)>> {
+pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSweep> {
     let store = pm_store().await?;
     let mut candidates = Vec::new();
+    let mut skipped_projects = Vec::new();
+    let mut skipped_ids = BTreeSet::new();
     for name in list_pm_waves(repo)? {
         let ctx = resolve_context(repo, &name).await?;
         let locator = crate::work::wave::WaveLocator::discover(repo, &name)
@@ -3051,6 +3078,12 @@ pub(crate) async fn chapter_sweep_candidates(
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
+            if project_is_foreign(&project, &ctx.team_id) {
+                if skipped_ids.insert(project.id.clone()) {
+                    skipped_projects.push((name.clone(), project));
+                }
+                continue;
+            }
             validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
             if project.id == chapter.id {
                 continue;
@@ -3079,7 +3112,10 @@ pub(crate) async fn chapter_sweep_candidates(
             }
         }
     }
-    Ok(candidates)
+    Ok(ChapterSweep {
+        candidates,
+        skipped_projects,
+    })
 }
 
 pub(crate) async fn require_outside_current_chapter(

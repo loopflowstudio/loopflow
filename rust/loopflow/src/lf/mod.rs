@@ -506,6 +506,9 @@ pub enum Commands {
         /// Scope to one Wave (default: every Wave in the current repository)
         #[arg(long)]
         wave: Option<String>,
+        /// Find an exact issue identifier, including retained historical Tasks.
+        #[arg(long)]
+        task: Option<String>,
         /// Emit the roadmap snapshot as JSON
         #[arg(long)]
         json: bool,

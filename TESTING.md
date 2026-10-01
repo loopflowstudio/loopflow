@@ -578,7 +578,10 @@ execution overrides; they are not exported by `sync-skills`.
 cargo test -p loopflow --lib engine::skills::tests
 ```
 
-Prompt parity and golden prompt tests live in Rust.
+After editing embedded skills, directions, surfaces, or prompt assembly, run
+the Rust golden prompt check even for Markdown-only changes. If the mismatch
+reflects the intended prompt change, regenerate the snapshots, review their
+diff, and rerun the check before gate.
 
 ```bash
 cargo test -p loopflow --test golden_prompt

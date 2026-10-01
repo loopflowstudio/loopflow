@@ -732,21 +732,39 @@ fn print_task_snapshot(
             branch,
             pm_writeback,
         );
-        println!("  execution: {}", snapshot.execution.reason);
+        println!("  managed execution: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
         }
-        for run in &snapshot.runs {
+        for session in &snapshot.work.sessions {
             println!(
-                "  Session input: {}  {}  {}  {}",
-                run.selector(),
-                run.label(),
-                run.surface,
-                run.status()
+                "  Session: {}  {}  {}{}",
+                session.id,
+                session.title,
+                if session.completed_at.is_some() {
+                    "completed"
+                } else {
+                    "open"
+                },
+                if session.managed { "  [managed]" } else { "" }
             );
         }
-        if snapshot.runs_truncated {
-            println!("  Run history truncated; inspect exact Run IDs for older evidence");
+        for flow in &snapshot.work.flows {
+            println!(
+                "  Flow: {}  {}  {:?}{}",
+                flow.summary.id,
+                flow.summary.name.as_deref().unwrap_or("unnamed"),
+                flow.summary.state,
+                if flow.managed { "  [managed]" } else { "" }
+            );
+        }
+        for exec in &snapshot.work.execs {
+            println!(
+                "  Exec: {}  {}  {}",
+                exec.id,
+                exec.command.as_deref().unwrap_or("unknown command"),
+                exec.outcome.as_deref().unwrap_or("unknown")
+            );
         }
         println!("  project: {}", snapshot.project_id);
         for pr in &snapshot.prs {
@@ -1255,24 +1273,17 @@ fn run() -> anyhow::Result<()> {
             cmd: loopflow::lf::HomeCommand::Install { .. }
         })
     );
-    if !bypasses_machine_startup_gate {
-        let switch_id = std::env::var(loopflow::machine_install::INSTALL_SWITCH_ENV)
-            .ok()
-            .filter(|value| !value.is_empty());
-        loopflow::machine_install::authorize_current_for_switch(
-            &loopflow::machine_install::ArtifactRole::Cli,
-            switch_id.as_deref(),
-        )?;
-        if !matches!(
+    if !bypasses_machine_startup_gate
+        && !matches!(
             &cli.command,
             Some(
                 Commands::Home {
                     cmd: loopflow::lf::HomeCommand::Screenshot { .. }
                 } | Commands::ScreenshotSupervisor { .. }
             )
-        ) {
-            loopflow::store::isolate_branch_data()?;
-        }
+        )
+    {
+        loopflow::machine_install::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
@@ -1325,17 +1336,10 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
             }
-            Some(InstallCommand::LocalPreflight { store, json }) => {
-                loopflow::lf::commands::install::local_preflight(store, *json)
-            }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
             }
             Some(InstallCommand::Promote {
-                from_build,
-                coordinated_build,
-                fresh,
-                reuse_home,
                 cli_target,
 
                 app_source,
@@ -1353,10 +1357,6 @@ fn run() -> anyhow::Result<()> {
                 },
                 *sync_skills,
                 *preview,
-                from_build.as_deref(),
-                coordinated_build.as_deref(),
-                *fresh,
-                reuse_home.as_deref(),
             ),
             Some(InstallCommand::Rollback {
                 cli_target,
@@ -1419,19 +1419,6 @@ fn dispatch(
     // expectation and falls through.
     loopflow::lf::commands::home::validate_expected_home_process()?;
 
-    if let Some(task) = &cli.task {
-        if matches!(
-            cli.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Pr { .. } | TaskCommand::Sync(_)
-            })
-        ) {
-            let directory = loopflow::repo::working_directory()?;
-            if loopflow::ops::task::redirect_task_operation(&directory, task, &args[1..])? {
-                return Ok(());
-            }
-        }
-    }
     let mut direct_binding = None;
     let mut _work_declaration = None;
     let mut _bound_cwd = None;
@@ -1483,14 +1470,14 @@ fn dispatch(
                 anyhow::ensure!(
                     wave.id() == &binding.wave_id,
                     "--wave {} does not own Task {} (Wave {})",
-                    wave.name(),
+                    wave.slug(),
                     binding.work.id(),
                     binding.wave_name
                 );
                 direct_binding = Some(binding);
             }
         }
-        cli.wave = Some(wave.name().to_string());
+        cli.wave = Some(wave.slug().to_string());
     } else if let Some(binding) = &direct_binding {
         cli.wave = Some(binding.wave_name.clone());
     }

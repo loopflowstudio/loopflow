@@ -13,6 +13,18 @@ registered Task. Connect a provider with `lf account connect codex EMAIL`, or
 use an existing provider login. `lf account --cached` inspects saved evidence
 without contacting providers.
 
+## Use one Home
+
+Ordinary commands, Task workers and agent tools use the installed `lf` and
+`~/.lf`. Source builds forward there too. For an explicit disposable experiment:
+
+```bash
+LF_HOME="$(mktemp -d)" target/debug/lf wave list --json
+```
+
+Children stay in that Home. Experiments start empty; Loopflow does not upgrade,
+repair or preserve them. Use a fresh directory when its schema changes.
+
 ## Select where work happens
 
 ```bash
@@ -127,5 +139,19 @@ open 'loopflow://task/LOO-303'
 lf roadmap --task LOO-303 --all --json
 ```
 
-Task links and ⌘K open work without starting it. Add a percent-encoded `repo`
-query to disambiguate issue identifiers. Flow selection opens its folded template.
+Task links open details without starting work, including retained and completed
+Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
+Task destinations open details; selecting a Flow opens its folded template.
+
+### Inspect all work in a Task
+
+```bash
+lf task status LOO-358 --json
+lf session list --task LOO-358 --history
+```
+
+Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
+including headless and completed work. Managed marks the Flow advanced by
+`lf --task … flow start`; the managed execution line describes only that worker. Independent
+work remains visible and preserves the checkout while unfinished or unresolved.

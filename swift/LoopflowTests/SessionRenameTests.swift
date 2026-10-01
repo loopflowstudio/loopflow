@@ -109,12 +109,14 @@ func renameFixtureRecord(
     _ id: String, title: String, source: String = "generated", work: WorkReference? = nil
 ) throws -> SessionRecord {
     let workJSON = String(decoding: try JSONEncoder().encode(work), as: UTF8.self)
+    let taskIds = work.flatMap { $0.kind == .task ? [$0.id] : nil } ?? []
+    let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
     {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"closed","wave_id":null,"work_path":null,
      "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "closed")),
      "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
-     "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+     "task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
     """.utf8))
 }
 

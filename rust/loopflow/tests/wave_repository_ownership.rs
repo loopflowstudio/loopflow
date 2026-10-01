@@ -413,22 +413,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(team_error.to_string().contains("repository Team"));
 
-    author_wave(&repo_a, "infrastructure/child", "nested");
-    let nested = registered_wave(&repo_a, "infrastructure/child");
-    store.create_wave(&nested).await.unwrap();
-    let nested_error = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
-        .await
-        .unwrap_err();
-    assert!(nested_error
-        .to_string()
-        .contains("contains registered Wave"));
-    assert!(repo_a.join("wave/infrastructure/child/GOAL.md").is_file());
-    store.delete_wave(nested.id()).await.unwrap();
-    std::fs::remove_dir_all(repo_a.join("wave/infrastructure/child")).unwrap();
-
-    author_wave(&repo_a, "infrastructure/child", "chord-child");
-    let child = registered_wave(&repo_a, "infrastructure/child").with_parent(alpha.id().clone());
+    author_wave(&repo_a, "infrastructure/child", "child");
+    let child = registered_wave(&repo_a, "child").with_parent(alpha.id().clone());
     store.create_wave(&child).await.unwrap();
+    author_wave(&repo_a, "infrastructure/child/leaf", "grandchild");
+    let grandchild = registered_wave(&repo_a, "leaf").with_parent(child.id().clone());
+    store.create_wave(&grandchild).await.unwrap();
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
@@ -474,7 +464,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(injected.to_string().contains("injected relocation failure"));
     assert_eq!(
-        store.get_wave(alpha.id()).await.unwrap().unwrap().name(),
+        store.get_wave(alpha.id()).await.unwrap().unwrap().slug(),
         "infrastructure"
     );
     assert!(repo_a.join("wave/infrastructure").is_dir());
@@ -498,17 +488,21 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         ],
     );
     assert_eq!(relocation["wave_id"], alpha.id().as_str());
-    assert_eq!(relocation["waves_moved"], 2);
+    assert_eq!(relocation["waves_moved"], 3);
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
-    assert_eq!(renamed.name(), "platform");
+    assert_eq!(renamed.slug(), "platform");
     assert_eq!(
         std::fs::read_to_string(repo_a.join("wave/platform/GOAL.md")).unwrap(),
         "# alpha\n"
     );
     assert!(!repo_a.join("wave/infrastructure").exists());
     let renamed_child = store.get_wave(child.id()).await.unwrap().unwrap();
-    assert_eq!(renamed_child.name(), "platform/child");
+    assert_eq!(renamed_child.slug(), "platform/child");
     assert!(repo_a.join("wave/platform/child/GOAL.md").is_file());
+    let renamed_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(renamed_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(renamed_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_a.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .get_wave_at(&WaveLocator::discover(&repo_b, "infrastructure").unwrap())
@@ -542,10 +536,15 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .display()
             .to_string()
     );
-    assert_eq!(moved.name(), "platform");
+    assert_eq!(moved.slug(), "platform");
     let moved_child = store.get_wave(child.id()).await.unwrap().unwrap();
     assert_eq!(moved_child.repo(), moved.repo());
-    assert_eq!(moved_child.name(), "platform/child");
+    assert_eq!(moved_child.slug(), "platform/child");
+    let moved_grandchild = store.get_wave(grandchild.id()).await.unwrap().unwrap();
+    assert_eq!(moved_grandchild.repo(), moved.repo());
+    assert_eq!(moved_grandchild.slug(), "platform/child/leaf");
+    assert_eq!(moved_grandchild.parent_wave_id(), Some(child.id()));
+    assert!(repo_d.join("wave/platform/child/leaf/GOAL.md").is_file());
     assert_eq!(
         store
             .pm_snapshot(alpha.id())
@@ -584,7 +583,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap_err();
     assert!(error.to_string().contains("invoke relocation from"));
     assert_eq!(
-        store.get_wave(alpha.id()).await.unwrap().unwrap().name(),
+        store.get_wave(alpha.id()).await.unwrap().unwrap().slug(),
         "platform"
     );
     assert_eq!(
@@ -682,10 +681,10 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
             .await
             .unwrap();
         assert_eq!(receipt.wave_id, established.id().as_str());
-        commit(&source, &format!("relocate {}", established.name()));
+        commit(&source, &format!("relocate {}", established.slug()));
 
         let active = store
-            .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+            .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -748,7 +747,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     for (established, _) in &identities {
         assert_eq!(
             reopened
-                .get_wave_at(&WaveLocator::discover(&target, established.name()).unwrap())
+                .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
                 .await
                 .unwrap()
                 .unwrap()
@@ -783,8 +782,7 @@ async fn relocation_refuses_meaningful_destination_history() {
 
     let child_shadow = registered_wave(&target, "with-child");
     store.create_wave(&child_shadow).await.unwrap();
-    let child =
-        registered_wave(&target, "with-child/nested").with_parent(child_shadow.id().clone());
+    let child = registered_wave(&target, "nested").with_parent(child_shadow.id().clone());
     store.create_wave(&child).await.unwrap();
 
     let pm_shadow = registered_wave(&target, "with-pm");

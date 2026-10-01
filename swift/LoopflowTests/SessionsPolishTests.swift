@@ -66,7 +66,7 @@ struct SessionsPolishTests {
                   "ready_summary": null,
                   "work_path": "product / Desktop / LOO-291",
                   "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-                  "title_source": "generated", "flow_membership": {"kind": "independent"}, "terminal_ids": [],
+                  "title_source": "generated", "flow_membership": {"kind": "independent"}, "task_ids": [], "terminal_ids": [],
                   "open_argv": ["lf", "session", "connect", "polish"]
                 }
                 """.utf8

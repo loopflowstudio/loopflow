@@ -11,6 +11,30 @@ import ViewInspector
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Task work renders checkout conversations, the managed Flow and mechanical Execs")
+    func taskWorkInventory() async throws {
+        let fixtures = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))
+        let work = try JSONDecoder().decode(TaskWork.self, from: data)
+        let payload = "{\"work\":\(String(decoding: data, as: UTF8.self))}"
+        let query = RegistryQuery { _, _ in payload }
+        let model = PodiumModel(query: query)
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        await model.loadTaskWork(task: task, wave: wave.wave)
+        let view = TaskWorkView(model: model, task: task, wave: wave.wave)
+        for id in work.sessions.map(\.id) + work.flows.map(\.id) + work.execs.map(\.id) {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
+        }
+        #expect(try view.inspect().findAll(ViewType.Text.self) {
+            try $0.string() == "Managed"
+        }.count == 2)
+    }
+
     @Test("Loading, unavailable, empty and selected Work have distinct content")
     func workStates() throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }

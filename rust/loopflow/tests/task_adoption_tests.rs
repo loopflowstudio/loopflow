@@ -1,6 +1,3 @@
-#[path = "support/installation.rs"]
-mod installation;
-
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -146,7 +143,6 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .unwrap();
             assert!(store.list_tasks(None).await.unwrap().is_empty());
         });
-        let installed = installation::Installation::new(home.path());
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
         let tmux = bin.join("tmux");
@@ -162,7 +158,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         fs::write(&gh, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nif [ \"$1 $2\" = 'pr list' ]; then\n  printf '%s\\n' '[{{\"url\":\"https://example.test/pull/42\",\"number\":42,\"state\":\"OPEN\",\"isDraft\":true,\"mergeCommit\":null,\"headRefOid\":\"{head}\"}}]'\nelse\n  exit 1\nfi\n")).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
         let command = |cwd: &Path, args: &[&str]| {
-            let mut command = Command::new(&installed.cli);
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
             for (key, _) in std::env::vars_os() {
                 if key.to_string_lossy().starts_with("LF_") {
                     command.env_remove(key);
@@ -172,6 +168,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                 .current_dir(cwd)
                 .args(args)
                 .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_DB_PATH", home.path().join("loopflow.db"))
                 .env(
                     "PATH",

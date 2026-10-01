@@ -975,9 +975,13 @@ fn declared_agent_can_start_another_tasks_flow() {
         .unwrap(),
     )
     .unwrap();
-    let output = fixture.run(&[
-        "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
-    ]);
+    let output = fixture
+        .command(&[
+            "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
+        ])
+        .env("LF_BIN", bin.join("lf"))
+        .output()
+        .unwrap();
     assert!(output.status.success(), "{output:?}");
     let result: Value = serde_json::from_slice(
         &std::fs::read(fixture.home.path().join("tool-result.json")).unwrap(),

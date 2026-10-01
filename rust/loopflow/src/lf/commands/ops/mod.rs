@@ -677,7 +677,7 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 fn planning_wave(repo: &std::path::Path, explicit: Option<&str>) -> Result<Option<String>> {
     use crate::work::wave::context::WaveResolveError;
     match crate::work::wave::context::resolve_managed_wave_sync(Some(repo), explicit) {
-        Ok(wave) => Ok(Some(wave.name().to_string())),
+        Ok(wave) => Ok(Some(wave.slug().to_string())),
         Err(WaveResolveError::NoContext) => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -936,7 +936,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 Some(&repo_root),
                 wave.as_deref(),
             )
-            .map(|wave| wave.name().to_string())
+            .map(|wave| wave.slug().to_string())
             .map_err(|err| match err {
                 crate::work::wave::context::WaveResolveError::NoContext => {
                     anyhow!("cannot determine wave; pass --wave <name>")
@@ -1070,7 +1070,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             days,
             json,
         } => {
-            let root = crate::ops::receipt_root(&crate::store::authority_home_dir());
+            let root = crate::ops::receipt_root(&crate::store::lf_home_dir());
             let receipts = crate::ops::list_cron_receipts(&root, wave, flow.as_deref(), *days)?;
             if *json {
                 println!("{}", serde_json::to_string(&receipts)?);
@@ -1199,8 +1199,8 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         Ok(CronAuthority {
             host: CronHost {
                 home_id: local.id.clone(),
-                lf_home: crate::store::authority_home_dir(),
-                db_path: crate::store::observability_database_path()?,
+                lf_home: crate::store::lf_home_dir(),
+                db_path: crate::store::database_path_from_env()?,
                 path_env,
             },
             local_home: local.id,
@@ -1925,7 +1925,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
         }
     }
 
-    // A development binary owns an isolated `.lf-dev` registry, but pruning is
+    // An explicit experiment owns its own registry, but pruning is
     // machine-wide filesystem mutation. Read the release registry without
     // migrations so `cargo run -- lf task wt prune` cannot erase release-owned Tasks.
     let production = crate::store::production_database_path();

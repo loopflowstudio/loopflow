@@ -281,30 +281,20 @@ pub(crate) fn bound_context(
         usage: Vec::new(),
     };
     let repo_root = Path::new(&components.repo_root);
-    let (memory_path, memory_text) = components
-        .wave_memory
-        .as_ref()
-        .map(|memory| (memory.path.as_str(), memory.content.as_str()))
-        .unwrap_or(("Wave memory (absent)", ""));
-    // Preserve the exact gathered text, including any ancestor Wave memories.
-    let bounded = report.bound_source(
-        memory_path,
-        memory_text,
-        BudgetKey::MemoryTokens,
-        BudgetKey::MemoryBytes,
+    let memories = components
+        .docs
+        .iter_mut()
+        .filter(|doc| {
+            doc.source == DocumentSource::RepoMemory
+                || (doc.source == DocumentSource::Wave && doc.path.ends_with("/MEMORY.md"))
+        })
+        .collect();
+    bound_memories(
+        memories,
         repo_root,
+        &mut components.budget_decisions,
+        &mut report,
     )?;
-    if let Some(memory) = &mut components.wave_memory {
-        record_reduction(
-            &mut components.budget_decisions,
-            &memory.content,
-            &bounded,
-            ContextAssetKind::Memory,
-            ContextScope::Wave,
-            &memory.path,
-        );
-        memory.content = bounded;
-    }
     let scratch_docs: Vec<_> = components
         .docs
         .iter()
@@ -384,6 +374,55 @@ pub(crate) fn bound_context(
         *message = bounded;
     }
     Ok(report)
+}
+
+fn bound_memories(
+    memories: Vec<&mut Document>,
+    repo_root: &Path,
+    decisions: &mut Vec<ContextDecision>,
+    report: &mut ContextBudgetReport,
+) -> Result<(), CoreError> {
+    let token_limit = report.budgets.limit(BudgetKey::MemoryTokens);
+    let byte_limit = report.budgets.limit(BudgetKey::MemoryBytes);
+    let memory_tokens = memories
+        .iter()
+        .map(|doc| count_tokens(&doc.content))
+        .sum::<usize>()
+        .max(token_limit);
+    let memory_bytes = memories
+        .iter()
+        .map(|doc| doc.content.len())
+        .sum::<usize>()
+        .max(byte_limit);
+    // Repository, ancestor and selected Wave memory share one budget.
+    for memory in memories {
+        let tokens = count_tokens(&memory.content) * token_limit / memory_tokens;
+        let bytes = memory.content.len() * byte_limit / memory_bytes;
+        let bounded = bound_source(&memory.content, tokens, bytes, repo_root)?;
+        report.usage.push(ContextUsage {
+            source: memory.path.clone(),
+            original_tokens: tokens_in(&memory.content),
+            original_bytes: memory.content.len(),
+            submitted_tokens: tokens_in(&bounded),
+            submitted_bytes: bounded.len(),
+            token_limit: tokens,
+            byte_limit: bytes,
+        });
+        record_reduction(
+            decisions,
+            &memory.content,
+            &bounded,
+            ContextAssetKind::Memory,
+            if memory.source == DocumentSource::RepoMemory {
+                ContextScope::Repo
+            } else {
+                ContextScope::Wave
+            },
+            &memory.path,
+        );
+        memory.content = bounded;
+    }
+    Ok(())
 }
 
 fn record_reduction(
@@ -469,18 +508,18 @@ mod tests {
             let memory = " word".repeat(words);
             let mut components = PromptComponents {
                 repo_root: repo.path().display().to_string(),
-                wave_memory: Some(Document {
+                docs: vec![Document {
                     path: "wave/build/MEMORY.md".into(),
                     content: memory.clone(),
-                    source: DocumentSource::WaveMemory,
-                }),
+                    source: DocumentSource::Wave,
+                }],
                 ..Default::default()
             };
             let report = bound_context(&mut components, budgets.clone()).unwrap();
-            let submitted = &components.wave_memory.as_ref().unwrap().content;
+            let submitted = &components.docs[0].content;
             assert_eq!(submitted != &memory, excerpted);
-            assert_eq!(report.usage[0].token_limit, 16_000);
-            assert_eq!(report.usage[0].byte_limit, 128 * 1024);
+            assert_eq!(budgets.limit(BudgetKey::MemoryTokens), 16_000);
+            assert_eq!(budgets.limit(BudgetKey::MemoryBytes), 128 * 1024);
             assert!(report.usage[0].submitted_tokens <= 16_000);
             assert_eq!(components.budget_decisions.len(), usize::from(excerpted));
         }
@@ -548,16 +587,19 @@ mod tests {
         let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
         let mut components = PromptComponents {
             repo_root: repo.path().display().to_string(),
-            wave_memory: Some(Document {
-                path: "wave/build/MEMORY.md".into(),
-                content: "Live decision and evidence. ".repeat(400),
-                source: DocumentSource::WaveMemory,
-            }),
-            docs: vec![Document {
-                path: "scratch/plan.md".into(),
-                content: "Remain unresolved. ".repeat(600),
-                source: DocumentSource::Scratch,
-            }],
+            wave: Some("build".into()),
+            docs: vec![
+                Document {
+                    path: "wave/build/MEMORY.md".into(),
+                    content: "Live decision and evidence. ".repeat(400),
+                    source: DocumentSource::Wave,
+                },
+                Document {
+                    path: "scratch/plan.md".into(),
+                    content: "Remain unresolved. ".repeat(600),
+                    source: DocumentSource::Scratch,
+                },
+            ],
             ..Default::default()
         };
         let report = bound_context(&mut components, budgets.clone()).unwrap();
@@ -576,9 +618,8 @@ mod tests {
             2
         );
 
-        components.wave_memory.as_mut().unwrap().content =
-            "Live decision retained; old evidence in git.".into();
-        components.docs[0].content = "Unresolved work retained.".into();
+        components.docs[0].content = "Live decision retained; old evidence in git.".into();
+        components.docs[1].content = "Unresolved work retained.".into();
         let report = bound_context(&mut components, budgets).unwrap();
         assert!(report
             .usage

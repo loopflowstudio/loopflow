@@ -86,7 +86,7 @@ pub fn resolve_current_project(
 ) -> OpsResult<ResolvedProject> {
     let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let snapshot = load_wave(repo, wave.name(), refresh)?;
+    let snapshot = load_wave(repo, wave.slug(), refresh)?;
     let project = tokio::runtime::Runtime::new()
         .map_err(|error| OpsError::Message(error.to_string()))?
         .block_on(async {

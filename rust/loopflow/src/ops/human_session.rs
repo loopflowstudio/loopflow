@@ -37,8 +37,7 @@ pub(crate) fn reserved_capture(
         return Ok(None);
     };
     let reservation: ReviewCaptureReservation = serde_json::from_str(&raw.to_string_lossy())?;
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(&reservation.session_id)?
         .ok_or_else(|| anyhow!("review reservation disappeared"))?;
@@ -205,6 +204,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub kind: SessionKind,
     pub interactive: bool,
@@ -851,6 +851,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         kind,
         interactive: session.interactive,
@@ -1163,7 +1164,7 @@ async fn serve_flow_locked(
         bail!("review session cannot start: {}", failure.reason);
     }
     let message = flow_message(&task, &token);
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let serialized = serde_json::to_string(&HumanSessionToken::Flow {
         token: Box::new(token.clone()),
     })?;
@@ -1249,7 +1250,7 @@ async fn serve_locked(
     session: &AgentSession,
     launch_lock: File,
 ) -> Result<()> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session)?;
     command
@@ -1322,8 +1323,7 @@ pub(crate) fn publish_capture_binding(
     if reservation.run_id != *run_id {
         bail!("review Run differs from its reservation");
     }
-    let store =
-        crate::store::sqlite::SqliteStore::new(&crate::store::observability_database_path()?)?;
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     store.publish_review_capture(
         &reservation.session_id,
         reservation.captured,
@@ -1534,19 +1534,6 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
     #[cfg(test)]
     action_test::after_lookup("complete", session_id).await;
     let session = session_surface(store, &target).await?;
-    if matches!(&target, SessionTarget::Flow { .. }) {
-        if let Some(destination) = super::task_destination::destination()? {
-            // The full boundary id includes Task, invocation, node and iteration.
-            // The installed operation reads its own readiness/feedback; none is copied.
-            super::task_destination::execute(
-                &destination,
-                &std::env::current_dir()?,
-                &["session".into(), "complete".into(), session.id.clone()],
-                None,
-            )?;
-            return Ok(session);
-        }
-    }
     require_session_action(session.kind, session.state, SessionActionKind::Complete)?;
     match &target {
         SessionTarget::Row { session }
@@ -1687,7 +1674,7 @@ async fn open_flow_locked(
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
-    match crate::session_record::resolve_manifest(&crate::store::observability_home_dir(), run_id) {
+    match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), run_id) {
         Ok((dir, _)) => Ok(dir.join("prepared").is_file()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session Run"),
@@ -1810,6 +1797,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         },
     };
     Ok(SessionRecord {
+        task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         kind,
         interactive: session.interactive,
@@ -1854,7 +1842,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
         return Ok(None);
     };
     let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.name().to_string(),
+        Some(wave) => wave.slug().to_string(),
         None => format!("Wave {wave_id} (unavailable)"),
     };
     Ok(Some(match &session.task_id {
@@ -1867,7 +1855,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
 }
 
 fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
-    crate::session_record::record_dir(&crate::store::observability_home_dir(), run_id)
+    crate::session_record::record_dir(&crate::store::lf_home_dir(), run_id)
 }
 
 /// Rename a Session through its Run and return the authoritative record.
@@ -1994,7 +1982,7 @@ pub(crate) async fn spawn_session_exec(
     command: &mut tokio::process::Command,
     run_id: &String,
 ) -> Result<tokio::process::Child> {
-    let home = crate::store::observability_home_dir();
+    let home = crate::store::lf_home_dir();
     let executable = Path::new(command.as_std().get_program());
     let digest = fs::read(executable)
         .ok()
@@ -2004,7 +1992,7 @@ pub(crate) async fn spawn_session_exec(
         Some(cwd) => cwd.to_path_buf(),
         None => std::env::current_dir()?,
     };
-    let database = crate::store::observability_database_path()?;
+    let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
     // never start; the opening Run must retain enough evidence to diagnose it.
     // Arguments and environment values can contain prompts or credentials.
@@ -2094,7 +2082,7 @@ pub(crate) fn stop_session_client(run_id: &String) -> Result<()> {
         return Ok(());
     }
     let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
-        &crate::store::observability_database_path()?,
+        &crate::store::database_path_from_env()?,
     )
     .context("cannot resolve the provider for this Session input")?;
     let input = store
@@ -2135,7 +2123,7 @@ pub(crate) fn human_open_argv(
     worktree: Option<&Path>,
     id: &str,
 ) -> Result<Vec<String>> {
-    let context = crate::engine::process::current_home_execution_context()?;
+    let context = crate::engine::process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry the executable and its data together, including when a different
     // installation becomes current between listing and opening.
@@ -2230,7 +2218,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
@@ -2247,7 +2235,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
 
 /// Hand the conversation to a durable terminal, as a child of the asking Run.
 async fn exec_ask(session: &AgentSession) -> Result<()> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
@@ -2259,10 +2247,9 @@ async fn exec_ask(session: &AgentSession) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("Ask {} has no caller input", session.id))?
         .to_string();
-    let caller_dir =
-        crate::session_record::resolve_manifest(&crate::store::observability_home_dir(), &caller)
-            .ok()
-            .map(|(directory, _)| directory.to_string_lossy().to_string());
+    let caller_dir = crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), &caller)
+        .ok()
+        .map(|(directory, _)| directory.to_string_lossy().to_string());
     let mut env = vec![(crate::durable::RUN_ID_ENV, caller.as_str())];
     if let Some(directory) = &caller_dir {
         env.push((RUN_DIR_ENV, directory.as_str()));
@@ -2355,7 +2342,7 @@ fn flow_token_id(token: &FlowSessionToken) -> String {
 }
 
 pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
-    let directory = crate::store::current_home_lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
+    let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
     fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
     let path = directory.join(format!(".{name}.launch.lock"));
@@ -2531,6 +2518,7 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
             artifact_key: crate::session_record::new_artifact_key(),
@@ -3630,16 +3618,11 @@ mod tests {
     #[test]
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let argv = human_open_argv(None, None, "ask_123");
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        let argv = argv.unwrap();
+        let home = AskHome::new();
+        let argv = human_open_argv(None, None, "ask_123").unwrap();
 
         assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
+        assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }
 

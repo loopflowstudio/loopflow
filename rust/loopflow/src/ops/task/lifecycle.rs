@@ -1,4 +1,5 @@
 //! Task lifecycle composes the provider, PR, worker and checkout owners.
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -16,6 +17,15 @@ use super::{block_on_task, owning_wave, task_error, task_store};
 /// Completion is durable before cleanup; failure never reverses the outcome.
 pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
     if super::task_work_status(store, task).await? != WorkStatus::Done {
+        return Ok(());
+    }
+    let blockers = associated_work_blockers(store, task)?;
+    if !blockers.is_empty() {
+        eprintln!(
+            "Task {} is complete; retained checkout: {}",
+            task.plan.identifier,
+            blockers.join("; ")
+        );
         return Ok(());
     }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
@@ -134,6 +144,10 @@ fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<boo
 }
 
 async fn require_idle(store: &SharedStore, task: &Task, settle_dead: bool) -> OpsResult<()> {
+    let blockers = associated_work_blockers(store, task)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
     if let Some(position) = store.task_flow(&task.id).await.map_err(task_error)? {
         if execution_unsettled(store, &position)? {
             return Err(task_error(format!("{} has live or unresolved execution; interrupt it and wait for exit before abandoning", task.plan.identifier)));
@@ -219,15 +233,6 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
             current_branch(repo)?.ok_or_else(|| task_error("no Task selector or current branch"))?
         }
     };
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        crate::ops::task_destination::check_task(&destination, &selector).map_err(task_error)?;
-        let mut args = vec!["task".into(), "abandon".into(), selector];
-        if force {
-            args.push("--force".into());
-        }
-        return crate::ops::task_destination::json(&destination, repo, args, None)
-            .map_err(task_error);
-    }
     let repo = task_repository(repo, Some(&selector))?;
     block_on_task(abandon(&repo, &selector, force)).map_err(|error| {
         task_error(format!(
@@ -437,14 +442,6 @@ pub struct SweepEntry {
 }
 
 pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
-    if let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? {
-        let mut args = vec!["task".into(), "sweep".into()];
-        if apply {
-            args.push("--apply".into());
-        }
-        return crate::ops::task_destination::json(&destination, repo, args, None)
-            .map_err(task_error);
-    }
     block_on_task(async {
         let store = task_store().await?;
         let sweep = crate::ops::pm::chapter_sweep_candidates(repo).await?;
@@ -498,18 +495,6 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
     })
 }
 
-/// Move selected Task operations with their executable, data and launch options.
-pub fn redirect_task_operation(repo: &Path, issue: &str, args: &[String]) -> OpsResult<bool> {
-    let Some(destination) = crate::ops::task_destination::destination().map_err(task_error)? else {
-        return Ok(false);
-    };
-    crate::ops::task_destination::check_task(&destination, issue).map_err(task_error)?;
-    let output = crate::ops::task_destination::execute(&destination, repo, args, None)
-        .map_err(task_error)?;
-    print!("{}", String::from_utf8_lossy(&output));
-    Ok(true)
-}
-
 /// Resolve placed Task operations through retained Wave ownership, even after
 /// their checkout is gone. Unplaced planning work uses the caller's repository.
 pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<std::path::PathBuf> {
@@ -529,4 +514,94 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
     crate::repo::discover_repo_root(directory)
         .map_err(task_error)?
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
+}
+
+/// Completion cannot implicitly settle another Flow's work.
+pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    let mut blockers = execution_blockers(store, &work)?;
+    for flow in work.flows.iter().filter(|flow| !flow.managed) {
+        if flow.summary.state == crate::session::FlowSummaryState::Current {
+            blockers.push(format!(
+                "Flow {} is unfinished; inspect `lf flow show {} --sessions`",
+                flow.summary.id, flow.summary.id
+            ));
+        }
+    }
+    Ok(blockers)
+}
+
+/// Restoring a checkout preserves idle Flows; only unresolved execution waits.
+pub(super) fn associated_execution_blockers(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Vec<String>> {
+    execution_blockers(
+        store,
+        &store.sqlite.task_work(&task.id).map_err(task_error)?,
+    )
+}
+
+fn execution_blockers(
+    store: &SharedStore,
+    work: &crate::task_work::TaskWork,
+) -> OpsResult<Vec<String>> {
+    let mut blockers = Vec::new();
+    let mut managed_execs = HashSet::new();
+    for flow in work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
+    {
+        if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
+            if flow.managed {
+                managed_execs.extend(
+                    store
+                        .sqlite
+                        .flow_exec_ids(&flow.summary.id)
+                        .map_err(task_error)?,
+                );
+                if let Some(claim) = position.claim {
+                    managed_execs.insert(claim.owner.exec_id);
+                }
+            } else if execution_unsettled(store, &position)? {
+                blockers.push(format!(
+                    "Flow {} has live or unresolved execution",
+                    flow.summary.id
+                ));
+            }
+        }
+    }
+    for session in work.sessions.iter().filter(|session| !session.managed) {
+        if session.completed_at.is_none()
+            && session.kind != crate::session::SessionKind::Conversation
+        {
+            blockers.push(format!("Session {} awaits completion", session.id));
+        }
+        if store
+            .sqlite
+            .session_has_pending_turn(&session.id)
+            .map_err(task_error)?
+        {
+            blockers.push(format!(
+                "Session {} has an unresolved provider turn",
+                session.id
+            ));
+        }
+    }
+    let caller = crate::journal::current_exec_id();
+    for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
+        if caller.as_ref() == Some(&exec.id) || managed_execs.contains(&exec.id) {
+            continue;
+        }
+        if crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+        {
+            blockers.push(format!(
+                "Exec {} has live or unresolved execution; inspect `lf mon show {}`",
+                exec.id, exec.id
+            ));
+        }
+    }
+    Ok(blockers)
 }

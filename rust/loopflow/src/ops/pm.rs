@@ -2330,13 +2330,13 @@ async fn pm_sync_async(
                 && wave.promoted_at().is_none()
                 && !origin
                     .join("wave")
-                    .join(wave.name())
+                    .join(wave.slug())
                     .join("GOAL.md")
                     .is_file()
             {
                 diagnostics.push(format!(
                     "prepared child wave/{} has no GOAL.md; resume or abandon its promotion",
-                    wave.name()
+                    wave.slug()
                 ));
             }
         }
@@ -3029,12 +3029,11 @@ async fn canonical_wave_title_path_with_store(
         if current_repo != main {
             return Err(OpsError::Message(format!(
                 "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
-                current.name(),
+                current.slug(),
                 current.repo()
             )));
         }
-        let leaf = current.name().rsplit('/').next().unwrap_or(current.name());
-        segments.push(title_case(leaf));
+        segments.push(title_case(current.name()));
         let Some(parent_id) = current.parent_wave_id().cloned() else {
             break;
         };
@@ -3397,7 +3396,7 @@ mod tests {
         );
         write_goal(
             repo.path(),
-            "infrastructure",
+            "survival/infrastructure",
             "pm:\n  provider: linear\n  linear_initiative: initiative-infrastructure\n  linear_team: team-old\n",
         );
 
@@ -3407,19 +3406,9 @@ mod tests {
         ))
         .await
         .unwrap();
-        let survival = Wave::new(
-            WaveId::new(),
-            "survival".to_string(),
-            repo.path().display().to_string(),
-        );
-        let infrastructure = Wave::new(
-            WaveId::new(),
-            "infrastructure".to_string(),
-            repo.path().display().to_string(),
-        )
-        .with_parent(survival.id().clone());
-        store.create_wave(&survival).await.unwrap();
-        store.create_wave(&infrastructure).await.unwrap();
+        crate::work::wave::ensure_wave_row(&store, repo.path(), "survival/infrastructure")
+            .await
+            .unwrap();
 
         let old_survival = migration_project_node(
             "project-survival",
@@ -3446,15 +3435,6 @@ mod tests {
             &["team-loo"],
         );
         let responses = vec![
-            projects_response(json!([old_infrastructure])),
-            issues_response(json!([migration_issue_node(
-                "issue-done",
-                "OLD-2",
-                "project-infrastructure",
-                "Infrastructure — Gmail",
-                "team-old",
-                true,
-            )])),
             projects_response(json!([old_survival])),
             issues_response(json!([migration_issue_node(
                 "issue-open",
@@ -3464,17 +3444,17 @@ mod tests {
                 "team-old",
                 false,
             )])),
+            projects_response(json!([old_infrastructure])),
+            issues_response(json!([migration_issue_node(
+                "issue-done",
+                "OLD-2",
+                "project-infrastructure",
+                "Infrastructure — Gmail",
+                "team-old",
+                true,
+            )])),
             project_update_response("project-survival"),
             project_update_response("project-infrastructure"),
-            issue_comments_response(),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-done" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
-            ),
             issue_comments_response(),
             json_response(
                 StatusCode::OK,
@@ -3484,18 +3464,18 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
             ),
+            issue_comments_response(),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-done" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
+            ),
             project_update_response("project-survival"),
             project_update_response("project-infrastructure"),
             project_update_response("project-infrastructure"),
-            projects_response(json!([new_infrastructure])),
-            issues_response(json!([migration_issue_node(
-                "issue-done",
-                "LOO-2",
-                "project-infrastructure",
-                "Survival / Infrastructure — Gmail",
-                "team-loo",
-                true,
-            )])),
             projects_response(json!([new_survival])),
             issues_response(json!([migration_issue_node(
                 "issue-open",
@@ -3504,6 +3484,15 @@ mod tests {
                 "Survival — A real task reaches done",
                 "team-loo",
                 false,
+            )])),
+            projects_response(json!([new_infrastructure])),
+            issues_response(json!([migration_issue_node(
+                "issue-done",
+                "LOO-2",
+                "project-infrastructure",
+                "Survival / Infrastructure — Gmail",
+                "team-loo",
+                true,
             )])),
         ];
         let (base_url, requests) = test_server::spawn(responses).await;
@@ -3542,7 +3531,7 @@ mod tests {
                 .as_deref(),
             Some("team-loo")
         );
-        for wave in ["survival", "infrastructure"] {
+        for wave in ["survival", "survival/infrastructure"] {
             let pm = read_wave_pm_config(repo.path(), wave).unwrap();
             assert!(pm.provider.is_none());
             assert!(pm.linear_team.is_none());

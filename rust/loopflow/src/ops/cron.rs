@@ -219,7 +219,9 @@ pub fn add_cron(
     launchctl: &dyn Launchctl,
 ) -> OpsResult<InstalledCron> {
     fs::create_dir_all(launch_agents_dir)?;
-    fs::create_dir_all(spec.working_directory.join(".lf/logs"))?;
+    if let Some(parent) = spec.log_path().parent() {
+        fs::create_dir_all(parent)?;
+    }
     let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
@@ -1470,13 +1472,14 @@ mod tests {
             let cron = named_spec(
                 temp.path(),
                 &executable,
-                "reliability",
+                "infrastructure/release",
                 name,
                 "0 0 3 * * *",
                 kind,
             );
             fs::create_dir_all(&cron.working_directory).unwrap();
             add_cron(&agents, &cron, &launchctl).unwrap();
+            assert!(cron.log_path().parent().unwrap().is_dir());
             run_cron(
                 &agents,
                 &cron.wave,

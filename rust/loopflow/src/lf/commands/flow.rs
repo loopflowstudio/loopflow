@@ -898,7 +898,7 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
 async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Result<()> {
     // The absolute selected path becomes argv[0] in the child's Exec record.
     let mut command =
-        tokio::process::Command::new(crate::engine::process::resolve_step_lf_binary(&flow.cwd)?);
+        tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
         .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);

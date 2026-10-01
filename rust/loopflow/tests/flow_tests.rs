@@ -1,5 +1,3 @@
-#[path = "support/installation.rs"]
-mod installation;
 mod support;
 
 use std::fs;
@@ -42,7 +40,7 @@ fn write_flow(repo: &Path, name: &str, content: &str) {
 }
 
 #[test]
-fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade() {
+fn flow_steps_use_explicit_binary_and_retain_effects_after_experimental_schema_changes() {
     for upgrade in [false, true] {
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
@@ -53,8 +51,8 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
             "path-proof",
             "- cmd: task sync --plan\n- cmd: task sync --plan\n",
         );
-        // A replacement executable delegates the actual effect to lf, then
-        // simulates a future build committing an additive schema migration.
+        // An explicitly selected executable delegates the effect to lf, then
+        // changes the experimental schema so subsequent opens must refuse it.
         let migration = if upgrade {
             r#"python3 - <<'PYTHON'
 import os
@@ -89,6 +87,7 @@ PYTHON
             &["flow", "path-proof", "--mode", "batch", "--no-loopflow"],
             None,
         )
+        .env("LF_BIN", bin.join("lf"))
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .output()
         .unwrap();
@@ -794,7 +793,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         use loopflow::engine::agent::AgentConfig;
         use loopflow::harness::{codex::CodexHarness, ApprovalPolicy, Harness};
         let provider = codex_app_server_script("done", "")
-            .replace("read -r thread_start", "read -r thread_start\nprintf '%s\\n' \"$thread_start\" > \"$LF_CONTROL_HOME/thread-request\"")
+            .replace("read -r thread_start", "read -r thread_start\nprintf '%s\\n' \"$thread_start\" > \"$LF_HOME/thread-request\"")
             .replace("printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"", "read -r release\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"item/agentMessage/delta\"");
         let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
         let _env =
@@ -1189,10 +1188,10 @@ fn agent_step_survives_driver_death_without_another_turn() {
     write_flow(repo.path(), "survive-agent", "- work\n");
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf 'turn\\n' >> \"$LF_CONTROL_HOME/turns\"",
+        "read -r turn_start\nprintf 'turn\\n' >> \"$LF_HOME/turns\"",
     ).replace(
         "printf '%s\\n'",
-        "touch \"$LF_CONTROL_HOME/entered\"\ni=0\nwhile [ ! -e \"$LF_CONTROL_HOME/release\" ]; do\n  i=$((i+1)); [ \"$i\" -lt 300 ] || exit 1\n  sleep 0.1\ndone\nprintf '%s\\n'",
+        "touch \"$LF_HOME/entered\"\ni=0\nwhile [ ! -e \"$LF_HOME/release\" ]; do\n  i=$((i+1)); [ \"$i\" -lt 300 ] || exit 1\n  sleep 0.1\ndone\nprintf '%s\\n'",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -2007,9 +2006,9 @@ fn bound_flows_keep_task_context_and_leave_managed_flow_and_shared_edits_alone()
 
     register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
-    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_CONTROL_HOME/cwds\"").replace(
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_CONTROL_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -2624,55 +2623,6 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     assert_eq!(status.lines().next(), Some("Planning evidence: available"));
     assert!(status.lines().any(|line| line == "INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
-}
-
-#[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-fn flow_step_executable_falls_back_without_losing_its_store() {
-    assert!(Path::new("/.dockerenv").is_file());
-    assert!(!loopflow::machine_install::root().unwrap().exists());
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    write_flow(repo.path(), "fallback-proof", "- cmd: task sync --plan\n");
-    let execute = |driver: &Path, path: &str, expected: &Path| {
-        let mut command = Command::new(driver);
-        for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("LF_") {
-                command.env_remove(key);
-            }
-        }
-        let output = command
-            .args(["flow", "fallback-proof", "--mode", "batch"])
-            .current_dir(repo.path())
-            .env("LF_HOME", home.path())
-            .env("LF_DB_PATH", home.path().join("loopflow.db"))
-            .env("PATH", path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let executable: String = db.query_row(
-            "SELECT json_extract(e.command,'$[0]') FROM flow_events f JOIN execs e ON e.id=f.exec_id WHERE f.kind='operation_started' ORDER BY f.seq DESC LIMIT 1",
-            [], |row| row.get(0)).unwrap();
-        assert_eq!(Path::new(&executable), expected);
-    };
-    let candidate = Path::new(env!("CARGO_BIN_EXE_lf"));
-    execute(candidate, "/usr/bin:/bin", candidate);
-    let bin = home.path().join("path-bin");
-    fs::create_dir(&bin).unwrap();
-    let path_lf = bin.join("lf");
-    fs::copy(candidate, &path_lf).unwrap();
-    let path = format!("{}:/usr/bin:/bin", bin.display());
-    execute(candidate, &path, &path_lf);
-    let installed = installation::Installation::new(home.path());
-    let alias = home.path().join("driver");
-    fs::copy(&installed.cli, &alias).unwrap();
-    execute(&alias, "/usr/bin:/bin", &installed.cli);
-    execute(&alias, &path, &installed.cli);
 }
 
 #[test]

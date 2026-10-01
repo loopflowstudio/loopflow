@@ -1981,7 +1981,7 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
-        let home = crate::store::authority_home_dir();
+        let home = crate::store::lf_home_dir();
         let caller = inherited_caller().and_then(|id| verified_caller(&home, id));
         Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }

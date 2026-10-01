@@ -4,11 +4,10 @@ produces: self-contained HTML walkthrough of the change
 ---
 Create an HTML walkthrough that helps a design collaborator review the code that matters in a PR.
 
-Assume the reader helped design the change and knows its goals. Restate those
-goals clearly, then spend their attention on how the implementation realizes
-them, where it differs, and what still needs judgment. The reader should finish
-able to explain the core model, follow the important behavior into code, and
-decide what deserves a closer look.
+Assume the reader helped design the change and knows its goals, but does not
+know the implementation. Name the observable behaviors and show the snippets
+that produce them. The reader should finish able to explain what happens,
+find the code responsible, and decide what still needs judgment.
 
 ## Workflow
 
@@ -20,32 +19,42 @@ decide what deserves a closer look.
    If a base or source is unavailable, name the gap instead of inventing it.
    Prior design context helps explain intent but is not required to begin.
 
-2. **Choose a reading route.** Organize by the concepts and behaviors the reader
-   needs to understand, not file order. Lead with the goal and delivered scope.
-   Select the core data models, public APIs, ownership or state boundaries, and
-   the implementation points that decide important user behavior. Include
-   unchanged code when it explains the connection. Skip routine plumbing unless
-   it carries a consequential constraint. Scale the walkthrough to the change;
-   a small PR may need only a few stops. For prose or configuration changes,
-   show the actual instructions or declarations that control behavior rather
-   than inventing models and APIs.
+2. **Choose a reading route.** Lead with the goal and delivered scope, then
+   organize stops around observable behavior. Name each stop with what happens:
+   “Moving a group keeps its Tasks attached” or “A failed save preserves the
+   draft.” Use the reader's product vocabulary. Introduce data models, APIs and
+   infrastructure only where they explain that behavior; their structure should
+   not determine the narrative. Include unchanged code when it explains the
+   connection. Scale the walkthrough to the change; a small PR may need only a
+   few stops. For prose or configuration changes, show the instructions or
+   declarations that control behavior.
 
-3. **Connect intent to source.** At each stop, explain the design choice, show
-   a short real excerpt, and explain its consequence. Identify the file, symbol,
+3. **Connect behavior to source.** At each stop, first state what happens in
+   plain language. Use a concrete action and result, or a small before/after
+   example, when the behavior needs explanation. Then show a short real excerpt
+   and explain how its decisive condition produces that result. Keep function
+   names and call chains in source captions or supporting detail until the
+   reader understands the behavior. Identify the file, symbol,
    revision, and line range. Link to revision-pinned source when a remote exists;
    keep excerpts readable offline. Label local-only excerpts accurately. Preserve
    source text, mark omissions, and distinguish explanatory pseudocode from real
    code. Never let an ellipsis hide the condition being discussed. Use before/after
    excerpts when the change itself is easier to see that way.
 
-   Trace at least one representative user action through the entry point, model
-   or state changes, decisive branch, and visible result. Include the important
-   failure or boundary case. For changes without a direct UI, use the caller's
-   observable behavior. Explain who owns durable state or side effects where
-   relevant. A diagram earns space when it clarifies these relationships.
+   Trace at least one representative action from the reader's starting situation
+   to its visible result, with source anchors for the entry point, state change
+   and decisive branch. A sequence of function calls alone is not that trace.
+   Include the important failure or boundary case. Label hypothetical examples
+   and test scenarios so they cannot be mistaken for requested product changes.
+   For changes without a direct UI, use the caller's observable behavior. Explain
+   state ownership or side effects where they affect the result. A diagram earns
+   space when it clarifies the behavior.
 
 4. **Surface review decisions and evidence.** Distinguish accepted intent,
-   implementation choices, and unresolved questions. Highlight departures from
+   implementation choices, and unresolved questions. State what this diff changes
+   versus behavior already present in the base. When related work supplies a
+   mechanism, name that dependency and explain only this change's contribution;
+   separate planned work from implemented behavior. Highlight departures from
    the design, surprising tradeoffs, and plausible failure modes with their source
    anchors. Tie tests or observed behavior to the claims they support; distinguish
    inspected tests, recorded passes, newly run checks, and unverified behavior.
@@ -69,6 +78,9 @@ decide what deserves a closer look.
    and disclosure controls. Fix defects before delivery. If rendering is
    unavailable, report that limit explicitly. Recheck excerpts against the named
    revisions and ensure every material claim has source or evidence behind it.
+   Read the headings and explanations without the code: the behavior should
+   still make sense. Then check that each central snippet explains that behavior,
+   rather than merely showing nearby infrastructure.
 
 ## Delivery
 

@@ -165,7 +165,7 @@ FlowSession --< history       mechanical results or agent completion references
 | Chapter | No stored object: the shared name of each Wave's In Progress Project |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments |
 | Project | Linear status, Tasks, KRs, targets and the default Flow |
-| Task | Worktree, serial PRs, attributed FlowSessions and one managed selection |
+| Task | Worktree, serial PRs, associated Sessions/Flows/Execs; managed Flow selected for worker control |
 | Flow | Reusable authored graph of agent/mechanical/router/review nodes |
 | Exec | One lf process's immutable causal ancestry and command completion |
 | AgentSession | Conversation identity, title, feedback, native thread and provider history |
@@ -242,8 +242,24 @@ and conversation rows before provider launch, even when earlier observation fail
 ### Flow outcomes and authority
 
 A FlowSession is the existing invocation owner evolved, not a parallel cursor.
-Task and taskless execution share it. A Task selects one managed FlowSession
-without excluding other attributed Flows. Template composition compiles into the graph.
+Task and taskless execution share it. A Task observes every AgentSession,
+FlowSession and Exec associated with its checkout, plus explicitly bound work.
+The shared Rust association reader includes checkout descendants at path component
+boundaries and retained paths after removal. It neither follows causal ancestry
+nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
+Desktop navigation uses the same membership as Task status.
+
+The managed FlowSession is one marked member. Its selection remains authoritative
+only for Task worker run/retry/restart/stop, cursor/claim fencing, exact Task review
+settlement and worker delivery authority. The managed Flow panel describes that
+cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
+headless and closed history. Completion waits for independent unfinished Flows;
+recovery preserves idle Flows and waits for unresolved execution, including a
+worker claim before its first step. Pending Asks/reviews and live or unresolved
+Execs preserve the checkout. The completing managed worker may settle itself;
+it cannot settle an independent Flow by completing its Task. Passive membership
+grants no control.
+Template composition compiles into the graph.
 One started Flow is one FlowSession; loop passes are node/iteration positions and
 lenses over its history. They have no separate claim or lifecycle. Captured
 definitions survive source deletion or edits.
@@ -349,9 +365,9 @@ provider, and literal subprocess edge must appear exactly once.
 | Concept | Truth and authority | Data structure | Persistence | Process owner | Public surface | External edge |
 | --- | --- | --- | --- | --- | --- | --- |
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
-| **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf task sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
+| **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf home sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `exec:python3` |
 | **Flow / Flow invocation** — template and one execution | Template expansion captures all Skill content and Xor paths; invocation transactions own cursor and claim settlement. | `Flow`, `FlowSession`, typed node ID | `.lf/flows/`; `flow_sessions`, `flow_events` | CLI driver or hidden `lf task __worker`; `lf __flow-step` owns each mechanical effect | `lf flow`, `lf run` (flow-first definition execution), `lf --task --flow flow start` | — |
-| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable readable locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
+| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Directory discovery reconciles names and parents without replacing IDs. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
 | **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
 | **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. One Task worker at a time owns advancement of the selected Flow; helpers and delivery commands may mutate the worktree without that claim. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | hidden `lf task __worker` drives successive claimed boundaries until a stop; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf task sync`, `lf commit` | Linear |
@@ -500,7 +516,8 @@ Task trigger -> claim current invocation -> execute captured node
                                          -> settle, stop, or await Session
 ```
 
-A Task selects one managed FlowSession; repeated passes retain that identity.
+A Task's managed FlowSession is one member of its general work set; repeated
+passes of that Flow retain its identity.
 Claims fence session identity, cursor version, worker generation
 and exact selected native completion. A late result cannot advance a replacement
 even if numeric versions repeat. Successful native history and its consumption

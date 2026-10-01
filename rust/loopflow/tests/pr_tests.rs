@@ -1,5 +1,3 @@
-#[path = "support/installation.rs"]
-mod installation;
 mod support;
 
 use std::fs;
@@ -1307,7 +1305,6 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
 }
 
 #[test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
@@ -1376,8 +1373,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
 
-    let installation = installation::Installation::new(home.path());
-    let output = Command::new(&installation.cli)
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["--task", "INF-123", "flow", "start", "--json"])
         .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))

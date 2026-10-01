@@ -110,7 +110,7 @@ fn context_budget_preview_reads_authored_wave_without_registration() {
 }
 
 #[test]
-fn explicit_branch_data_overrides_inherited_observation_and_run_context() {
+fn explicit_home_ignores_retired_control_home_pins() {
     let home = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();
     let store_path = home.path().join(".lf/loopflow.db");
@@ -162,7 +162,6 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         "install-task",
         &repo.head_sha(),
     );
-    let store_path = home.path().join(".lf/loopflow.db");
     for (cwd, declaration, restricted) in [
         (repo.path(), None, true),
         (home.path(), Some(format!("task:{}", task.task.id)), true),
@@ -185,25 +184,10 @@ fn installation_restriction_uses_checkout_or_explicit_declaration() {
         let expected = if restricted {
             "Task Work cannot change"
         } else {
-            "did not converge"
+            "only a published candidate"
         };
         assert!(error.contains(expected), "{error}");
     }
-    let output = command(
-        home.path(),
-        repo.path(),
-        &[
-            "install",
-            "local-preflight",
-            "--store",
-            store_path.to_str().unwrap(),
-            "--json",
-        ],
-    )
-    .output()
-    .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&success(output)).unwrap();
-    assert!(preview.get("compatibility").is_some());
 }
 
 #[test]

@@ -75,7 +75,6 @@ async fn drive_task(
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {
-    crate::ops::task_destination::require_worker_destination()?;
     let store = std::sync::Arc::new(
         crate::store::open_existing_store()
             .await
@@ -1426,7 +1425,7 @@ mod planning_tests {
                 if invocation_id == &position.invocation.id
         ));
 
-        let home = crate::store::observability_home_dir();
+        let home = crate::store::lf_home_dir();
         let first_dir = crate::session_record::record_dir(&home, &first.artifact_key).unwrap();
         std::fs::create_dir_all(&first_dir).unwrap();
         let manifest = crate::session_record::SessionCaptureManifest {
@@ -1612,11 +1611,9 @@ mod planning_tests {
             },
         );
         assert!(interrupted.is_err());
-        let dir = crate::session_record::record_dir(
-            &crate::store::authority_home_dir(),
-            &run.artifact_key,
-        )
-        .unwrap();
+        let dir =
+            crate::session_record::record_dir(&crate::store::lf_home_dir(), &run.artifact_key)
+                .unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         assert!(!dir.join("terminal.json").exists());
         let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();

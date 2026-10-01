@@ -344,7 +344,7 @@ struct ActiveSessionsObservationTests {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script]
         process.currentDirectoryURL = cwd
-        process.environment = ["PATH": "/usr/bin:/bin", "LF_CONTROL_HOME": "/fixture"]
+        process.environment = ["PATH": "/usr/bin:/bin", "LF_HOME": "/fixture"]
         return process
     }
 }

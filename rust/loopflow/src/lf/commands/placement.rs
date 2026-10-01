@@ -51,7 +51,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     crate::ops::pm::pm_rename(
                         repo,
                         &crate::ops::pm::PmRenameOptions {
-                            wave: Some(selected.name().to_string()),
+                            wave: Some(selected.slug().to_string()),
                             title: title.clone(),
                         },
                         &crate::ops::NullProgress,
@@ -102,7 +102,7 @@ async fn require_wave_repository(
         .get_wave(wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave.slug())?;
     let local = store.get_wave_at(&locator).await?;
     if local.as_ref().map(crate::work::wave::Wave::id) != Some(wave_id) {
         return Err(anyhow!(

@@ -1907,7 +1907,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        let cli = Cli::parse_from(["lf", "--ide", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),

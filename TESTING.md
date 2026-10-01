@@ -567,7 +567,11 @@ Rendering gathered documents must include the production deduplication step.
 ```bash
 cargo test -p loopflow --test context_tests
 cargo test -p loopflow --lib context_delivery
+cargo test -p loopflow --lib skill_launch
 ```
+
+Run the launch checks after syncing CLI changes; they parse the current flags
+before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`

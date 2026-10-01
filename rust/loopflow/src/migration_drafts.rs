@@ -3,24 +3,17 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
-use sha2::{Digest, Sha256};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MigrationDraft {
-    pub id: &'static str,
     pub name: &'static str,
-    pub dependencies: &'static [&'static str],
     pub sql: &'static str,
-    pub checksum: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftMigration {
-    pub id: String,
     pub name: String,
     pub dependencies: Vec<String>,
     pub sql: String,
-    pub checksum: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +22,6 @@ pub enum DraftManifestErrorCategory {
     Io,
     InvalidFilename,
     ReservedMarker,
-    MissingName,
-    NameMismatch,
-    MissingId,
-    InvalidId,
-    IdMismatch,
-    DuplicateName,
     ReleasedNameCollision,
     SelfDependency,
     MissingDependency,
@@ -47,12 +34,6 @@ impl DraftManifestErrorCategory {
             Self::Io => "io",
             Self::InvalidFilename => "invalid_filename",
             Self::ReservedMarker => "reserved_marker",
-            Self::MissingName => "missing_name",
-            Self::NameMismatch => "name_mismatch",
-            Self::MissingId => "missing_id",
-            Self::InvalidId => "invalid_id",
-            Self::IdMismatch => "id_mismatch",
-            Self::DuplicateName => "duplicate_name",
             Self::ReleasedNameCollision => "released_name_collision",
             Self::SelfDependency => "self_dependency",
             Self::MissingDependency => "missing_dependency",
@@ -129,11 +110,11 @@ pub fn read_draft_manifest(
                     format!("{} has a non-UTF-8 filename", path.display()),
                 )
             })?;
-        let (name, file_id) = parse_draft_filename(filename).ok_or_else(|| {
+        let name = parse_draft_filename(filename).ok_or_else(|| {
             DraftManifestError::new(
                 DraftManifestErrorCategory::InvalidFilename,
                 format!(
-                    "draft {filename} is not `<snake_case_name>__<id>.sql` — run scripts/new_migration.py"
+                    "draft {filename} is not `<snake_case_name>.sql` — run scripts/new_migration.py"
                 ),
             )
         })?;
@@ -151,44 +132,6 @@ pub fn read_draft_manifest(
                 format!("draft {filename} uses reserved `-- draft:` release provenance"),
             ));
         }
-        let header_name = find_header(&text, "name").ok_or_else(|| {
-            DraftManifestError::new(
-                DraftManifestErrorCategory::MissingName,
-                format!("draft {filename} has no `-- name:` header"),
-            )
-        })?;
-        if !is_snake_name(header_name) {
-            return Err(DraftManifestError::new(
-                DraftManifestErrorCategory::MissingName,
-                format!("draft {filename} has no valid `-- name:` header"),
-            ));
-        }
-        if header_name != name {
-            return Err(DraftManifestError::new(
-                DraftManifestErrorCategory::NameMismatch,
-                format!("draft {filename} header names {header_name:?}, not {name:?}"),
-            ));
-        }
-        let header_id = find_header(&text, "id").ok_or_else(|| {
-            DraftManifestError::new(
-                DraftManifestErrorCategory::MissingId,
-                format!("draft {filename} has no `-- id:` header"),
-            )
-        })?;
-        if !is_draft_id(header_id) {
-            return Err(DraftManifestError::new(
-                DraftManifestErrorCategory::InvalidId,
-                format!(
-                    "draft {filename} id {header_id:?} is not a 128-bit token (32 hex chars) — run scripts/new_migration.py"
-                ),
-            ));
-        }
-        if header_id != file_id {
-            return Err(DraftManifestError::new(
-                DraftManifestErrorCategory::IdMismatch,
-                format!("draft {filename} header id {header_id:?} disagrees with its filename"),
-            ));
-        }
         let dependencies = find_header(&text, "depends_on")
             .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("none"))
             .map(|value| {
@@ -200,14 +143,10 @@ pub fn read_draft_manifest(
                     .collect()
             })
             .unwrap_or_default();
-        let sql = draft_body(&text);
-        let checksum = hex::encode(Sha256::digest(sql.as_bytes()));
         drafts.push(DraftMigration {
-            id: file_id.to_string(),
             name: name.to_string(),
             dependencies,
-            sql,
-            checksum,
+            sql: draft_body(&text),
         });
     }
 
@@ -265,18 +204,10 @@ fn order_drafts(
     drafts: Vec<DraftMigration>,
     released_names: &BTreeSet<String>,
 ) -> Result<Vec<DraftMigration>, DraftManifestError> {
-    let mut by_name = BTreeMap::new();
-    for draft in drafts {
-        let name = draft.name.clone();
-        if by_name.insert(name.clone(), draft).is_some() {
-            return Err(DraftManifestError::new(
-                DraftManifestErrorCategory::DuplicateName,
-                format!(
-                    "two drafts share the readable name {name:?} in this cut — rename one before releasing"
-                ),
-            ));
-        }
-    }
+    let mut by_name = drafts
+        .into_iter()
+        .map(|draft| (draft.name.clone(), draft))
+        .collect::<BTreeMap<_, _>>();
     for draft in by_name.values() {
         if released_names.contains(&draft.name) {
             return Err(DraftManifestError::new(
@@ -370,13 +301,9 @@ fn order_drafts(
         .collect())
 }
 
-fn parse_draft_filename(filename: &str) -> Option<(&str, &str)> {
-    let stem = filename.strip_suffix(".sql")?;
-    let split = stem.len().checked_sub(34)?;
-    (stem.get(split..split + 2)? == "__").then_some(())?;
-    let name = stem.get(..split)?;
-    let id = stem.get(split + 2..)?;
-    (is_snake_name(name) && is_draft_id(id)).then_some((name, id))
+fn parse_draft_filename(filename: &str) -> Option<&str> {
+    let name = filename.strip_suffix(".sql")?;
+    is_snake_name(name).then_some(name)
 }
 
 fn parse_migration_filename(filename: &str) -> Option<(Option<&str>, bool)> {
@@ -422,11 +349,7 @@ fn header_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 fn draft_body(text: &str) -> String {
     let body = text
         .lines()
-        .filter(|line| {
-            !["name", "id", "depends_on"]
-                .iter()
-                .any(|key| header_value(line, key).is_some())
-        })
+        .filter(|line| header_value(line, "depends_on").is_none())
         .collect::<Vec<_>>()
         .join("\n")
         .trim_matches('\n')
@@ -446,13 +369,6 @@ fn is_snake_name(value: &str) -> bool {
         && value.chars().all(|character| {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
         })
-}
-
-fn is_draft_id(value: &str) -> bool {
-    value.len() == 32
-        && value
-            .chars()
-            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
 }
 
 #[cfg(test)]
@@ -488,11 +404,9 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     struct ExpectedDraft {
-        id: String,
         name: String,
         dependencies: Vec<String>,
         sql: String,
-        checksum: String,
     }
 
     #[test]
@@ -518,11 +432,9 @@ mod tests {
                     let expected = expected
                         .into_iter()
                         .map(|draft| DraftMigration {
-                            id: draft.id,
                             name: draft.name,
                             dependencies: draft.dependencies,
                             sql: draft.sql,
-                            checksum: draft.checksum,
                         })
                         .collect::<Vec<_>>();
                     assert_eq!(result.unwrap(), expected, "{}", case.name);

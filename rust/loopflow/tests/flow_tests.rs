@@ -61,11 +61,6 @@ with sqlite3.connect(os.path.join(os.environ["LF_HOME"], "loopflow.db")) as conn
     connection.executescript("""
 BEGIN IMMEDIATE;
 CREATE TABLE future_flow_feature (id INTEGER PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS development_migrations (
- position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
- name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL);
-INSERT INTO development_migrations
- SELECT COUNT(*), 'future', 'future_flow_feature', 'fixture', 1 FROM development_migrations;
 COMMIT;
 """)
 PYTHON

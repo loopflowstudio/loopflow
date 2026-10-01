@@ -3,20 +3,11 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-/// Resolve one draft migration by its marker, never by a path that disappears
-/// when release materialization folds drafts into a canonical batch.
+/// Read one draft migration by name.
 pub fn migration_sql_for_test(crate_root: &Path, name: &str) -> String {
-    let marker = format!("-- name: {name}");
-    let drafts = crate_root.join("src/store/migrations/drafts");
-    std::fs::read_dir(&drafts)
-        .expect("migration draft directory")
-        .map(|entry| entry.expect("migration draft entry").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
-        .find_map(|path| {
-            let sql = std::fs::read_to_string(path).expect("read migration draft");
-            sql.lines().any(|line| line == marker).then_some(sql)
-        })
-        .unwrap_or_else(|| panic!("migration draft {name:?} not found"))
+    let draft = crate_root.join(format!("src/store/migrations/drafts/{name}.sql"));
+    std::fs::read_to_string(&draft)
+        .unwrap_or_else(|error| panic!("migration draft {name:?} not found: {error}"))
 }
 
 #[derive(Debug)]

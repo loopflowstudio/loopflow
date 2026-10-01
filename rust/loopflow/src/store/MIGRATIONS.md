@@ -1,23 +1,34 @@
 # Schema migrations
 
 ```bash
-uv run python scripts/new_migration.py add_wave_colour   # author a draft (no ordinal)
+uv run python scripts/new_migration.py add_wave_colour   # this Task's draft (no ordinal)
 uv run python scripts/check_migrations.py                # what CI and the release run
 ```
 
-Write the SQL below the header, and you are done — there is nothing to paste into
-`migration_catalog.rs`. A **draft** carries a stable snake_case name, an immutable
-authoring id (a 128-bit token, 32 hex chars), and **no ordinal**; it lives at
-`migrations/drafts/<name>__<id>.sql`.
-The draft's file *is* its registration: canonicalization discovers it by scanning
-the directory, and Rust never sees it until the release cut appends the canonical
-`Migration` entry it generates. Because a draft has no ordinal and two branches
-authoring the same name mint different 128-bit ids (materially collision-resistant),
-concurrent branches never contend,
-renumber, or share a registry edit, and the allocator performs no `git fetch` or
-rebase. Ordering that matters — a data migration that must run after another — is
-declared with `--depends-on` (naming another draft or an already-released
-migration), not by a serial number.
+Write the SQL in `migrations/drafts/<name>.sql`, and you are done — there is
+nothing to paste into `migration_catalog.rs`. The file *is* the draft's
+registration and its name is the draft's identity: canonicalization discovers it by
+scanning the directory, and Rust never sees it until the release cut appends the
+canonical `Migration` entry it generates.
+
+## One draft per Task, edited in place
+
+A Task keeps one draft until it lands. When the schema changes again, rewrite that
+file to the final shape; run `new_migration.py` again and it prints the draft the
+branch already has instead of creating another. Nothing has applied an unreleased
+draft except disposable `LF_HOME` experiments, so there is no intermediate schema
+to preserve, migrate from, or test. The same holds for another Task's unreleased
+draft already on main: to change or undo it, edit it — do not add a draft that
+alters or drops what it created.
+
+A draft has no ordinal, so concurrent branches never contend, renumber, or share a
+registry edit. Ordering that matters between Tasks — a draft that must run after
+another draft or after an already-released migration — is declared with
+`--depends-on` (a `-- depends_on:` header), not by a serial number.
+
+Test the upgrade from the released frontier to the finished draft. A custom
+`LF_HOME` is initialized once with the build's exact schema; after editing a
+draft, start a fresh one.
 
 ## The release cut assigns canonical ids
 
@@ -25,8 +36,7 @@ The release PR is the single publication boundary that turns drafts into canonic
 migrations. `lf repo release run` invokes the canonicalizer with `--release-cut` inside the
 release worktree, **after the version bump and before the commit**, so the generated
 files are part of the release PR and run under real Rust CI before the queue merges
-and tags. It freezes the draft set, rejects missing or cyclic dependencies (and two
-drafts sharing a readable name in one cut), and topologically orders it (edges
+and tags. It freezes the draft set, rejects missing or cyclic dependencies, and topologically orders it (edges
 first, ties broken by name — never merge time, PR number, or wall clock). It then
 concatenates the ordered bodies into the release's one
 `<major>.<minor>.<patch>.001_release.sql` batch. `-- draft: <name>` markers retain
@@ -57,8 +67,8 @@ SQLite table rebuild cannot cascade-delete child history. It runs
 migration that leaves a dangling reference rolls back as one unit.
 
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
-shape in a DTO stored by the database requires an ordinal-free repair draft and
-a typed upgrade test seeded with the previous shape. Before commit, the runner
+shape in a DTO stored by the database requires a repair in the Task's draft and
+a typed upgrade test seeded with the released shape. Before commit, the runner
 deserializes every registered persisted JSON column into its current Rust type
 and reports all incompatible rows together; any failure rolls back the complete
 migration transaction.
@@ -89,9 +99,9 @@ the last release tag and fails the build if one moved.
 - Every canonical migration already on `origin/main` has the same ordinal, name, and
   bytes.
 - Nothing that shipped in the last release tag has changed.
-- Every draft under `drafts/` is well-formed: a snake_case name matching its file, a
-  `-- name:` header, no collision with a released migration name, and a `depends_on`
-  graph that resolves to other drafts with no cycle. Drafts have no ordinal, so they
+- Every draft under `drafts/` is well-formed: a snake_case `<name>.sql`, no
+  collision with a released migration name, and a `depends_on` graph that resolves
+  to other drafts or released migrations with no cycle. Drafts have no ordinal, so they
   are never compared against `origin/main`.
 
 It runs in CI, and — because `lf repo release` cuts a tag from local state and never

@@ -32,7 +32,7 @@ pub(crate) fn product_schema(
          FROM sqlite_master
          WHERE type IN ('table', 'view', 'index', 'trigger')
            AND name NOT LIKE 'sqlite_%'
-           AND name NOT IN ('schema_migrations', 'development_migrations')
+           AND name != 'schema_migrations'
          ORDER BY type, name",
     )?;
     let rows = statement.query_map([], |row| {

@@ -12,11 +12,12 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-const EXEC_SELECT: &str = "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
+pub(super) const EXEC_SELECT: &str =
+    "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
     e.caller_provider_generation,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error FROM execs e";
 
-fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
+pub(super) fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
     Ok(Exec {
         id: row.get(0)?,
         trace_id: row.get(1)?,

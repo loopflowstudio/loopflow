@@ -35,7 +35,7 @@ private enum SessionFixtureKind: String {
           "ready_summary": \(summary),
           "work_path": null,
           "actions": \(actions),
-          "title_source": "generated", "flow_membership": \(membership), "terminal_ids": [],
+          "title_source": "generated", "flow_membership": \(membership), "task_ids": [], "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

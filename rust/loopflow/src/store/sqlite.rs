@@ -30,6 +30,7 @@ mod planning;
 mod pr_landings;
 mod session_events;
 pub(crate) mod sessions;
+mod task_work;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

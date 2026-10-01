@@ -115,8 +115,8 @@ fn inventory_query(
     if let Some(task) = &filter.task {
         let task = bind(Value::Text(task.clone()));
         sql.push_str(&format!(
-            " AND s.task_id IN (SELECT id FROM tasks
-            WHERE id={task} OR issue_identifier={task} OR external_issue_id={task})"
+            " AND s.id IN ({})",
+            super::task_work::session_ids(&task)
         ));
     }
     if let Some(search) = &filter.search {
@@ -166,14 +166,15 @@ fn summary_query(page: &str, by_id: bool) -> String {
         COALESCE(t.current_invocation_id=s.flow_session_id,0),h.id,h.route,
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
-         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent')
+         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
+        (SELECT json_group_array(id) FROM ({}))
         FROM page s
         LEFT JOIN flows f ON f.id=s.flow_session_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
-        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS)
+        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
 }
 
 fn read_summary(
@@ -181,6 +182,7 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
+            task_ids: serde_json::from_str(&row.get::<_, String>(32)?)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)

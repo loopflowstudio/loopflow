@@ -304,8 +304,11 @@ mod tests {
                 step: None,
                 captured: None,
             },
-            runs: vec![],
-            runs_truncated: false,
+            work: crate::task_work::TaskWork {
+                sessions: vec![],
+                flows: vec![],
+                execs: vec![],
+            },
             worktree: root.display().to_string(),
             workspace_slug: "fixture".into(),
             agent: None,

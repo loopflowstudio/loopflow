@@ -175,3 +175,15 @@ Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
 Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
 Task destinations open details; selecting a Flow opens its folded template.
+
+### Inspect all work in a Task
+
+```bash
+lf task status LOO-358 --json
+lf session list --task LOO-358 --history
+```
+
+Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
+including headless and completed work. Managed marks the Flow advanced by
+`lf task run`; the managed execution line describes only that worker. Independent
+work remains visible and preserves the checkout while unfinished or unresolved.

@@ -165,7 +165,7 @@ FlowSession --< history       mechanical results or agent completion references
 | Chapter | No stored object: the shared name of each Wave's In Progress Project |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments |
 | Project | Linear status, Tasks, KRs, targets and the default Flow |
-| Task | Worktree, serial PRs, attributed FlowSessions and one managed selection |
+| Task | Worktree, serial PRs, associated Sessions/Flows/Execs; managed Flow selected for worker control |
 | Flow | Reusable authored graph of agent/mechanical/router/review nodes |
 | Exec | One lf process's immutable causal ancestry and command completion |
 | AgentSession | Conversation identity, title, feedback, native thread and provider history |
@@ -242,8 +242,24 @@ and conversation rows before provider launch, even when earlier observation fail
 ### Flow outcomes and authority
 
 A FlowSession is the existing invocation owner evolved, not a parallel cursor.
-Task and taskless execution share it. A Task selects one managed FlowSession
-without excluding other attributed Flows. Template composition compiles into the graph.
+Task and taskless execution share it. A Task observes every AgentSession,
+FlowSession and Exec associated with its checkout, plus explicitly bound work.
+The shared Rust association reader includes checkout descendants at path component
+boundaries and retained paths after removal. It neither follows causal ancestry
+nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
+Desktop navigation uses the same membership as Task status.
+
+The managed FlowSession is one marked member. Its selection remains authoritative
+only for Task worker run/retry/restart/stop, cursor/claim fencing, exact Task review
+settlement and worker delivery authority. The managed Flow panel describes that
+cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
+headless and closed history. Completion waits for independent unfinished Flows;
+recovery preserves idle Flows and waits for unresolved execution, including a
+worker claim before its first step. Pending Asks/reviews and live or unresolved
+Execs preserve the checkout. The completing managed worker may settle itself;
+it cannot settle an independent Flow by completing its Task. Passive membership
+grants no control.
+Template composition compiles into the graph.
 One started Flow is one FlowSession; loop passes are node/iteration positions and
 lenses over its history. They have no separate claim or lifecycle. Captured
 definitions survive source deletion or edits.
@@ -500,7 +516,8 @@ Task trigger -> claim current invocation -> execute captured node
                                          -> settle, stop, or await Session
 ```
 
-A Task selects one managed FlowSession; repeated passes retain that identity.
+A Task's managed FlowSession is one member of its general work set; repeated
+passes of that Flow retain its identity.
 Claims fence session identity, cursor version, worker generation
 and exact selected native completion. A late result cannot advance a replacement
 even if numeric versions repeat. Successful native history and its consumption

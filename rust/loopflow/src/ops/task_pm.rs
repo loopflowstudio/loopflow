@@ -2,11 +2,12 @@ use std::path::Path;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmTaskUpdate, PmUpdateOptions};
-use crate::pm::{PmItem, PmPortfolioValidator, PmProject};
+use crate::pm::{PmItem, PmProject};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTask {
-    pub snapshot: PmShowResult,
+    pub wave: String,
+    pub observed_at: i64,
     pub project: PmProject,
     pub item: PmItem,
 }
@@ -51,44 +52,28 @@ pub(crate) async fn resolve_task_async(
     issue: &str,
     refresh: PmRefresh,
 ) -> OpsResult<ResolvedTask> {
+    let record = crate::ops::pm::read_task_planning_async(repo, issue, refresh).await?;
+    let item = record.item;
+    let project = record.project.ok_or_else(|| {
+        OpsError::Message(format!(
+            "task {} has no Project; planning can be inspected but managed work requires ownership",
+            item.identifier
+        ))
+    })?;
+    let initiative = crate::ops::pm::singular_project_initiative(&project)?;
+    let wave = crate::ops::pm::wave_for_initiative(repo, &initiative)?;
     let team_id = crate::ops::pm::repository_team_id(repo)?;
-    let mut matches = Vec::new();
-    for snapshot in repository_snapshots_async(repo, &team_id).await? {
-        if let Some(item) = snapshot
-            .items
-            .iter()
-            .find(|item| item.id == issue || item.identifier.eq_ignore_ascii_case(issue))
-        {
-            matches.push((snapshot.wave.clone(), item.id.clone()));
-        }
+    crate::pm::validate_project_ownership(&wave, &initiative, Some(&team_id), &project)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if item.team_id != team_id {
+        return Err(OpsError::Message(format!(
+            "task {} belongs to Team {}, expected repository Team {}",
+            item.identifier, item.team_id, team_id
+        )));
     }
-    let (wave, item_id) = match matches.len() {
-        0 => {
-            return Err(OpsError::Message(format!(
-                "task {issue:?} is absent from local PM snapshots. Run `lf wave sync --wave <wave>`."
-            )))
-        }
-        1 => matches.pop().expect("one task match"),
-        count => {
-            return Err(OpsError::Message(format!(
-                "task {issue:?} belongs to {count} PM snapshots; repair Wave ownership before running it"
-            )))
-        }
-    };
-    let snapshot = load_wave_async(repo, &wave, refresh).await?;
-    let item = snapshot
-        .items
-        .iter()
-        .find(|item| item.id == item_id)
-        .cloned()
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "task {issue:?} disappeared from wave/{wave}; run `lf wave sync --wave {wave}`"
-            ))
-        })?;
-    let project = project_for_item(&snapshot, &item, &team_id)?;
     Ok(ResolvedTask {
-        snapshot,
+        wave,
+        observed_at: record.observed_at,
         project,
         item,
     })
@@ -109,29 +94,6 @@ pub fn resolve_current_project(
             crate::ops::chapter::current_project(&store, &wave).await
         })?;
     Ok(ResolvedProject { snapshot, project })
-}
-
-async fn repository_snapshots_async(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResult>> {
-    let mut snapshots = Vec::new();
-    let mut ownership = PmPortfolioValidator::default();
-    for wave in crate::ops::pm::list_pm_waves(repo)? {
-        let snapshot = match load_wave_async(repo, &wave, PmRefresh::Never).await {
-            Ok(snapshot) => snapshot,
-            Err(error) if error.to_string().contains("has no local PM snapshot") => continue,
-            Err(error) => return Err(error),
-        };
-        ownership
-            .validate(
-                &snapshot.wave,
-                &snapshot.initiative,
-                Some(team_id),
-                &snapshot.projects,
-                &snapshot.items,
-            )
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        snapshots.push(snapshot);
-    }
-    Ok(snapshots)
 }
 
 pub(crate) async fn create_and_load_task<T, F, Fut>(
@@ -179,47 +141,4 @@ pub async fn complete_task(
     )
     .await?;
     Ok(())
-}
-
-fn project_for_item(snapshot: &PmShowResult, item: &PmItem, team_id: &str) -> OpsResult<PmProject> {
-    if item.team_id != team_id {
-        return Err(OpsError::Message(format!(
-            "task {} belongs to Linear Team {}, expected repository Team {}; \
-             run `lf doctor --planning` and repair repository ownership",
-            item.identifier, item.team_id, team_id
-        )));
-    }
-    let project = snapshot
-        .projects
-        .iter()
-        .find(|project| project.id == item.project_id)
-        .cloned()
-        .ok_or_else(|| {
-            OpsError::Message(format!(
-                "task {} names unknown Project {} in wave/{}",
-                item.identifier, item.project_id, snapshot.wave
-            ))
-        })?;
-    validate_project_ownership(snapshot, &project, team_id)?;
-    if item.project != project.slug {
-        return Err(OpsError::Message(format!(
-            "task {} carries stale Project slug {:?}, expected {:?}; run `lf wave sync --wave {}`",
-            item.identifier, item.project, project.slug, snapshot.wave
-        )));
-    }
-    Ok(project)
-}
-
-fn validate_project_ownership(
-    snapshot: &PmShowResult,
-    project: &PmProject,
-    team_id: &str,
-) -> OpsResult<()> {
-    crate::pm::validate_project_ownership(
-        &snapshot.wave,
-        &snapshot.initiative,
-        Some(team_id),
-        project,
-    )
-    .map_err(|error| OpsError::Message(error.to_string()))
 }

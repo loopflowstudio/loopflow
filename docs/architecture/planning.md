@@ -2,6 +2,7 @@
 
 ```bash
 lf --wave product wave/operate
+lf task status INF-124 --json
 lf task checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
@@ -35,6 +36,69 @@ newest-looking names never win. Status mutations do not form a distributed
 transaction. Another Home observes the new plan through normal synchronization.
 There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
 for adoption, default Flow and disposition details.
+
+## Inspect planning before starting execution
+
+```bash
+lf task status INF-124 --json
+```
+
+Status returns `planning`, `planning_state`, `planning_error`, `planning_stale`,
+and optional `execution`. An issue
+without a Project stays inspectable; operations requiring ownership report the
+missing relationship. Status may refresh planning and observe a PR, but never
+completes a Task. Reading an issue allocates no Task execution or worktree.
+
+Exact lookups and Wave views share normalized SQLite entities scoped to a
+repository and provider. An empty cache fetches the requested issue before
+reporting absence; provider errors remain resolution failures. Bounded refresh
+retains the last successful observation and its timestamp on failure. Lists
+reference shared Project/Task facts; omission alone never proves deletion.
+A null detail response invalidates cached admission until a complete detail
+read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
+including after stale list ingestion.
+
+Status preserves dated facts even after hard-stale or forced acquisition fails.
+`planning_state` distinguishes `available`, `unavailable` acquisition, `invalid`
+evidence, confirmed `removed` planning, and an `absent` detail response. A null
+provider response observes absence for that acquisition; the stored record stays
+invalid until complete detail repairs it. This creates no deletion receipt.
+`planning.observed_at` remains the last successful acquisition. An unresolved
+selector returns an unavailable envelope even without execution.
+
+Invalid and removed facts remain inspectable through status. Managed execution
+requires available planning: a fresh cached observation suffices, but a failed
+due refresh stops continuation. Wave `synced_at` dates its last successful list
+acquisition; joined entities may have newer detail observations.
+
+Task facts carry Linear's `updatedAt` as `revision`. Detail, list and confirmed
+mutation refreshes share one writer: older provider revisions cannot overwrite
+newer facts, and conflicting facts at an equal revision fail without replacement.
+Complete responses must include nullable fields; omission cannot clear known data.
+Stored change receipts invalidate planning even without execution. A complete read
+at or beyond the receipt's revision repairs the invalidation. Removal receipts fence
+later reads, including when the receipt arrived before the issue was cached.
+Receipts do not replace complete planning entities. The former daemon webhook
+ingress is removed; these store operations do not establish live event delivery. Project facts also
+carry `revision`; a newer Project observation updates independently of the issue's
+revision. Older observations cannot overwrite it. Project responses must include
+nullable content fields and relationship sets.
+
+List coverage never removes a Project merely because a later response omits it.
+Without removal evidence, refresh fails and retains the previous observation.
+Project revisions do not establish ordering for separate Initiative/Team
+relationships. A contradictory relationship set stays unresolved, retains its
+last-good facts, and blocks managed readers. Replaying a list or detail does not
+clear that uncertainty; acquiring ordered relationship evidence remains future work.
+
+Chapter rollover transfers unfinished work and settles backlog before completing
+each predecessor Project in Linear. It confirms provider completion before recording
+the Project. Closing the Project does not complete transferred Tasks or change
+historical KR results. Current Project selection follows provider status.
+
+The planning store can retain explicit archival acknowledgements. Integrating
+archival into the provider-backed chapter operation and preserving old acknowledgements
+across the combined migration frontier remain unfinished.
 
 ## Capture a Flow once
 

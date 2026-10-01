@@ -13,9 +13,8 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, ProviderTokenReplacement, RoutingState, StoreError, StoreResult,
-    WaveLocatorUpdate,
+    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderAccountSelection,
+    ProviderTokenReplacement, RoutingState, StoreError, StoreResult, WaveLocatorUpdate,
 };
 use crate::work::wave::{Wave, WaveLocator};
 
@@ -27,6 +26,7 @@ mod execs;
 mod flow_inventory;
 mod flows;
 mod metrics;
+mod planning;
 mod pr_landings;
 mod session_events;
 pub(crate) mod sessions;
@@ -484,7 +484,12 @@ impl SqliteStore {
             })?;
         let store_installation = match installed_selection {
             Some(selection)
-                if super::same_database_file(path, &selection.store).map_err(|error| {
+                if super::same_database_file(
+                    path,
+                    &super::installed_execution_database(&selection)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                )
+                .map_err(|error| {
                     StoreError::InvalidData(format!("resolve installed store identity: {error}"))
                 })? =>
             {
@@ -504,16 +509,47 @@ impl SqliteStore {
                 )));
             }
         }
-        let installed_development = store_installation.is_some_and(|selection| {
+        let addressed_execution = store_installation.as_ref().is_some_and(|selection| {
+            !super::same_database_file(path, &selection.store).unwrap_or(false)
+        });
+        let installed_development = store_installation.as_ref().is_some_and(|selection| {
             selection.source == crate::machine_install::InstallSource::Development
         });
+        if addressed_execution {
+            // Runtime choice grants no migration authority over execution found
+            // elsewhere. Validate before journal mode or any writable connection.
+            let connection =
+                Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let validation = if installed_development {
+                super::migrations::validate_installed_development_sqlite(
+                    &connection,
+                    crate::build_info::migration_draft_manifest(),
+                )
+            } else {
+                super::migrations::validate_sqlite(&connection).and_then(|()| {
+                    if let Some(pending) = super::migrations::pending_shared_migration(&connection)?
+                    {
+                        return Err(StoreError::InvalidData(format!(
+                            "pending migration {pending}"
+                        )));
+                    }
+                    Ok(())
+                })
+            };
+            validation.map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "selected lf cannot continue execution in {}: {error}",
+                    path.display()
+                ))
+            })?;
+        }
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
         // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
         // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
-            .map_err(|error| {
+        let may_apply_migrations = !addressed_execution
+            && super::may_apply_migrations(path, authority, home, advance).map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
         let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
@@ -702,69 +738,6 @@ impl SqliteStore {
         }
         conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
         Ok(())
-    }
-
-    pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO pm_snapshots (wave_id, provider, initiative, synced_at, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(wave_id) DO UPDATE SET
-               provider = excluded.provider,
-               initiative = excluded.initiative,
-               synced_at = excluded.synced_at,
-               payload = excluded.payload",
-            params![
-                snapshot.wave_id,
-                snapshot.provider,
-                snapshot.initiative,
-                snapshot.synced_at,
-                snapshot.payload
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut snapshot = conn
-            .query_row(
-                "SELECT wave_id, provider, initiative, synced_at, payload
-             FROM pm_snapshots WHERE wave_id = ?1",
-                params![wave_id],
-                |row| {
-                    Ok(PmSnapshotRow {
-                        wave_id: row.get(0)?,
-                        provider: row.get(1)?,
-                        initiative: row.get(2)?,
-                        synced_at: row.get(3)?,
-                        payload: row.get(4)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(StoreError::from)?;
-        if let Some(snapshot) = &mut snapshot {
-            // Leave malformed snapshots to the existing diagnostic owner.
-            if let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
-                if let Some(items) = payload
-                    .get_mut("items")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    let removed = deleted_task_issues_in(&conn, wave_id)?;
-                    let count = items.len();
-                    items.retain(|item| {
-                        item.get("id")
-                            .and_then(serde_json::Value::as_str)
-                            .is_none_or(|id| !removed.contains(id))
-                    });
-                    if items.len() != count {
-                        snapshot.payload = serde_json::to_string(&payload)?;
-                    }
-                }
-            }
-        }
-        Ok(snapshot)
     }
 
     pub(crate) fn retain_task_issue_identity(
@@ -1853,10 +1826,15 @@ impl SqliteStore {
                 "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
             )));
         }
-        tx.execute(
-            "UPDATE waves SET repo = ?2 WHERE id = ?1 AND repo = ?3",
-            params![wave_id, target_repo, expected_repo],
-        )?;
+        // Canonicalization changes one repository identity, including every Wave
+        // and shared planning entity under that alias. Move them atomically;
+        // uniqueness conflicts must preserve both observations, never merge them.
+        for table in ["waves", "pm_projects", "pm_items"] {
+            tx.execute(
+                &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
+                params![expected_repo, target_repo],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -2013,7 +1991,7 @@ impl SqliteStore {
             blockers.push(format!("{children} child Waves"));
         }
         let snapshots: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM pm_snapshots WHERE wave_id = ?1",
+            "SELECT COUNT(*) FROM pm_wave_sync WHERE wave_id = ?1",
             params![wave_id],
             |row| row.get(0),
         )?;

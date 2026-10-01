@@ -1,3 +1,7 @@
+> September 30 restart: current LOO-332 ownership choices and source findings
+> are in [task-automation.md](task-automation.md). The September 28 stack and
+> operation assumptions below are historical; LOO-298 is now integrated.
+
 > Execution context: LOO-332. Primary design: `scratch/task-automation.md`.
 > Source: `/Users/jack/src/loopflow.discord/scratch/questions.md` at `613a66ca8fd99b81b92a902c986dfc1540d6ca10`.
 > Stacked on LOO-298 at `d07e569330c8dedceb5dd238ce9b22a7b6137006`. This destination owns ongoing edits.

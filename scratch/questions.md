@@ -1,3 +1,21 @@
+## LOO-332 restart — ownership recommendation (2026-09-30)
+
+Jack reopened TaskSession versus cron versus primary Wave Session ownership.
+The current comparison, recommendation and three review choices are in
+[task-automation.md](task-automation.md#open-choices-for-jack). Recommend a finite
+repository cron for reliable wakeups, TaskSession for continuity/immediate
+operation, and Wave Session for broader recovery, all using shared admission.
+This recommendation is not recorded approval.
+
+Planning assumptions: LOO-332 can deliver the reliable floor independently of
+LOO-353 Unit 2; explicit Task opt-in avoids enrolling historical independent
+work; a one-minute user-agent schedule promises progress with Desktop closed
+only while the placed host session is available. One unchanged startup/runtime
+failure recovery and one timeout-only CI rerun are proposed bounds, not accepted
+policy. Jack's remaining choices are ownership/delivery order, enrollment/stop
+semantics, and availability/retry expectations. No answer is required to finish
+this planning-only pass. Earlier dated questions below retain their original scope.
+
 # LOO-298 review agenda
 
 2026-09-26. Interactive review amends Jack's earlier model. The current

@@ -315,8 +315,9 @@ or bind one member of a taskless Flow inconsistently with its owner.
 
 Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
-The history reader owns this single choice; a separate Intelligence Task may
-re-evaluate it. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
+The history reader owns this single choice. `lf usage --binds` compares it with
+post-hoc attribution from the same history; the
+[evaluation](../performance/bind-attribution.md) holds the reading and recommendation. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
 Authorized Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 

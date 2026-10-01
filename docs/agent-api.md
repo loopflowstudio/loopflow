@@ -177,6 +177,7 @@ lf mon show --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf usage --weekly --json   # context cost and turn time by week since 2026-09-30
+lf usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
 lf ps --json                # one OS-live process frame
 ```
 

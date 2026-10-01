@@ -126,6 +126,11 @@ Review finding: prompt assembly and execution previously disagreed on the
 forced terminal surface when an IDE mode was supplied. They now share one
 launch-target decision, preserving terminal presentation for the default.
 
+The operational skill keeps Task-description and Flow-selection guidance in
+one place. Installed Flows own their step order; the skill no longer copies
+that order or directs routine progress into Task comments, which conflicts
+with the shared local-notes contract.
+
 ## The demo
 
 Open `lf`: a short invitation, no operational inventory. Ask an unrelated
@@ -149,4 +154,4 @@ canonical overrides, while `wave/operate` remains distinct; run `cargo test -p l
 Conversational responsiveness is judged in demo/review, not by brittle prose
 assertions or a live-provider gate.
 
-Check: `cargo test -p loopflow operate`, `cargo test -p loopflow --test default_conversation_tests`, `cargo test -p loopflow --lib assembled_prompts_deliver_procedures_to_the_owning_skill`, `cargo test -p loopflow --lib formerly_attended_skills_have_bounded_headless_contracts`, `cargo fmt`, and `git diff --check` passed; full affected suites/clippy deferred to gate.
+Check: `cargo test -p loopflow --lib assembled_prompts_deliver_procedures_to_the_owning_skill` and `git diff --check` passed after skill simplification; earlier `operate`, `default_conversation_tests`, `formerly_attended_skills_have_bounded_headless_contracts`, and formatting passes remain applicable; full affected suites/clippy deferred to gate.

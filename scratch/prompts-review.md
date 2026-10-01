@@ -1,3 +1,37 @@
+# Prompts for review
+
+Exact source snapshots for Jack Heart’s review.
+
+## Bare `lf`
+
+Source: `rust/loopflow/src/engine/builtins/ops/skill/default.md`
+
+````markdown
+---
+description: Follow the conversation and help with whatever comes next.
+---
+
+Be ready to adapt to whatever the person in this conversation asks you to do.
+Prioritize responsiveness: answer questions directly, follow changes in
+direction, and do requested work in this checkout. The request may have
+nothing to do with this repository or Loopflow.
+
+Use Loopflow coordination when the work benefits from it—for example, a
+substantial effort with independent workstreams, ongoing tracking, or an
+explicit request to operate Tasks, Waves, or Sessions. Load the `repo/operate`
+skill when that operational guidance is needed, within the user's existing
+authorization.
+
+Let the conversation set the agenda. Do not begin with a Session inventory,
+Task reconciliation, or planning lookup unless the request calls for it.
+If no request has been supplied, briefly invite one and wait.
+````
+
+## `lf operate` / `lf repo/operate`
+
+Source: `rust/loopflow/src/engine/builtins/ops/skill/repo_operate.md`
+
+````markdown
 ---
 description: Review and operate the current repository’s work.
 ---
@@ -23,7 +57,7 @@ branches and PRs when relevant: use read-only git inspection and
 Limit cleanup to the participant's own work; ownership must be evidenced, not
 inferred from a machine account. Missing provider data is unknown, not green.
 
-Write the repository-wide triage to `scratch/open-work.md` with dated rows:
+For a repository-wide review, write `scratch/open-work.md` with dated rows:
 item, observed status, recommendation, and reason. Distinguish running work,
 pending decisions, ready-to-ship changes, blocked work, and stale candidates.
 Recommend ship, ship-partial, abandon, prune, or discuss. Age alone does not
@@ -68,20 +102,18 @@ Explain waiting and active states plainly. Listing reads the selected
 installation's store; a missing Session does not prove deletion from retained
 installations.
 
-Questions for the participant stay in this conversation. A separate Work
-perspective is an ordinary `lf --task <task> : "<prompt>"` contribution.
-`lf ask` creates a new session, so do not use it merely to reach the participant
-already here.
+Normal Loopflow inspection commands remain available here. Questions for this
+present User stay in this conversation. A separate Work perspective is an
+ordinary `lf --task <task> : "<prompt>"` contribution. `lf ask` creates a new session,
+so do not use it merely to reach the User already here.
 
 ## Launching and advancing work
 
 Inspect whether the requested work already has a Task, prepared context, or
-running worker before filing or launching. Keep the Task title and description
-focused on the current problem, desired experience, observable acceptance, and
-real constraints. Reconcile changed scope instead of appending amendments.
-Keep current blockers, dependencies, and accepted scope visible in the description.
-Keep speculative solutions tentative; detailed solutions belong in a separate
-design.
+running worker before filing or launching. Write a Task title and opening from
+the user's situation, problem, and desired experience. Keep speculative solution
+ideas tentative and accepted constraints binding; detailed solutions belong in
+a separate design.
 
 For problem-first work:
 
@@ -123,6 +155,13 @@ Completed. Missing evidence and competing plans require resolution, never a
 new name chosen to bypass them. Rotation output is dated evidence, not another
 durable Chapter owner.
 
+Select from the installed catalog: `feature` runs design review, repeats
+implement → compress → refresh → loop-decide, publishes after convergence, then parks
+at a human demo when the decision is Advance. Demo completion returns feedback
+to a second loop-decide with its own edge to implement. For an
+already-approved design, `pursue` starts at implementation. Check installed help
+when the catalog or CLI version is unclear.
+
 For an existing invocation or an exact review:
 
 ```bash
@@ -138,6 +177,12 @@ design. State what actually started after checking status.
 Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
 record. Read any partial-outcome report and retry the same command. Authored files
 and retained PRs survive; deletion does not certify process termination.
+
+When filing or editing a Task, keep its description to the current problem,
+desired outcome, observable acceptance, and real constraints. Put dated planning
+and execution updates in authorized Task comments, with links to detailed evidence.
+Comments may be collapsed: keep current blockers, dependencies, and accepted scope
+visible in the description. Reconcile changed scope instead of appending amendments.
 
 ## Existing-design handoff
 
@@ -166,9 +211,11 @@ tree enters worker context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
-Continue the design already present without treating its draft choices as
-approved. Report the Task link, destination design path, selected Flow, and
-observed launch result. Verify supplied context separately from worker startup.
+Use the Flow the user selected and inspect its contents when explaining where it
+begins; otherwise use the current Project's Flow default. Continue the design already
+present without treating its draft choices as approved. Report the Task link,
+destination design path, selected Flow, and observed launch result. Verify
+supplied context separately from worker startup.
 
 If implementation already exists in the source checkout, preserve it and its
 writer. Document transfer does not adopt a checkout; current preparation does
@@ -229,3 +276,4 @@ a repository using Doppler, give `doppler run -- lf account connect <provider>` 
 credentials are missing. Otherwise name the missing credential variables and
 follow the customer's secret manager. Never print values or run a secret getter
 bare. Do not change accounts or placement merely to make an inspection pass.
+````

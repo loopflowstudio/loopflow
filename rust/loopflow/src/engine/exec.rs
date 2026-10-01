@@ -261,24 +261,24 @@ Test skill body.
         let tmp = create_repo_fixture();
         fs::write(tmp.path().join("STYLE.md"), "Provider-owned instructions.").unwrap();
         std::os::unix::fs::symlink("STYLE.md", tmp.path().join("AGENTS.md")).unwrap();
-        fs::write(tmp.path().join("guide.md"), "A shared document.").unwrap();
-        std::os::unix::fs::symlink("guide.md", tmp.path().join("alias.md")).unwrap();
+        fs::create_dir(tmp.path().join("scratch")).unwrap();
+        fs::write(tmp.path().join("scratch/guide.md"), "A shared document.").unwrap();
+        std::os::unix::fs::symlink("scratch/guide.md", tmp.path().join("alias.md")).unwrap();
         let prepared = prepare_exec_prompt(
             &default_test_config(),
             ExecPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                docs: vec![
-                    "STYLE.md".into(),
-                    "AGENTS.md".into(),
-                    "guide.md".into(),
-                    "alias.md".into(),
-                ],
+                docs: vec!["STYLE.md".into(), "AGENTS.md".into(), "alias.md".into()],
                 ..Default::default()
             },
         )
         .unwrap();
         assert!(!prepared.prompt.contains("Provider-owned instructions."));
         assert_eq!(prepared.prompt.matches("A shared document.").count(), 1);
+        assert!(prepared.deduplication_decisions.iter().any(|decision| {
+            decision.source_path.as_deref() == Some("alias.md")
+                && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+        }));
         assert!(prepared
             .deduplication_decisions
             .iter()

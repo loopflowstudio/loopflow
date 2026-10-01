@@ -362,8 +362,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-    dedup_documents(&mut diff_files);
-
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
     let (diff, diff_tier, diff_file_count) = if opts.include_diff {
@@ -1422,9 +1420,8 @@ pub fn drop_duplicate_docs(
 
     let mut decisions = Vec::new();
     let mut seen = HashSet::new();
-    let operate = components.operate;
-    let mut retain =
-        |doc: &Document| {
+    for docs in [&mut components.docs, &mut components.diff_files] {
+        docs.retain(|doc| {
             let name = Path::new(&doc.path)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -1436,7 +1433,7 @@ pub fn drop_duplicate_docs(
                 if AGENT_NATIVE_FILES.contains(&name) || canonical_paths.contains(&source_path) {
                     (Kind::RepoInstructions, ContextScope::Repo,
                      "provider-native discovery owns this instruction file or its symlink target")
-                } else if operate
+                } else if components.operate
                     && name == "LOOPFLOW.md"
                     && doc.content.trim() == crate::engine::builtins::LOOPFLOW_DOC.trim()
                 {
@@ -1446,15 +1443,11 @@ pub fn drop_duplicate_docs(
                         "the system channel already supplies the builtin operating instructions",
                     )
                 } else if !seen.insert((source_path, doc.content.clone())) {
-                    let kind = if doc.source == DocumentSource::Scratch {
-                        Kind::Scratch
-                    } else {
-                        Kind::Document
-                    };
-                    let scope = if doc.source == DocumentSource::Wave {
-                        ContextScope::Wave
-                    } else {
-                        ContextScope::Repo
+                    let (kind, scope) = match doc.source {
+                        DocumentSource::Scratch => (Kind::Scratch, ContextScope::Repo),
+                        DocumentSource::Wave => (Kind::Document, ContextScope::Wave),
+                        DocumentSource::Diff => (Kind::Diff, ContextScope::Repo),
+                        _ => (Kind::Document, ContextScope::Repo),
                     };
                     (
                         kind,
@@ -1477,9 +1470,8 @@ pub fn drop_duplicate_docs(
                 asset_position: None,
             });
             false
-        };
-    components.docs.retain(&mut retain);
-    components.diff_files.retain(retain);
+        });
+    }
     decisions
 }
 
@@ -1492,11 +1484,6 @@ fn read_text_file(path: &Path) -> Option<String> {
         return None;
     }
     String::from_utf8(bytes).ok()
-}
-
-fn dedup_documents(docs: &mut Vec<Document>) {
-    let mut seen = HashSet::new();
-    docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
 /// Ensure an entry exists in the repo's root .gitignore.
@@ -2688,6 +2675,29 @@ mod tests {
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
         assert!(!prompt.contains("mod b;"));
+    }
+
+    #[test]
+    fn context_delivery_keeps_one_document_also_requested_as_a_changed_file() {
+        let repo = init_repo();
+        write_file(repo.path(), "guide.md", "Keep rollback available.");
+        let mut components = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["guide.md".into()],
+            files: vec!["guide.md".into()],
+            include_diff_files: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let decisions = drop_duplicate_docs(&mut components, repo.path());
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
+
+        assert_eq!(prompt.matches("Keep rollback available.").count(), 1);
+        assert!(decisions.iter().any(|decision| {
+            decision.kind == crate::trace::ContextAssetKind::Diff
+                && decision.source_path.as_deref() == Some("guide.md")
+                && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+        }));
     }
 
     #[test]

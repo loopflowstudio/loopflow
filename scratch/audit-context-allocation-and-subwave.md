@@ -60,13 +60,13 @@ No new schema, record store, or content-hash deduplication policy is introduced.
 
 ## Delete — do not maintain
 
-- Remove the full authored goal from `ops/run.rs::render_wave_context` seeds;
-  preserve the complete gathered GOAL document, flow list, memory, metrics and
-  executive instructions. Keep builtin-goal fallback behavior.
-- Replace `drop_native_instruction_docs` and its returned removed-document list
-  with `drop_duplicate_docs` returning existing context decisions. Preserve native
-  file/symlink ownership; migrate preparation, capture, and `lf-prompt` consumers.
-- Remove the misleading GOAL source path on generated Wave framing.
+- Removed authored-goal seed copies, `drop_native_instruction_docs` and its
+  removed-document list, and the misleading GOAL source path on generated framing.
+  Preparation, capture, and `lf-prompt` use `drop_duplicate_docs` and existing
+  context decisions. Builtin-goal fallback, flow lists, memory, metrics and
+  executive instructions remain.
+- Removed `dedup_documents`: file gathering already deduplicates requested paths.
+  The shared assembly filter handles duplicates across document sources.
 - Do not rebuild the already-removed Objective excerpt, retired Run ownership,
   automatic child index, or per-skill memory loading infrastructure.
 
@@ -74,8 +74,10 @@ No new schema, record store, or content-hash deduplication policy is introduced.
 
 Focused prepared-prompt tests cover direct and Wave launches, complete goal
 content once, captured source/decision attribution, native and symlink duplicate
-sources, equal text in distinct memory files, customized guidance, and guidance
-with operate disabled. Golden fixtures carry the authored `realign` procedure.
+sources across automatic scratch and explicit docs, equal text in distinct memory
+files, customized guidance, and guidance with operate disabled. A focused assembly
+test also covers a document requested as changed-file context and its deduplication
+decision. Golden fixtures carry the authored `realign` procedure.
 
 Gate owns broader affected suites and acceptance checks. Demo/review owns observing
 an agent discover a relevant child lesson and curate a useful parent entry; prompt
@@ -89,8 +91,11 @@ full document explain its actual source. The same review found that the IDE
 short-seed path would lose the now document-owned goal; Wave-document launches
 therefore retain the assembled prompt. Deduplication is limited to source identity
 and the known operating document so identical memory scopes retain meaning.
+Compression review found that deduplicated changed-file context was classified
+as a generic document. The shared filter now retains its Diff classification;
+no extra deduplication pass or record type is needed.
 
-Check: `cargo test -p loopflow --lib context_delivery_` (3 tests), `cargo test -p loopflow --test golden_prompt`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; broader acceptance belongs to gate and observed curation to demo/review.
+Check: `cargo test -p loopflow --lib context_delivery_` (4 tests), `cargo test -p loopflow --lib gather_files_` (4 tests), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; broader acceptance belongs to gate and observed curation to demo/review.
 
 ## Historical evidence limits
 

@@ -5,6 +5,26 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Ask removal decision (2026-10-01)
+
+Jack Heart requested ordinary headless failure without an escalation conversation,
+reporting command, notification queue, or required handoff. The responsible Wave
+operator reads existing status and logs, resolves authorized impediments, and
+uses its ongoing Wave chat for necessary judgment. Taskless failure returns to
+its caller without creating a Wave or conversation. Known failed work stays
+stopped until explicit recovery; retry retains the Flow position and conversation.
+
+Jack clarified “no, Task sessions stay”: Task conversations and authored human
+reviews retain their feedback and completion contract. Persistent versus one-off
+Task conversations remains open. Historical Ask rows become ordinary conversations
+without replacing the Wave chat or granting Flow settlement authority. Older Ask
+identity and caller-release notes below describe the retired model.
+
+The local Ask removal implements this boundary with provider simulations and
+store recovery coverage; full Rust and Desktop acceptance remains with gate.
+A successful provider turn is not reclassified from prose alone. This records
+Product’s shared Session contract, not a Task or Wave placement decision.
+
 ## CI watcher decisions (2026-10-01)
 
 Jack Heart's decisions on [LOO-365](https://linear.app/loopflow/issue/LOO-365),
@@ -434,8 +454,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   old failures do not diagnose a new runner. Never replay retired mutation probes.
 - LOO-291 retains ten human-selected external-work trials, an authorized directive
   edit, and twenty long-lived-registry trials against published budgets. The external
-  workflow/text remain unprovided. LOO-251 retains promoted-Ask blocked-caller release
-  and D2's fourteen-day/twenty-open readiness obligations. Local PTYs, one cached
+  workflow/text remain unprovided. LOO-251’s promoted-Ask blocked-caller proof
+  was superseded by Jack Heart’s 2026-10-01 Ask removal; retained Task reviews
+  still require completion proof. D2’s fourteen-day/twenty-open readiness
+  obligations remain. Local PTYs, one cached
   population, or AX count timings do not satisfy these. Earlier fallback attempts
   stopped at resource preflight; the September 25 supervised Xcode compile later
   passed. Neither compile supplies the missing verdict or authorizes removing
@@ -514,9 +536,9 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
   machine bylines, and the database message bus are deleted.
 - **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
-  is useful. `lf ask` is reserved for a review boundary: it starts a provider
-  Run in the caller's checkout and blocks until that Session is explicitly
-  completed. A declared Task review node persists its exact playhead and advances
+  is useful. Ask was removed by Jack Heart’s 2026-10-01 decision. Failed work
+  retains its normal logs and outcome; necessary judgment belongs in the existing
+  Wave chat. A declared Task review node persists its exact playhead and advances
   only through Approve or Iterate. There is no agent exchange row, answer lane,
   or dedicated answer controller.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
@@ -686,11 +708,12 @@ substitute for another merely because identifiers coincide.
   Sessions alone open or resolve human work. NOW groups the same conditions, and
   usage and Run inspection preserve explicit subject provenance without adding
   another planning hierarchy.
-- **Two configured-path proofs remain release evidence.** One promoted Ask must
-  survive open, provider-native continuation, Ready, Complete, pane clearing, and
-  blocked-caller release. The permissioned macOS UI gate must interact with a
-  Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
-  launch-only screenshot, empty list, or live row without caller release is not
+- **Configured Session and Task review proofs remain release evidence.** After
+  Jack Heart’s 2026-10-01 Ask removal, ordinary Sessions still need open and
+  provider-native continuation proof; retained Task reviews need Ready, Complete,
+  pane clearing, and exact Flow feedback proof. The permissioned macOS UI gate
+  must interact with a Session and prove focus/action/pane reconciliation. A mocked `SessionRecord`,
+  launch-only screenshot, empty list, or live review without completion is not
   equivalent evidence.
 - **Shared action reduction is implemented in this branch.** Required action
   descriptors and shared Work paths replace Swift's legality/replacement matrix

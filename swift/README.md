@@ -191,7 +191,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Sessions, Task human FlowSteps, and ad-hoc Asks.
+include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session until Complete.
 

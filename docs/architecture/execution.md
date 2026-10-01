@@ -31,7 +31,7 @@ argv -> Exec admission -> Skill discovery -> prompt -> provider route
 ```
 
 The same admission applies to headless and interactive skills, inline prompts,
-helpers, Asks and reviews. It needs no planning parents, but requires its Home's
+helpers and reviews. It needs no planning parents, but requires its Home's
 writable conversation store before provider launch. Optional Work enrichment does
 not confer a Flow claim. A failed admission cannot become an invisible file-only
 conversation. Large captured payloads remain outside SQLite behind indexed references.

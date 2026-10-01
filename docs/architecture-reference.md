@@ -193,7 +193,7 @@ attempt object. History entries have stable references, not independent lifecycl
 ### Conversation and driver lifetime
 
 Every agent conversation is an AgentSession: skills, inline prompts, helpers,
-Asks, reviews, interactive and headless work. Default views select interactive
+reviews, interactive and headless work. Default views select interactive
 conversations. Explicit filters expose headless and completed history; `--all`
 continues to mean all repositories. Interactive mode grants neither review
 completion nor Flow authority.
@@ -264,7 +264,7 @@ settlement and worker delivery authority. The managed Flow panel describes that
 cursor; `task status`'s `work` contains all Sessions, Flows and Execs, including
 headless and closed history. Completion waits for independent unfinished Flows;
 recovery preserves idle Flows and waits for unresolved execution, including a
-worker claim before its first step. Pending Asks/reviews and live or unresolved
+worker claim before its first step. Pending reviews and live or unresolved
 Execs preserve the checkout. The completing managed worker may settle itself;
 it cannot settle an independent Flow by completing its Task. Passive membership
 grants no control.

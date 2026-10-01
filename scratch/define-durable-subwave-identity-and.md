@@ -15,9 +15,20 @@ Inherited LOO-298 scratch notes were removed under the supervising session's
 
 ## Remaining work
 
+Jack Heart's 2026-09-30 walkthrough review accepted the rename/reparent context
+behavior and changed memory budgeting: 8,000 tokens for the selected Wave and
+another 8,000 shared by all ancestors. The local revision retains the existing
+64-KiB limit per pool and full-source snapshots; 41 focused checks, formatting
+and all-target Clippy passed. This
+supersedes the sync's shared 8,000-token pool. Jack is open to experimentation on
+repository-root MEMORY.md: the local experiment includes it automatically before
+Wave files, sharing the inherited pool, including for unbound launches. This
+review concluded with Jack’s explicit demo approval and request to complete the
+Session. Configured-provider/Desktop observations remain unperformed.
+
 1. LOO-298 landed as #1296 and `lf sync` merged main, per Jack Heart's latest
    supervising-session steer. Continue the selected ship-demo Flow through
-   gate, publication and Jack's interactive demo. Synchronize by merge, never
+   remaining delivery after Jack’s approved interactive demo. Synchronize by merge, never
    rebase. Local implementation and the disposable-Home proof are complete.
 2. After landing, use installed `lf` to create Release's Linear Initiative and
    plan, move release-focused Tasks/KRs and sync the live schedule. The authored

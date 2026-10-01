@@ -49,36 +49,20 @@ fn bound_source(
 
 pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), CoreError> {
     let repo_root = Path::new(&components.repo_root);
-    let memories: Vec<_> = components
+    let own_memory = components
+        .wave
+        .as_ref()
+        .map(|wave| format!("wave/{wave}/MEMORY.md"));
+    let (own, inherited): (Vec<_>, Vec<_>) = components
         .docs
         .iter_mut()
-        .filter(|doc| doc.source == DocumentSource::Wave && doc.path.ends_with("/MEMORY.md"))
-        .collect();
-    let memory_tokens = memories
-        .iter()
-        .map(|doc| count_tokens(&doc.content))
-        .sum::<usize>()
-        .max(MEMORY_TOKENS);
-    let memory_bytes = memories
-        .iter()
-        .map(|doc| doc.content.len())
-        .sum::<usize>()
-        .max(64 * 1024);
-    // Share the collection budget in proportion to source size, preserving
-    // ancestor order and each document's attribution and complete source.
-    for memory in memories {
-        let tokens = count_tokens(&memory.content) * MEMORY_TOKENS / memory_tokens;
-        let bytes = memory.content.len() * (64 * 1024) / memory_bytes;
-        let bounded = bound_source(&memory.content, tokens, bytes, repo_root)?;
-        record_reduction(
-            &mut components.budget_decisions,
-            &memory.content,
-            &bounded,
-            ContextAssetKind::Memory,
-            ContextScope::Wave,
-            &memory.path,
-        );
-        memory.content = bounded;
+        .filter(|doc| {
+            doc.source == DocumentSource::RepoMemory
+                || (doc.source == DocumentSource::Wave && doc.path.ends_with("/MEMORY.md"))
+        })
+        .partition(|doc| Some(doc.path.as_str()) == own_memory.as_deref());
+    for memories in [own, inherited] {
+        bound_memories(memories, repo_root, &mut components.budget_decisions)?;
     }
     let scratch_docs: Vec<_> = components
         .docs
@@ -136,6 +120,43 @@ pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), Cor
             "launch message",
         );
         *message = bounded;
+    }
+    Ok(())
+}
+
+fn bound_memories(
+    memories: Vec<&mut Document>,
+    repo_root: &Path,
+    decisions: &mut Vec<ContextDecision>,
+) -> Result<(), CoreError> {
+    let memory_tokens = memories
+        .iter()
+        .map(|doc| count_tokens(&doc.content))
+        .sum::<usize>()
+        .max(MEMORY_TOKENS);
+    let memory_bytes = memories
+        .iter()
+        .map(|doc| doc.content.len())
+        .sum::<usize>()
+        .max(64 * 1024);
+    // Repository and ancestor memory share a pool; selected Wave memory has its own.
+    for memory in memories {
+        let tokens = count_tokens(&memory.content) * MEMORY_TOKENS / memory_tokens;
+        let bytes = memory.content.len() * (64 * 1024) / memory_bytes;
+        let bounded = bound_source(&memory.content, tokens, bytes, repo_root)?;
+        record_reduction(
+            decisions,
+            &memory.content,
+            &bounded,
+            ContextAssetKind::Memory,
+            if memory.source == DocumentSource::RepoMemory {
+                ContextScope::Repo
+            } else {
+                ContextScope::Wave
+            },
+            &memory.path,
+        );
+        memory.content = bounded;
     }
     Ok(())
 }

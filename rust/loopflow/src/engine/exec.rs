@@ -297,16 +297,18 @@ Test skill body.
         assert!(bytes <= INPUT_BYTES, "{bytes}");
         assert!(tokens <= INPUT_TOKENS, "{tokens}");
         assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
-        assert!(
-            prepared
+        for path in [
+            "wave/infrastructure/MEMORY.md",
+            "wave/infrastructure/release/MEMORY.md",
+        ] {
+            let memory = prepared
                 .components
                 .docs
                 .iter()
-                .filter(|doc| doc.source == DocumentSource::Wave)
-                .map(|doc| count_tokens(&doc.content))
-                .sum::<usize>()
-                <= MEMORY_TOKENS
-        );
+                .find(|doc| doc.path == path)
+                .unwrap();
+            assert!(count_tokens(&memory.content) <= MEMORY_TOKENS);
+        }
         assert!(
             prepared
                 .components
@@ -349,6 +351,71 @@ Test skill body.
             evidence
         );
         eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
+    }
+
+    #[test]
+    fn inherited_memory_cannot_consume_the_selected_waves_allowance() {
+        let tmp = create_repo_fixture();
+        let inherited = "Parent decisions and observations.\n".repeat(8_000);
+        let own = "Release decisions and observations.\n".repeat(800);
+        fs::write(tmp.path().join("MEMORY.md"), &inherited).unwrap();
+        for (wave, memory) in [
+            ("infrastructure", &inherited),
+            ("infrastructure/delivery", &inherited),
+            ("infrastructure/delivery/release", &own),
+        ] {
+            let directory = tmp.path().join("wave").join(wave);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("MEMORY.md"), memory).unwrap();
+        }
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                wave: Some("infrastructure/delivery/release".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let memories = &prepared.components.docs;
+        assert_eq!(memories.len(), 4);
+        assert_eq!(memories[3].content, own);
+        assert!(memories[..3]
+            .iter()
+            .all(|doc| doc.content.contains("excerpt only")));
+        let inherited_tokens: usize = memories[..3]
+            .iter()
+            .map(|doc| crate::engine::prompt::count_tokens(&doc.content))
+            .sum();
+        assert!(inherited_tokens <= crate::engine::context_budget::MEMORY_TOKENS);
+    }
+
+    #[test]
+    fn repository_memory_is_bounded_without_a_selected_wave() {
+        let tmp = create_repo_fixture();
+        let memory = "Repository decisions and observations.\n".repeat(8_000);
+        fs::write(tmp.path().join("MEMORY.md"), &memory).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let doc = &prepared.components.docs[0];
+        assert!(
+            crate::engine::prompt::count_tokens(&doc.content)
+                <= crate::engine::context_budget::MEMORY_TOKENS
+        );
+        assert!(doc.content.contains("excerpt only"));
+        assert_eq!(
+            prepared.components.budget_decisions[0].scope,
+            crate::trace::ContextScope::Repo
+        );
+        assert!(fs::read_dir(tmp.path().join(".lf/tmp/context"))
+            .unwrap()
+            .any(|entry| fs::read_to_string(entry.unwrap().path()).unwrap() == memory));
     }
 
     #[test]

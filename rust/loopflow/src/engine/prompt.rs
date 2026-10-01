@@ -24,6 +24,7 @@ pub enum DocumentSource {
     Skill,
     Scratch,
     Wave,
+    RepoMemory,
     Docs,
     Summary,
     Diff,
@@ -342,7 +343,10 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
     let mut diff_files = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::Docs | DocumentSource::Scratch | DocumentSource::Wave => docs.push(doc),
+            DocumentSource::Docs
+            | DocumentSource::Scratch
+            | DocumentSource::Wave
+            | DocumentSource::RepoMemory => docs.push(doc),
             DocumentSource::Summary => summaries.push(doc),
             DocumentSource::Diff => diff_files.push(doc),
             DocumentSource::Skill | DocumentSource::Clipboard => {}
@@ -401,8 +405,16 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve ambient ordering: scratch -> wave -> explicit docs.
+    // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    let repo_memory = spec.repo_root.join("MEMORY.md");
+    if repo_memory.is_file() {
+        docs.push(Document {
+            path: "MEMORY.md".into(),
+            content: fs::read_to_string(repo_memory)?,
+            source: DocumentSource::RepoMemory,
+        });
+    }
     docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
     if !spec.docs.is_empty() {
         let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
@@ -1488,7 +1500,7 @@ pub fn loopflow_section() -> String {
     )
 }
 
-/// Render the same Wave files for assembled prompts and native skill launches.
+/// Render repository memory and Wave files for assembled and native skill launches.
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
@@ -1501,7 +1513,12 @@ pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|doc| doc.source == DocumentSource::Wave)
+        .filter(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Wave
+            )
+        })
         .collect();
     if !docs.is_empty() {
         parts.push(format_files(docs));
@@ -1550,7 +1567,12 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     let reference_docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|doc| !matches!(doc.source, DocumentSource::Scratch | DocumentSource::Wave))
+        .filter(|doc| {
+            !matches!(
+                doc.source,
+                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
+            )
+        })
         .collect();
     if !reference_docs.is_empty() {
         parts.push(format_files(reference_docs));

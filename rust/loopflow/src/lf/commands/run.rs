@@ -996,7 +996,9 @@ pub(crate) fn attributed_context(
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
             Kind::Scratch
-        } else if document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md") {
+        } else if document.source == DocumentSource::RepoMemory
+            || (document.source == DocumentSource::Wave && document.path.ends_with("/MEMORY.md"))
+        {
             Kind::Memory
         } else if document.path.ends_with("AGENTS.md") || document.path.ends_with("CLAUDE.md") {
             Kind::RepoInstructions
@@ -1966,6 +1968,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("infrastructure/release".into()),
             docs: vec![
                 Document {
+                    path: "MEMORY.md".into(),
+                    content: "Repository decisions.".into(),
+                    source: DocumentSource::RepoMemory,
+                },
+                Document {
                     path: "wave/infrastructure/MEMORY.md".into(),
                     content: "Inherited decisions.".into(),
                     source: DocumentSource::Wave,
@@ -1991,6 +1998,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(
             seed.find("Inherited decisions.").unwrap() < seed.find("Deliver releases.").unwrap()
         );
+        assert!(
+            seed.find("Repository decisions.").unwrap()
+                < seed.find("Inherited decisions.").unwrap()
+        );
+        assert_eq!(seed.matches("Repository decisions.").count(), 1);
         assert!(seed.find("Deliver releases.").unwrap() < seed.find("<lf:message>").unwrap());
         assert_eq!(seed.matches("Inherited decisions.").count(), 1);
     }

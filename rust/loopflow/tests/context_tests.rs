@@ -606,6 +606,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     for (path, content) in [
+        ("MEMORY.md", "Repository decisions"),
         ("wave/infrastructure/README.md", "Parent introduction"),
         ("wave/infrastructure/GOAL.md", "Parent goal"),
         ("wave/infrastructure/MEMORY.md", "Parent decisions"),
@@ -635,12 +636,18 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
     let paths: Vec<_> = components
         .docs
         .iter()
-        .filter(|doc| doc.source == DocumentSource::Wave)
+        .filter(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Wave
+            )
+        })
         .map(|doc| doc.path.as_str())
         .collect();
     assert_eq!(
         paths,
         [
+            "MEMORY.md",
             "wave/infrastructure/README.md",
             "wave/infrastructure/GOAL.md",
             "wave/infrastructure/MEMORY.md",
@@ -652,6 +659,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
     let prompt = render_prompt(components);
     assert!(prompt.contains("Recursive scratch"));
     for content in [
+        "Repository decisions",
         "Parent introduction",
         "Parent goal",
         "Parent decisions",
@@ -662,6 +670,7 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
         assert_eq!(prompt.matches(content).count(), 1);
     }
     assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release goal").unwrap());
+    assert!(prompt.find("Repository decisions").unwrap() < prompt.find("Parent goal").unwrap());
     for excluded in [
         "Sibling secrets",
         "Child details",
@@ -670,6 +679,23 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
     ] {
         assert!(!prompt.contains(excluded));
     }
+}
+
+#[test]
+fn repository_memory_is_included_once_without_a_wave() {
+    let temp = TempDir::new().unwrap();
+    fs::write(temp.path().join("MEMORY.md"), "Repository decisions.").unwrap();
+    let components = gather_context(&GatherContextOpts {
+        repo_root: temp.path().to_path_buf(),
+        docs: vec!["MEMORY.md".into()],
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(components.docs.len(), 1);
+    assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
+    let prompt = render_prompt(components);
+    assert_eq!(prompt.matches("Repository decisions.").count(), 1);
+    assert!(!prompt.contains("<lf:wave name="));
 }
 
 #[test]

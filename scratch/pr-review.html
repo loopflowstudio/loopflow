@@ -1,0 +1,281 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Subwaves — source walkthrough · LOO-354</title><style>
+:root{--paper:#f7f5ef;--ink:#20312f;--muted:#56635e;--line:#cbd2c9;--accent:#245d4e;--soft:#e8eee6;--code:#142c2c;--amber:#865116}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--accent);text-underline-offset:3px}a:hover{color:#103f30}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #b06622;outline-offset:5px}h1,h2,h3,p{margin-top:0}h1,h2{font-family:Georgia,"Times New Roman",serif;font-weight:400;line-height:1.1}h1{font-size:clamp(48px,7vw,86px);letter-spacing:-.045em;max-width:850px;margin-bottom:24px}h2{font-size:clamp(30px,4vw,44px);letter-spacing:-.025em;margin:0}h3{font-size:19px;margin:28px 0 10px}p{margin-bottom:20px}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.86em;overflow-wrap:anywhere}header{border-top:8px solid var(--accent);padding:65px 0 40px}.shell{max-width:1220px;margin:auto;padding:0 40px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:25px}.deck{max-width:780px;font-size:22px;line-height:1.55}.scope{max-width:960px;padding-top:20px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}.scope p{margin:7px 0}.layout{display:grid;grid-template-columns:180px minmax(0,1fr);gap:52px}nav{align-self:start;position:sticky;top:30px;padding:22px 0}nav p{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:750}nav a{display:block;padding:8px 0;text-decoration:none;font-size:14px;border-bottom:1px solid var(--line)}nav a span{color:var(--muted);margin-right:8px}main{min-width:0}section{padding:46px 0 56px;border-top:1px solid var(--line)}.section-title{display:flex;gap:16px;align-items:baseline;margin-bottom:23px}.section-title>span{font:14px ui-monospace,monospace;color:var(--accent)}.lead{font-size:21px;line-height:1.5;max-width:770px;color:var(--muted)}.pair{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:25px;align-items:start}.source{margin:23px 0;min-width:0}.pair .source{margin-top:0}figcaption{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:1.5;margin-bottom:10px;overflow-wrap:anywhere}figcaption strong{font-size:13px}figcaption span{color:var(--muted)}pre{margin:0;background:var(--code);color:#edf3ec;border-radius:4px;padding:21px;overflow:auto;tab-size:4;font-size:13px;line-height:1.6}pre code{font-size:inherit;overflow-wrap:anywhere;white-space:pre-wrap}.model{display:flex;align-items:center;gap:15px;margin-top:26px}.model>div{background:var(--soft);border-top:3px solid var(--accent);padding:18px 15px;flex:1;min-width:0}.model b{font-size:14px;display:block;overflow-wrap:anywhere}.model small{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}.model span:not(.arrow){font-size:12px}.caption{font-size:12px;color:var(--muted);margin-top:10px}.note{background:#eee8db;border-left:3px solid var(--amber);padding:22px 25px;margin:25px 0;font-size:15px}.route-steps{padding-left:24px}.route-steps li{padding:0 0 16px 8px}details{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:26px 0;padding:17px 0}details[open]{padding-bottom:24px}summary{cursor:pointer;color:var(--accent);font-size:15px;font-weight:650}details[open] summary{margin-bottom:20px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px}th{text-align:left;background:var(--soft);font-weight:650}th,td{vertical-align:top;padding:17px 15px;border-bottom:1px solid var(--line)}td:first-child{width:25%;font-weight:650}li{margin-bottom:13px}footer{padding:26px 0 55px;color:var(--muted);font-size:13px}.skip{position:absolute;left:20px;top:-100px;background:white;padding:10px}.skip:focus{top:20px}
+@media(max-width:1050px){.pair{grid-template-columns:1fr}.layout{gap:30px;grid-template-columns:155px minmax(0,1fr)}.model{flex-direction:column;align-items:stretch}.arrow{align-self:center;transform:rotate(90deg)}}
+@media(max-width:700px){body{font-size:16px}.shell{padding:0 22px}header{padding-top:40px}.deck{font-size:20px}.layout{display:block}nav{position:static;display:flex;flex-wrap:wrap;gap:0 17px;padding:0 0 25px}nav p{width:100%;margin-bottom:6px}nav a{font-size:13px}section{padding:35px 0}.section-title{gap:12px}.lead{font-size:19px}pre{padding:16px;font-size:12px}th,td{padding:12px 9px}.note{padding:18px}.model{gap:7px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media print{body{background:white;font-size:10pt;color:black}.shell{max-width:none;padding:0}header{padding:20px 0}h1{font-size:42pt}h2{font-size:24pt}.layout{display:block}nav,.skip{display:none}section{padding:20px 0}.pair{display:block}pre{white-space:pre-wrap;background:#f1f3f0;color:black;overflow:visible;font-size:8pt}pre code{white-space:pre-wrap;overflow-wrap:anywhere}.source{break-inside:avoid}a{color:black}.model{flex-direction:row}.note{background:#f3f1eb}footer{padding:15px 0}}
+</style></head><body id="top">
+<a class="skip" href="#identity">Skip to walkthrough</a><header><div class="shell"><p class="eyebrow">Loopflow / Infrastructure · LOO-354 · 30 September 2026</p><h1>A Wave inside a Wave.</h1><p class="deck">Say <code>infrastructure/release</code>. Keep its identity, inherit the right context, and give Release its own work.</p><div class="scope"><p><strong><a href="https://github.com/loopflowstudio/loopflow/pull/1375">PR #1375</a> · Published diff.</strong> Published source excerpts are pinned to <code>581cc3599d7e499a180dfc274837fac466008506</code>; local review edits are explicitly labeled in section 04. The published comparison base is <code>de074a2ebd2cb54e6f7dde799400dae36c87bbbe</code> (merged main).</p><p>GitHub reports this exact base and head. The earlier demo preview predates the main merge; its limits remain explicit below. This HTML is a local, unpublished review artifact. Unpublished review edits add separate memory allowances, repository-memory inclusion, and behavior-focused pr-review instructions.</p><p>Source links target exact revisions. Embedded excerpts remain readable offline. Product verification and Jack’s explicit demo approval are distinguished below. This document records no merge decision.</p></div></div></header>
+<div class="shell layout"><nav aria-label="Reading route"><p>Reading route</p><a href="#identity"><span>01</span>Rename a parent</a><a href="#discovery"><span>02</span>Use a fresh Home</a><a href="#journey"><span>03</span>Move Release</a><a href="#context"><span>04</span>Read inherited context</a><a href="#migration"><span>05</span>Upgrade existing plans</a><a href="#release"><span>06</span>Run Release’s schedule</a><a href="#evidence"><span>07</span>Evidence & judgment</a></nav><main><section id="identity"><div class="section-title"><span>01</span><h2>Renaming a parent keeps its child Waves attached</h2></div><p class="lead">Rename infrastructure to infra. Release becomes infra/release, with the same identity and plan.</p><div class="pair"><div><p>Release has its own objective, plan, Tasks and schedule. Renaming its parent changes how Release is addressed; its existing work stays attached.</p><p>The code keeps a permanent ID, a name such as release, and a parent ID. It derives the full address from those names. SQLite stores the relationship; <code>slug</code> holds the derived address in memory.</p><p>Changing Infrastructure’s name therefore changes Release’s address without rewriting Release’s identity. The SQL view is the shared calculation used by readers.</p></div><figure class="source"><figcaption><strong>Wave — identity and directory parent</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/work/wave/mod.rs#L56-L68">rust/loopflow/src/work/wave/mod.rs · L56–68</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Wave — identity and directory parent"><code>#[derive(Debug, Clone, Serialize)]
+pub struct Wave {
+    id: WaveId,
+    name: String,
+    /// Derived on read from this Wave and its ancestors; never persisted.
+    #[serde(skip)]
+    slug: String,
+    /// Current canonical repository half of the mutable locator.
+    repo: String,
+    #[serde(with = &quot;time::serde::rfc3339::option&quot;)]
+    created_at: Option&lt;OffsetDateTime&gt;,
+    /// Directory parent; absent for a top-level Wave.
+    parent_wave_id: Option&lt;WaveId&gt;,</code></pre></figure></div><div class="model" aria-label="Illustrative data model"><div><small>Stored root</small><b>id: A · infrastructure</b><span>parent: none</span></div><span class="arrow" aria-hidden="true">→</span><div><small>Stored child</small><b>id: B · release</b><span>parent: A</span></div><span class="arrow" aria-hidden="true">→</span><div><small>Derived address</small><b>infrastructure/release</b><span>Project still points to B</span></div></div><p class="caption">Illustrative IDs A and B; this is a model diagram, not a database dump.</p><figure class="source"><figcaption><strong>Active uniqueness and wave_addresses</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql#L48-L59">rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql · L48–59</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Active uniqueness and wave_addresses"><code>
+CREATE UNIQUE INDEX idx_waves_active_locator
+    ON waves(repo,ifnull(parent_wave_id,&#x27;&#x27;),name) WHERE retired_at IS NULL;
+
+CREATE VIEW wave_addresses AS
+WITH RECURSIVE addresses(id,slug) AS (
+    SELECT id,name FROM waves WHERE parent_wave_id IS NULL
+    UNION ALL
+    SELECT w.id,a.slug || &#x27;/&#x27; || w.name FROM waves w
+    JOIN addresses a ON w.parent_wave_id=a.id
+)
+SELECT w.*,a.slug FROM waves w JOIN addresses a ON a.id=w.id;</code></pre></figure><p>The active unique index scopes names by repository and parent. Two parents can each contain <code>release</code>. The existing Project → Wave identity link survives the conversion; <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migrations.rs#L5553-L5602">the migration regression preserves that link and then renames the parent</a>.</p></section><section id="discovery"><div class="section-title"><span>02</span><h2>A fresh Home recognizes the same Wave</h2></div><p class="lead">Commit the ID in GOAL.md, and another Home can recognize the Wave even after its directory moves.</p><p>On registration, Loopflow uses the ID written in GOAL.md. If none is written, it adopts the Wave already registered at that address or creates a new ID. The following code makes that choice:</p><figure class="source"><figcaption><strong>ensure_wave_row — choose the identity</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/work/wave/mod.rs#L197-L211">rust/loopflow/src/work/wave/mod.rs · L197–211</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: ensure_wave_row — choose the identity"><code>        let address = WaveLocator::new(locator.repo().clone(), &amp;prefix)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let config = config::try_read_wave_config(main_repo, &amp;prefix)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        let at_address = store.get_wave_at(&amp;address).await?;
+        let id = config
+            .as_ref()
+            .and_then(|config| config.id.clone())
+            .or_else(|| at_address.as_ref().map(|wave| wave.id().clone()))
+            .unwrap_or_default();
+        if at_address.as_ref().is_some_and(|wave| wave.id() != &amp;id) {
+            return Err(StoreError::InvalidData(format!(
+                &quot;Wave {prefix} is already registered with another id&quot;
+            )));
+        }</code></pre></figure><div class="pair"><div><h3>Registration writes the ID into GOAL.md</h3><p>Existing rows reconcile their segment and parent; new rows are inserted. Registration then writes missing <code>id:</code> frontmatter into GOAL.md. Discovery can therefore change both SQLite and repository files.</p><p><strong>Fresh-Home continuity depends on committing that field.</strong> The checked-in Release goal still has no ID at this snapshot. Its post-landing registration and committed UUID remain part of making the live prototype portable.</p><p><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/docs/waves.md#L34-L44">The user documentation states this requirement</a>.</p></div><figure class="source"><figcaption><strong>ensure_wave_row — reconcile, then author the UUID</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/work/wave/mod.rs#L228-L246">rust/loopflow/src/work/wave/mod.rs · L228–246</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: ensure_wave_row — reconcile, then author the UUID"><code>            store
+                .reconcile_wave_directory(&amp;id, segment, parent.as_ref())
+                .await?;
+        } else {
+            let mut wave = Wave::new(id.clone(), segment.to_string(), repo.clone());
+            if let Some(parent) = &amp;parent {
+                wave = wave.with_parent(parent.clone());
+            }
+            store.create_wave(&amp;wave).await?;
+        }
+        if config.as_ref().is_none_or(|config| config.id.is_none()) {
+            config::update_wave_goal_config(main_repo, &amp;prefix, |map| {
+                map.insert(
+                    serde_yaml_ng::Value::String(&quot;id&quot;.into()),
+                    serde_yaml_ng::Value::String(id.to_string()),
+                );
+                Ok(())
+            })
+            .map_err(StoreError::InvalidData)?;</code></pre></figure></div><details><summary>Boundary case: copying an ID does not create a second Wave</summary><p>A conflicting occupant is rejected above. If the same UUID still exists in the previous authored directory, discovery refuses to interpret the copy as a move.</p><figure class="source"><figcaption><strong>ensure_wave_row — distinguish move from copy</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/work/wave/mod.rs#L212-L227">rust/loopflow/src/work/wave/mod.rs · L212–227</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: ensure_wave_row — distinguish move from copy"><code>        if let Some(existing) = store.get_wave(&amp;id).await? {
+            if existing.is_retired() || existing.repo() != repo {
+                return Err(StoreError::InvalidData(format!(
+                    &quot;Wave {id} belongs to another repository or is retired&quot;
+                )));
+            }
+            if existing.slug() != prefix {
+                let previous = config::try_read_wave_config(main_repo, existing.slug())
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                if previous.and_then(|config| config.id).as_ref() == Some(&amp;id) {
+                    return Err(StoreError::InvalidData(format!(
+                        &quot;Wave {id} appears at both {} and {prefix}&quot;,
+                        existing.slug()
+                    )));
+                }
+            }</code></pre></figure><p>The store also rejects cycles and parents in another repository: <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/sqlite.rs#L915-L953">validate_wave_parent</a>. <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/work/wave/mod.rs#L264-L301">The inspected fixture checks sibling names, duplicate IDs and a parent cycle</a>.</p></details><p class="note"><strong>Operational review point.</strong> Row reconciliation precedes the file write; the two are not one transaction. A GOAL.md write failure can leave the row changed before the operation reports failure. This is a source-derived boundary, not a newly reproduced failure.</p></section><section id="journey"><div class="section-title"><span>03</span><h2>Moving Release changes what its Tasks inherit</h2></div><p class="lead">A Task stays attached to Release when Release moves. Its agent reads the new parent’s context.</p><p>Start a Task belonging to Release. Its agent reads Infrastructure’s Markdown, then Release’s Markdown, from the checkout where it will work. That includes local edits in that checkout.</p><p>Now consider two directory changes:</p><div class="table-wrap"><table><thead><tr><th>Directory</th><th>Task belongs to</th><th>Agent reads</th></tr></thead><tbody><tr><td>infrastructure/release</td><td>Release</td><td>Infrastructure + Release</td></tr><tr><td>Rename parent: infra/release</td><td>Release</td><td>Infra + Release</td></tr><tr><td>Move under Product: product/release</td><td>Release</td><td>Product + Release</td></tr></tbody></table></div><p><strong>The move under Product is a test scenario.</strong> It checks that Tasks keep their owner while inherited context follows the directory. It is not a proposal to move Release.</p><p>The test renames the parent directory, discovers the new address, and checks that Release’s stored identity is unchanged:</p><figure class="source"><figcaption><strong>Parent rename preserves Release — release_task_prompt_follows_parent_rename_and_reparenting</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L495-L508">rust/loopflow/src/ops/run.rs · L495–508</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Parent rename preserves Release — release_task_prompt_follows_parent_rename_and_reparenting"><code>            let discovered = crate::work::wave::ensure_wave_row(&amp;store, repo.path(), address)
+                .await
+                .unwrap();
+            assert_eq!(discovered.id(), release.id());
+            if address == &quot;infra/release&quot; {
+                assert_eq!(
+                    serde_json::to_value(&amp;discovered).unwrap(),
+                    child_row,
+                    &quot;renaming a parent leaves the child row unchanged&quot;
+                );
+                assert_eq!(
+                    store.get_wave(parent.id()).await.unwrap().unwrap().name(),
+                    &quot;infra&quot;
+                );</code></pre></figure><p>It then starts from the same Task and checks the resulting prompt. Release’s memory appears once; the current parent’s memory comes first; the former parent and Auth sibling stay out. Finally, a fresh Home recovers Release’s ID from the authored files:</p><figure class="source"><figcaption><strong>Inherited memory follows the move — same fixture</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L528-L549">rust/loopflow/src/ops/run.rs · L528–549</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Inherited memory follows the move — same fixture"><code>            let ancestor = if address.starts_with(&quot;product/&quot;) {
+                &quot;Product memory&quot;
+            } else {
+                &quot;Parent memory&quot;
+            };
+            assert_eq!(prompt.matches(&quot;Release memory&quot;).count(), 1);
+            assert_eq!(prompt.matches(ancestor).count(), 1);
+            assert!(prompt.find(ancestor).unwrap() &lt; prompt.find(&quot;Release memory&quot;).unwrap());
+            assert!(!prompt.contains(&quot;Excluded auth memory&quot;));
+            assert!(!prompt.contains(if ancestor == &quot;Parent memory&quot; {
+                &quot;Product memory&quot;
+            } else {
+                &quot;Parent memory&quot;
+            }));
+        }
+        // A new Home reconstructs the same identity from the authored files.
+        let (_fresh_home, fresh) = test_store().await;
+        let recovered = crate::work::wave::ensure_wave_row(&amp;fresh, repo.path(), &quot;product/release&quot;)
+            .await
+            .unwrap();
+        assert_eq!(recovered.id(), release.id());
+        assert_eq!(recovered.slug(), &quot;product/release&quot;);</code></pre></figure><details><summary>How starting the Task reaches these files</summary><ol><li>The work selector finds the Task, its Wave and Project. <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L79-L146">resolve_work_binding → resolve_work_selection</a>.</li><li>The Task keeps the invoking worktree when it is on the recorded PR branch; otherwise it uses its saved worktree. Its Wave supplies the current address. <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L156-L180">Task binding</a>.</li><li>Preparation reads that checkout’s files, applies the context budget and formats the prompt. <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/engine/exec.rs#L102-L117">prepare_exec_prompt</a>.</li></ol></details><details><summary>Selecting a Wave directly also reads local edits</summary><p>When the invocation is in another worktree of the same repository, its files are used. An invocation from a different repository uses the Wave’s repository.</p><figure class="source"><figcaption><strong>Keep the invoking checkout — resolve_work_selection</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L193-L207">rust/loopflow/src/ops/run.rs · L193–207</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Keep the invoking checkout — resolve_work_selection"><code>        let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+            .is_ok_and(|canonical| canonical.contains(repo))
+        {
+            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+        } else {
+            PathBuf::from(wave.repo())
+        };
+        let context = render_wave_context(&amp;cwd, wave.slug(), &amp;metric_context);
+        return Ok(WorkBinding {
+            source: crate::session::WorkSource::Declared,
+            subjects: vec![format!(&quot;wave:{}&quot;, wave.slug())],
+            work: WorkRef::Wave(wave.id().clone()),
+            wave_id: wave.id().clone(),
+            wave_name: wave.slug().to_string(),
+            cwd,</code></pre></figure></details></section><section id="context"><div class="section-title"><span>04</span><h2>Keep your own memory allowance separate from inherited memory</h2></div><p class="lead">The selected Wave gets 8,000 tokens. Repository memory and all ancestors share another 8,000.</p><p><strong>Local review revision, not yet published.</strong> Jack Heart requested separate allowances on 2026-09-30. This supersedes the published branch’s single pool. Jack is open to experimenting with repository memory; the implementation below tries automatic inclusion in the inherited pool.</p><div class="table-wrap"><table><thead><tr><th>For infrastructure/release</th><th>Memory allowance</th></tr></thead><tbody><tr><td>wave/infrastructure/release/MEMORY.md</td><td>8,000 tokens for Release alone</td></tr><tr><td>MEMORY.md + wave/infrastructure/MEMORY.md</td><td>8,000 tokens shared proportionally</td></tr></tbody></table></div><p>A large Infrastructure memory can no longer shrink Release’s allowance. Each pool also has a 64-KiB byte limit. Unused space in one pool is not transferred to the other.</p><figure class="source"><figcaption><strong>Separate the selected Wave from inherited memory — bound_context</strong><a href="../rust/loopflow/src/engine/context_budget.rs">rust/loopflow/src/engine/context_budget.rs · L50–66</a><span>Local uncommitted revision over 581cc3599 · exact excerpt</span></figcaption><pre tabindex="0"><code>pub(crate) fn bound_context(components: &amp;mut PromptComponents) -&gt; Result&lt;(), CoreError&gt; {
+    let repo_root = Path::new(&amp;components.repo_root);
+    let own_memory = components
+        .wave
+        .as_ref()
+        .map(|wave| format!(&quot;wave/{wave}/MEMORY.md&quot;));
+    let (own, inherited): (Vec&lt;_&gt;, Vec&lt;_&gt;) = components
+        .docs
+        .iter_mut()
+        .filter(|doc| {
+            doc.source == DocumentSource::RepoMemory
+                || (doc.source == DocumentSource::Wave &amp;&amp; doc.path.ends_with(&quot;/MEMORY.md&quot;))
+        })
+        .partition(|doc| Some(doc.path.as_str()) == own_memory.as_deref());
+    for memories in [own, inherited] {
+        bound_memories(memories, repo_root, &amp;mut components.budget_decisions)?;
+    }</code></pre></figure><h3>Repository memory comes first, even without a Wave</h3><p>When the executing checkout contains a root MEMORY.md, include it before ancestor and selected Wave files. Without a selected Wave, repository memory still receives the inherited allowance. Explicitly requesting the same file does not duplicate it.</p><figure class="source"><figcaption><strong>Include repository memory before Wave files — gather_documents</strong><a href="../rust/loopflow/src/engine/prompt.rs">rust/loopflow/src/engine/prompt.rs · L408–418</a><span>Local uncommitted revision over 581cc3599 · exact excerpt</span></figcaption><pre tabindex="0"><code>    // Preserve ambient ordering: scratch -&gt; inherited context -&gt; explicit docs.
+    docs.extend(gather_scratch_docs(&amp;spec.repo_root)?);
+    let repo_memory = spec.repo_root.join(&quot;MEMORY.md&quot;);
+    if repo_memory.is_file() {
+        docs.push(Document {
+            path: &quot;MEMORY.md&quot;.into(),
+            content: fs::read_to_string(repo_memory)?,
+            source: DocumentSource::RepoMemory,
+        });
+    }
+    docs.extend(gather_wave_docs(&amp;spec.repo_root, spec.wave.as_deref())?);</code></pre></figure><h3>What belongs to which change</h3><div class="table-wrap"><table><thead><tr><th>Work</th><th>Behavior</th></tr></thead><tbody><tr><td><a href="https://github.com/loopflowstudio/loopflow/pull/1362">Merged PR #1362 · LOO-346</a></td><td>Introduced memory, scratch and message limits; beginning/end excerpts; complete source snapshots; an overall launch cap of 64,000 tokens / 512 KiB.</td></tr><tr><td>Published subwaves at 581cc3599</td><td>Read each ancestor’s and selected Wave’s top-level Markdown from the checkout. Keep memory files separate and divide one inherited 8,000-token allowance across them.</td></tr><tr><td>This local review revision</td><td>Give the selected Wave a separate 8,000-token allowance. Experiment with repository-root MEMORY.md in the inherited pool.</td></tr></tbody></table></div><p>README-first ordering and recursive scratch were already present. The total launch cap, scratch/message limits, source snapshots and excerpt method remain unchanged. Within the inherited pool, files share space in proportion to size; there is no relevance ranking.</p><details><summary>The inherited excerpt mechanism is unchanged</summary><p>When a file exceeds its allowance, retain its beginning and end and insert a pointer to its complete local snapshot.</p><figure class="source"><figcaption><strong>Preserve complete sources when shortening text — bound_source</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/engine/context_budget.rs#L17-L46">rust/loopflow/src/engine/context_budget.rs · L17–46</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Preserve complete sources when shortening text — bound_source"><code>fn bound_source(
+    text: &amp;str,
+    tokens: usize,
+    bytes: usize,
+    repo_root: &amp;Path,
+) -&gt; Result&lt;String, CoreError&gt; {
+    if text.len() &lt;= bytes &amp;&amp; count_tokens(text) &lt;= tokens {
+        return Ok(text.to_string());
+    }
+    let source = preserve_source(text, repo_root)?;
+    let notice = format!(
+        &quot;\n\n[Context budget: excerpt only. Full text: {}. Read the relevant omitted sections before acting; this excerpt is not the complete instruction.]\n\n&quot;,
+        source.display(),
+    );
+    // Include both ends: definitions usually lead, recent direction usually trails.
+    let mut keep = bytes.saturating_sub(notice.len()).min(text.len()) / 2;
+    loop {
+        let mut head = keep;
+        while !text.is_char_boundary(head) {
+            head -= 1;
+        }
+        let mut tail = text.len() - keep;
+        while !text.is_char_boundary(tail) {
+            tail += 1;
+        }
+        let result = format!(&quot;{}{notice}{}&quot;, &amp;text[..head], &amp;text[tail..]);
+        if keep == 0 || (result.len() &lt;= bytes &amp;&amp; count_tokens(&amp;result) &lt;= tokens) {
+            return Ok(result);
+        }
+        keep = keep * 3 / 4;</code></pre></figure></details><details><summary>Existing preview limitation: lf-prompt skips launch budgeting</summary><p>The recorded demo used lf-prompt. That renderer gathers and formats directly; actual launch preparation applies memory budgets before formatting. This inherited difference means the preview demonstrates scope and order, not the exact excerpts a provider receives.</p><p><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/bin/lf-prompt.rs#L72-L75">Published preview path</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/engine/exec.rs#L102-L117">Published launch preparation</a>.</p></details><details><summary>New subwave instruction: parent realign reads child files</summary><p>A parent can incorporate its children’s findings by reading their files explicitly during realign. Ordinary automatic context excludes children. Deeper descendant traversal remains unspecified.</p><figure class="source"><figcaption><strong>Read children during reconciliation — realign</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/engine/builtins/task/skill/realign.md#L13-L19">rust/loopflow/src/engine/builtins/task/skill/realign.md · L13–19</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Read children during reconciliation — realign"><code>   When the work identifies a Wave, read its objective and `wave/&lt;name&gt;/MEMORY.md`
+   alongside the plan. Recover accepted decisions, lessons, and evidence limits
+   that should shape the work. Use supplied Wave context or the repository&#x27;s
+   memory location; do not invent a Wave for unbound work.
+   At a parent Wave, also read its child Waves&#x27; top-level Markdown from this
+   checkout so relevant child findings can inform the parent&#x27;s memory. Ordinary
+   execution context excludes children; read these files explicitly here.</code></pre></figure></details></section><section id="migration"><div class="section-title"><span>05</span><h2>Upgrading preserves existing plans and nested addresses</h2></div><p class="lead">Existing Projects stay attached to their Waves when the database adopts directory parents.</p><p>The migration expands old paths, supplies missing ancestors, rewires parent links, then shortens names. Earlier promotion ancestry no longer defines directory ancestry; <code>promoted_at</code> stays historical. Existing Project references retain their Wave IDs.</p><figure class="source"><figcaption><strong>wave_directory_parents — derive parentage before shortening names</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql#L35-L46">rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql · L35–46</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: wave_directory_parents — derive parentage before shortening names"><code>
+-- Old parent links described promotion ancestry. Directory paths now determine
+-- parentage; promoted_at remains untouched as historical promotion evidence.
+UPDATE waves AS child SET parent_wave_id=(
+    SELECT parent.id FROM wave_directory_paths p JOIN waves parent
+    ON parent.repo=p.repo AND parent.name=p.parent_path
+    WHERE p.repo=child.repo AND p.path=child.name
+    ORDER BY parent.retired_at IS NOT NULL, parent.created_at DESC, parent.id LIMIT 1
+);
+
+UPDATE waves SET name=(SELECT p.name FROM wave_directory_paths p
+    WHERE p.repo=waves.repo AND p.path=waves.name);</code></pre></figure><h3>The boundary that gate caught</h3><p>An active <code>infra/release</code> can have a retired registration at <code>infra</code>, alongside a separate active root named <code>release</code>. Flattening the child would change its address or collide. The draft creates an active directory ancestor when active descendants need one; historical-only ancestry stays retired.</p><figure class="source"><figcaption><strong>wave_directory_parents — retired ancestor handling</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql#L23-L33">rust/loopflow/src/store/migrations/drafts/wave_directory_parents__0fc2ccbc9281442080b26eedf05f4891.sql · L23–33</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: wave_directory_parents — retired ancestor handling"><code>-- An active descendant needs an active directory ancestor even when an older
+-- registration at that address is retired. Historical-only paths stay retired.
+INSERT INTO waves(id,name,repo,created_at,retired_at,superseded_by_wave_id,retirement_reason)
+SELECT lower(hex(randomblob(4))) || &#x27;-&#x27; || lower(hex(randomblob(2))) || &#x27;-&#x27; ||
+       lower(hex(randomblob(2))) || &#x27;-&#x27; || lower(hex(randomblob(2))) || &#x27;-&#x27; ||
+       lower(hex(randomblob(6))), p.path,p.repo,unixepoch(),
+       CASE WHEN p.active=0 THEN source.retired_at END,
+       CASE WHEN p.active=0 THEN source.superseded_by_wave_id END,
+       CASE WHEN p.active=0 THEN &#x27;Directory ancestor of retired Wave &#x27; || source.id END
+FROM wave_directory_paths p JOIN waves source ON source.id=p.source_id
+WHERE NOT EXISTS(SELECT 1 FROM waves w WHERE w.repo=p.repo AND w.name=p.path</code></pre></figure><p><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migrations.rs#L5629-L5678">The populated regression</a> asserts the nested address, active parent, preserved retirement timestamp and retired subtree. <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/store/migration_schema.rs#L24-L38">Schema comparison now includes SQL views</a>, so losing the address view is detectable. This is draft migration evidence from disposable stores; an installed migration has not been demonstrated.</p></section><section id="release"><div class="section-title"><span>06</span><h2>Release owns its plan and daily release schedule</h2></div><p class="lead">Release declares the 10:00 release job. Infrastructure keeps the 09:00 telemetry job; live activation is still pending.</p><div class="pair"><div><p>Infrastructure retains the telemetry schedule at 09:00. Release declares <code>release-run</code> at 10:00. The existing Flow invokes <code>release run patch</code>.</p><p>The nested address also affects a mechanical boundary: cron log paths contain the Wave address. Installation now creates the full log parent before launchd opens it.</p><p>The live Linear Initiative, plan, release-focused Task/KR moves and schedule transfer remain post-landing operations through installed <code>lf</code>.</p></div><figure class="source"><figcaption><strong>Release GOAL.md — authored ownership</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/wave/infrastructure/release/GOAL.md#L1-L20">wave/infrastructure/release/GOAL.md · L1–20</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: Release GOAL.md — authored ownership"><code>---
+crons:
+- flow: release-run
+  schedule: 0 0 10 * * *
+---
+
+## Objective
+
+Deliver new and updated Loopflow to the public at regular intervals, with
+accessible guidance, without bugs, through a smart and recoverable rollout.
+
+## Plan
+
+Keep release-focused Tasks and KRs in Release&#x27;s Linear plan. Infrastructure&#x27;s
+objective includes verified releases; Release owns the work and its evidence.
+
+## Cron
+
+- `release-run` -&gt; attempt one patch release after telemetry. No merged changes is
+  a green no-op; an incomplete tagged release resumes from its hosted build.</code></pre></figure></div><details><summary>Follow the schedule into the existing runtime</summary><figure class="source"><figcaption><strong>release-run — unchanged mechanical Flow</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/.lf/flows/release-run.yaml#L1-L1">.lf/flows/release-run.yaml · L1–1</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: release-run — unchanged mechanical Flow"><code>- cmd: release run patch</code></pre></figure><figure class="source"><figcaption><strong>add_cron — nested log directory</strong>
+    <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/cron.rs#L219-L225">rust/loopflow/src/ops/cron.rs · L219–225</a>
+    <span>581cc3599 · exact source excerpt</span></figcaption>
+    <pre tabindex="0" aria-label="Source: add_cron — nested log directory"><code>    launchctl: &amp;dyn Launchctl,
+) -&gt; OpsResult&lt;InstalledCron&gt; {
+    fs::create_dir_all(launch_agents_dir)?;
+    if let Some(parent) = spec.log_path().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let path = plist_path(launch_agents_dir, &amp;spec.wave, &amp;spec.flow);</code></pre></figure><p><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/cron.rs#L1450-L1515">The scheduled fixture uses infrastructure/release and parses the resulting CLI invocation</a>. It simulates provider/launchctl effects.</p></details></section><section id="evidence"><div class="section-title"><span>07</span><h2>What this review establishes</h2></div><p class="lead">Source inspection supports the model. Jack approved the demo after reviewing the revised behavior. Configured provider/Desktop observations remain unperformed.</p><div class="table-wrap"><table><thead><tr><th>Claim</th><th>Evidence and limit</th></tr></thead><tbody><tr><td>Ancestor-first context, once</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/tests/context_tests.rs#L604-L672">Inspected nested context fixture</a>: includes an explicit duplicate, excluded sibling/child files and recursive scratch.</td></tr><tr><td>Moves preserve Task ownership</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/rust/loopflow/src/ops/run.rs#L448-L549">Inspected Task-binding fixture</a>: parent rename, reparent, changed inheritance and recovery in a fresh Home after authoring IDs.</td></tr><tr><td>Gate repairs</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/scratch/define-durable-subwave-identity-and.md#L30-L51">Recorded gate evidence</a>: broad Rust run had 2,003 passes and three remaining failures; focused repair run passed 126 tests. Final formatting, all-target Clippy and migration history checks passed. The broad receipts remain failed.</td></tr><tr><td>Current-checkout preview</td><td><a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/scratch/subwaves-demo.md#L16-L32">Recorded preview at 9385c811b</a>: four Wave files, once each, in order, using disposable data. No configured provider or Desktop acceptance.</td></tr><tr><td>This walkthrough</td><td>The original walkthrough used source inspection and recorded checks. Local review edits passed 41 focused checks, formatting and all-target Clippy in a disposable Home. Earlier broad-suite failures remain historical evidence; no new full gate ran.</td></tr></tbody></table></div><h3>Where Jack’s attention matters</h3><ul><li><strong>The actual launch:</strong> inspect the selected Wave’s memory and the separate inherited pool through the configured provider path.</li><li><strong>Live ownership:</strong> complete the installed Release planning and schedule transfer after landing, retaining and committing authored IDs.</li><li><strong>Acceptance:</strong> Jack explicitly approved the demo and requested Session completion. That approval is distinct from live provider/Desktop proof.</li></ul><p>These are evidence and review boundaries, not a merge verdict. Accepted intent remains in the <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/scratch/define-durable-subwave-identity-and.md#L171-L322">working design</a>; implementation choices and open scope are in <a href="https://github.com/loopflowstudio/loopflow/blob/581cc3599d7e499a180dfc274837fac466008506/scratch/subwave-questions.md#L1-L36">the subwave assumptions</a>.</p></section><footer>Prepared for Jack Heart · PR #1375 source review · <a href="#top" onclick="window.scrollTo(0,0);return false">Back to top</a><br>Open supporting excerpts with their disclosure controls. Printing includes them automatically.</footer></main></div>
+<script>const disclosures=[...document.querySelectorAll('details')];let before=[];addEventListener('beforeprint',()=>{before=disclosures.map(d=>d.open);disclosures.forEach(d=>d.open=true)});addEventListener('afterprint',()=>disclosures.forEach((d,i)=>d.open=before[i]));</script></body></html>

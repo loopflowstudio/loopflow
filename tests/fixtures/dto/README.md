@@ -63,3 +63,9 @@ exact comparison bases,
 rename paths, scratch listing, and lossless content with a byte revision and
 explicit file state, Save outcome, recovery access and late-change disclosure.
 Rust round-trips the same fixture Swift decodes.
+
+`context_report.json` pins `lf usage --context --json`: each recorded step's
+submitted input by source, flagged against budgets, with Task totals. One step
+is LOO-298-shaped (384 steers over the goal budget); the other has no retained
+capture, so every source is `null` rather than zero. Rust round-trips it and
+Swift decodes it for the Task's Session history.

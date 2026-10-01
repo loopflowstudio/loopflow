@@ -131,6 +131,7 @@ lf session list --json # conversations on this Home
 lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
+lf usage --task LOO-265 --context # each step's input by source, flagged over budget
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
 lf mon prune --dry-run     # inspect dead receipts and registered orphan providers

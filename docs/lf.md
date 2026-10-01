@@ -72,6 +72,8 @@ lf mon list --json                 # bounded Exec history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf mon show SESSION --final         # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
+lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
+lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session connect SESSION         # continue a conversation

@@ -53,6 +53,9 @@ pub enum MonitorCommand {
         /// Inspect an exact retained input belonging to this Session
         #[arg(long)]
         input: Option<String>,
+        /// Print only what the step's submitted input was made of, by source
+        #[arg(long, conflicts_with_all = ["events", "final_answer"])]
+        context: bool,
     },
     /// Observe active conversations and missing process evidence
     Active {
@@ -87,6 +90,9 @@ pub enum MonitorCommand {
         /// Limit to Session inputs attributed to one Task
         #[arg(long)]
         task: Option<String>,
+        /// Break each step's submitted input down by source, flagged against budgets
+        #[arg(long)]
+        context: bool,
     },
     /// Print one parseable snapshot of live Loopflow call trees
     Ps {
@@ -167,7 +173,9 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             project,
             task,
             weekly: false,
+            context,
         } => super::usage::run(
+            *context,
             *json,
             *days,
             wave.as_deref(),
@@ -196,7 +204,15 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             events,
             final_answer,
             input,
-        } => show(id, *json, *events, *final_answer, input.as_deref()),
+            context,
+        } => show(
+            id,
+            *json,
+            *events,
+            *final_answer,
+            input.as_deref(),
+            *context,
+        ),
         MonitorCommand::List {
             json,
             all,
@@ -292,6 +308,7 @@ fn show(
     events: bool,
     final_answer: bool,
     input: Option<&str>,
+    context: bool,
 ) -> anyhow::Result<()> {
     let exec = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
@@ -318,8 +335,8 @@ fn show(
     match exec {
         Some(exec) => {
             anyhow::ensure!(
-                !events && !final_answer,
-                "--events and --final inspect Session evidence; Execs record command outcomes"
+                !events && !final_answer && !context,
+                "--events, --final and --context inspect Session evidence; Execs record command outcomes"
             );
             if json {
                 println!("{}", serde_json::to_string_pretty(&exec)?);
@@ -329,7 +346,7 @@ fn show(
             }
             Ok(())
         }
-        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, json),
+        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, context, json),
     }
 }
 

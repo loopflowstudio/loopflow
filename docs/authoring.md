@@ -339,6 +339,10 @@ Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
 agents edit the same reviewed file through the ordinary repository workflow;
 `realign` reconciles memory with the plan and code.
 
+Before curating a parent, realign discovers immediate-child `MEMORY.md` files
+with filesystem tools, reads relevant sections, and promotes shared lessons
+while keeping local detail in the child. Unread coverage stays explicit.
+
 ## Adaptation
 
 Curate durable lessons and decisions in the owning Wave's

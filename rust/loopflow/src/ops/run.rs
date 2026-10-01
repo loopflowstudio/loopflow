@@ -450,6 +450,63 @@ mod tests {
         task
     }
 
+    #[test]
+    fn context_delivery_supplies_one_goal_for_direct_and_wave_launches() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
+        let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
+        std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
+        let seed = super::render_wave_context(tmp.path(), "release", "");
+        for message in [None, Some(seed)] {
+            let prepared = crate::engine::exec::prepare_exec_prompt(
+                &crate::engine::config::Config {
+                    diff_files: false,
+                    diff: false,
+                    paste: false,
+                    ..Default::default()
+                },
+                crate::engine::exec::ExecPromptInput {
+                    repo_root: tmp.path().to_path_buf(),
+                    wave: Some("release".into()),
+                    docs: vec!["wave/release/GOAL.md".into()],
+                    message,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                prepared.prompt.matches("Ship a reliable release.").count(),
+                1
+            );
+            assert_eq!(
+                prepared.prompt.matches("Keep rollback available.").count(),
+                1
+            );
+            assert!(prepared.config.task_prompt.contains(goal));
+            let context = crate::lf::commands::run::attributed_context(
+                &prepared.components,
+                &prepared.config.system_prompt,
+                &prepared.config.task_prompt,
+                &prepared.deduplication_decisions,
+            );
+            assert_eq!(
+                context
+                    .task
+                    .assets
+                    .iter()
+                    .filter(|asset| {
+                        asset.source_path.as_deref() == Some("wave/release/GOAL.md")
+                    })
+                    .count(),
+                1
+            );
+            assert!(context.decisions.iter().any(|decision| {
+                decision.source_path.as_deref() == Some("wave/release/GOAL.md")
+                    && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+            }));
+        }
+    }
+
     #[tokio::test]
     async fn release_task_prompt_follows_parent_rename_and_reparenting() {
         let (_home, store) = test_store().await;

@@ -389,6 +389,26 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Match CI's current stable toolchain before accepting a local lint pass:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+rustup update stable --no-self-update
+rustc +stable --version
+cargo +stable clippy --version
+cargo +stable fmt --all -- --check
+cargo +stable clippy --all-targets -- -D warnings
+```
+
+The installation harness pulls `rust:bookworm` on each run to follow stable
+alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
+standard-library API, run `uv run python scripts/test_task_installation.py` too;
+a local lint pass does not prove that the disposable installation builds.
+
+CI installs stable on each run. An older local compiler can miss new Clippy
+lints and standard-library deprecations. Put rustup's proxies first on `PATH`
+so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
+
 Task cancellation uses a real child CLI with a disposable scorecard effect.
 Build the sibling CLI before running this library-only proof:
 
@@ -559,6 +579,19 @@ Prompt parity and golden prompt tests live in Rust.
 cargo test -p loopflow golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
+
+For document gathering or deduplication changes, run the complete context suite
+alongside the delivery checks; a test-name filter alone misses ancestor coverage.
+Rendering gathered documents must include the production deduplication step.
+
+```bash
+cargo test -p loopflow --test context_tests
+cargo test -p loopflow --lib context_delivery
+cargo test -p loopflow --lib skill_launch
+```
+
+Run the launch checks after syncing CLI changes; they parse the current flags
+before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
@@ -840,6 +873,13 @@ Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
 the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
+
+Launch proofs use provider-written evidence and terminal receipts. Session
+completion gives the asynchronous telemetry recorder only 250 ms to drain;
+returning successfully does not guarantee `events.jsonl` is complete. Keep
+usage and account-event assertions in the recorder tests, rather than racing
+its queue in subprocess-launch tests. Reproduce suspected races with a temporary
+recorder delay beyond that drain window; remove the delay before publication.
 
 Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
 `LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables

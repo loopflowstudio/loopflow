@@ -353,7 +353,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
     let (diff, diff_tier, diff_file_count) = if opts.include_diff {
@@ -438,7 +437,6 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         };
         docs.extend(gather_files(&spec.repo_root, &files)?);
     }
-    dedup_documents(&mut docs);
 
     Ok(docs)
 }
@@ -1386,44 +1384,78 @@ fn glob_to_regex(pattern: &str) -> String {
 /// avoid duplication — whichever agent runs will pick up its own file.
 const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
-/// Remove docs that duplicate any agent's natively-loaded instruction file.
-///
-/// Skips all known native files and any files they symlink to.
-pub fn drop_native_instruction_docs(
+/// Keep one delivery of a document source or the builtin operating guidance.
+/// Native instructions remain owned by provider discovery. Equal text at
+/// different paths remains distinct, including separate memory scopes.
+pub fn drop_duplicate_docs(
     components: &mut PromptComponents,
     repo_root: &Path,
-) -> Vec<Document> {
+) -> Vec<crate::trace::ContextDecision> {
+    use crate::trace::{
+        ContextAssetKind as Kind, ContextDecision, ContextDecisionKind, ContextScope,
+    };
+
     // Collect canonical paths of all native files (resolves symlinks)
     let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
         .iter()
         .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
         .collect();
 
-    let mut removed = Vec::new();
-    components.docs.retain(|doc| {
-        let name = Path::new(&doc.path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+    let mut decisions = Vec::new();
+    let mut seen = HashSet::new();
+    for docs in [&mut components.docs, &mut components.diff_files] {
+        docs.retain(|doc| {
+            let name = Path::new(&doc.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
 
-        // Drop the native files themselves
-        if AGENT_NATIVE_FILES.contains(&name) {
-            removed.push(doc.clone());
-            return false;
-        }
-
-        // Drop aliases of native instruction files in either symlink direction.
-        let doc_path = repo_root.join(&doc.path);
-        if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
-            if canonical_paths.contains(&doc_canon) {
-                removed.push(doc.clone());
-                return false;
-            }
-        }
-
-        true
-    });
-    removed
+            let doc_path = repo_root.join(&doc.path);
+            let source_path = fs::canonicalize(&doc_path).unwrap_or(doc_path);
+            let (kind, scope, reason) =
+                if AGENT_NATIVE_FILES.contains(&name) || canonical_paths.contains(&source_path) {
+                    (Kind::RepoInstructions, ContextScope::Repo,
+                     "provider-native discovery owns this instruction file or its symlink target")
+                } else if components.operate
+                    && name == "LOOPFLOW.md"
+                    && doc.content.trim() == crate::engine::builtins::LOOPFLOW_DOC.trim()
+                {
+                    (
+                        Kind::OperatingInstructions,
+                        ContextScope::Global,
+                        "the system channel already supplies the builtin operating instructions",
+                    )
+                } else if !seen.insert((source_path, doc.content.clone())) {
+                    let (kind, scope) = match doc.source {
+                        DocumentSource::Scratch => (Kind::Scratch, ContextScope::Repo),
+                        DocumentSource::Wave => (Kind::Document, ContextScope::Wave),
+                        DocumentSource::Diff => (Kind::Diff, ContextScope::Repo),
+                        _ => (Kind::Document, ContextScope::Repo),
+                    };
+                    (
+                        kind,
+                        scope,
+                        "this document source is already supplied in the assembled input",
+                    )
+                } else {
+                    return true;
+                };
+            decisions.push(ContextDecision {
+                position: decisions.len() as u32,
+                kind,
+                scope,
+                label: doc.path.clone(),
+                source_path: Some(doc.path.clone()),
+                decision: ContextDecisionKind::Deduplicated,
+                reason: reason.to_string(),
+                original_bytes: Some(doc.content.len() as u64),
+                original_tokens: Some(count_tokens(&doc.content) as u64),
+                asset_position: None,
+            });
+            false
+        });
+    }
+    decisions
 }
 
 fn read_text_file(path: &Path) -> Option<String> {
@@ -1435,11 +1467,6 @@ fn read_text_file(path: &Path) -> Option<String> {
         return None;
     }
     String::from_utf8(bytes).ok()
-}
-
-fn dedup_documents(docs: &mut Vec<Document>) {
-    let mut seen = HashSet::new();
-    docs.retain(|doc| seen.insert(doc.path.clone()));
 }
 
 /// Ensure an entry exists in the repo's root .gitignore.
@@ -2123,9 +2150,9 @@ mod tests {
             ..Default::default()
         };
 
-        let removed = drop_native_instruction_docs(&mut components, repo.path());
+        let removed = drop_duplicate_docs(&mut components, repo.path());
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].path, "AGENTS.md");
+        assert_eq!(removed[0].source_path.as_deref(), Some("AGENTS.md"));
         let prompt = render_full_prompt(components);
         assert!(!prompt.contains("Repository instructions"));
         assert!(prompt.contains("Project documentation"));
@@ -2150,7 +2177,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let removed = drop_native_instruction_docs(&mut components, repo.path());
+            let removed = drop_duplicate_docs(&mut components, repo.path());
             assert_eq!(removed.len(), 1);
             assert!(!render_full_prompt(components).contains("Repository instructions"));
         }
@@ -2515,6 +2542,29 @@ mod tests {
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
         assert!(!prompt.contains("mod b;"));
+    }
+
+    #[test]
+    fn context_delivery_keeps_one_document_also_requested_as_a_changed_file() {
+        let repo = init_repo();
+        write_file(repo.path(), "guide.md", "Keep rollback available.");
+        let mut components = gather_context(&GatherContextOpts {
+            repo_root: repo.path().to_path_buf(),
+            docs: vec!["guide.md".into()],
+            files: vec!["guide.md".into()],
+            include_diff_files: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let decisions = drop_duplicate_docs(&mut components, repo.path());
+        let prompt = format_prompt(PromptFormatMode::Full, &components);
+
+        assert_eq!(prompt.matches("Keep rollback available.").count(), 1);
+        assert!(decisions.iter().any(|decision| {
+            decision.kind == crate::trace::ContextAssetKind::Diff
+                && decision.source_path.as_deref() == Some("guide.md")
+                && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+        }));
     }
 
     #[test]

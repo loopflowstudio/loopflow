@@ -106,7 +106,9 @@ conclusions in their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
-Curate Wave decisions in `wave/<name>/MEMORY.md` through `realign`. Do not create
+Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
+memories live in nested directories; discover relevant ones with ordinary
+filesystem tools. Do not create
 miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
 skills.
 
@@ -172,6 +174,16 @@ Bring the plan and the implementation into agreement with what the work has taug
    acceptance. Keep a substantial code change explicit as remaining work.
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
+
+   Before curating the selected Wave's memory, inspect `wave/<address>/` with
+   ordinary filesystem tools for immediate child directories containing
+   `MEMORY.md`, including scopes without a `GOAL.md` or registry entry. Read
+   those memories for lessons that apply across the parent scope. For large
+   files, inspect headings and read relevant sections within the available
+   context budget; explore deeper descendants when relevant. State unread or
+   unavailable coverage honestly. Promote broadly useful lessons into the
+   selected parent's memory and keep child-specific detail in its owning file.
+   Inherited memory guides the work; curate the selected scope, not its ancestors.
 
    Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
    and write durable decisions and lessons learned from this work into its

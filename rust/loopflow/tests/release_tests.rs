@@ -1668,7 +1668,18 @@ esac
         r#"{"status":"published","summary":"Reran the failed Swift job; the exact release head is green and merged."}"#,
         &format!("touch '{}'", repaired.display()),
     );
-    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex)]);
+    let repair_log = state.path().join("repair.log");
+    let tmux = format!(
+        r#"#!/bin/sh
+if [ "$1" = new-session ]; then
+  cd "$6" || exit 1
+  for arg do command=$arg; done
+  /bin/sh -c "$command" </dev/null >'{}' 2>&1 &
+fi
+"#,
+        repair_log.display()
+    );
+    let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("tmux", &tmux)]);
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.1"]);
     git(&repo, &["push", "origin", "v0.9.1"]);
@@ -1699,16 +1710,24 @@ esac
     );
     git(&repo, &["remote", "set-url", "origin", github_remote]);
 
-    let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
-
-    let ReleaseRunOutcome::Released(receipt) = outcome else {
-        panic!("release did not settle")
-    };
+    let outcome = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["repo", "release", "run", "patch"])
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        outcome.status.success(),
+        "release did not settle: {}\n{}\n{}",
+        String::from_utf8_lossy(&outcome.stdout),
+        String::from_utf8_lossy(&outcome.stderr),
+        fs::read_to_string(&repair_log).unwrap_or_default()
+    );
     assert!(
         repaired.exists(),
         "the failed required check must receive repair"
     );
-    assert_eq!(receipt.commit, head);
+    assert_eq!(git_output(&repo, &["rev-parse", "refs/tags/v0.9.2"]), head);
     assert_eq!(
         git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
         head

@@ -1664,12 +1664,7 @@ fn finish_release_pr(
                     .into_iter()
                     .find(|(_, branch)| branch.as_deref() == Some(release_branch))
                 {
-                    let pr = current_pr(&path)?.ok_or_else(|| {
-                        OpsError::Message(format!(
-                            "release PR #{} is unavailable",
-                            prepared.pr_number
-                        ))
-                    })?;
+                    let pr = crate::ops::pr::observe_pr_merge(&path, prepared.pr_number)?.pr;
                     crate::ops::pr_landing::reconcile_armed_pr(
                         &path,
                         &release_land_options(None),

@@ -389,6 +389,10 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Match CI's stable compiler and Clippy before accepting a local lint pass. A
+Homebrew `cargo-clippy` can shadow rustup's component even when Cargo is newer;
+check both `rustc --version` and `cargo clippy --version`.
+
 Task cancellation uses a real child CLI with a disposable scorecard effect.
 Build the sibling CLI before running this library-only proof:
 
@@ -556,7 +560,7 @@ cargo test -p loopflow --lib engine::skills::tests
 Prompt parity and golden prompt tests live in Rust.
 
 ```bash
-cargo test -p loopflow golden_prompt
+cargo test -p loopflow --test golden_prompt
 uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after prompt changes
 ```
 
@@ -596,6 +600,16 @@ For landing changes, prove same-head recovery and authoritative merge separately
 from commit creation. Exercise takeover while the old repair is still running;
 generation fencing alone does not stop its effects. Label simulated
 provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
+
+Landing changes also affect release finalization and Linear completion recovery:
+
+```bash
+uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::pm::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+```
+
+Detached repair proofs enter through the compiled CLI so admission records its
+Exec before launching a child. Assert the published tag and completed repair;
+an in-process `release_run` call does not exercise that execution boundary.
 
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
 binary mid-test mixes migration frontiers in a single temporary Home.

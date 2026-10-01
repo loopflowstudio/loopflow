@@ -210,6 +210,44 @@ impl super::SqliteStore {
         )?)
     }
 
+    /// Fill the provider's completion time on this head's incidents that lack one.
+    pub(crate) fn record_ci_provider_completion(
+        &self,
+        repo: &str,
+        pr_number: u32,
+        failed_head_sha: &str,
+        completed_at: OffsetDateTime,
+    ) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE ci_incidents SET provider_completed_at=?4
+             WHERE repo=?1 AND pr_number=?2 AND failed_head_sha=?3
+               AND provider_completed_at IS NULL",
+            params![
+                repo,
+                i64::from(pr_number),
+                failed_head_sha,
+                timestamp(completed_at)
+            ],
+        )?)
+    }
+
+    /// Execs holding an unfinished repair for this landing, newest first.
+    pub(crate) fn landing_repair_execs(
+        &self,
+        landing_id: &PrLandingId,
+    ) -> StoreResult<Vec<crate::id::ExecId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT repair_exec_id FROM ci_incidents
+             WHERE landing_id=?1 AND repair_exec_id IS NOT NULL AND repair_finished_at IS NULL
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = statement.query_map([landing_id.as_str()], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     pub(crate) fn ci_incidents_since(
         &self,
         since: OffsetDateTime,

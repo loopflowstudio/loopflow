@@ -110,6 +110,15 @@ struct PodiumView: View {
                 await model.refresh()
             }
         }
+        .task(id: model.repoPath) {
+            // Fixture and UI-test runs render without background helpers.
+            guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
+            CIWatchers.shared.open(repo)
+            defer { CIWatchers.shared.close(repo) }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+            }
+        }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
                 await model.refreshPortfolio(

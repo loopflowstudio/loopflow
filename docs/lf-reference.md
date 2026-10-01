@@ -347,7 +347,7 @@ Internal command; invoked by the owning operation.
 
 ## lf session serve-ask
 
-Run one ad-hoc request in its durable terminal
+Run one prepared Ask or primary conversation in its durable terminal
 
 Internal command; invoked by the owning operation.
 
@@ -598,6 +598,20 @@ Show how failed CI is detected, repaired, and landed across this Home
 | `--wave` | Scope to one Wave |
 | `--repo` | Scope to one GitHub owner/repo |
 | `--json` | Emit the complete incident report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo ci watch
+
+Watch this repository's PR checks and start a ci-fix when a recorded landing fails
+
+| Argument | What it does |
+|---|---|
+| `--once` | Check every open PR once and exit Default: false. |
+| `--install` | Keep the watcher running in the background as a launchd service Default: false. |
+| `--uninstall` | Remove the background service Default: false. |
+| `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
+| `--json` | Emit the status as JSON Default: false. |
+| `--parent-pid` | Stop when this process exits Internal. |
 | `--help / -h` | Print help |
 
 ## lf repo reteam
@@ -1016,7 +1030,7 @@ Pull request lifecycle
 
 ## lf task pr reconcile
 
-Check recorded repository landings once, repair CI, and settle verified merges
+Check recorded repository landings once, record CI failures, and settle verified merges
 
 | Argument | What it does |
 |---|---|

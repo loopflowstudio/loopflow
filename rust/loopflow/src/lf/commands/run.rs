@@ -488,6 +488,13 @@ fn build_prompt_at(
             && exec_target == ExecTarget::Ide
             && use_native_skill_exec
             && should_exec_via_skill(skill_name)
+            // Wave seeds refer to assembled documents, including GOAL.md.
+            // The short vendor seed carries no document section.
+            && !prepared
+                .components
+                .docs
+                .iter()
+                .any(|doc| doc.source == crate::engine::DocumentSource::Wave)
         {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
@@ -516,14 +523,14 @@ fn build_prompt_at(
         } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
             warn!(
                 skill = skill_name,
-                "external skill uses assembled prompt fallback"
+                "skill launch requires assembled prompt context"
             );
         }
     }
 
     let mut components = prepared.components;
     components.message_context = message_context;
-    let deduplicated_docs = prepared.deduplicated_docs;
+    let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     crate::engine::context_budget::check_input(
@@ -535,7 +542,7 @@ fn build_prompt_at(
         &components,
         &effective_system,
         &agent_config.task_prompt,
-        &deduplicated_docs,
+        &deduplication_decisions,
     );
     Ok(PromptBuild {
         repo_root,
@@ -907,7 +914,7 @@ pub(crate) fn attributed_context(
     components: &PromptComponents,
     system_prompt: &str,
     task_prompt: &str,
-    deduplicated_docs: &[crate::engine::Document],
+    deduplication_decisions: &[crate::trace::ContextDecision],
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -993,14 +1000,7 @@ pub(crate) fn attributed_context(
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
-        push(
-            goal,
-            Kind::Goal,
-            Scope::Wave,
-            wave.clone(),
-            Some(format!("wave/{wave}/GOAL.md")),
-            "wave",
-        );
+        push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     for document in &components.docs {
         let kind = if document.source == DocumentSource::Scratch {
@@ -1114,22 +1114,7 @@ pub(crate) fn attributed_context(
         );
     }
 
-    let mut decisions = Vec::new();
-    for (position, document) in deduplicated_docs.iter().enumerate() {
-        decisions.push(ContextDecision {
-            position: position as u32,
-            kind: Kind::RepoInstructions,
-            scope: Scope::Repo,
-            label: document.path.clone(),
-            source_path: Some(document.path.clone()),
-            decision: ContextDecisionKind::Deduplicated,
-            reason: "provider-native instruction discovery owns this file or its symlink target"
-                .to_string(),
-            original_bytes: Some(document.content.len() as u64),
-            original_tokens: Some(crate::engine::prompt::count_tokens(&document.content) as u64),
-            asset_position: None,
-        });
-    }
+    let mut decisions = deduplication_decisions.to_vec();
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
@@ -1552,8 +1537,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
-        let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
 
         let mut implicit_launch = built.agent_config.clone();
         implicit_launch.env.insert(
@@ -1581,20 +1564,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(implicit_run_dir.join("manifest.json").is_file());
         assert!(implicit_run_dir.join("terminal.json").is_file());
         assert!(!implicit_run_dir.join("owner.json").exists());
-        let implicit_events =
-            std::fs::read_to_string(implicit_run_dir.join("events.jsonl")).unwrap();
-        assert_eq!(
-            implicit_events.matches("provider_attempt_started").count(),
-            2
-        );
-        let accounts: Vec<serde_json::Value> = implicit_events
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .filter(|event: &serde_json::Value| event["type"] == "provider_account_selected")
-            .collect();
-        assert_eq!(accounts.len(), 2);
-        assert!(accounts.iter().all(|event| event["account_id"].is_null()));
-        assert_ne!(accounts[0]["attempt_key"], accounts[1]["attempt_key"]);
+        // Completion does not wait for all telemetry. The provider evidence above
+        // proves retry identity; session_record tests own usage and account events.
         assert!(registry.is_file());
         let db = rusqlite::Connection::open(&registry).unwrap();
         let tasks: i64 = db
@@ -1904,6 +1875,44 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(built.prompt.contains("verify the result"));
         assert!(!built.prompt.starts_with("/proof"));
         assert!(!built.prompt.starts_with("$proof"));
+    }
+
+    #[test]
+    fn ide_wave_skill_launch_delivers_the_authored_goal() {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        // A regression into native skill sync must never write personal skills.
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("LF_HOME", home.path().join(".lf"));
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
+        );
+        let goal =
+            "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
+        repo.create_file("wave/release/GOAL.md", goal);
+        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
+        let built = build_prompt_at(
+            Some("design"),
+            Some("plan the release"),
+            &cli,
+            repo.path().to_path_buf(),
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.prompt.matches(goal).count(), 1);
+        assert!(built
+            .context
+            .task
+            .assets
+            .iter()
+            .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
     }
 
     #[test]

@@ -51,10 +51,10 @@ pub use flow::{
     Flow, Skill, Step, XorDef, XorPath,
 };
 pub use prompt::{
-    count_tokens, drop_native_instruction_docs, format_claude_system_prompt,
-    format_claude_task_prompt, format_context_prompt, format_prompt, format_task_prompt,
-    gather_context, gather_documents, write_prompt_log, DiffTier, Document, DocumentSource,
-    GatherContextOpts, GatherSpec, PromptComponents, PromptFormatMode, Surface,
+    count_tokens, drop_duplicate_docs, format_claude_system_prompt, format_claude_task_prompt,
+    format_context_prompt, format_prompt, format_task_prompt, gather_context, gather_documents,
+    write_prompt_log, DiffTier, Document, DocumentSource, GatherContextOpts, GatherSpec,
+    PromptComponents, PromptFormatMode, Surface,
 };
 pub use skills::{sync_skills, SkillSyncOptions, SkillSyncReport};
 pub use stream::{

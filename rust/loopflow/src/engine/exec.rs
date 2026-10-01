@@ -5,8 +5,8 @@ use crate::engine::config::{default_agent, parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
-    drop_native_instruction_docs, format_claude_system_prompt, format_claude_task_prompt,
-    format_prompt, gather_context, Document, DocumentSource, GatherContextOpts, PromptComponents,
+    drop_duplicate_docs, format_claude_system_prompt, format_claude_task_prompt, format_prompt,
+    gather_context, Document, DocumentSource, GatherContextOpts, PromptComponents,
     PromptFormatMode, RelatedRepoContext, Surface,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
@@ -47,7 +47,7 @@ pub struct PreparedExecPrompt {
     pub budget_report: crate::engine::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
-    pub deduplicated_docs: Vec<Document>,
+    pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
     pub prompt: String,
 }
 
@@ -123,7 +123,7 @@ pub(crate) fn preview_exec_prompt(
     if let Some(skill) = resolved_skill {
         components.skill = Some(skill);
     }
-    let deduplicated_docs = drop_native_instruction_docs(&mut components, &repo_root);
+    let deduplication_decisions = drop_duplicate_docs(&mut components, &repo_root);
 
     if let Some(summary) = summary {
         components.summaries.push(Document {
@@ -194,7 +194,7 @@ pub(crate) fn preview_exec_prompt(
         budget_report,
         config: launch,
         components,
-        deduplicated_docs,
+        deduplication_decisions,
         prompt,
     })
 }
@@ -283,6 +283,91 @@ Test skill body.
             diff: false,
             paste: false,
             ..Config::default()
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn context_delivery_keeps_native_and_symlink_sources_single() {
+        let tmp = create_repo_fixture();
+        fs::write(tmp.path().join("STYLE.md"), "Provider-owned instructions.").unwrap();
+        std::os::unix::fs::symlink("STYLE.md", tmp.path().join("AGENTS.md")).unwrap();
+        fs::create_dir(tmp.path().join("scratch")).unwrap();
+        fs::write(tmp.path().join("scratch/guide.md"), "A shared document.").unwrap();
+        std::os::unix::fs::symlink("scratch/guide.md", tmp.path().join("alias.md")).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                docs: vec!["STYLE.md".into(), "AGENTS.md".into(), "alias.md".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!prepared.prompt.contains("Provider-owned instructions."));
+        assert_eq!(prepared.prompt.matches("A shared document.").count(), 1);
+        assert!(prepared.deduplication_decisions.iter().any(|decision| {
+            decision.source_path.as_deref() == Some("alias.md")
+                && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+        }));
+        assert!(prepared
+            .deduplication_decisions
+            .iter()
+            .any(|decision| { decision.kind == crate::trace::ContextAssetKind::RepoInstructions }));
+    }
+
+    #[test]
+    fn context_delivery_keeps_distinct_scopes_and_one_operating_document() {
+        let tmp = create_repo_fixture();
+        let operating = crate::engine::builtins::LOOPFLOW_DOC;
+        fs::write(tmp.path().join("LOOPFLOW.md"), operating).unwrap();
+        fs::create_dir_all(tmp.path().join("custom")).unwrap();
+        fs::write(
+            tmp.path().join("custom/LOOPFLOW.md"),
+            "Local operating guidance.",
+        )
+        .unwrap();
+        for scope in ["infrastructure", "infrastructure/release"] {
+            let directory = tmp.path().join("wave").join(scope);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(directory.join("MEMORY.md"), "Keep rollback available.").unwrap();
+        }
+        for no_loopflow in [false, true] {
+            let prepared = prepare_exec_prompt(
+                &default_test_config(),
+                ExecPromptInput {
+                    repo_root: tmp.path().to_path_buf(),
+                    docs: vec![
+                        "LOOPFLOW.md".into(),
+                        "custom/LOOPFLOW.md".into(),
+                        "wave/infrastructure/MEMORY.md".into(),
+                        "wave/infrastructure/release/MEMORY.md".into(),
+                    ],
+                    no_loopflow,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(prepared.prompt.matches(operating.trim()).count(), 1);
+            assert_eq!(
+                prepared.prompt.matches("Keep rollback available.").count(),
+                2
+            );
+            assert!(prepared
+                .config
+                .task_prompt
+                .contains("Local operating guidance."));
+            assert_eq!(
+                prepared.config.task_prompt.contains(operating.trim()),
+                no_loopflow
+            );
+            assert_eq!(
+                prepared.deduplication_decisions.iter().any(|decision| {
+                    decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
+                        && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+                }),
+                !no_loopflow
+            );
         }
     }
 

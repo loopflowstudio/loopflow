@@ -41,6 +41,11 @@ independent FlowSession. `flow start` preserves the Task's selected Flow and
 saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
 explicitly replaces the Task's workflow.
 
+Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
+requests for the same document do not repeat its contents; distinct memory files
+remain separate even when their text matches. IDE launches with Wave documents
+use the assembled prompt so those references reach the provider.
+
 ## Connect planning and create work
 
 ```bash

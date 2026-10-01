@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use loopflow::engine::{
-    drop_native_instruction_docs, format_prompt, gather_context, GatherContextOpts,
-    PromptFormatMode, Surface,
+    drop_duplicate_docs, format_prompt, gather_context, GatherContextOpts, PromptFormatMode,
+    Surface,
 };
 
 #[derive(Parser, Debug)]
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let mut components = gather_context(&opts)?;
-    let _ = drop_native_instruction_docs(&mut components, &args.repo);
+    let _ = drop_duplicate_docs(&mut components, &args.repo);
     let prompt = format_prompt(PromptFormatMode::Full, &components);
     println!("{prompt}");
 

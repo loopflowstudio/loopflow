@@ -1,24 +1,57 @@
 ---
-description: Control Loopflow from a live terminal conversation.
+description: Review and operate the current repository’s work.
 ---
 
-# Terminal control
+# Operate repository work
 
-When the user wants to step back and rethink a Task mid-flight, use
-`concept-review` to examine its product concepts, core types, and APIs together.
+Follow the requested operation. With a specific request, inspect the relevant
+work and act within existing authorization. Without one, review the repository's
+open work and present a short triage before advancing it. Refresh relevant facts
+before acting; do not inventory every Session on every conversational turn.
 
-Keep this conversation open as the User's terminal-native Loopflow control
-surface. Do not perform requested interventions in this checkout.
+Work directly in this checkout when appropriate. Existing Tasks, workers, and
+managed Flows retain their authority; do not become a competing driver.
+For rethinking a Task mid-flight, use `concept-review`.
 
-At the beginning of every User turn, and again after any Session mutation, run:
+## Review open work
 
-```text
-lf session list --json
-```
+For a repository-wide review, start with `lf roadmap --json`,
+`lf session list --json`, and `lf wt list --json`.
+Read `lf task status <issue> --json` for work needing attention. Expand into
+branches and PRs when relevant: use read-only git inspection and
+`gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`.
+Limit cleanup to the participant's own work; ownership must be evidenced, not
+inferred from a machine account. Missing provider data is unknown, not green.
 
-Use the fresh list to identify conversations and unresolved reviews. Never rely
-on Session content remembered from an earlier turn or embedded in the launch
-prompt.
+For a repository-wide review, write `scratch/open-work.md` with dated rows:
+item, observed status, recommendation, and reason. Distinguish running work,
+pending decisions, ready-to-ship changes, blocked work, and stale candidates.
+Recommend ship, ship-partial, abandon, prune, or discuss. Age alone does not
+prove abandonment; branches with open PRs are not cleanup candidates without
+explicit direction. Review Waves through shared readers and their GOAL/MEMORY
+when relevant. Judge progress toward their objective, not activity counts;
+record continue, split, reduce scope, or archive recommendations.
+
+Use existing delivery skills and `lf` operations for authorized actions.
+Preserve Task identity and any active worker. Use `lf wt` for worktree cleanup;
+inspect installed help for the supported operation rather than improvising
+raw git mutations. Ask before publishing, destructive cleanup, or external
+messages unless already authorized. Do not launch unconditional background
+ships. Record observed outcomes and leave unresolved items as a short punch
+list; a dispatched operation is not a completed delivery.
+
+## Reviewer mode
+
+- **Interactive reviewer:** discuss consequential decisions here; obtain only
+  authorization not already supplied.
+- **Parent reviewer:** send evidence-backed recommendations through the
+  review protocol and verify the Task's replies. Do not mutate its checkout or launch
+  competing execution. Destructive actions require prior authorization; missing
+  authority remains explicit in the review outcome.
+
+## Sessions and reviews
+
+Use `lf session list --json` to identify conversations and unresolved reviews.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.

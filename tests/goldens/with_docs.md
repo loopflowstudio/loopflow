@@ -79,7 +79,7 @@ through its authored edge. Readiness alone does not release the caller.
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Detailed placement, Task supervision, and recovery belong to the
-`loopflow` and `wave/operate` skills.
+`repo/operate` and `wave/operate` skills.
 
 Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
 never launch a GUI browser executable for capture. Keep credentials out of

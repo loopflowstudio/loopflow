@@ -1,6 +1,6 @@
 # A responsive default conversation
 
-Draft — 2026-10-01. Jack Heart requested: “make lf less of an opinonated default” because “the Desktop app + repo/wave agents cover a lot of the lf operational ground.” Earlier direction: “Prioritize responsiveness” and a “possible request is unrelated.”
+Implementation authorized by Jack Heart — 2026-10-01. Jack Heart requested: “make lf less of an opinonated default” because “the Desktop app + repo/wave agents cover a lot of the lf operational ground.” Earlier direction: “Prioritize responsiveness” and a “possible request is unrelated.”
 
 ## What to build
 
@@ -9,12 +9,17 @@ Bare `lf` opens a general-purpose conversation that follows the participant's di
 Jack Heart proposed merging the operational skills under `lf operate` on
 2026-10-01. This supersedes the earlier proposal to retain `lf loopflow`.
 The existing review skill is named `review-open-work` in the repository.
+Jack Heart then selected `repo/operate` as the canonical skill, with `operate`
+as its short name. One explicit resolver shorthand handles the otherwise
+ambiguous suffix shared with `wave/operate`; no duplicate skill is registered.
+The separately published `skills/loopflow/SKILL.md` teaches external harnesses
+the API and remains unchanged.
 
 ## Placement
 
 Unresolved; no Wave was supplied. This bounded default-launch change needs no planning-provider lookup to design.
 
-## Proposed exact default prompt
+## Default prompt
 
 ```markdown
 ---
@@ -28,7 +33,7 @@ nothing to do with this repository or Loopflow.
 
 Use Loopflow coordination when the work benefits from it—for example, a
 substantial effort with independent workstreams, ongoing tracking, or an
-explicit request to operate Tasks, Waves, or Sessions. Load the `operate`
+explicit request to operate Tasks, Waves, or Sessions. Load the `repo/operate`
 skill when that operational guidance is needed, within the user's existing
 authorization.
 
@@ -63,7 +68,7 @@ existing launch-target handling; assemble and execute the same surface.
 
 ## Explicit operation
 
-Create `ops/skill/operate.md` by consolidating `loopflow` and
+Create `ops/skill/repo_operate.md` by consolidating `loopflow` and
 `review-open-work`. Its purpose: inspect current work, identify what needs
 attention, and carry authorized actions through to an observable result.
 
@@ -104,20 +109,22 @@ Remove the default launch's selection of the control skill and replace
 `bare_lf_has_a_terminal_control_skill` with coverage of the new default
 selection. Remove comments describing bare `lf` as terminal control.
 Delete `ops/skill/loopflow.md` and `wave/skill/review-open-work.md` after their
-useful behavior moves to `operate.md`. Update catalog, documentation, Flow,
+useful behavior moves to `repo_operate.md`. Update catalog, documentation, Flow,
 and test references together, including old skill-name launch special cases.
-Do not retain aliases, duplicate procedures, or tests asserting removed names.
+Do not retain retired-name aliases, duplicate procedures, or tests asserting removed names.
 
 ## Internal slices
 
 One indivisible change, shipped as one PR through internal slices.
 
-**This slice:** consolidate the two operational skills into `operate`, remove
-the superseded skills, and cut over their consumers. Add the short default
-skill and switch bare launch in the same cut so no launch target disappears.
+The skill consolidation, default launch, shared terminal routing, discovery
+shorthand, and documentation are implemented. No deletion targets remain.
+**This slice:** implementation complete; full affected suites and clippy remain
+for gate, with conversational judgment in demo/review. No follow-up Tasks needed.
 
-Then finish terminal-routing coverage, prompt-ownership coverage, and examples
-contrasting `lf` with `lf operate`. No follow-up Tasks needed.
+Review finding: prompt assembly and execution previously disagreed on the
+forced terminal surface when an IDE mode was supplied. They now share one
+launch-target decision, preserving terminal presentation for the default.
 
 ## The demo
 
@@ -129,16 +136,17 @@ a specific request goes directly to the relevant work.
 
 ## Done when
 
-Headless gate: `cargo test -p loopflow --bin lf bare_lf` verifies default
-selection and terminal routing without launching a provider. Extend
+Headless gate: `cargo test -p loopflow --test default_conversation_tests` verifies
+the default prompt delivered to a stub provider. `cargo test -p loopflow --lib
+bare_lf` verifies terminal routing. Extend
 `assembled_prompts_deliver_procedures_to_the_owning_skill` to include `default`
-and replace `loopflow` with `operate`;
+and replace `loopflow` with `repo/operate`;
 `cargo test -p loopflow assembled_prompts_deliver_procedures_to_the_owning_skill`
 passes with operational procedures confined to their owning skills.
-Add discovery coverage proving `operate` resolves distinctly from
-`wave/operate`; run `cargo test -p loopflow lf::discovery`.
+Add discovery coverage proving `operate` resolves to `repo/operate`, including
+canonical overrides, while `wave/operate` remains distinct; run `cargo test -p loopflow lf::discovery`.
 `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass.
 Conversational responsiveness is judged in demo/review, not by brittle prose
 assertions or a live-provider gate.
 
-Check: source inspection only; design has no executable changes.
+Check: `cargo test -p loopflow operate`, `cargo test -p loopflow --test default_conversation_tests`, `cargo test -p loopflow --lib assembled_prompts_deliver_procedures_to_the_owning_skill`, `cargo test -p loopflow --lib formerly_attended_skills_have_bounded_headless_contracts`, `cargo fmt`, and `git diff --check` passed; full affected suites/clippy deferred to gate.

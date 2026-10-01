@@ -68,6 +68,16 @@ python -m pytest test_calc.py    # see the bug
 lf debug -c                            # fix it
 ```
 
+### Open a conversation
+
+```bash
+lf                         # ask a question or start work
+lf operate                 # review and operate the repository’s open work
+```
+
+Bare `lf` follows the conversation, including requests unrelated to the repository.
+`operate` is the short name for `repo/operate`; `wave/operate` handles one Wave.
+
 ### Inline prompts
 
 ```bash

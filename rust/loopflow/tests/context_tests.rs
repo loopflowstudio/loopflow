@@ -682,17 +682,22 @@ fn nested_wave_reads_all_ancestor_markdown_in_checkout_order() {
 }
 
 #[test]
-fn repository_memory_is_included_once_without_a_wave() {
+fn context_delivery_repository_memory_is_included_once_without_a_wave() {
     let temp = TempDir::new().unwrap();
     fs::write(temp.path().join("MEMORY.md"), "Repository decisions.").unwrap();
-    let components = gather_context(&GatherContextOpts {
+    let mut components = gather_context(&GatherContextOpts {
         repo_root: temp.path().to_path_buf(),
         docs: vec!["MEMORY.md".into()],
         ..Default::default()
     })
     .unwrap();
+    let decisions = loopflow::engine::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
     assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
+    assert!(decisions.iter().any(|decision| {
+        decision.source_path.as_deref() == Some("MEMORY.md")
+            && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
+    }));
     let prompt = render_prompt(components);
     assert_eq!(prompt.matches("Repository decisions.").count(), 1);
     assert!(!prompt.contains("<lf:wave name="));

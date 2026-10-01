@@ -1,1 +1,0 @@
-`cargo test -p loopflow --lib --test context_tests context_delivery` — PASS (5 tests); review retained final-assembly deduplication evidence alongside checkout-local Wave gathering; broader checks belong to gate/CI.

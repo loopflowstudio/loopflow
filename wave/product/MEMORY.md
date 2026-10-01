@@ -58,16 +58,27 @@ focus backup. Interaction edges exclude routes through another interactive visit
 otherwise repeat work leaks into the exit edge. Raw Ask keys identify questions
 within one caller Run, independently of captured Flow recovery keys.
 
-Recorded Rust/Swift focused proofs, shared fixtures, Clippy and fallback compilation
-support the local implementation; Swift transport was simulated and native input
-proof used fixture shells. Jack Heart placed configured desktop/provider proof at
-the final demo boundary and authorized local implementation before it. The hosted
-UI gate, real Ask/Flow caller release, remote owning-Home association and measured
-layout/idle behavior remain unproved and mandatory before shipping. The retained
-workspace signpost ends at a main callback, not compositor presentation; it does
-not establish the proposed p95 target. Primary native wake delivery and durable
-Flow replacement remain separate Unit 2 obligations. These checks earn no
-external-product weekly-progress credit.
+Recorded Rust/Swift proofs, shared fixtures, Clippy and both native build paths
+support the implementation; transport fixtures remain simulated. On October 1,
+Jack Heart approved landing this workspace checkpoint and requested LOO-353 continue.
+This supersedes the earlier instruction to hold this PR for all configured demo
+proof; it does not claim those checks passed. Real provider continuation, remote
+association and measured layout/idle behavior remain explicit LOO-353 work.
+The retained signpost is scheduling evidence, not compositor presentation.
+
+Jack's revised workspace uses a compact toolbar and split-owned selection. One
+existing Session starts without the Sessions sidebar; multiple Sessions expose a
+collapsible sidebar. Ordinary selection preserves other splits; Command-click
+changes visibility without terminating Sessions. New arrivals preserve focus and
+manual layout. Primary Sessions runtime moved to LOO-364; LOO-353 retains UX,
+remaining proof, Flow defaults/source editing and the website pass.
+
+Jack also accepted ordinary Projects independent of optional chapter coordination
+(LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
+continuity to Flows, not separate execution semantics. See
+[the dated review and retained design references](../../docs/reviews/task-workspace.md)
+and [research](../../docs/reviews/independent-operations.md). These decisions do not
+authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
 ## Skill reduction decisions (2026-09-28)
 

@@ -8,6 +8,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::engine::flow::{flatten_resolved, resolve_flow, ResolvedFlowItem};
 
 use std::path::Path;
 
@@ -61,12 +64,67 @@ pub struct FlowReturn {
     pub traversals: u32,
 }
 
+/// Disclosure structure from the same resolution that supplies the execution graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowTemplate {
+    /// Digest of resolved content and composition; unrelated to invocation identity.
+    pub revision: String,
+    pub items: Vec<FlowTemplateItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FlowTemplateItem {
+    Node {
+        key: u32,
+        paths: BTreeMap<String, Vec<FlowTemplateItem>>,
+    },
+    Group {
+        id: String,
+        name: String,
+        items: Vec<FlowTemplateItem>,
+    },
+}
+
+fn template_items(
+    items: &[ResolvedFlowItem],
+    next: &mut u32,
+    group: &mut usize,
+) -> Vec<FlowTemplateItem> {
+    items
+        .iter()
+        .map(|item| {
+            if let ResolvedFlowItem::Group { name, items } = item {
+                let id = format!("group-{}", *group);
+                *group += 1;
+                return FlowTemplateItem::Group {
+                    id,
+                    name: name.clone(),
+                    items: template_items(items, next, group),
+                };
+            }
+            let key = *next;
+            *next += 1;
+            let paths = if let ResolvedFlowItem::Xor { paths, .. } = item {
+                paths
+                    .iter()
+                    .map(|(name, path)| (name.clone(), template_items(&path.items, next, group)))
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
+            FlowTemplateItem::Node { key, paths }
+        })
+        .collect()
+}
+
 /// One selectable Flow and the topology it would pin if started now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
     /// `None` when the definition cannot be loaded or compiled.
     pub graph: Option<FlowGraph>,
+    pub template: Option<FlowTemplate>,
     /// Why the definition is unusable; set exactly when `graph` is `None`.
     pub unavailable: Option<String>,
 }
@@ -79,19 +137,29 @@ pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
             let compiled = crate::engine::load_flow(&name, repo)
                 .map_err(|error| error.to_string())
                 .and_then(|flow| {
-                    crate::engine::compile_flow(&flow, repo)
-                        .map(|steps| FlowGraph::new(&flow.name, &steps))
-                        .map_err(|error| error.to_string())
+                    let resolved = resolve_flow(&flow, repo).map_err(|error| error.to_string())?;
+                    let bytes = serde_json::to_vec(&(&flow.name, &resolved))
+                        .map_err(|error| error.to_string())?;
+                    let template = FlowTemplate {
+                        revision: hex::encode(Sha256::digest(bytes)),
+                        items: template_items(&resolved, &mut 0, &mut 0),
+                    };
+                    Ok((
+                        FlowGraph::new(&flow.name, &flatten_resolved(&resolved)),
+                        template,
+                    ))
                 });
             match compiled {
-                Ok(graph) => FlowCatalogEntry {
+                Ok((graph, template)) => FlowCatalogEntry {
                     name,
                     graph: Some(graph),
+                    template: Some(template),
                     unavailable: None,
                 },
                 Err(reason) => FlowCatalogEntry {
                     name,
                     graph: None,
+                    template: None,
                     unavailable: Some(reason),
                 },
             }
@@ -325,6 +393,100 @@ fn collect_returns(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn template_resolution_preserves_composition_and_execution() {
+        use super::{flow_catalog, FlowGraph, FlowTemplateItem};
+        use crate::engine::flow::{compile_flow, load_flow};
+        let repo = tempfile::tempdir().unwrap();
+        let flows = repo.path().join(".lf/flows");
+        let skills = repo.path().join(".lf/skills");
+        std::fs::create_dir_all(&flows).unwrap();
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("sample.md"), "First content").unwrap();
+        std::fs::write(flows.join("piece.yaml"), "- sample\n").unwrap();
+        std::fs::write(flows.join("empty.yaml"), "[]\n").unwrap();
+        std::fs::write(
+            flows.join("study.yaml"),
+            r#"
+- flow: piece
+- flow: piece
+- flow: empty
+- xor:
+    paths:
+      fix:
+        description: Fix it
+        flow: piece
+      pass:
+        description: Continue
+        steps: []
+- step: {name: sample, id: start}
+- step: {name: loop-decide, id: inner, repeat: {from: start}}
+- demo
+- step: {name: loop-decide, id: outer, repeat: {from: start}}
+"#,
+        )
+        .unwrap();
+        let entry = flow_catalog(repo.path())
+            .into_iter()
+            .find(|e| e.name == "study")
+            .unwrap();
+        assert!(entry.unavailable.is_none(), "{:?}", entry.unavailable);
+        let template = entry.template.unwrap();
+        let expanded =
+            compile_flow(&load_flow("study", repo.path()).unwrap(), repo.path()).unwrap();
+        let graph = entry.graph.unwrap();
+        assert_eq!(graph, FlowGraph::new("study", &expanded));
+        assert_eq!(
+            graph
+                .steps
+                .iter()
+                .filter(|n| n.returns_to.is_some())
+                .count(),
+            2
+        );
+        let [FlowTemplateItem::Group { id: first, .. }, FlowTemplateItem::Group { id: second, .. }, FlowTemplateItem::Group { items: empty, .. }, FlowTemplateItem::Node { paths, .. }, ..] =
+            template.items.as_slice()
+        else {
+            panic!("expected distinct composition uses and XOR");
+        };
+        assert_ne!(first, second);
+        assert!(empty.is_empty());
+        assert_eq!(paths.len(), 2);
+        let FlowTemplateItem::Group { items, .. } = &paths["fix"][0] else {
+            panic!("expected nested group");
+        };
+        assert!(matches!(&items[0], FlowTemplateItem::Node { key, .. } if *key == 3));
+        assert!(paths["pass"].is_empty());
+        let reread = flow_catalog(repo.path())
+            .into_iter()
+            .find(|e| e.name == "study")
+            .unwrap();
+        assert_eq!(
+            reread.template.as_ref().unwrap().revision,
+            template.revision
+        );
+        std::fs::write(skills.join("sample.md"), "Changed content").unwrap();
+        let changed = flow_catalog(repo.path())
+            .into_iter()
+            .find(|e| e.name == "study")
+            .unwrap();
+        assert_ne!(changed.template.unwrap().revision, template.revision);
+        std::fs::write(flows.join("piece.yaml"), "- flow: study\n").unwrap();
+        let cyclic = flow_catalog(repo.path())
+            .into_iter()
+            .find(|e| e.name == "study")
+            .unwrap();
+        assert!(cyclic.graph.is_none() && cyclic.template.is_none());
+        assert!(cyclic.unavailable.unwrap().contains("cycle"));
+        std::fs::remove_file(flows.join("piece.yaml")).unwrap();
+        let missing = flow_catalog(repo.path())
+            .into_iter()
+            .find(|e| e.name == "study")
+            .unwrap();
+        assert!(missing.graph.is_none() && missing.template.is_none());
+        assert!(missing.unavailable.is_some());
+    }
+
     use std::collections::{BTreeMap, HashMap};
 
     use crate::engine::execution::{ExecutionCursor, NestedCursor};

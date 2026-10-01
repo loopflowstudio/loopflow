@@ -136,8 +136,42 @@ ownership evidence cannot report confirmed emptiness. Closing a Monitor preserve
 the window's shared reader and terminals. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
-Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
-history. Projects are internal chapter records and add no navigation tier. Task
+Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
+selected repository. Empty search shows recent destinations first; arrows select,
+Return opens and Escape returns focus to the previous terminal. Flow entries
+inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+The sidebar search remains a filter. Each repository retains up to 20 recent
+destinations for the window. Visited historical Tasks remain in recents after
+leaving their pages; opening one reads its exact identity again. This does not
+search all historical Tasks. Failed reads preserve the workspace and offer Retry.
+If a highlighted row disappears, Return opens the first remaining visible result;
+with no results it does nothing.
+
+With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
+the Session name. Both open the same picker: review the named Task, then choose
+**Bind permanently**. Opening the picker leaves the conversation and terminal intact.
+
+```sh
+open 'loopflow://task/LOO-303'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+```
+
+Task links and palette Task entries open details, including Tasks outside the
+current chapter. They never start work or enter a Task's sole Session. Ambiguous
+links offer repository-qualified choices; unavailable reads keep the current
+workspace and offer Retry. Only one workspace window receives a link.
+
+Wave details show the objective, current chapter plan/KRs, the current Project's
+Flow template, all Tasks and chapter history. Templates fold composed Flows;
+click a group or its disclosure control to expand it. Repeated uses disclose
+independently, and both return edges remain visible at folded boundaries. Tab to
+a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
+this includes nested and empty groups and XOR paths. Inspecting a return names
+its target step even while the containing Flow is folded.
+Task previews use the same template view until an invocation exists, including
+Tasks with independent conversations. Captured invocations keep their expanded
+graph. Changing a template resets its disclosure; it does not change a capture.
+Projects are internal chapter records and add no navigation tier. Task
 details include the directive, recorded condition, current KRs, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared PM API. Failed saves retain your

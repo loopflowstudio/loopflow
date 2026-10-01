@@ -528,7 +528,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
                 crate::lf::commands::WorkFilter {
-                    wave: Some(wave.name()),
+                    wave: Some(wave.slug()),
                     project: None,
                     task: None,
                 },
@@ -711,7 +711,7 @@ async fn wave_tasks(
                 Err(error) => error.to_string(),
                 _ => format!(
                     "no local chapter plan; run `lf wave sync --wave {}`",
-                    wave.name()
+                    wave.slug()
                 ),
             }),
         ),
@@ -841,13 +841,13 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
-        name: wave.name().to_string(),
+        name: wave.slug().to_string(),
         status,
         goal: if wave.is_retired() {
-            wave.name().to_string()
+            wave.slug().to_string()
         } else {
-            crate::work::wave::config::read_wave_summary(&goal_repo, wave.name())
-                .unwrap_or_else(|_| wave.name().to_string())
+            crate::work::wave::config::read_wave_summary(&goal_repo, wave.slug())
+                .unwrap_or_else(|_| wave.slug().to_string())
         },
         repo,
         active_tasks,
@@ -895,7 +895,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
         return Ok(None);
     };
     let mut planning = row.snapshot;
-    let current = crate::ops::chapter::select_current(wave.name(), &planning.projects)?;
+    let current = crate::ops::chapter::select_current(wave.slug(), &planning.projects)?;
     planning.projects.retain(|project| project.id == current.id);
     planning
         .items
@@ -918,7 +918,7 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         let planning = row.snapshot;
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
         ownership.validate(
-            wave.name(),
+            wave.slug(),
             &row.initiative,
             expected_team.as_deref(),
             &planning.projects,

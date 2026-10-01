@@ -204,6 +204,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub kind: SessionKind,
     pub interactive: bool,
@@ -850,6 +851,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         kind,
         interactive: session.interactive,
@@ -1787,6 +1789,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         },
     };
     Ok(SessionRecord {
+        task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         kind,
         interactive: session.interactive,
@@ -1831,7 +1834,7 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
         return Ok(None);
     };
     let wave = match store.get_wave(wave_id).await? {
-        Some(wave) => wave.name().to_string(),
+        Some(wave) => wave.slug().to_string(),
         None => format!("Wave {wave_id} (unavailable)"),
     };
     Ok(Some(match &session.task_id {
@@ -2507,6 +2510,7 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
             artifact_key: crate::session_record::new_artifact_key(),

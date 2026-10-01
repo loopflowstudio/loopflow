@@ -24,7 +24,7 @@ pub enum DocumentSource {
     Skill,
     Scratch,
     Wave,
-    WaveMemory,
+    RepoMemory,
     Docs,
     Summary,
     Diff,
@@ -98,8 +98,6 @@ pub struct GatherContextOpts {
     pub files: Vec<String>,
     /// Wave name for wave/ scoping.
     pub wave: Option<String>,
-    /// Wave memory already resolved by the Work layer.
-    pub wave_memory: Option<String>,
     pub include_diff: bool,
     pub include_diff_files: bool,
     pub include_clipboard: bool,
@@ -185,7 +183,6 @@ pub struct PromptComponents {
     pub repo_root: String,
     pub clipboard: Option<String>,
     pub summaries: Vec<Document>,
-    pub wave_memory: Option<Document>,
     pub wave: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
@@ -344,26 +341,18 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 
     let mut docs = Vec::new();
     let mut summaries = Vec::new();
-    let mut wave_memory = opts.wave_memory.as_ref().map(|content| Document {
-        path: opts
-            .wave
-            .as_ref()
-            .map(|wave| format!("wave/{wave}/MEMORY.md"))
-            .unwrap_or_else(|| "wave/MEMORY.md".to_string()),
-        content: content.clone(),
-        source: DocumentSource::WaveMemory,
-    });
     let mut diff_files = Vec::new();
     for doc in gathered_docs {
         match doc.source {
-            DocumentSource::Docs | DocumentSource::Scratch | DocumentSource::Wave => docs.push(doc),
+            DocumentSource::Docs
+            | DocumentSource::Scratch
+            | DocumentSource::Wave
+            | DocumentSource::RepoMemory => docs.push(doc),
             DocumentSource::Summary => summaries.push(doc),
-            DocumentSource::WaveMemory => wave_memory = Some(doc),
             DocumentSource::Diff => diff_files.push(doc),
             DocumentSource::Skill | DocumentSource::Clipboard => {}
         }
     }
-    dedup_documents(&mut diff_files);
 
     // Gather diff context (tiered: unified diff or stat)
     let diff_start = Instant::now();
@@ -403,7 +392,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         repo_root: repo_root.to_string_lossy().to_string(),
         clipboard,
         summaries,
-        wave_memory,
         wave: opts.wave.clone(),
         operate: opts.operate,
         message: opts.message.clone(),
@@ -419,8 +407,16 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
 pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
 
-    // Preserve ambient ordering: scratch -> wave -> explicit docs.
+    // Preserve ambient ordering: scratch -> inherited context -> explicit docs.
     docs.extend(gather_scratch_docs(&spec.repo_root)?);
+    let repo_memory = spec.repo_root.join("MEMORY.md");
+    if repo_memory.is_file() {
+        docs.push(Document {
+            path: "MEMORY.md".into(),
+            content: fs::read_to_string(repo_memory)?,
+            source: DocumentSource::RepoMemory,
+        });
+    }
     docs.extend(gather_wave_docs(&spec.repo_root, spec.wave.as_deref())?);
     if !spec.docs.is_empty() {
         let explicit_docs = gather_doc_targets(&spec.repo_root, &spec.docs, &spec.related_repos)?;
@@ -434,16 +430,15 @@ pub fn gather_documents(spec: &GatherSpec) -> Result<Vec<Document>, CoreError> {
         docs.extend(explicit_docs);
     }
 
-    if !spec.include_files {
-        return Ok(docs);
+    if spec.include_files {
+        let files = if spec.files.is_empty() {
+            gather_changed_file_paths(&spec.repo_root)?
+        } else {
+            spec.files.clone()
+        };
+        docs.extend(gather_files(&spec.repo_root, &files)?);
     }
-
-    let files = if spec.files.is_empty() {
-        gather_changed_file_paths(&spec.repo_root)?
-    } else {
-        spec.files.clone()
-    };
-    docs.extend(gather_files(&spec.repo_root, &files)?);
+    dedup_documents(&mut docs);
 
     Ok(docs)
 }
@@ -538,51 +533,37 @@ pub(crate) fn render_message(message: &str) -> String {
 
 fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document>, CoreError> {
     let mut docs = Vec::new();
-
-    if let Some(wave_name) = wave {
-        let wave_dir = repo_root.join("wave").join(wave_name);
-        if wave_dir.is_dir() {
-            // README first
-            let readme = wave_dir.join("README.md");
-            if readme.is_file() {
-                if let Ok(content) = fs::read_to_string(&readme) {
-                    docs.push(Document {
-                        path: format!("wave/{}/README.md", wave_name),
-                        content,
-                        source: DocumentSource::Wave,
-                    });
-                }
-            }
-            // Then other .md files (sorted)
-            let mut entries: Vec<_> = fs::read_dir(&wave_dir)?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let path = e.path();
-                    path.is_file()
-                        && path.extension().map(|ext| ext == "md").unwrap_or(false)
-                        && path.file_name().map(|n| n != "README.md").unwrap_or(false)
-                        // Wave memory is gathered separately as DocumentSource::WaveMemory.
-                        && path.file_name().map(|n| n != "MEMORY.md").unwrap_or(false)
-                })
-                .collect();
-            entries.sort_by_key(|e| e.path());
-            for entry in entries {
-                let path = entry.path();
-                if let Ok(content) = fs::read_to_string(&path) {
-                    docs.push(Document {
-                        path: format!(
-                            "wave/{}/{}",
-                            wave_name,
-                            path.file_name().unwrap_or_default().to_string_lossy()
-                        ),
-                        content,
-                        source: DocumentSource::Wave,
-                    });
-                }
-            }
+    let Some(wave) = wave else {
+        return Ok(docs);
+    };
+    let mut directory = PathBuf::from("wave");
+    for segment in Path::new(wave).components() {
+        directory.push(segment);
+        let absolute = repo_root.join(&directory);
+        if !absolute.is_dir() {
+            continue;
+        }
+        let mut paths = fs::read_dir(&absolute)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
+        paths.sort_by_key(|path| {
+            (
+                path.file_name().is_none_or(|name| name != "README.md"),
+                path.clone(),
+            )
+        });
+        for path in paths {
+            docs.push(Document {
+                path: directory
+                    .join(path.file_name().expect("directory entry has a name"))
+                    .to_string_lossy()
+                    .into_owned(),
+                content: fs::read_to_string(&path)?,
+                source: DocumentSource::Wave,
+            });
         }
     }
-
     Ok(docs)
 }
 
@@ -1520,27 +1501,30 @@ pub fn loopflow_section() -> String {
     )
 }
 
-/// The Wave memory section inherited by every run born inside a Wave, whatever
-/// the launch surface (assembled prompts and vendor-skill seeds alike). Emitted
-/// only when non-empty: no memory, no header, no tokens.
-///
-/// Memory goes through the one injector
-/// ([`crate::engine::flow::wave_memory_section`], shared with the wave
-/// agent's `render_goal`) and is skipped when the task message already
-/// carries the tag — a wave-agent seed embeds its own memory, and injecting
-/// it twice would double the context.
-pub fn format_wave_memory_section(components: &PromptComponents) -> Option<String> {
-    let message_carries_memory = components
-        .message
-        .as_deref()
-        .is_some_and(|message| message.contains("<lf:wave-memory>"));
-    if message_carries_memory {
-        return None;
+/// Render repository memory and Wave files for assembled and native skill launches.
+pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
+    let mut parts = Vec::new();
+    if let Some(wave) = &components.wave {
+        parts.push(format!(
+            "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
+             Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.\n\
+             Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
+        ));
     }
-    components
-        .wave_memory
-        .as_ref()
-        .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
+    let docs: Vec<_> = components
+        .docs
+        .iter()
+        .filter(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::RepoMemory | DocumentSource::Wave
+            )
+        })
+        .collect();
+    if !docs.is_empty() {
+        parts.push(format_files(docs));
+    }
+    parts
 }
 
 /// Render user-content reference sections (docs, diffs, wave context, clipboard).
@@ -1555,43 +1539,12 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         parts.push(user_context);
     }
 
-    // Wave context
-    if let Some(ref wave) = components.wave {
-        let memory_path = format!("wave/{wave}/MEMORY.md");
-
-        parts.push(format!(
-            "<lf:wave name=\"{}\">\n\
-             You are building toward the {} program of work.\n\
-             Wave context is included in docs below.\n\n\
-             ## Wave memory\n\n\
-             Persistent memory at {}. Use the supplied memory; read relevant omitted\n\
-             sections when an excerpt names them. Its current\n\
-             contents, when any, ride this prompt's wave-memory section.\n\
-             Edit it through the ordinary repository workflow; no live Wave is required.\n\
-             `realign` reconciles memory with the plan and code. Keep durable observations,\n\
-             correct or remove stale entries, and drop session-specific notes. Use absolute dates.\n\n\
-             Organize as useful, for example:\n\
-             - Patterns: codebase conventions, architecture, how things connect\n\
-             - Preferences: user workflow, tool choices, communication norms\n\
-             - Learnings: what worked, what failed, surprises\n\n\
-             Keep memory compact enough for every iteration. Put architectural decisions\n\
-             in wave docs or explicit docs, and design rationale in scratch/ or the wave plan.\n\
-             As sections grow, promote stable entries to wave docs or explicit docs and trim.\n\
-             </lf:wave>",
-            wave, wave, memory_path
-        ));
-    }
+    parts.extend(format_wave_sections(components));
 
     if let Some(notice) = &components.budget_notice {
         parts.push(format!(
             "<lf:context-budget>\n{notice}\n</lf:context-budget>"
         ));
-    }
-
-    // Durable Wave memory flows into every run born inside the Wave and costs
-    // zero tokens when absent. Conversation requires explicit selection.
-    if let Some(memory) = format_wave_memory_section(components) {
-        parts.push(memory);
     }
 
     let scratch_body: Vec<String> = components
@@ -1617,11 +1570,16 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Explicit docs and wave docs.
-    let reference_docs: Vec<&Document> = components
+    // Explicit docs.
+    let reference_docs: Vec<_> = components
         .docs
         .iter()
-        .filter(|doc| doc.source != DocumentSource::Scratch)
+        .filter(|doc| {
+            !matches!(
+                doc.source,
+                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
+            )
+        })
         .collect();
     if !reference_docs.is_empty() {
         parts.push(format_files(reference_docs));
@@ -1885,11 +1843,14 @@ mod tests {
             source: source_kind,
         };
         let components = PromptComponents {
-            docs: vec![doc(DocumentSource::Scratch), doc(DocumentSource::Docs)],
+            docs: vec![
+                doc(DocumentSource::Scratch),
+                doc(DocumentSource::Docs),
+                doc(DocumentSource::Wave),
+            ],
             diff: Some(source.into()),
             diff_files: vec![doc(DocumentSource::Diff)],
             summaries: vec![doc(DocumentSource::Summary)],
-            wave_memory: Some(doc(DocumentSource::WaveMemory)),
             clipboard: Some(source.into()),
             message: Some(format!(
                 "Use $implement.\n<lf:steers>\n{source}\n</lf:steers>\n\
@@ -1914,7 +1875,7 @@ mod tests {
         assert!(submitted
             .contains("The selected skill and live request determine the current operation."));
         assert_eq!(components.docs[0].content, source);
-        assert_eq!(components.wave_memory.unwrap().content, source);
+        assert_eq!(components.docs[2].content, source);
         assert_eq!(
             render_reference(&render_reference(source)),
             render_reference(source)
@@ -2003,21 +1964,23 @@ mod tests {
     #[test]
     fn format_prompt_does_not_trim_large_context() {
         let components = PromptComponents {
-            docs: vec![Document {
-                path: "doc.md".to_string(),
-                content: "Doc content ".repeat(200),
-                source: DocumentSource::Docs,
-            }],
+            docs: vec![
+                Document {
+                    path: "doc.md".to_string(),
+                    content: "Doc content ".repeat(200),
+                    source: DocumentSource::Docs,
+                },
+                Document {
+                    path: "wave/living/MEMORY.md".into(),
+                    content: "Wave memory content ".repeat(200),
+                    source: DocumentSource::Wave,
+                },
+            ],
             summaries: vec![Document {
                 path: "summary.md".to_string(),
                 content: "Summary content ".repeat(200),
                 source: DocumentSource::Summary,
             }],
-            wave_memory: Some(Document {
-                path: "wave/living/MEMORY.md".to_string(),
-                content: "Wave memory content ".repeat(200),
-                source: DocumentSource::WaveMemory,
-            }),
             wave: Some("living".to_string()),
             ..Default::default()
         };
@@ -2026,7 +1989,7 @@ mod tests {
 
         assert!(prompt.contains("<lf:file path=\"doc.md\">"));
         assert!(prompt.contains("<lf:summary path=\"summary.md\">"));
-        assert!(prompt.contains("<lf:wave-memory>"));
+        assert!(prompt.contains("<lf:file path=\"wave/living/MEMORY.md\">"));
         assert!(prompt.contains("Wave memory content"));
     }
 
@@ -2143,128 +2106,6 @@ mod tests {
         assert!(prompt.contains("name=\"rust\""));
         assert!(prompt.contains("rust program of work"));
         assert!(prompt.contains("</lf:wave>"));
-    }
-
-    #[test]
-    fn format_prompt_with_wave_memory() {
-        let components = PromptComponents {
-            wave: Some("living".to_string()),
-            wave_memory: Some(Document {
-                path: "wave/living/MEMORY.md".to_string(),
-                content: "- prefer focused tests\n- run cargo fmt first".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(prompt.contains("Persistent memory at wave/living/MEMORY.md"));
-        assert!(prompt.contains("<lf:wave-memory>"));
-        assert!(prompt.contains("prefer focused tests"));
-    }
-
-    #[test]
-    fn wave_memory_renders_without_an_explicit_wave_block() {
-        let components = PromptComponents {
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "- land real product code".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert!(
-            !prompt.contains("<lf:wave name="),
-            "no wave block ambiently"
-        );
-        assert!(prompt.contains("<lf:wave-memory>\n- land real product code\n</lf:wave-memory>"));
-    }
-
-    #[test]
-    fn no_wave_context_renders_no_wave_sections() {
-        let prompt = render_full_prompt(PromptComponents::default());
-        assert!(!prompt.contains("<lf:wave-memory>"));
-        assert!(!prompt.contains("<lf:wave"));
-    }
-
-    #[test]
-    fn empty_wave_memory_renders_no_section() {
-        let components = PromptComponents {
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "   \n".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert!(!prompt.contains("<lf:wave-memory>"));
-    }
-
-    #[test]
-    fn wave_agent_seed_does_not_double_inject_memory() {
-        // The wave agent's inline run: render_goal already embedded the
-        // memory in the task message; assembly must not inject it again.
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".to_string(),
-        };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext {
-                flows: vec![],
-                memory: "- one source of truth".to_string(),
-            },
-        );
-        let components = PromptComponents {
-            wave: Some("goals".to_string()),
-            wave_memory: Some(Document {
-                path: "wave/goals/MEMORY.md".to_string(),
-                content: "- one source of truth".to_string(),
-                source: DocumentSource::WaveMemory,
-            }),
-            message: Some(seed),
-            ..Default::default()
-        };
-
-        let prompt = render_full_prompt(components);
-        assert_eq!(
-            prompt.matches("<lf:wave-memory>").count(),
-            1,
-            "memory appears exactly once (inside the seed message)"
-        );
-        assert_eq!(prompt.matches("- one source of truth").count(), 1);
-    }
-
-    /// The wave agent's inline run: the render_goal seed rides as the task
-    /// message of an assembled prompt (operate on), and the loopflow document
-    /// lands exactly once — from assembly, not the seed.
-    #[test]
-    fn wave_agent_seed_carries_loopflow_document_once() {
-        let goal = crate::engine::flow::Goal {
-            prompt: "Ship the roadmap.".to_string(),
-        };
-        let seed = crate::engine::flow::render_goal(
-            &goal,
-            &crate::engine::flow::GoalRenderContext {
-                flows: vec![],
-                memory: String::new(),
-            },
-        );
-        assert!(
-            !seed.contains("<lf:loopflow>"),
-            "the seed itself carries no loopflow section"
-        );
-
-        let components = PromptComponents {
-            operate: true,
-            wave: Some("goals".to_string()),
-            message: Some(seed),
-            ..Default::default()
-        };
-        let prompt = render_full_prompt(components);
-        assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
     }
 
     #[test]
@@ -2927,34 +2768,6 @@ mod tests {
         assert!(result.is_ok());
         let components = result.unwrap();
         assert_eq!(components.wave, Some("rust-migration".to_string()));
-    }
-
-    #[test]
-    fn gather_context_uses_preassembled_wave_memory() {
-        let repo = init_repo();
-        write_file(repo.path(), "wave/living/README.md", "# Living");
-
-        let opts = GatherContextOpts {
-            repo_root: repo.path().to_path_buf(),
-            wave: Some("living".to_string()),
-            wave_memory: Some("- always run rustfmt before commit".to_string()),
-            ..Default::default()
-        };
-
-        let result = gather_context(&opts);
-        assert!(result.is_ok());
-        let components = result.unwrap();
-        assert!(components.wave_memory.is_some());
-        assert_eq!(
-            components.wave_memory.as_ref().map(|d| d.source),
-            Some(DocumentSource::WaveMemory)
-        );
-        assert!(components
-            .wave_memory
-            .as_ref()
-            .expect("wave memory should be loaded")
-            .content
-            .contains("always run rustfmt before commit"));
     }
 
     // ==========================================================================

@@ -31,6 +31,21 @@ because they had live file handles: `installed/local-04115a69e0c34b198bf110976b3
 reinspect live ownership before cleanup. Older running builds can recreate side
 stores until the published cutover. No active database was removed or process killed.
 
+## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+
+Jack Heart selected the Task's checkout as its general work set: every
+AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
+SQLite reader supplies Task status and Desktop membership; the app does not
+reconstruct ownership from paths. Membership is additive, includes descendants
+at component boundaries and closed history, and survives a missing checkout.
+It changes neither recorded usage attribution nor process/Flow authority.
+
+The managed Flow remains one marked member for worker progression, claims,
+Task review settlement and worker delivery authority. Independent unfinished
+Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
+during completion, recovery and cleanup. General membership cannot settle or
+signal them. Current mechanics live in the architecture reference; this branch
+entry is not evidence of shipment or configured Desktop acceptance.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
@@ -588,8 +603,9 @@ draft preservation are discarded. Keep current Work/links, account routes and
 resumable conversations. Exactly three direct drafts remain: `record_execs`,
 `project_status_chapters` and `session_ownership`; released SQL remains immutable.
 
-**Merge and conversion have different proof.** The working merge checklist is
-`scratch/remaining-work.md` until delivery clears it. Configured provider and
+**Merge and conversion have different proof.** LOO-298 owns its merge checklist;
+this branch retains the earlier copy at `ab901f1f1:scratch/remaining-work.md`
+in Git history. Configured provider and
 Desktop continuity remain unproven; removing Jack's attendance requirement does
 not turn fixtures into acceptance. Before release conversion, quiesce old writers
 and new launches, preserve a consistent SQLite/filesystem backup and matching

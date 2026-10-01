@@ -78,9 +78,9 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
             let _lock = rotation_lock(&wave).await?;
             super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
                 .map_err(error)?;
-            let ctx = resolve_context(repo, wave.name()).await?;
-            let projects = checked_projects(repo, &ctx, wave.name()).await?;
-            let project = select_current(wave.name(), &projects)?;
+            let ctx = resolve_context(repo, wave.slug()).await?;
+            let projects = checked_projects(repo, &ctx, wave.slug()).await?;
+            let project = select_current(wave.slug(), &projects)?;
             let provider = ctx
                 .client
                 .project_ownership(&project.id)
@@ -90,7 +90,7 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
                 .update_project(&provider.id, &provider.name, content)
                 .await
                 .map_err(error)?;
-            refresh_pm_snapshot(repo, wave.name(), &ctx).await?;
+            refresh_pm_snapshot(repo, wave.slug(), &ctx).await?;
             Ok(())
         })
 }
@@ -123,7 +123,7 @@ pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmP
             error("Project planning is unavailable; run `lf wave sync --wave <wave>`")
         })?;
     let snapshot = snapshot.snapshot;
-    select_current(wave.name(), &snapshot.projects)
+    select_current(wave.slug(), &snapshot.projects)
 }
 
 // Stable across Homes, including a lost create response before initiative attachment.
@@ -307,19 +307,19 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
         }
     }
     for (entry, (wave, ctx)) in plan.waves.iter_mut().zip(&contexts) {
-        adopt_legacy_projects(repo, &store, wave.name(), ctx, true).await?;
+        adopt_legacy_projects(repo, &store, wave.slug(), ctx, true).await?;
         apply_rotation(repo, &store, wave, ctx, name, entry)
             .await
             .map_err(|cause| error(format!("{cause}; retry `lf repo new-chapter {name}`")))?;
-        refresh_pm_snapshot(repo, wave.name(), ctx).await?;
+        refresh_pm_snapshot(repo, wave.slug(), ctx).await?;
     }
     for (wave, ctx) in &contexts {
-        let projects = checked_projects(repo, ctx, wave.name()).await?;
-        let current = select_current(wave.name(), &projects)?;
+        let projects = checked_projects(repo, ctx, wave.slug()).await?;
+        let current = select_current(wave.slug(), &projects)?;
         if current.name != name {
             return Err(error(format!(
                 "Wave {} now selects {}; reconcile competing chapter changes in Linear",
-                wave.name(),
+                wave.slug(),
                 current.name
             )));
         }
@@ -550,7 +550,7 @@ async fn apply_rotation(
     name: &str,
     entry: &mut WaveRotation,
 ) -> OpsResult<()> {
-    let linear_name = linear_project_name(repo, wave.name(), name).await?;
+    let linear_name = linear_project_name(repo, wave.slug(), name).await?;
     let mut successor = match ctx
         .client
         .find_project(&entry.successor_id)
@@ -763,7 +763,7 @@ async fn apply_rotation(
             "predecessor still has unfinished Tasks; refresh and retry",
         ));
     }
-    let current = checked_projects(repo, ctx, wave.name()).await?;
+    let current = checked_projects(repo, ctx, wave.slug()).await?;
     if current.iter().any(|project| {
         project.status == ProjectStatus::Started
             && project.id != predecessor.id
@@ -823,7 +823,7 @@ pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResul
     if placement.home_id != local.id {
         return Err(error(format!(
             "Wave {} is placed on {}; run this command with `lf ssh {}`",
-            wave.name(),
+            wave.slug(),
             placement.home_id,
             placement.home_id
         )));

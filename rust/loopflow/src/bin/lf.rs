@@ -812,21 +812,39 @@ fn print_task_snapshot(
             branch,
             pm_writeback,
         );
-        println!("  execution: {}", snapshot.execution.reason);
+        println!("  managed execution: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
         }
-        for run in &snapshot.runs {
+        for session in &snapshot.work.sessions {
             println!(
-                "  Run: {}  {}  {}  {}",
-                run.selector(),
-                run.label(),
-                run.surface,
-                run.status()
+                "  Session: {}  {}  {}{}",
+                session.id,
+                session.title,
+                if session.completed_at.is_some() {
+                    "completed"
+                } else {
+                    "open"
+                },
+                if session.managed { "  [managed]" } else { "" }
             );
         }
-        if snapshot.runs_truncated {
-            println!("  Run history truncated; inspect exact Run IDs for older evidence");
+        for flow in &snapshot.work.flows {
+            println!(
+                "  Flow: {}  {}  {:?}{}",
+                flow.summary.id,
+                flow.summary.name.as_deref().unwrap_or("unnamed"),
+                flow.summary.state,
+                if flow.managed { "  [managed]" } else { "" }
+            );
+        }
+        for exec in &snapshot.work.execs {
+            println!(
+                "  Exec: {}  {}  {}",
+                exec.id,
+                exec.command.as_deref().unwrap_or("unknown command"),
+                exec.outcome.as_deref().unwrap_or("unknown")
+            );
         }
         println!("  project: {}", snapshot.project_id);
         for pr in &snapshot.prs {
@@ -1470,7 +1488,7 @@ fn run() -> anyhow::Result<()> {
             .map(loopflow::work::wave::context::resolve_explicit_wave)
             .transpose()?;
         if let Some(wave) = &explicit_wave {
-            cli.wave = Some(wave.name().to_string());
+            cli.wave = Some(wave.slug().to_string());
         }
         // One resolved wave identity drives prompt context, registry attribution,
         // journaling, and every child process.
@@ -1555,7 +1573,7 @@ fn dispatch(
             if wave.id() != &binding.wave_id {
                 anyhow::bail!(
                     "--wave {} does not own --as {}:{}",
-                    wave.name(),
+                    wave.slug(),
                     binding.work.kind(),
                     binding.work.id(),
                 );

@@ -41,13 +41,13 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;
                 if Path::new(wave.repo())
                     .join("wave")
-                    .join(wave.name())
+                    .join(wave.slug())
                     .join("GOAL.md")
                     .exists()
                 {
                     return Err(anyhow!(
                         "Wave {} still has an authored GOAL.md",
-                        wave.name()
+                        wave.slug()
                     ));
                 }
                 store.forget_wave(&wave_id, *dry_run).await?;
@@ -57,7 +57,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     &format!(
                         "{} Wave {}",
                         if *dry_run { "Would forget" } else { "Forgot" },
-                        wave.name()
+                        wave.slug()
                     ),
                 )
             }
@@ -132,7 +132,7 @@ async fn require_work_repository(store: &Store, work: &WorkRef, repo: &Path) -> 
         .get_wave(&wave_id)
         .await?
         .ok_or_else(|| anyhow!("Wave {wave_id} is not registered"))?;
-    let locator = crate::work::wave::WaveLocator::discover(repo, wave.name())?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave.slug())?;
     let local = store.get_wave_at(&locator).await?;
     if local.as_ref().map(crate::work::wave::Wave::id) != Some(&wave_id) {
         return Err(anyhow!(

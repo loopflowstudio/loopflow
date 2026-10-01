@@ -18,6 +18,40 @@ Flow execution; each Home retains command and conversation history.
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
 Session for a conversation, or invoke `wave/operate` for a bounded planning pass.
 
+## Nested Waves
+
+```text
+wave/infrastructure/GOAL.md
+wave/infrastructure/MEMORY.md
+wave/infrastructure/release/GOAL.md
+wave/infrastructure/release/MEMORY.md
+```
+
+Address Release as `infrastructure/release`. It has its own objective, plan,
+Tasks and schedules. Its prompt reads Infrastructure's top-level Markdown,
+then Release's, from the executing checkout; sibling Waves stay out.
+
+Repository-root `MEMORY.md`, when present, comes before Wave files and is also
+included when no Wave is selected. Read all files from the executing checkout.
+
+Repository, ancestor and selected Wave memory share one budget, defaulting to
+16,000 tokens and 128 KiB. Files receive proportional shares of that budget.
+`context_budgets.memory_tokens` and `memory_bytes` configure the shared limits;
+`lf context` reports each file's share and usage. Oversized files become excerpts
+with links to their complete local snapshots.
+
+Registration records the Wave UUID in `GOAL.md` frontmatter as `id:`. Commit
+that field with the Wave files and retain it when moving a directory. Discovery
+reconciles its one-segment name and directory parent. Renaming Infrastructure
+changes Release's address without changing its ID, Project or Task links.
+A fresh Home uses the same authored IDs. Copying an ID into two Wave directories
+is a conflict, not a second Wave.
+
+The release prototype declares its schedule in
+`wave/infrastructure/release/GOAL.md`. Connecting its Linear Initiative, moving
+release plans and Tasks, and syncing the installed schedule are separate
+post-landing operations.
+
 ## Operate manually
 
 ```bash
@@ -242,11 +276,18 @@ reviewed repository file:
 $EDITOR wave/shipper/MEMORY.md
 ```
 
-The file is the whole memory surface — read and edit it directly, running Wave
-or not. `realign` curates it: merge durable context into the existing
-structure, correct stale entries, and drop transient execution detail. When a task ships,
-its context folds forward into memory and the remaining Linear tasks — fold,
-don't drop.
+Prompts read every top-level `.md` in the selected Wave directory and each
+ancestor directory, root first, from the executing checkout. For
+`infrastructure/release`, that means `wave/infrastructure/*.md` followed by
+`wave/infrastructure/release/*.md`. Memory uses the same reader as goals and
+notes. Children, siblings and unrelated Waves stay out of ordinary context;
+`scratch/` remains recursive. No registry lookup is needed to gather these files.
+
+Edit memory through the ordinary repository workflow. `realign` reconciles the
+plan, code and Wave memory; the prompt identifies the selected Wave's memory
+as the file to curate.
+At a parent Wave, `realign` explicitly reads the child Waves' top-level Markdown
+to bring relevant findings into the parent's memory.
 
 ### Home
 

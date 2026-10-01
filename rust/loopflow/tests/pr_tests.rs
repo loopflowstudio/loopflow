@@ -1226,6 +1226,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
     let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
     let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
     let base = repo.head_sha();
     let branch = "jack/task-resume-proof";
     repo.create_branch(branch);

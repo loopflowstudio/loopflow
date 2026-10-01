@@ -9,6 +9,7 @@ use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
 use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
+use loopflow_test_support::TestRepo;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
@@ -245,6 +246,20 @@ impl Drop for EnvGuard {
             None => env::remove_var("LF_DB_PATH"),
         }
     }
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
+pub fn bind_task_planning(repo: &TestRepo) {
+    repo.create_file(
+        ".lf/config.yaml",
+        "pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n",
+    );
+    repo.create_file(
+        "wave/task-pr-tests/GOAL.md",
+        "---\npm:\n  linear_initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+    );
+    repo.stage_all();
+    repo.commit("Bind fixture planning before creating Task checkouts");
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.

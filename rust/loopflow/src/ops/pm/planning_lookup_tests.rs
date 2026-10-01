@@ -54,9 +54,13 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
     let fixture = Fixture::new().await;
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
+    let mut provider_project = project();
+    provider_project["name"] = "Product — Chapter".into();
     let (url, _) = spawn(vec![
         team_response(),
-        json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(provider_project.clone())),
+        team_response(),
+        json_response(StatusCode::OK, issue(provider_project)),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -65,6 +69,8 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .await
                 .unwrap();
             assert_eq!(record.item.name, "Inspect a planning-only Task");
+            assert_eq!(record.project.as_ref().unwrap().name, "Chapter");
+            assert_eq!(record.item.project.as_deref(), Some("chapter"));
             assert_eq!(
                 record.item.branch_name.as_deref(),
                 Some("dev/fix-1-existing")
@@ -91,6 +97,11 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 .put_pm_snapshot(snapshot.clone())
                 .await
                 .unwrap();
+            let refreshed = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                .await
+                .unwrap();
+            assert_eq!(refreshed.project, record.project);
+            assert_eq!(refreshed.item, record.item);
             let mut edited = record.clone();
             edited.item.name = "Changed through detail sync".into();
             edited.item.revision = Some("2026-09-29T12:00:00.124Z".into());

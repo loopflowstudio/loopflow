@@ -638,6 +638,14 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 
 Pass several names after `--test` to share one disposable build across related proofs.
 
+When changing Task planning lookup or provider response shapes, run the affected
+installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
+the deletion test, and the regular Rust suite skips installation proofs. Keep
+simulated provider revisions and checkout Team/Initiative bindings consistent
+with the planning records those workflows resolve. Exercise unfinished work
+before confirmed removal; do not resurrect deleted Tasks by resetting only
+execution tables while retaining planning tombstones.
+
 This copies source into a disposable Linux container, materializes its draft
 migrations and builds the development CLI with two Cargo jobs. It checks
 populated planning upgrades from the released schema. Intermediate branch

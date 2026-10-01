@@ -1694,6 +1694,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use loopflow::engine::invocation::QueuedInvocation;
     let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
     repo.create_branch("task-claim");
     let home = TempDir::new().unwrap();
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
@@ -2395,6 +2396,7 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
     use loopflow::engine::invocation::QueuedInvocation;
 
     let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-flow-read", &repo.head_sha());
@@ -2571,7 +2573,8 @@ fn task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart() 
         String::from_utf8_lossy(&status.stderr)
     );
     let status = String::from_utf8(status.stdout).unwrap();
-    assert_eq!(status.lines().next(), Some("INF-123  blocked"));
+    assert_eq!(status.lines().next(), Some("Planning evidence: available"));
+    assert!(status.lines().any(|line| line == "INF-123  blocked"));
     assert!(status.contains("Release target is unavailable"));
 }
 

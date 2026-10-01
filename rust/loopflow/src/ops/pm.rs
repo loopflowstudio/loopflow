@@ -1761,7 +1761,7 @@ async fn inspect_task_planning_async(
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let Some((item, project)) = observation else {
+        let Some((mut item, mut project)) = observation else {
             store
                 .invalidate_pm_task(&scope, provider.as_str(), selector)
                 .await
@@ -1773,6 +1773,17 @@ async fn inspect_task_planning_async(
                 "Linear task {} belongs to Team {}, expected repository Team {}",
                 item.identifier, item.team_id, repository.team_id
             )));
+        }
+        if let Some(project) = project.as_mut() {
+            // Exact inspection also permits unbound Projects. Bound Projects use
+            // the same names as Wave snapshots before comparing provider revisions.
+            if let Ok(wave) = singular_project_initiative(project)
+                .and_then(|initiative| wave_for_initiative(repo, &initiative))
+            {
+                let title_path = canonical_wave_title_path_with_store(repo, &wave, &store).await?;
+                canonicalize_project_name(&title_path, &wave, project)?;
+                item.project = Some(project.slug.clone());
+            }
         }
         store
             .put_pm_task(
@@ -2895,8 +2906,7 @@ async fn checked_projects_with_store(
     projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
-        project.name = canonical_project_name(&title_path, wave, &project.name)?;
-        project.slug = crate::pm::project_slug(&project.name);
+        canonicalize_project_name(&title_path, wave, project)?;
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
@@ -2948,6 +2958,16 @@ pub(crate) async fn linear_project_name(
         canonical_wave_title_path_async(repo, wave).await?,
         canonical_name.trim()
     ))
+}
+
+fn canonicalize_project_name(
+    title_path: &str,
+    wave: &str,
+    project: &mut PmProject,
+) -> OpsResult<()> {
+    project.name = canonical_project_name(title_path, wave, &project.name)?;
+    project.slug = crate::pm::project_slug(&project.name);
+    Ok(())
 }
 
 fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> OpsResult<String> {

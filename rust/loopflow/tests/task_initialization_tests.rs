@@ -445,6 +445,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
     repo.create_branch("jack/review-installation");
     let task = register_unrun_task(
         home.path(),

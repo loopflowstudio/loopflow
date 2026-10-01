@@ -914,6 +914,10 @@ branches in the same directory does not remove checkout membership. Run these
 proofs with a canonical `TMPDIR` (on macOS, `TMPDIR=/private/tmp`) so temporary
 path symlinks cannot mask that association.
 
+Session association changes also require the full `session_lifecycle_tests` suite:
+explicit Task bindings retain membership even from a sibling checkout. Wave label
+changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered titles.
+
 Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 

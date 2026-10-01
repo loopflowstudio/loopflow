@@ -143,6 +143,12 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         if let Some(workspace) = &session.workspace {
             session.task_ids = workspace.task_id.iter().cloned().collect();
         }
+        // Checkout placement and explicit binding both grant membership.
+        if let Some(WorkRef::Task(task)) = &session.work {
+            if !session.task_ids.contains(task) {
+                session.task_ids.push(task.clone());
+            }
+        }
     }
     Ok(())
 }

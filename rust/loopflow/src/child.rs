@@ -77,13 +77,12 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The `lf` binary, store, and home a child Work launch uses, resolved fresh at
+/// The `lf` binary and Home a child Work launch uses, resolved fresh at
 /// the launch boundary from the current Home — never persisted as Work state.
 /// Work no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
-    pub db_path: PathBuf,
     pub lf_home: PathBuf,
 }
 

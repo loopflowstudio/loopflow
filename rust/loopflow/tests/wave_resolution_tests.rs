@@ -183,8 +183,7 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", home)
-        .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"));
+        .env("LF_HOME", home);
     if let Some(id) = wave_id {
         command.env("LF_WAVE_ID", id);
     }

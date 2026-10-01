@@ -450,13 +450,7 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
 }
 
 fn global_config_path() -> PathBuf {
-    if let Ok(home) = std::env::var("LF_HOME") {
-        PathBuf::from(home).join("config.yaml")
-    } else {
-        dirs::home_dir()
-            .map(|home| home.join(".lf/config.yaml"))
-            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
-    }
+    crate::store::lf_home_dir().join("config.yaml")
 }
 
 /// Load only the repository-owned config, without inheriting user-global values.

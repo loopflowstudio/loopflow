@@ -25,6 +25,10 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import unix_connect
 
 
+def _database(env: dict[str, str]) -> str:
+    return str(Path(env["LF_HOME"]) / "loopflow.db")
+
+
 class Responses(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), Handler)
@@ -267,15 +271,14 @@ enabled = false
                 shim.chmod(0o700)
                 env.update(
                     LF_BIN=str(binary),
-                    LF_DB_PATH=str(root / "lf" / "loopflow.db"),
                     PATH=f"{binary.parent}:{args.codex.parent}:{env['PATH']}",
                     LF_PROBE_CODEX=str(args.codex),
                     LF_PROBE_ENGINES=str(engines),
                 )
                 results["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
                 server.command = (
-                    'printf "caller-present=%s home=%s database=%s\\n" '
-                    '"${LF_AGENT_CALLER:+yes}" "$LF_HOME" "$LF_DB_PATH"\n'
+                    'printf "caller-present=%s home=%s\\n" '
+                    '"${LF_AGENT_CALLER:+yes}" "$LF_HOME"\n'
                     "ps -p $$ -o etime= 2>&1\n"
                     + "RUST_LOG=loopflow::journal=debug "
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
@@ -349,7 +352,6 @@ enabled = false
                     params["config"]["shell_environment_policy.set"].update(
                         {
                             "LF_HOME": str(args.lf_home),
-                            "LF_DB_PATH": str(args.lf_home / "loopflow.db"),
                             "LF_AGENT_CALLER": (args.control / "caller.json").read_text(),
                         }
                     )
@@ -524,7 +526,7 @@ def _public_connection_contract(
         wait(control / "ready")
 
     try:
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             endpoint, thread, generation = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
                 "FROM agent_sessions WHERE id=?",
@@ -542,7 +544,7 @@ def _public_connection_contract(
             _connect(label)
             if label == "first":
                 call(0, 0, "thread/read", {"threadId": thread})
-                with sqlite3.connect(env["LF_DB_PATH"]) as database:
+                with sqlite3.connect(_database(env)) as database:
                     active = database.execute(
                         "SELECT provider_turn FROM session_events WHERE session_id=? "
                         "AND kind='started' ORDER BY seq DESC LIMIT 1",
@@ -551,7 +553,7 @@ def _public_connection_contract(
         headless.send_signal(signal.SIGINT)
         headless.communicate(timeout=10)
         assert headless.returncode == 130, headless.returncode
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             outcome = database.execute(
                 "SELECT outcome FROM execs "
                 "WHERE id=(SELECT provider_exec_id FROM agent_sessions WHERE id=?)",
@@ -590,7 +592,7 @@ def _public_connection_contract(
         )
         # Explicit client replacement must use the same live-engine path as
         # ordinary connect, with the current turn and shared sibling untouched.
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             before_prepare = database.execute(
                 "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
@@ -605,7 +607,7 @@ def _public_connection_contract(
         assert prepared.returncode == 0, prepared.stderr
         assert "--replace" in json.loads(prepared.stdout)["open_argv"]
         assert all(previous.poll() is None for previous in processes)
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             after_prepare = database.execute(
                 "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
@@ -623,7 +625,7 @@ def _public_connection_contract(
             engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
             == "active"
         )
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             retained_connection = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
                 "FROM agent_sessions WHERE id=?",
@@ -640,7 +642,7 @@ def _public_connection_contract(
         assert driver != before_prepare[0]
         server.release.set()
         engine.wait_turn(active)
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             after = database.execute(
                 "SELECT id,parent_exec_id,caller_session_id,caller_provider_generation "
                 "FROM execs WHERE via_agent=1"
@@ -698,7 +700,7 @@ def _public_connection_contract(
 def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
-    with sqlite3.connect(env["LF_DB_PATH"]) as database:
+    with sqlite3.connect(_database(env)) as database:
         existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
     server.held.clear()
     server.release.clear()
@@ -712,7 +714,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
     )
     try:
         assert server.held.wait(15), "headless provider never reached held upstream"
-        with sqlite3.connect(env["LF_DB_PATH"]) as database:
+        with sqlite3.connect(_database(env)) as database:
             sessions = [
                 row[0]
                 for row in database.execute("SELECT id FROM agent_sessions")
@@ -806,7 +808,7 @@ def _flow_blocked_contract(
         stdout=log,
         stderr=log,
     )
-    database = env["LF_DB_PATH"]
+    database = _database(env)
 
     def pending_question() -> tuple:
         deadline = time.monotonic() + 60
@@ -931,7 +933,7 @@ def _flow_decision_retry_contract(
         timeout=90,
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
-    with sqlite3.connect(env["LF_DB_PATH"]) as db:
+    with sqlite3.connect(_database(env)) as db:
         results["flow"] = db.execute(
             "SELECT state,failure_json,review_json FROM flow_sessions"
         ).fetchone()
@@ -1009,7 +1011,7 @@ def _flow_driver_loss_contract(
         engine_pid, engine_stamp = receipts[0]
         assert os.getpgid(child.pid) == child.pid
         assert os.getpgid(engine_pid) == engine_pid and engine_pid != child.pid
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             flow = db.execute("SELECT id FROM flow_sessions").fetchone()[0]
             before = db.execute(
                 "SELECT id,provider_thread,provider_generation,driver_exec_id "
@@ -1028,7 +1030,7 @@ def _flow_driver_loss_contract(
         )
         assert observed.returncode == 0 and observed.stdout.strip() == engine_stamp
         results["engine_survived_driver"] = receipts[0]
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             endpoint = db.execute(
                 "SELECT provider_endpoint FROM agent_sessions WHERE id=?", (before[0],)
             ).fetchone()[0]
@@ -1101,7 +1103,7 @@ def _flow_driver_loss_contract(
                 if retry.poll() is None:
                     os.killpg(retry.pid, signal.SIGTERM)
                     retry.communicate(timeout=10)
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             results["driver_outcome_after"] = db.execute(
                 "SELECT outcome,exit_code FROM execs WHERE id=?", (before[3],)
             ).fetchone()
@@ -1109,7 +1111,7 @@ def _flow_driver_loss_contract(
             "native completion rewrote the dead command outcome"
         )
         results.update(retry_exit=retry_exit, retry_stderr=retry_stderr)
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             results["after"] = db.execute(
                 "SELECT id,provider_thread,provider_generation,driver_exec_id "
                 "FROM agent_sessions WHERE flow_session_id=?",
@@ -1128,7 +1130,7 @@ def _flow_driver_loss_contract(
             assert results["after"][2] == before[2] + 1
         else:
             assert results["before"][:3] == results["after"][:3], "surviving conversation changed"
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             consumed = db.execute(
                 "SELECT e.session_event,s.provider_turn,s.exec_id FROM flow_events e "
                 "JOIN session_events s ON s.seq=e.session_event "
@@ -1166,7 +1168,7 @@ def _flow_driver_loss_contract(
         results["public_history"] = events
         repeated = _command([str(binary), "flow", "resume", flow], work=work, env=env, timeout=30)
         assert repeated.returncode == 0, repeated.stderr
-        with sqlite3.connect(env["LF_DB_PATH"]) as db:
+        with sqlite3.connect(_database(env)) as db:
             assert db.execute(
                 "SELECT COUNT(*) FROM flow_events WHERE kind='consumed'"
             ).fetchone() == (1,)

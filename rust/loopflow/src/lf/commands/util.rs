@@ -877,10 +877,7 @@ mod tests {
     use super::*;
     use crate::profile::EmailAddress;
     use crate::provider_account::new_account;
-    use crate::store::{
-        CredentialType, ProviderAccountId, ProviderToken, StorageConfig, CONTROL_DB_PATH_ENV,
-        CONTROL_HOME_ENV,
-    };
+    use crate::store::{CredentialType, ProviderAccountId, ProviderToken, StorageConfig};
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Child, Stdio};
@@ -985,14 +982,9 @@ mod tests {
             let temp = tempfile::tempdir().unwrap();
             let names = [
                 "LF_HOME",
-                "LF_DB_PATH",
-                "LF_CONTROL_HOME",
-                "LF_CONTROL_DB_PATH",
                 "LF_RUN_ID",
                 "LF_RUN_DIR",
-                "LF_RUN_CONTEXT",
                 "LF_WORK_ADVANCE_CLAIM",
-                "LF_TASK_ORIGIN",
                 "LF_WAVE_ID",
                 "LF_ACCOUNT_LEASE",
                 "LF_HUMAN_SESSION",
@@ -1002,7 +994,6 @@ mod tests {
                 std::env::remove_var(name);
             }
             std::env::set_var("LF_HOME", temp.path());
-            std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
             let provider = fake_provider(
                 &temp,
                 "trap '' TERM\nprintf ready > \"$1\"\nwhile :; do /bin/sleep 0.05; done",
@@ -1179,13 +1170,10 @@ mod tests {
     #[test]
     fn session_stop_retries_unknown_native_client_without_resolving_history() {
         let _lock = crate::journal::test_env_lock();
-        let _env =
-            EnvRestore::capture(&["PATH", "LF_HOME", "LF_CONTROL_HOME", "LF_CONTROL_DB_PATH"]);
+        let _env = EnvRestore::capture(&["PATH", "LF_HOME"]);
         let original_path = std::env::var_os("PATH").unwrap();
         let mut fixture = NativeClient::new();
         std::env::set_var("LF_HOME", fixture.temp.path());
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let dir = fixture.capture.artifact_dir();
         crate::session_record::write_provider_session(&dir, "native-history", None).unwrap();
         let run = fixture.capture.artifact_key();
@@ -1358,16 +1346,8 @@ mod tests {
     fn intentional_session_move_exits_cleanly() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
+        let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let provider = fake_provider(&temp, "trap 'exit 143' TERM\ni=0; while [ \"$i\" -lt 100 ]; do sleep 0.05; i=$((i + 1)); done");
         let capture = crate::session_record::CaptureHandle::begin_at(
             temp.path(),
@@ -1445,16 +1425,8 @@ mod tests {
     fn provider_sigterm_without_stop_intent_remains_an_error() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
+        let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let provider = fake_provider(&temp, "kill -TERM $$");
         let capture = crate::session_record::CaptureHandle::begin_at(
             temp.path(),
@@ -1642,23 +1614,9 @@ mod tests {
     fn preferred_name_resume_uses_config_when_forwarded_name_is_empty() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _restore = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_USER_NAME",
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
-            "PATH",
-        ]);
+        let _restore = EnvRestore::capture(&["LF_HOME", "LF_USER_NAME", "PATH"]);
         std::env::set_var("LF_HOME", temp.path());
-        for key in [
-            "LF_USER_NAME",
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
-        ] {
-            std::env::remove_var(key);
-        }
+        std::env::remove_var("LF_USER_NAME");
         let provider = fake_provider(&temp, "printf '%s\\0' \"$LF_USER_NAME\" \"$@\" > received");
         std::fs::rename(provider, temp.path().join("opencode")).unwrap();
         let path = std::env::var_os("PATH").unwrap_or_default();
@@ -1759,16 +1717,8 @@ mod tests {
     async fn opencode_tui_records_its_native_session_without_wrapping_stdout() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = EnvRestore::capture(&[
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
+        let _home = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::set_var("LF_DB_PATH", temp.path().join("loopflow.db"));
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let _restore = EnvRestore::capture(&["PATH"]);
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1862,18 +1812,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "CLAUDE_CONFIG_DIR",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(CONTROL_HOME_ENV);
-        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
 
@@ -1931,9 +1875,6 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
-            "LF_DB_PATH",
-            CONTROL_HOME_ENV,
-            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
@@ -1941,9 +1882,6 @@ mod tests {
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(CONTROL_HOME_ENV);
-        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
         std::env::remove_var("CODEX_ACCESS_TOKEN");

@@ -927,7 +927,6 @@ fn ci_watch_cmd(cmd: &crate::lf::CiCommand) -> Result<()> {
                     repo: authority.repo,
                     lf_path: crate::ops::resolve_lf_path()?,
                     lf_home: authority.host.lf_home,
-                    db_path: authority.host.db_path,
                     path_env: authority.host.path_env,
                 },
                 &SystemLaunchctl,
@@ -1308,7 +1307,6 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
             host: CronHost {
                 home_id: local.id.clone(),
                 lf_home: crate::store::lf_home_dir(),
-                db_path: crate::store::database_path_from_env()?,
                 path_env,
             },
             local_home: local.id,

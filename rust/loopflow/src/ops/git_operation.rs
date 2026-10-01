@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::engine::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
 
-pub(crate) const LEGACY_WORKTREE_WRITER_ID_ENV: &str = "LF_WORKTREE_WRITER_ID";
 pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";
 
 /// Recorded as the target of a sequencer Loopflow adopted rather than started,

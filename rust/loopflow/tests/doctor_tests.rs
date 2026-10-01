@@ -20,7 +20,6 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .current_dir(home)
         .env("HOME", home)
         .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("NO_COLOR", "1")
         .env(
             "PATH",
@@ -35,15 +34,10 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env("GIT_DIR", home.join(".git"))
         .env("GIT_WORK_TREE", home)
         .env("GIT_ALLOW_PROTOCOL", "file")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_RUN_ID")
-        .env_remove("LF_RUN_CONTEXT")
-        .env_remove("LF_RUN_LEASE")
-        .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .unwrap()
 }
@@ -102,13 +96,11 @@ fn install_current_telemetry_obligation(home: &Path) {
 <key>LoopflowRepo</key><string>{repo}</string>
 <key>LoopflowLfPath</key><string>/usr/local/bin/lf</string>
 <key>LoopflowLfHome</key><string>{lf_home}</string>
-<key>LoopflowDbPath</key><string>{database}</string>
 <key>LoopflowPath</key><string>/usr/bin:/bin</string>
 </dict></plist>
 "#,
             repo = home.display(),
             lf_home = home.display(),
-            database = home.join("loopflow.db").display(),
         ),
     )
     .unwrap();

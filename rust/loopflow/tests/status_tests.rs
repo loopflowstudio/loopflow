@@ -134,9 +134,6 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .args(args)
         .arg("--json")
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID")
         .current_dir(home.join("repo"));
@@ -158,9 +155,6 @@ fn status_human(home: &Path, wave: &str) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["wave", "status", wave])
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .current_dir(home.join("repo"))
         .output()
         .expect("lf wave status runs");
@@ -177,9 +171,6 @@ fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
     command
         .args(["roadmap", "--wave", wave, "--json"])
         .env("LF_HOME", home)
-        .env_remove("LF_DB_PATH")
-        .env_remove("LF_CONTROL_HOME")
-        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID")
         .current_dir(home.join("repo"));
@@ -505,9 +496,6 @@ fn all_roadmaps_ignore_inherited_wave_from_a_gui_launch() {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(["roadmap", "--all", "--json"])
             .env("LF_HOME", home.path())
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
             .env_remove("LF_TRACE_ID")
             .env("LF_WAVE_ID", ambient)
             .current_dir("/")
@@ -541,9 +529,6 @@ fn current_wave_reads_exclude_abandoned_registrations_without_deleting_history()
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .args(args)
             .env("LF_HOME", home.path())
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
             .env_remove("LF_WAVE_ID")
             .env_remove("LF_TRACE_ID")
             .current_dir(home.path().join("repo"))
@@ -906,9 +891,6 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             .args(["roadmap", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
             .env("LF_WAVE_ID", "must-not-narrow-exact-lookup")
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
             .env_remove("LF_RUN_ID")
             .current_dir(home.path().join("repo"));
         prepend_test_bin(&mut command, home.path());
@@ -989,9 +971,6 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         }
         command
             .env("LF_HOME", home.path())
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
             .env_remove("LF_RUN_ID")
             .env("LF_WAVE_ID", original.id().to_string())
             .current_dir(&other_repo);

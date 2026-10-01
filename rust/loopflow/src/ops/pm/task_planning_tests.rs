@@ -408,7 +408,6 @@ fn task_creation_snapshot_failure_retries_without_starting_backlog() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, _wave) = runtime.block_on(fixture.planning_repo());
     // Deliberately no commit, Project Work, agent route or execution credential.
     std::fs::write(repo.join("authored.txt"), "keep this unfinished work").unwrap();
@@ -510,7 +509,6 @@ fn deletion_process_entry() {
         serde_json::from_str(&std::env::var("LOOPFLOW_DELETION_FIXTURE").unwrap()).unwrap();
     let database = PathBuf::from(input["database"].as_str().unwrap());
     std::env::set_var("LF_HOME", database.parent().unwrap());
-    std::env::set_var("LF_DB_PATH", &database);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = Arc::new(
         runtime
@@ -568,7 +566,6 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
     std::fs::write(repo.join("authored.txt"), "keep authored work").unwrap();
@@ -819,7 +816,6 @@ fn assert_task_completion_retry(registered: bool, lose_response: bool, merge: Op
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
     if merge.is_some() {
         let bin = fixture.directory.path().join("bin");
@@ -1262,7 +1258,6 @@ fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(Fixture::new());
         std::env::set_var("LF_HOME", fixture.directory.path());
-        std::env::set_var("LF_DB_PATH", &fixture.database);
         let (repo, wave) = runtime.block_on(fixture.planning_repo());
         runtime.block_on(fixture.seed(now() + 86_400));
         let remote = fixture.directory.path().join("loopflowstudio/fixture.git");
@@ -1570,7 +1565,6 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
     let foreign = json!({
@@ -1688,7 +1682,6 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    std::env::set_var("LF_DB_PATH", &fixture.database);
     let (repo, _wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));

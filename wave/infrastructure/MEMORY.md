@@ -43,6 +43,18 @@ because they had live file handles: `installed/local-04115a69e0c34b198bf110976b3
 reinspect live ownership before cleanup. Older running builds can recreate side
 stores until the published cutover. No active database was removed or process killed.
 
+## Environment variables (LOO-341, branch evidence 2026-10-01)
+
+Jack Heart requested an audit of every `LF_*` variable against the policy it
+implements. The inventory is [Environment](../../docs/architecture/environment.md).
+`LF_HOME` is the only Home selector and its database is always
+`$LF_HOME/loopflow.db`; `LF_DB_PATH` and the `LF_CONTROL_*` trio are removed, with
+the other names nothing read. One list of Exec-context names drives both the
+session shell's `unset` and the tmux client's environment, because a tmux server
+copies its first client's environment into every later session. Fixtures open
+their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
+`LF_RUN_ID` presence still decides three behaviours without validating the Run.
+
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
 Jack Heart selected the Task's checkout as its general work set: every

@@ -30,7 +30,7 @@ use crate::engine::agent::AgentConfig;
 
 pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> Result<()> {
     let context = crate::engine::process::execution_context()?;
-    set_vendor_std_env(command, &context.lf_bin, &context.lf_home, &context.db_path)
+    set_vendor_std_env(command, &context.lf_bin, &context.lf_home)
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
@@ -40,7 +40,6 @@ pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config:
     command
         .envs(&config.env)
         .env_remove(crate::engine::process::DISCORD_TOKEN_ENV)
-        .env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE");
     if let Some(path) = &config.directive_relay {
         command.env("LOOPFLOW_DIRECTIVE_FILE", path);
@@ -64,14 +63,7 @@ pub(crate) fn conversation_environment(
             let intended = config.env.contains_key(key.as_ref())
                 || matches!(
                     key.as_ref(),
-                    "PATH"
-                        | "LF_BIN"
-                        | "LF_HOME"
-                        | "LF_DB_PATH"
-                        | "LF_CONTROL_BIN"
-                        | "LF_CONTROL_HOME"
-                        | "LF_CONTROL_DB_PATH"
-                        | "LOOPFLOW_DIRECTIVE_FILE"
+                    "PATH" | "LF_BIN" | "LF_HOME" | "LOOPFLOW_DIRECTIVE_FILE"
                 );
             intended
                 .then_some(value)
@@ -85,15 +77,10 @@ fn set_vendor_std_env(
     command: &mut std::process::Command,
     control_bin: &std::path::Path,
     control_home: &std::path::Path,
-    control_db: &std::path::Path,
 ) -> Result<()> {
     command
         .env("LF_BIN", control_bin)
         .env("LF_HOME", control_home)
-        .env("LF_DB_PATH", control_db)
-        .env_remove(crate::store::CONTROL_BIN_ENV)
-        .env_remove(crate::store::CONTROL_HOME_ENV)
-        .env_remove(crate::store::CONTROL_DB_PATH_ENV)
         .env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
     let mut paths = vec![control_bin
         .parent()
@@ -125,11 +112,9 @@ mod environment_tests {
         let mut config = AgentConfig::default();
         for key in [
             "LF_DISCORD_TOKEN",
-            "LF_WORKTREE_WRITER_ID",
             "LOOPFLOW_DIRECTIVE_FILE",
             "LF_BIN",
             "LF_HOME",
-            "LF_DB_PATH",
         ] {
             config.env.insert(key.into(), "stale-fixture".into());
         }
@@ -142,13 +127,12 @@ mod environment_tests {
             engine.as_std_mut(),
             Path::new("/control/lf"),
             Path::new("/private"),
-            Path::new("/private/loopflow.db"),
         )
         .unwrap();
         // Provider account environment is not conversation tool authority.
         engine.env("PROVIDER_ACCOUNT_FIXTURE", "not-for-tools");
         let tools = super::conversation_environment(engine.as_std(), &config);
-        let script = "test -z \"${LF_DISCORD_TOKEN+x}${LF_WORKTREE_WRITER_ID+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}${LF_CONTROL_HOME+x}${LF_CONTROL_BIN+x}${LF_CONTROL_DB_PATH+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_DB_PATH\" = /private/loopflow.db && test \"$LF_BIN\" = /control/lf";
+        let script = "test -z \"${LF_DISCORD_TOKEN+x}${LOOPFLOW_DIRECTIVE_FILE+x}${PROVIDER_ACCOUNT_FIXTURE+x}\" && test \"$LF_AGENT_CALLER\" = current-fixture && test \"$LF_HOME\" = /private && test \"$LF_BIN\" = /control/lf";
         assert!(std::process::Command::new("/bin/sh")
             .env_clear()
             .envs(tools)
@@ -203,26 +187,6 @@ mod environment_tests {
             environment[crate::session_record::RUN_DIR_ENV],
             Some(OsString::from("/fresh/run"))
         );
-    }
-
-    #[test]
-    fn provider_drops_legacy_worktree_writer_authority() {
-        let mut command = tokio::process::Command::new("vendor");
-        command.env("LF_WORKTREE_WRITER_ID", "writer_stale");
-        let mut config = AgentConfig::default();
-        config.env.insert(
-            "LF_WORKTREE_WRITER_ID".to_string(),
-            "writer_explicit".to_string(),
-        );
-
-        configure_agent_env(&mut command, &config);
-
-        let environment = command
-            .as_std()
-            .get_envs()
-            .map(|(key, value)| (key.to_string_lossy().to_string(), value.map(OsString::from)))
-            .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(environment["LF_WORKTREE_WRITER_ID"], None);
     }
 }
 

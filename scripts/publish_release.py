@@ -163,7 +163,6 @@ def _validate_release_candidate(binary: Path, scratch: Path) -> None:
     result = _run(
         [str(binary), "install", "preflight", "--json"],
         capture=True,
-        env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
         check=False,
     )
     try:

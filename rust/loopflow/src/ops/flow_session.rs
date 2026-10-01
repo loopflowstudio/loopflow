@@ -179,16 +179,8 @@ mod tests {
     fn nested_review_is_one_session_and_returns_its_feedback() {
         let _lock = crate::journal::test_env_lock();
         let home = tempfile::tempdir().unwrap();
-        let previous = [
-            ("LF_HOME", std::env::var_os("LF_HOME")),
-            ("LF_DB_PATH", std::env::var_os("LF_DB_PATH")),
-            ("LF_CONTROL_HOME", std::env::var_os("LF_CONTROL_HOME")),
-            ("LF_CONTROL_DB_PATH", std::env::var_os("LF_CONTROL_DB_PATH")),
-        ];
+        let previous = [("LF_HOME", std::env::var_os("LF_HOME"))];
         std::env::set_var("LF_HOME", home.path());
-        std::env::set_var("LF_DB_PATH", home.path().join("registry.db"));
-        std::env::remove_var("LF_CONTROL_HOME");
-        std::env::remove_var("LF_CONTROL_DB_PATH");
         let mut demo = Skill::named("demo");
         demo.content = Some("Pinned demo instructions".into());
         let steps = vec![ConcreteStep::Xor(ConcreteXor {
@@ -210,7 +202,7 @@ mod tests {
         })];
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let store = std::sync::Arc::new(
-                open_ephemeral_store(&StorageConfig::sqlite(home.path().join("registry.db")))
+                open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
                     .await
                     .unwrap(),
             );

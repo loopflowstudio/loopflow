@@ -407,6 +407,20 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
+    /// Show effective context budgets, their sources, and current source usage
+    Context {
+        #[arg(long)]
+        json: bool,
+        /// Inspect a Wave's local authored context
+        #[arg(long, conflicts_with = "task")]
+        wave: Option<String>,
+        /// Inspect a Task's checkout and locally stored goal
+        #[arg(long)]
+        task: Option<String>,
+        /// Skill to include in the launch preview
+        #[arg(long, default_value = "realign")]
+        skill: String,
+    },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON

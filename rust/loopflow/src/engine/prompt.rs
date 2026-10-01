@@ -173,6 +173,7 @@ impl std::str::FromStr for Surface {
 /// All components of a prompt before assembly.
 #[derive(Debug, Clone, Default)]
 pub struct PromptComponents {
+    pub budget_notice: Option<String>,
     pub surface: Surface,
     pub user_name: Option<String>,
     pub docs: Vec<Document>,
@@ -398,6 +399,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<PromptComponents, Core
         diff_tier,
         diff_file_count,
         budget_decisions: Vec::new(),
+        budget_notice: None,
     })
 }
 
@@ -1539,6 +1541,12 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     }
 
     parts.extend(format_wave_sections(components));
+
+    if let Some(notice) = &components.budget_notice {
+        parts.push(format!(
+            "<lf:context-budget>\n{notice}\n</lf:context-budget>"
+        ));
+    }
 
     let scratch_body: Vec<String> = components
         .docs

@@ -1,8 +1,8 @@
 use crate::engine::{
-    check_cli_available, exec_agent, load_config_or_default, missing_agent_message, parse_agent,
-    prepare_exec_prompt, write_prompt_log, AgentCapabilities, AgentConfig, Config,
-    ContextSourceOverrides, ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill,
-    SkillSyncOptions, StreamFormat, Surface,
+    check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
+    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
+    StreamFormat, Surface,
 };
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -368,7 +368,7 @@ fn build_prompt_at(
         .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
     let message = task_message.as_deref().or(message);
     let config_start = Instant::now();
-    let config = load_config_or_default(Some(&repo_root));
+    let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -471,6 +471,7 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
+    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
     if confine {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
@@ -507,6 +508,11 @@ fn build_prompt_at(
                 Some(&wave_context),
                 prepared.components.user_name.as_deref(),
             );
+            if let Some(notice) = &prepared.components.budget_notice {
+                prompt.push_str(&format!(
+                    "\n\n<lf:context-budget>\n{notice}\n</lf:context-budget>"
+                ));
+            }
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
         } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
@@ -522,7 +528,11 @@ fn build_prompt_at(
     let deduplicated_docs = prepared.deduplicated_docs;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    crate::engine::context_budget::check_input(&effective_system, &agent_config.task_prompt)?;
+    crate::engine::context_budget::check_input(
+        &effective_system,
+        &agent_config.task_prompt,
+        &budgets,
+    )?;
     let context = attributed_context(
         &components,
         &effective_system,

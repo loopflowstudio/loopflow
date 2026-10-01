@@ -726,7 +726,7 @@ async fn worktree_reads_its_own_wave_memory() {
     fs::create_dir_all(origin.join("wave/goals")).unwrap();
     fs::write(
         origin.join("wave/goals/MEMORY.md"),
-        "- origin memory is the truth",
+        "- previous committed memory",
     )
     .unwrap();
     fs::write(origin.join("wave/goals/GOAL.md"), "Origin goal.").unwrap();
@@ -781,6 +781,6 @@ async fn worktree_reads_its_own_wave_memory() {
     assert_eq!(prompt.matches("Checkout goal.").count(), 1);
     assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
     assert!(prompt.contains("Curate wave/goals/MEMORY.md in this checkout."));
-    assert!(!prompt.contains("origin memory is the truth"));
+    assert!(!prompt.contains("previous committed memory"));
     assert!(!prompt.contains("Origin goal."));
 }

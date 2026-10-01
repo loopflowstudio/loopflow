@@ -213,6 +213,15 @@ pub struct InstallSelection {
 }
 
 impl InstallSelection {
+    pub(crate) fn verified_cli(&self) -> Result<&Path> {
+        let cli = self
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .context("selected installation has no CLI")?;
+        cli.verify()?;
+        Ok(&cli.path)
+    }
+
     fn validate(&self) -> Result<()> {
         if self.installation_id.is_empty() {
             return Err(anyhow!("installation id is empty"));
@@ -912,12 +921,12 @@ pub(crate) fn known_installations(root: &Path) -> Result<Vec<InstallSelection>> 
             selections.extend(receipt.prior);
         }
     }
-    let receipts = match fs::read_dir(root.join("receipts")) {
-        Ok(receipts) => receipts,
+    let entries = match fs::read_dir(root.join("receipts")) {
+        Ok(entries) => entries,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(selections),
         Err(error) => return Err(error.into()),
     };
-    for entry in receipts {
+    for entry in entries {
         let path = entry?.path();
         if path.extension().is_none_or(|extension| extension != "json") {
             continue;

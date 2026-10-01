@@ -337,7 +337,7 @@ fn query_repo_origin(repo_root: &Path) -> PathBuf {
         .unwrap_or_else(|| repo_root.to_path_buf())
 }
 
-/// The origin repo a wave's state lives under: the main checkout when
+/// The canonical repository used to resolve Wave identity: the main checkout when
 /// `repo_root` is a worktree root, `repo_root` itself otherwise (see
 /// [`repo_origin`] for the guard).
 pub fn wave_origin(repo_root: &Path) -> PathBuf {

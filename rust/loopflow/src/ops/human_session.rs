@@ -2222,7 +2222,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         .id
         .as_deref()
         .ok_or_else(|| anyhow!("review flow position has no node id"))?;
-    let lf = crate::engine::process::resolve_current_home_lf_binary();
+    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),
@@ -2239,7 +2239,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
 
 /// Hand the conversation to a durable terminal, as a child of the asking Run.
 async fn exec_ask(session: &AgentSession) -> Result<()> {
-    let lf = crate::engine::process::resolve_current_home_lf_binary();
+    let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let argv = vec![
         lf.to_string_lossy().to_string(),
         "session".to_string(),

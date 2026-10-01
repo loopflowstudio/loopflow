@@ -73,3 +73,17 @@ If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-decide to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to
 the caller.
+
+## Keep authored context within budget
+
+Use the assembled `lf:context-budget` snapshot, or run `lf context --skill realign`
+to read effective limits, their configuration sources, and current usage. Before
+updating scratch or Wave memory, read complete sources named by excerpt pointers.
+Bring over-budget material under both token and byte limits as part of this step.
+Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
+stacked parent, and keep historical detail in git rather than ambient context.
+Preserve live decisions, attribution, unresolved work, and contrary evidence;
+keep a precise git reference when older detail still matters. Preserve uncommitted
+evidence before removing it. Edit existing notes instead of accumulating reports.
+Re-run the query after writing. Do not raise limits to conceal overflow. If the
+live decisions alone cannot fit, record the concrete conflict and remaining overage.

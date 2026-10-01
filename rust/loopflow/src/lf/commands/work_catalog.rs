@@ -1,12 +1,13 @@
 //! The Work hierarchy Activity renders and filters by.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
 use crate::durable::WorkRef;
 use crate::lf::commands::WorkFilter;
-use crate::store::sqlite::WorkIdentity;
+use crate::store::sqlite::{SqliteStore, WorkIdentity};
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkCatalog {
@@ -42,6 +43,14 @@ impl WorkOwner {
 }
 
 impl WorkCatalog {
+    pub(crate) fn load_at(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let store = SqliteStore::open_read_only(path)?;
+        Self::new(store.work_identities()?)
+    }
+
     pub(crate) fn new(identities: Vec<WorkIdentity>) -> Result<Self> {
         let mut catalog = Self::default();
         // The store returns parents before their children.

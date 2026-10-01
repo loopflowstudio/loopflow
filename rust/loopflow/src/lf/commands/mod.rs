@@ -2,6 +2,7 @@ pub mod activity;
 pub mod ask;
 pub mod auth;
 pub mod ci;
+pub mod context;
 pub mod desktop;
 pub mod discord;
 pub mod doctor;

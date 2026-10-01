@@ -33,6 +33,16 @@ pub(crate) async fn prepare(store: &SharedStore, task: &Task, wave: &str) -> Res
         }
         None => 0,
     };
+    read_seed(store, task, wave, consumed).await
+}
+
+/// Read a Task snapshot without refreshing providers or advancing a control cursor.
+pub(crate) async fn read_seed(
+    store: &SharedStore,
+    task: &Task,
+    wave: &str,
+    consumed: i64,
+) -> Result<TaskSeed> {
     let steers: Vec<_> = store
         .task_steers(&task.id)
         .await?

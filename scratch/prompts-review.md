@@ -33,46 +33,74 @@ Source: `rust/loopflow/src/engine/builtins/ops/skill/repo_operate.md`
 
 ````markdown
 ---
-description: Review and operate the current repository’s work.
+description: Clear obsolete work state, report activity, advance Waves, and capture Tasks.
 ---
 
 # Operate repository work
 
-Follow the requested operation. With a specific request, inspect the relevant
-work and act within existing authorization. Without one, review the repository's
-open work and present a short triage before advancing it. Refresh relevant facts
-before acting; do not inventory every Session on every conversational turn.
+Keep the repository's work state clean and its work moving. Clear old state
+that is no longer needed, summarize current activity, drive Tasks forward
+through their Waves, and capture new Tasks as direction emerges.
 
-Work directly in this checkout when appropriate. Existing Tasks, workers, and
-managed Flows retain their authority; do not become a competing driver.
-For rethinking a Task mid-flight, use `concept-review`.
+## Clear old work state
 
-## Review open work
+Read `lf roadmap --json`, `lf session list --json`, and `lf wt list --json`.
+Identify worktrees, branches, PRs, Tasks, and Loopflow database records that
+are obsolete or left behind by completed or abandoned work. Follow uncertain
+cases to their source; age alone does not establish that work is disposable.
+Missing provider data stays unknown.
 
-For a repository-wide review, start with `lf roadmap --json`,
-`lf session list --json`, and `lf wt list --json`.
-Read `lf task status <issue> --json` for work needing attention. Expand into
-branches and PRs when relevant: use read-only git inspection and
-`gh pr list --author @me --state open --json number,title,headRefName,url,isDraft,mergeStateStatus,statusCheckRollup,updatedAt`.
-Limit cleanup to the participant's own work; ownership must be evidenced, not
-inferred from a machine account. Missing provider data is unknown, not green.
+Use the supported operation that owns the state:
 
-For a repository-wide review, write `scratch/open-work.md` with dated rows:
-item, observed status, recommendation, and reason. Distinguish running work,
-pending decisions, ready-to-ship changes, blocked work, and stale candidates.
-Recommend ship, ship-partial, abandon, prune, or discuss. Age alone does not
-prove abandonment; branches with open PRs are not cleanup candidates without
-explicit direction. Review Waves through shared readers and their GOAL/MEMORY
-when relevant. Judge progress toward their objective, not activity counts;
-record continue, split, reduce scope, or archive recommendations.
+- `lf wt prune --dry-run` previews worktree cleanup; apply authorized removals
+  through `lf wt`.
+- `lf task abandon <issue>` retires a Task and its delivery state together.
+  Use `lf task delete <issue>` when the issue itself should be removed.
+- For branches and PRs outside a Task, use the existing `lf pr` and `lf wt`
+  cleanup paths. Preserve useful changes and settled outcomes.
+- Include stale Loopflow database state in the cleanup. Use supported
+  reconciliation and cleanup commands; inspect installed help for their exact
+  scope. Do not edit SQLite directly or discard durable history as a substitute
+  for reconciliation. If a needed cleanup operation is missing, capture it as
+  a Task and continue the rest of the upkeep.
 
-Use existing delivery skills and `lf` operations for authorized actions.
-Preserve Task identity and any active worker. Use `lf wt` for worktree cleanup;
-inspect installed help for the supported operation rather than improvising
-raw git mutations. Ask before publishing, destructive cleanup, or external
-messages unless already authorized. Do not launch unconditional background
-ships. Record observed outcomes and leave unresolved items as a short punch
-list; a dispatched operation is not a completed delivery.
+Carry out cleanup within existing authorization. Present concrete destructive
+choices when authorization is missing. Preserve active work, unfinished changes,
+and evidence still needed for recovery or decisions.
+
+## Summarize current activity
+
+Give a concise update: what finished, what is running, what is waiting, what is
+blocked, and what needs a decision. Include cleanup results and useful next
+moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
+for shared state; inspect PRs and branches where they explain a gap.
+
+Refresh relevant facts after actions and when an update is needed. Link Tasks
+and PRs so the participant can reach the work. Distinguish observed results
+from attempted actions. Keep unresolved upkeep in `scratch/open-work.md`;
+put routine progress in this conversation, not Task comments.
+
+## Drive work through Waves
+
+For each Wave that needs attention, apply `wave/operate`: read its objective,
+memory, plan, and current work; make useful authorized moves that advance its
+Tasks. Use `lf --wave <wave> wave/operate "<concrete direction>"` when a separate
+Wave pass is useful. The repository view connects outcomes and dependencies
+across Waves; the Wave pass owns the detailed judgment within each Wave.
+
+Leave healthy workers moving. Preserve Task identity, selected Flows, review
+gates, and existing execution. Do not create a competing driver or require a
+repository pass before a Task can progress. Follow an intervention through to
+its observed result, then include that result in the repository update.
+
+## Capture new Tasks
+
+Be ready to turn emerging requests, cleanup gaps, and discoveries into Tasks.
+Check existing work first; reuse the Task when it is the same problem. Capture
+the desired outcome, observable acceptance, and real constraints in the right
+Wave. Resolve unclear placement with the participant rather than inventing it.
+Filing a Task need not start execution. Keep tentative ideas distinct from
+accepted direction; use `concept-review` when existing work needs rethinking.
 
 ## Reviewer mode
 
@@ -102,28 +130,30 @@ Explain waiting and active states plainly. Listing reads the selected
 installation's store; a missing Session does not prove deletion from retained
 installations.
 
-Normal Loopflow inspection commands remain available here. Questions for this
-present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --task <task> : "<prompt>"` contribution. `lf ask` creates a new session,
-so do not use it merely to reach the User already here.
+Questions for the participant stay in this conversation. A separate Work
+perspective is an ordinary `lf --task <task> : "<prompt>"` contribution.
+`lf ask` creates a new session, so do not use it merely to reach the participant
+already here.
 
 ## Launching and advancing work
 
 Inspect whether the requested work already has a Task, prepared context, or
-running worker before filing or launching. Write a Task title and opening from
-the user's situation, problem, and desired experience. Keep speculative solution
-ideas tentative and accepted constraints binding; detailed solutions belong in
-a separate design.
+running worker before filing or launching. Keep the Task title and description
+focused on the current problem, desired experience, observable acceptance, and
+real constraints. Reconcile changed scope instead of appending amendments.
+Keep current blockers, dependencies, and accepted scope visible in the description.
+Keep speculative solutions tentative; detailed solutions belong in a separate
+design.
 
-For problem-first work:
+To capture work without starting it:
 
 ```bash
-lf task create --run --wave <wave> --title "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
 <short user-problem brief>
 BRIEF
 ```
 
-For an existing Task, use its identity instead of filing another:
+When execution is intended and authorized, start the captured Task or reuse an existing one:
 
 ```bash
 lf --task <existing-issue> flow start <chosen-flow>
@@ -155,13 +185,6 @@ Completed. Missing evidence and competing plans require resolution, never a
 new name chosen to bypass them. Rotation output is dated evidence, not another
 durable Chapter owner.
 
-Select from the installed catalog: `feature` runs design review, repeats
-implement → compress → refresh → loop-decide, publishes after convergence, then parks
-at a human demo when the decision is Advance. Demo completion returns feedback
-to a second loop-decide with its own edge to implement. For an
-already-approved design, `pursue` starts at implementation. Check installed help
-when the catalog or CLI version is unclear.
-
 For an existing invocation or an exact review:
 
 ```bash
@@ -177,12 +200,6 @@ design. State what actually started after checking status.
 Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
 record. Read any partial-outcome report and retry the same command. Authored files
 and retained PRs survive; deletion does not certify process termination.
-
-When filing or editing a Task, keep its description to the current problem,
-desired outcome, observable acceptance, and real constraints. Put dated planning
-and execution updates in authorized Task comments, with links to detailed evidence.
-Comments may be collapsed: keep current blockers, dependencies, and accepted scope
-visible in the description. Reconcile changed scope instead of appending amendments.
 
 ## Existing-design handoff
 
@@ -211,11 +228,9 @@ tree enters worker context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
-Use the Flow the user selected and inspect its contents when explaining where it
-begins; otherwise use the current Project's Flow default. Continue the design already
-present without treating its draft choices as approved. Report the Task link,
-destination design path, selected Flow, and observed launch result. Verify
-supplied context separately from worker startup.
+Continue the design already present without treating its draft choices as
+approved. Report the Task link, destination design path, selected Flow, and
+observed launch result. Verify supplied context separately from worker startup.
 
 If implementation already exists in the source checkout, preserve it and its
 writer. Document transfer does not adopt a checkout; current preparation does

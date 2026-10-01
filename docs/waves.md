@@ -35,7 +35,7 @@ Repository-root `MEMORY.md`, when present, comes before Wave files and is also
 included when no Wave is selected. Read all files from the executing checkout.
 
 Repository, ancestor and selected Wave memory share one budget, defaulting to
-8,000 tokens and 64 KiB. Files receive proportional shares of that budget.
+16,000 tokens and 128 KiB. Files receive proportional shares of that budget.
 `context_budgets.memory_tokens` and `memory_bytes` configure the shared limits;
 `lf context` reports each file's share and usage. Oversized files become excerpts
 with links to their complete local snapshots.

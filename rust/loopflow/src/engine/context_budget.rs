@@ -508,18 +508,18 @@ mod tests {
             let memory = " word".repeat(words);
             let mut components = PromptComponents {
                 repo_root: repo.path().display().to_string(),
-                wave_memory: Some(Document {
+                docs: vec![Document {
                     path: "wave/build/MEMORY.md".into(),
                     content: memory.clone(),
-                    source: DocumentSource::WaveMemory,
-                }),
+                    source: DocumentSource::Wave,
+                }],
                 ..Default::default()
             };
             let report = bound_context(&mut components, budgets.clone()).unwrap();
-            let submitted = &components.wave_memory.as_ref().unwrap().content;
+            let submitted = &components.docs[0].content;
             assert_eq!(submitted != &memory, excerpted);
-            assert_eq!(report.usage[0].token_limit, 16_000);
-            assert_eq!(report.usage[0].byte_limit, 128 * 1024);
+            assert_eq!(budgets.limit(BudgetKey::MemoryTokens), 16_000);
+            assert_eq!(budgets.limit(BudgetKey::MemoryBytes), 128 * 1024);
             assert!(report.usage[0].submitted_tokens <= 16_000);
             assert_eq!(components.budget_decisions.len(), usize::from(excerpted));
         }

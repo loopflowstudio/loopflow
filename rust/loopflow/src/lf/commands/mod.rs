@@ -1,6 +1,7 @@
 pub mod account;
 pub mod activity;
 pub mod ask;
+pub mod bind_attribution;
 pub mod ci;
 pub mod context;
 pub mod context_cost;

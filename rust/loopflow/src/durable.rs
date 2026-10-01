@@ -371,6 +371,16 @@ pub enum Author {
     Imported(String),
 }
 
+impl std::fmt::Display for Author {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::User => f.write_str("user"),
+            Self::Captured(id) => write!(f, "session input {id}"),
+            Self::Imported(selector) => write!(f, "imported {selector}"),
+        }
+    }
+}
+
 /// A steer projected from a Work's durable comment stream
 /// (`TaskEventKind::Steer` / `ProjectEventKind::Steer`). Not a durable entity —
 /// its identity is the event id, so ordering and change-detection use `id`.

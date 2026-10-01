@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 pub(crate) struct TaskSeed {
     pub task: Task,
     pub message: String,
+    pub steers: Vec<Steer>,
     pub steer: i64,
     pub interrupt: i64,
 }
@@ -70,6 +71,7 @@ pub(crate) async fn read_seed(
         task: task.clone(),
         message,
         steer: steers.last().map_or(consumed, |steer| steer.id),
+        steers,
         interrupt,
     })
 }

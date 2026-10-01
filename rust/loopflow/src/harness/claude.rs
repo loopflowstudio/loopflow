@@ -474,7 +474,7 @@ impl Harness for ClaudeHarness {
         // accepted after TurnCompleted and escape as a second boundary.
         if self
             .pending_results
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |pending| {
                 (pending > 0).then(|| pending.saturating_add(1))
             })
             .is_err()

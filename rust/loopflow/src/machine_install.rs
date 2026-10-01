@@ -184,14 +184,12 @@ impl ArtifactSet {
                 ));
             }
         }
-        for role in [ArtifactRole::Cli] {
-            if !roles.contains(&role) {
-                return Err(anyhow!(
-                    "install artifact set {} is missing role {:?}",
-                    self.id,
-                    role
-                ));
-            }
+        if !roles.contains(&ArtifactRole::Cli) {
+            return Err(anyhow!(
+                "install artifact set {} is missing role {:?}",
+                self.id,
+                ArtifactRole::Cli
+            ));
         }
         Ok(roles)
     }
@@ -344,13 +342,11 @@ pub struct ActivationTargets {
 
 impl ActivationTargets {
     fn validate(&self) -> Result<()> {
-        for path in [&self.cli] {
-            if !path.is_absolute() {
-                return Err(anyhow!(
-                    "install activation target {} is not absolute",
-                    path.display()
-                ));
-            }
+        if !self.cli.is_absolute() {
+            return Err(anyhow!(
+                "install activation target {} is not absolute",
+                self.cli.display()
+            ));
         }
         for path in [self.app.as_deref(), self.legacy_app.as_deref()]
             .into_iter()

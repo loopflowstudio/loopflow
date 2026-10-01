@@ -389,6 +389,21 @@ Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. R
 
 ## Rust Tests
 
+Match CI's current stable toolchain before accepting a local lint pass:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+rustup update stable --no-self-update
+rustc +stable --version
+cargo +stable clippy --version
+cargo +stable fmt --all -- --check
+cargo +stable clippy --all-targets -- -D warnings
+```
+
+CI installs stable on each run. An older local compiler can miss new Clippy
+lints and standard-library deprecations. Put rustup's proxies first on `PATH`
+so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
+
 Task cancellation uses a real child CLI with a disposable scorecard effect.
 Build the sibling CLI before running this library-only proof:
 

@@ -409,17 +409,14 @@ fn ensure_no_shadow_relocation_receipts(moves: &[PlannedWaveMove]) -> Result<()>
 fn ensure_move_paths_do_not_overlap(planned: &PlannedWaveMove) -> Result<()> {
     let source_repo = Path::new(planned.wave.repo());
     let target_repo = planned.target.repo().as_path();
-    for (source, target) in [(
-        authored_path(source_repo, planned.wave.slug()),
-        authored_path(target_repo, planned.target.slug()),
-    )] {
-        if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
-            return Err(anyhow!(
-                "Wave relocation paths overlap; choose a sibling locator: {} -> {}",
-                source.display(),
-                target.display()
-            ));
-        }
+    let source = authored_path(source_repo, planned.wave.slug());
+    let target = authored_path(target_repo, planned.target.slug());
+    if source != target && (source.starts_with(&target) || target.starts_with(&source)) {
+        return Err(anyhow!(
+            "Wave relocation paths overlap; choose a sibling locator: {} -> {}",
+            source.display(),
+            target.display()
+        ));
     }
     Ok(())
 }
@@ -607,25 +604,18 @@ fn remove_boot_files(path: &Path) -> Result<()> {
 fn remove_old_paths(path: &RelocationPath) -> Result<()> {
     let source_repo = Path::new(&path.from_repo);
     let target_repo = Path::new(&path.to_repo);
-    for (source, target, skip_boot_files) in [(
-        authored_path(source_repo, &path.from_name),
-        authored_path(target_repo, &path.to_name),
-        true,
-    )] {
-        if source != target && source.exists() {
-            if !target.exists()
-                || tree_contents(&source, skip_boot_files)?
-                    != tree_contents(&target, skip_boot_files)?
-            {
-                return Err(anyhow!(
-                    "old Wave path changed after staging; preserving both copies: {} -> {}",
-                    source.display(),
-                    target.display()
-                ));
-            }
-            std::fs::remove_dir_all(&source)
-                .with_context(|| format!("remove old Wave path {}", source.display()))?;
+    let source = authored_path(source_repo, &path.from_name);
+    let target = authored_path(target_repo, &path.to_name);
+    if source != target && source.exists() {
+        if !target.exists() || tree_contents(&source, true)? != tree_contents(&target, true)? {
+            return Err(anyhow!(
+                "old Wave path changed after staging; preserving both copies: {} -> {}",
+                source.display(),
+                target.display()
+            ));
         }
+        std::fs::remove_dir_all(&source)
+            .with_context(|| format!("remove old Wave path {}", source.display()))?;
     }
     Ok(())
 }

@@ -145,6 +145,9 @@ Bring the plan and the implementation into agreement with what the work has taug
    alongside the plan. Recover accepted decisions, lessons, and evidence limits
    that should shape the work. Use supplied Wave context or the repository's
    memory location; do not invent a Wave for unbound work.
+   At a parent Wave, also read its child Waves' top-level Markdown from this
+   checkout so relevant child findings can inform the parent's memory. Ordinary
+   execution context excludes children; read these files explicitly here.
    When intent is missing, ask for the specific missing decision rather than
    treating the implementation as its own specification.
 

@@ -10,9 +10,10 @@ The original LOO-329 notes remain at
 - Keep the read slice's short curation hint and README-first ordering within
   each ancestor directory. These are reversible implementation choices, not
   a claim that Jack approved their exact wording.
-- Parent `realign` explicitly reads children's files; ordinary gathering never
-  includes descendants. Descendant depth remains unspecified, so this pass does
-  not change realign's reading policy.
+- Parent `realign` explicitly reads child Waves' top-level Markdown; ordinary
+  gathering never includes descendants. Gate added this instruction to the skill.
+  Deeper descendant traversal remains unspecified; direct children are the
+  minimal implementation of the accepted exception.
 - Do not copy obsolete LOO-298 migrations from #1318. Parent/schema changes must
   use this branch's current parent model and its ordinary migration workflow.
 - The release Initiative, plan/Task moves and live schedule transfer happen

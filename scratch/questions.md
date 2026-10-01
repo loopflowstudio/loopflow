@@ -4,9 +4,11 @@ Jack Heart · 2026-09-30. The [accepted design](define-durable-subwave-identity-
 and [subwave assumptions](subwave-questions.md) own this Task's scope.
 
 - No design review; interactive acceptance remains at the supervising Flow's demo.
-- Stay on the code Flow until LOO-298 lands. Synchronize by merge, never rebase.
-- The read slice and directory-parent identity are verified. The supervising
-  session selected the Release split and disposable-Home proof next.
+- Jack Heart's latest supervising-session steer records LOO-298 landed as #1296
+  and main merged through `lf sync`. Continue the selected ship-demo Flow.
+  Synchronize by merge, never rebase.
+- The read slice, directory-parent identity, authored Release split and
+  disposable-Home proof are complete; gate is the current boundary.
 - Release's objective, memory and schedule are authored under
   `wave/infrastructure/release/`. Its Linear Initiative, release-focused plan,
   Task/KR moves and live schedule cutover use installed `lf` after code lands.

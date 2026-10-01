@@ -277,6 +277,8 @@ notes. Children, siblings and unrelated Waves stay out of ordinary context;
 Edit memory through the ordinary repository workflow. `realign` reconciles the
 plan, code and Wave memory; the prompt identifies the selected Wave's memory
 as the file to curate.
+At a parent Wave, `realign` explicitly reads the child Waves' top-level Markdown
+to bring relevant findings into the parent's memory.
 
 ### Home
 

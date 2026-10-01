@@ -4456,20 +4456,22 @@ mod tests {
         );
         validate_foreign_keys(&conn).unwrap();
 
-        // The previous release's rows — including the parent/child foreign key —
-        // survive the whole tail.
+        // Rows survive; directory parentage supersedes the old promotion link
+        // once the subwave migration is part of the canonical release tail.
         let waves: i64 = conn
             .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
             .unwrap();
         assert_eq!(waves, 2, "seeded waves did not survive the upgrade");
-        let child_parent: String = conn
+        let child_parent: Option<String> = conn
             .query_row(
                 "SELECT parent_wave_id FROM waves WHERE id = 'wave-child'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(child_parent, "wave-root", "foreign key relationship lost");
+        let expected_parent =
+            (!_draft_is_canonical("wave_directory_parents")).then(|| "wave-root".to_string());
+        assert_eq!(child_parent, expected_parent);
         let tokens: i64 = conn
             .query_row("SELECT count(*) FROM provider_tokens", [], |row| row.get(0))
             .unwrap();
@@ -5620,6 +5622,67 @@ mod tests {
             schema,
             product_schema(&conn).unwrap(),
             "schema verification must detect a missing address view"
+        );
+    }
+
+    #[test]
+    fn wave_directory_migration_preserves_paths_across_retired_ancestors() {
+        let conn = open();
+        apply_before_current_draft(&conn, "wave_directory_parents");
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at,retired_at,superseded_by_wave_id,retirement_reason) VALUES
+            ('retired-parent','infra','/repo',1,2,'root','relocated'),
+            ('child','infra/release','/repo',3,NULL,NULL,NULL),
+            ('root','release','/repo',4,NULL,NULL,NULL),
+            ('retired-child','archive/retired','/repo',1,2,'root','relocated');",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("wave_directory_parents"))
+            .unwrap();
+        let (slug, parent_retired): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT child.slug,parent.retired_at FROM wave_addresses child
+                 JOIN waves parent ON parent.id=child.parent_wave_id WHERE child.id='child'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(slug, "infra/release");
+        assert_eq!(parent_retired, None);
+        assert_eq!(
+            conn.query_row(
+                "SELECT slug FROM wave_addresses WHERE id='retired-child'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "archive/retired"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT retired_at FROM waves WHERE id='retired-parent'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM waves WHERE retired_at IS NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3,
+            "only the missing active ancestor is registered"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
         );
     }
 

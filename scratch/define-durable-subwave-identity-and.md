@@ -15,10 +15,10 @@ Inherited LOO-298 scratch notes were removed under the supervising session's
 
 ## Remaining work
 
-1. Local implementation and the disposable-Home proof are complete. The
-   supervising Flow owns integration, broader gate, publication
-   and Jack's interactive demo. Stay on the code Flow until LOO-298 lands;
-   synchronize by merge, never rebase. No push or landing ran in this pass.
+1. LOO-298 landed as #1296 and `lf sync` merged main, per Jack Heart's latest
+   supervising-session steer. Continue the selected ship-demo Flow through
+   gate, publication and Jack's interactive demo. Synchronize by merge, never
+   rebase. Local implementation and the disposable-Home proof are complete.
 2. After landing, use installed `lf` to create Release's Linear Initiative and
    plan, move release-focused Tasks/KRs and sync the live schedule. The authored
    schedule now belongs to release; no provider or launchd cutover occurred here.
@@ -26,6 +26,29 @@ Inherited LOO-298 scratch notes were removed under the supervising session's
    store proofs below establish local Rust behavior, not installed acceptance.
 
 ## Implementation and proof · 2026-09-30
+
+Gate review found that a retired directory ancestor caused an active nested
+Wave's migration to flatten its address (or collide with an existing root).
+The unshipped `wave_directory_parents` draft now creates active ancestors only
+where active descendants require them and preserves historical-only paths as
+retired. Existing IDs, retirement timestamps and Project links remain intact.
+The populated regression includes a root with the same leaf name and a retired
+subtree. This draft has only disposable-Home evidence; no installed migration
+or shipped migration was changed. SQLite reproduction passed after the repair.
+The affected suite also exposed stale chapter, reteam, identity-reader and
+historical-upgrade fixtures. They now use authored IDs across Homes, actual
+nested directories, the production address view and directory ancestry after
+the canonical cutover. The historical SQL fixture remains frozen. Parent
+`realign` now explicitly reads child Wave Markdown, as the accepted design
+requires; ordinary prompt gathering still excludes it. The first affected run
+reported seven stale-fixture failures. The second passed 2,003 Rust tests and
+reported three remaining failures: an incomplete retirement fixture, an insert
+missing its column list, and the updated realign golden. Final focused checks
+passed all three after repair, plus the full migration and Wave suites. Both
+broad-run receipts remain failed; focused success is not a reusable all-suite
+receipt for the final tree. CI owns the clean candidate result.
+
+Gate verification: `uv run python scripts/test.py --base 61d21f88564783a5fc8f63e385ec035f096fc069 --reuse-passing` → architecture, fmt, Clippy and website (78 passed, 3 skipped) passed; Rust 2,003 passed / 3 failures, all resolved by `uv run python scripts/materialize_rust_tests.py -- nice -n 10 cargo nextest run --all --no-fail-fast --build-jobs 4 --test-threads 4 -E 'test(store::migrations::) | test(managed_operations_move_before_branch_effects) | binary(golden_prompt) | test(work::wave::) | binary(wave_repository_ownership) | test(release_task_prompt_follows_parent_rename_and_reparenting)'` → 126 passed; final fmt, all-target Clippy and migration-history validation passed; `uv run python .lf/tmp/subwaves/gate-release-proof.py` passed both authored prompts and schedule assertions; disposable-Home `lf runs --json` and `lf usage --json` passed, `lf doctor --json` decoded with a healthy migration frontier but exit 1 for installed schedules lacking receipts in the empty Home (not a health pass). Logs: `.lf/tmp/subwaves/gate{,-final,-repair}.log`, `gate-release-proof.log`, `gate-{runs,usage,doctor}.json`. Final repair preflight: 32.4 GiB free above the 32 GiB reserve. Configured provider/Desktop demo and installed planning/schedule cutover remain unproven.
 
 Sync proof: `cargo test -p loopflow --lib -- large_task_launch_stays_within_context_budget_and_preserves_sources reference_rendering_preserves_live_requests_and_original_components attributed_context_keeps_escaped_reference_sources skill_launch_seed_activates_only_the_selected_skill_from_references implement_launch_treats_kickoff_plan_and_intent_as_references skill_exec_seed_carries_wave_files_before_the_message` — five passed; the ordering assertion was corrected to match file tags and passed on its focused rerun; `cargo test -p loopflow --test golden_prompt` passed. Logs: `.lf/tmp/subwaves/sync-verification.log`, `sync-golden.log`; disposable Home, inherited authority cleared, 41.9 GiB resource preflight. Broader verification and push remain with the supervising Flow.
 

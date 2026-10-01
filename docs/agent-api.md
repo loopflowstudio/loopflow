@@ -31,9 +31,9 @@ while `lf ask` blocks its caller on a durable AgentSession in its own checkout.
 A Wave directing a task is the internal case:
 
 ```bash
-lf checkout INF-123                              # tracked Work, no execution
-lf --as task:INF-123 research "write scratch/api.md"    # independent conversation
-lf task run INF-123                                  # start built-in Task automation
+lf task checkout INF-123                              # tracked Work, no execution
+lf --task INF-123 research "write scratch/api.md"    # independent conversation
+lf --task INF-123 flow start                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf wait INF-123 --until terminal                # block until it settles
@@ -62,10 +62,10 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf task run INF-123                    # run an existing Linear issue
+lf --task INF-123 flow start                    # run an existing Linear issue
 lf task create --run --wave <wave> --title "add passkeys" # create the issue, then run it
 pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
+lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent PR merges
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -74,21 +74,25 @@ hand off the whole seed, and never delegate the one blocker between you and
 completion — resolve that inline. The current process and worktree are the
 default execution surface.
 
-`--stack-on` forks the child's worktree from the parent Task's active PR and
-records the fork commit; the child's PR targets the parent's branch until
-merge, then replays only child-authored commits onto `main`.
+`--stack-on` forks the child's worktree from the parent Task's active PR, records
+the fork commit, and adds a `Clear inherited scratch` commit before execution.
+Parent syncs keep the child's scratch, including its deletions. The parent retains
+its own notes. The child's PR targets the parent's branch until
+merge, then `lf task sync` merges main using the recorded fork as the comparison base.
+Child edits survive the parent's squash landing without replay.
 
 ## Steer
 
 ```bash
-lf comment INF-123 "keep the public API" # post a Linear Task comment
-lf --as wave:<wave> wave/operate "prioritize the parser"
-lf --as wave:<wave> wave/operate "reassess Project priorities"
+lf task comment INF-123 "keep the public API"          # post a Linear Task comment
+lf task comment INF-123 --steer "keep the public API"  # explicit direction from an agent
+lf --wave <wave> wave/operate "prioritize the parser"
+lf --wave <wave> wave/operate "reassess Project priorities"
 ```
 
 Comment on the Linear Task directly, or use `task comment`. Both reach only the
 worker advancing that Task. Independent conversations sharing its worktree or using
-`--task`/`--as` do not subscribe to steering. With no active worker, comments
+`--task` do not subscribe to steering. With no active worker, comments
 wait for explicit advancement; steering never starts execution.
 
 Linear comments are the authored record. Workers refresh comments while running
@@ -98,16 +102,29 @@ in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
-`lf interrupt INF-123` appends a durable interrupt comment;
+On a repeated captured Flow step, workers seed only steer IDs newer than that
+step's last successful Run inputs. Failed or interrupted attempts acknowledge
+nothing. Each structural step and each new invocation has its own history;
+unreceived late comments remain eligible. This records delivery, not proof that
+the model followed the instruction.
+
+Keep routine agent progress in working notes and the Run response. `task comment`
+inside a Run marks its publication as progress, excluded from steers. Use
+`--steer` only to deliver deliberate new direction. Direct
+participant comments and explicit worker steering remain direction, even through
+the same account. Other integrations should mark progress with
+`<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
+eligible because their authorship cannot be inferred safely.
+
+`lf task interrupt INF-123` appends a durable interrupt comment;
 the active Task worker observes it and ends the current provider turn so the
 next boundary re-reads direction. With no live worker it remains durable input.
 Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no resident
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. `lf task run INF-123` continues the saved
-Flow without losing durable direction, the worktree, or the Task PR. `lf
-task run` never reopens terminal Work. Create a new Task for new work;
+Work survives its provider process. `lf --task INF-123 flow start` continues the saved
+Flow without losing durable direction, the worktree, or the Task PR. `lf flow start` never reopens terminal Work. Create a new Task for new work;
 `lf task status ISSUE` retains deliberate historical lookup.
 
 Automated Task commit, PR, and completion commands also re-check current PM
@@ -125,10 +142,12 @@ skills. Edit their definition or goal when the guidance should persist.
 the ordinary repository workflow; the file is truth, running Wave or not, and
 there is no separate CLI or server surface for it.
 
-Remove registered or planning-only Tasks with `lf delete ISSUE`. Repeat the same command
+Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
 after an incomplete operation, even after planning refresh or chapter replacement.
 Missing provider data does not confirm deletion.
-Deletion preserves authored files and retained PRs; it does not certify process termination.
+Deletion cancels unfinished placed work or cleans completed delivery before trashing
+the issue. Live or unresolved workers and dirty checkouts block it. Task, PR and
+Run history remain readable; confirmed provider trash makes retries idempotent.
 
 ## Ship
 
@@ -138,7 +157,7 @@ lands it:
 ```bash
 lf pr publish                          # make work visible mid-stream; the agent's default verb
 lf submit                              # done, a person clicks merge
-lf arm                                 # request exact-head auto-merge and return
+lf land                                 # request exact-head auto-merge and return
 lf land                                # watch, repair CI, and return only after merge
 ```
 
@@ -154,8 +173,8 @@ lf wave list --json                    # every durable Wave and its Home/runtime
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json                      # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
-lf usage --days 0 --project parser --json
-lf usage --days 0 --task INF-123 --json
+lf mon show --project parser --json
+lf mon show --task INF-123 --json
 lf usage --days 30 --json   # recorded provider usage, newest first
 lf usage --task INF-123 --json # the same evidence drilled to one Task
 lf ps --json                # one OS-live process frame
@@ -168,7 +187,7 @@ carries one typed fact with its execution, Task PR, or Steer evidence. Agents co
 those projections; they do not rebuild the joins.
 
 All of these reads are local to the executing Home. Use `lf ssh <home-id> ...`
-to execute the same read remotely. The historical `lf monitor list` interface and `lf usage` read that Home's evidence;
+to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Home's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 
@@ -184,7 +203,7 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
 - Answer the user in the current conversation; use typed Work observations for durable
-  coordination, ordinary `lf --as` conversations for another agent perspective, and
+  coordination, ordinary `lf --task` conversations for another agent perspective, and
   `lf ask` only for a new session.
 - Keep repeatable instructions with their skill, repository rules in its agent guide,
   and durable Wave learning in its existing memory.

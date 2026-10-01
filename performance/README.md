@@ -114,3 +114,6 @@ before attributing a change in duration to an optimization.
 Generated reports are runtime evidence and stay out of source control. Examples
 and fixtures must be synthetic; repository history owns only metric definitions,
 budgets, schemas, and behavior tests.
+
+For build/test time and submitted context by lifecycle step, use the local Run
+collector and September 30 baseline in [check-cost.md](check-cost.md).

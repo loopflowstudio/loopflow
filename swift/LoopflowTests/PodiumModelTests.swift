@@ -357,7 +357,7 @@ struct PodiumModelTests {
             name: "product",
             repo: origin.path,
             status: .ready,
-
+            
         )
         let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
         model.applyFixture(

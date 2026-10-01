@@ -1,163 +1,124 @@
 # lf CLI
 
-## Run a workflow
-
 ```bash
-lf run feature "Add CSV export"        # design, review, implement, check, and merge
-lf run code                            # implement and simplify the current plan locally
-lf run incident "Export times out"     # restore the workflow, investigate, plan prevention
-lf run ship                            # verify, merge, and complete the Task
+mkdir first-project && cd first-project
+git init
+lf --mode batch : "Write a README explaining this project"
+lf monitor                         # waiting, blocked, active, finished
+lf account                         # live access and capacity by account
 ```
 
-Flows combine agent work, deterministic operations, and review points.
-`feature` and `ship` include delivery; `code` leaves local changes.
-Use `lf help feature` to inspect a flow before running it.
+A local result needs a provider login and Git. It needs no Linear account or
+registered Task. Connect a provider with `lf account connect codex EMAIL`, or
+use an existing provider login. `lf account --cached` inspects saved evidence
+without contacting providers.
 
-## Start and continue Tasks
-
-```bash
-lf task create --run --wave exports --title "Add CSV export"
-lf task run EXP-12                     # start or continue the saved workflow
-lf task run EXP-13 --stack-on EXP-12   # start dependent work on the parent's PR
-lf task status EXP-12                  # progress, blockers, and delivery state
-lf wait EXP-12 --until terminal --timeout 15m
-```
-
-Task execution prepares its worktree and retains its workflow position.
-Repeating `run` continues the Task or reports its active worker. Connected
-Task creation requires the Wave's planning service; direct workflows do not.
-
-## Direct work and review results
+## Select where work happens
 
 ```bash
-lf comment EXP-12 "Keep this version to CSV; leave PDF out"
-lf interrupt EXP-12                    # end the current provider turn
-lf task run EXP-12                     # continue with retained direction
-
-lf session list                        # find open conversations and reviews
-lf session connect SESSION_ID             # join or resume one
-lf session complete SESSION_ID         # return feedback to its caller
+lf --task EXP-12 skill design       # contribute in the Task's checkout
+lf --wt csv-export : "Add CSV export"
+lf --wave exports : "Review the goal" # add context in the current directory
+lf --task EXP-12 flow start          # start or continue its managed Flow
+lf --task EXP-12 flow start incident # choose a template for new work
 ```
 
-Comments reach the Task's advancing worker; idle Tasks retain them without
-starting execution. Completing a review returns feedback. The following flow
-step decides whether to advance or revise; closing the terminal does neither.
+`--task` and `--wt` select a location. `--wave` supplies context and identity;
+it cannot override a Task's owning Wave. A named direct Flow creates an
+independent FlowSession. `flow start` preserves the Task's selected Flow and
+saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
+explicitly replaces the Task's workflow.
 
-## Inspect work
+## Connect planning and create work
 
 ```bash
-lf monitor                          # waiting, blocked, active, finished
-lf roadmap                          # current plans and recorded Task state
-lf wave status exports              # progress toward a Wave's goals
-lf mon activity --task EXP-12        # recorded changes to the work
-lf mon ps                           # snapshot of live processes and call trees
-lf mon top                          # continuously refresh the live view
-lf monitor show SESSION --input INPUT --final                # the recorded conclusion of one captured input
-lf mon usage --days 30               # reported consumption
+lf list wave                       # authored goals, including unconnected Waves
+lf account connect linear
+lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
+lf task create --wave exports --title "Add CSV export"
+lf checkout EXP-12                  # prepare its checkout without execution
+lf --task EXP-12 flow start
+lf roadmap --json                   # plans and Tasks across Waves
+lf wave status exports --json       # one Wave's detailed evidence
 ```
 
-The overview includes the reason and next action for each item.
-Inspection reads this computer. Live processes, recorded outcomes, and missing
-observations remain distinct. `mon` is short for `monitor`.
-`lf ps` and `lf top` resolve to the same operations through owner shorthand.
+Connected planning needs a Linear login and repository Team. Connection names
+missing access and the command to obtain it. Authored Waves remain discoverable
+before connection. Planning setup is separate from direct local execution.
 
-Read Wave state as JSON with the supported inspection commands:
+## Inspect and continue
 
 ```bash
-lf wave list --json                 # durable Waves and their runtime evidence
-lf wave status <wave> --json         # one Wave's Tasks, Sessions, and conditions
-lf roadmap --json                   # current plans across Waves
+lf ps                              # one live process snapshot
+lf top                             # refresh on a terminal
+lf mon list --json                 # bounded Exec history with a next cursor
+lf mon active --watch --json        # NDJSON until stdin closes
+lf mon show SESSION --final         # provider conclusion
+lf usage --days 30                  # measured consumption and missing evidence
+lf session connect SESSION         # continue a conversation
+lf session complete SESSION         # return review feedback
 ```
+
+Monitor keeps live processes, recorded outcomes and missing observations distinct.
+Its overview explains each item's state and next action. A mechanical Exec has
+no provider conclusion. JSON reads emit one document; the active watch emits
+newline-delimited snapshots. Progress and errors go to stderr.
 
 ## Publish and finish
 
 ```bash
-lf pr publish                          # push and create/update a ready PR
-lf submit                              # prepare for a reviewer's merge click
-lf arm                                 # prepare, request auto-merge, and return
-lf land                                # prepare, watch, repair CI, and finish merged
-lf land -c                             # also complete the owning Task
-lf release run patch                      # verify, prepare notes, tag, and publish a release
+lf pr publish                         # push a ready PR
+lf submit                          # prepare for a reviewer's merge click
+lf land                            # prepare and request auto-merge; return
+lf --task EXP-12 land -c            # also request completion after merge
+lf task sync --plan                     # preview integration with main or stack parent
+lf wt create csv-export
+lf release check                   # inspect release eligibility
 ```
 
-Choose one delivery operation for the desired endpoint. Submit, arm, and land
-own preparation and integration; publish does not rebase. PR operations work
-on ordinary branches without creating a Task. Bare `land` keeps a Task open.
+PR operations work on ordinary branches. Publication does not integrate main.
+Land returns after the handoff; requesting auto-merge does not establish a merge
+or complete a Task. Task completion still requires observed merged evidence.
 
-## Accounts and access
+## Accounts and children
 
 ```bash
-lf account                            # refresh access, capacity, and next actions
-lf account codex --cached              # inspect retained evidence without contact
 lf account connect codex work@example.com --chrome-profile Work
-lf --account work@ run code            # prefer an account for this launch
-lf --only-account codex=work@ run code # restrict this launch and its children
-lf account route set codex work@ personal@ # set account selection order
+lf --account codex=work@ run code
+lf --only-account codex=work@ run code
+lf account route set codex work@ personal@
 ```
 
-Launches check the access their work requires;
-explicit account controls inspect or override selection. Model and account
-selection are independent. An incompatible explicit choice reports an error.
-Readiness inheritance for background and remote children remains under design.
-
-## Control individual steps
-
-### Skills
-
-```bash
-lf skill design "Add CSV export"       # write and review the plan
-lf skill debug -c                      # investigate an error from the clipboard
-lf : "Include the author column"       # run an inline request
-lf -m codex --docs src/export/ run code
-```
-
-A skill supplies instructions for one kind of work. `run NAME` selects an
-authored flow first, then a skill. `skill NAME` and `flow NAME` select a kind
-explicitly. See [Authoring](authoring.md) to define either.
-
-### Checkout and delivery controls
-
-```bash
-lf checkout EXP-12                     # prepare a Task's worktree without starting it
-lf wt create csv-export                # create a worktree without a tracked Task
-lf commit -m "Add CSV export"          # save local changes
-lf rebase --plan                       # inspect the integration strategy
-lf checks --watch                      # follow the PR's checks
-```
-
-These controls operate on the same work as the higher-level workflows.
-[The reference](lf-reference.md) covers file access, manual recovery, machine
-setup, remote execution, and release operations.
-
-### Flow decisions and recovery
-
-```bash
-lf resume INVOCATION                   # continue a direct flow at its saved position
-lf task run EXP-12                     # continue a Task's saved flow
-lf restart EXP-12 --flow feature       # deliberately replace its workflow
-```
-
-Invoking a flow by name starts a new FlowSession. Resuming retains the captured
-definition and feedback. See [decision and retry controls](lf-reference.md#flow-decisions-and-recovery).
+A preference permits fallback; a restriction limits spending. Saved Flows capture
+one selection per provider and carry it through background children. Remote
+launches check destination access with the inherited restrictions. A foreground
+credential lease cannot authorize a detached remote process after it expires.
+Missing or expired capacity remains unknown, never zero or unlimited.
 
 ## Discover commands
 
 ```bash
-lf help                                # overview
-lf help land                           # arguments and effects of one operation
-lf help feature                        # inspect a workflow without starting it
-lf list                                # commands, skills, and flows
-lf help --all                          # full command tree
+lf help
+lf help --all
+lf help feature
+lf list skill
 ```
 
-Omit unambiguous owners: `lf land` resolves to the PR landing command. Multiple
-matches list the canonical choices and execute nothing. Exact commands win;
-installed skills do not change command resolution. Use `lf run land` to
-select an authored definition instead.
+Omit owners when the remaining command resolves uniquely: `lf land`, `lf ps`,
+`lf top`, and `lf mon list`. `mon` is a unique prefix, not an alias. Ambiguity
+lists canonical choices and performs no action. Exact commands take precedence
+over authored definitions; `lf skill NAME` and `lf flow NAME` select a kind.
 
-Help accepts either `lf help PATH` or `lf PATH --help`. Help and list do not
-launch agents, connect accounts, or fetch definitions. Use canonical paths
-and supported `--json` output in scripts.
+Help and catalog reads launch no agent. The [command reference](lf-reference.md)
+names canonical owners and arguments. [Authoring](authoring.md) explains workflows;
+[configuration](config.md) covers inherited launch defaults.
 
-[Full command reference](lf-reference.md) · [Authoring](authoring.md) ·
-[Configuration](config.md)
+## Desktop navigation
+
+```sh
+open 'loopflow://task/LOO-303'
+lf roadmap --task LOO-303 --all --json
+```
+
+Task links and ⌘K open work without starting it. Add a percent-encoded `repo`
+query to disambiguate issue identifiers. Flow selection opens its folded template.

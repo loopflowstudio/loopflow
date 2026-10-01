@@ -3,7 +3,7 @@ import Loopflow
 import SwiftUI
 
 /// Complete Task-attributed Session history, disclosed on demand. The list comes from the
-/// shared `lf usage --task` reader; loading begins on expansion. Provider outcomes
+/// shared `lf runs --task` reader; loading begins on expansion. Provider outcomes
 /// remain separate from recorded input completion and command exit.
 struct TaskRunsView: View {
     let model: PodiumModel

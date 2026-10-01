@@ -1,7 +1,7 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
 //! Linear owns authored chapter content and Tasks; the durable chapter binding
-//! identifies the current Project. `lf wave sync` projects provider state into
+//! identifies the current Project. `lf repo refresh` projects provider state into
 //! SQLite; reads serve that snapshot and only reach Linear through a bounded
 //! staleness policy (see `load_show_snapshot`).
 
@@ -283,7 +283,7 @@ fn require_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<S
     read_repository_team(repo, provider)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
-             Run `lf wave connect --wave <wave> --team-key <KEY>` before creating or mutating work."
+             Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
     })
@@ -367,7 +367,7 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
     RepoId::discover(repo).map_err(|error| {
         OpsError::Message(format!(
             "cannot establish repository PM identity from Git origin: {error}. \
-             Configure an origin before running `lf wave connect`."
+             Configure an origin before running `lf repo connect`."
         ))
     })
 }
@@ -406,7 +406,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf wave connect --wave {wave}` to connect its Linear Initiative.",
+             Run `lf repo connect {wave}` to connect its Linear Initiative.",
             provider.initiative_key()
         ))
     })?;
@@ -422,7 +422,7 @@ async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf ssh` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
-    // without this hook remote `lf wave sync` could never authenticate.
+    // without this hook remote `lf repo refresh` could never authenticate.
     if let Some(token) = forwarded_pm_token(provider) {
         return Ok(token);
     }
@@ -675,7 +675,7 @@ const PM_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 
 fn missing_snapshot_error(wave: &str) -> OpsError {
     OpsError::Message(format!(
-        "wave/{wave} has no local PM snapshot. Run `lf wave sync --wave {wave}`."
+        "wave/{wave} has no local PM snapshot. Run `lf repo refresh {wave}`."
     ))
 }
 
@@ -718,7 +718,7 @@ async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
 fn decode_snapshot(wave: &str, payload: &str) -> OpsResult<PmSnapshot> {
     serde_json::from_str(payload).map_err(|err| {
         OpsError::Message(format!(
-            "PM snapshot schema changed for wave/{wave}; run `lf wave sync`: {err}"
+            "PM snapshot schema changed for wave/{wave}; run `lf repo refresh`: {err}"
         ))
     })
 }
@@ -816,7 +816,7 @@ async fn load_show_snapshot(
                     )
                 };
                 Err(OpsError::Message(format!(
-                    "{reason}. Retry with `lf wave sync --wave {wave}` after addressing the reported cause."
+                    "{reason}. Retry with `lf repo refresh {wave}` after addressing the reported cause."
                 )))
             }
             None => Err(OpsError::Message(format!(
@@ -1028,7 +1028,7 @@ async fn pm_init_async(
             repo,
             &crate::ops::CommitOptions {
                 add: true,
-                message: Some(format!("lf wave connect: {wave} to {provider}")),
+                message: Some(format!("lf repo connect: {wave} to {provider}")),
                 ..crate::ops::CommitOptions::for_task("pm")
             },
             progress,
@@ -1105,6 +1105,7 @@ pub(crate) async fn task_comment_async(
     wave: Option<&str>,
     issue: &str,
     message: Option<&str>,
+    steer: bool,
 ) -> OpsResult<TaskComments> {
     if message.is_some_and(|text| text.trim().is_empty()) {
         return Err(OpsError::Message("Task comment cannot be empty".into()));
@@ -1120,8 +1121,13 @@ pub(crate) async fn task_comment_async(
     }
     let posted = match message {
         Some(message) => Some(
-            super::linear_observe::publish_issue_comment(&repository.client, &item.id, message)
-                .await?,
+            super::linear_observe::publish_issue_comment(
+                &repository.client,
+                &item.id,
+                message,
+                steer,
+            )
+            .await?,
         ),
         None => None,
     };
@@ -1686,10 +1692,12 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 .as_ref()
                 .and_then(|publication| publication.github.as_ref())
             {
-                eprintln!("Retained PR: {}", github.url);
+                eprintln!("Retained PR history: {}", github.url);
             }
         }
-        eprintln!("Retained authored checkout: {}", task.worktree.display());
+        if task.worktree.exists() {
+            eprintln!("Retained checkout: {}", task.worktree.display());
+        }
     }
     Ok(identifier)
 }
@@ -1698,7 +1706,7 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     block_on_pm(pm_resolve_task_async(repo, issue))
 }
 
-async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
+pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     let repository = resolve_repository_context(repo).await?;
     let (wave, initiative_id, mut item, mut project) =
         resolve_owned_issue(repo, &repository, issue).await?;
@@ -1829,7 +1837,7 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
     let team_id = read_repository_team(repo, provider)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
-             Run `lf wave connect --wave <wave> --team-key <KEY>` to establish the migration target."
+             Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
     })?;
@@ -2224,7 +2232,7 @@ async fn pm_sync_async(
         require_repository_pm_ready(repo)?;
     }
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf wave connect --wave <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -2307,6 +2315,18 @@ async fn pm_sync_async(
             .map_err(pm_to_ops)?;
         let mut slugs = BTreeMap::new();
         for project in projects {
+            if team_id
+                .as_deref()
+                .is_some_and(|team| project_is_foreign(&project, team))
+            {
+                diagnostics.push(format!(
+                    "skipped foreign-Team Project `{}` ({}) in wave/{wave}: Teams [{}]",
+                    project.name,
+                    project.id,
+                    project.team_ids.join(", ")
+                ));
+                continue;
+            }
             if let Some(existing_wave) = seen_projects.insert(project.id.clone(), wave.clone()) {
                 let message = format!(
                     "Linear Project `{}` ({}) appears under both wave/{existing_wave} and wave/{wave}",
@@ -2427,6 +2447,10 @@ async fn pm_sync_async(
             super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
             let title_path = canonical_wave_title_path_async(repo, wave).await?;
             for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
+                if project_is_foreign(&project, &team_id) {
+                    continue;
+                }
+                validate_project_ownership(&project, wave, &initiative, &team_id)?;
                 let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
                 let expected_name = format!("{title_path} — {canonical_name}");
                 if project.name != expected_name {
@@ -2457,7 +2481,7 @@ pub fn pm_rename(
     block_on_pm(pm_rename_async(repo, options, progress))
 }
 
-async fn pm_rename_async(
+pub(crate) async fn pm_rename_async(
     repo: &Path,
     options: &PmRenameOptions,
     progress: &impl Progress,
@@ -2675,7 +2699,7 @@ fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> 
         [] => Ok(None),
         [wave] => Ok(Some(wave.id.clone())),
         many => Err(OpsError::Message(format!(
-            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf wave connect`",
+            "multiple Linear Initiatives are named `{title}`: {}. Rename duplicates before running `lf repo connect`",
             many.iter()
                 .map(|wave| wave.id.as_str())
                 .collect::<Vec<_>>()
@@ -2703,7 +2727,7 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
     Ok(())
 }
 
-/// List a Wave's Projects and enforce repository Team + singular Initiative ownership.
+/// List repository Projects and enforce singular Team + Initiative ownership.
 pub(crate) async fn checked_projects(
     repo: &Path,
     ctx: &PmContext,
@@ -2761,6 +2785,7 @@ async fn checked_projects_with_store(
             projects.push(adopted);
         }
     }
+    projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &mut projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
         project.name = canonical_project_name(&title_path, wave, &project.name)?;
@@ -2768,6 +2793,10 @@ async fn checked_projects_with_store(
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
+}
+
+fn project_is_foreign(project: &PmProject, team_id: &str) -> bool {
+    !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
@@ -2779,7 +2808,7 @@ fn validate_project_ownership(
     crate::pm::validate_project_ownership(wave, initiative_id, Some(team_id), project).map_err(
         |error| {
             OpsError::Message(format!(
-                "{error}. Repair the associations and run `lf wave sync --wave {wave}`."
+                "{error}. Repair the associations and run `lf repo refresh {wave}`."
             ))
         },
     )
@@ -2912,6 +2941,102 @@ fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
 
 fn pm_to_ops(err: PmError) -> OpsError {
     OpsError::Message(err.to_string())
+}
+
+#[derive(Debug)]
+pub(crate) struct ChapterSweep {
+    pub candidates: Vec<(String, String, PmItem)>,
+    pub skipped_projects: Vec<(String, PmProject)>,
+}
+
+/// Read every linked Initiative, including archived predecessor Projects.
+pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSweep> {
+    let store = pm_store().await?;
+    let mut candidates = Vec::new();
+    let mut skipped_projects = Vec::new();
+    let mut skipped_ids = BTreeSet::new();
+    for name in list_pm_waves(repo)? {
+        let ctx = resolve_context(repo, &name).await?;
+        let locator = crate::work::wave::WaveLocator::discover(repo, &name)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
+        let chapter = super::chapter::current_project(&store, &wave).await?;
+        for project in ctx
+            .client
+            .list_projects_including_archived(&ctx.initiative, true)
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            if project_is_foreign(&project, &ctx.team_id) {
+                if skipped_ids.insert(project.id.clone()) {
+                    skipped_projects.push((name.clone(), project));
+                }
+                continue;
+            }
+            validate_project_ownership(&project, &name, &ctx.initiative, &ctx.team_id)?;
+            if project.id == chapter.id {
+                continue;
+            }
+            for item in ctx
+                .client
+                .list_items_including_archived(&project.id, true)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+            {
+                if item.completed
+                    || matches!(
+                        item.state.as_deref(),
+                        Some("completed" | "canceled" | "duplicate")
+                    )
+                {
+                    continue;
+                }
+                if item.state.is_none() || item.team_id != ctx.team_id {
+                    return Err(OpsError::Message(format!(
+                        "{} has unresolved state or ownership; sweep was not applied",
+                        item.identifier
+                    )));
+                }
+                candidates.push((name.clone(), project.name.clone(), item));
+            }
+        }
+    }
+    Ok(ChapterSweep {
+        candidates,
+        skipped_projects,
+    })
+}
+
+pub(crate) async fn require_outside_current_chapter(
+    repo: &Path,
+    issue: &str,
+) -> OpsResult<PmResolvedTask> {
+    let resolved = pm_resolve_task_async(repo, issue).await?;
+    let store = pm_store().await?;
+    let locator = crate::work::wave::WaveLocator::discover(repo, &resolved.wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let wave = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
+    let chapter = super::chapter::current_project(&store, &wave).await?;
+    if resolved.item.project_id == chapter.id
+        || resolved.item.completed
+        || matches!(
+            resolved.item.state.as_deref(),
+            Some("completed" | "canceled" | "duplicate")
+        )
+    {
+        return Err(OpsError::Message(
+            "issue moved to the current chapter or is already terminal".into(),
+        ));
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]

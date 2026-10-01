@@ -134,6 +134,20 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn reset_flow_input(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowSession> {
+        let id = id.to_string();
+        let claim = claim.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reset_flow_input(&id, version, claim.as_ref())
+        })
+        .await
+    }
+
     pub async fn checkpoint_flow(
         &self,
         id: &str,

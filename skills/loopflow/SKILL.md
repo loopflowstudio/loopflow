@@ -14,7 +14,7 @@ Loopflow is one binary, `lf`: the CLI for daily work and the API agents call
 to launch, steer, and observe other agents. It owns git, worktrees,
 delegation, and release plumbing in repos that use it. Route those operations
 through `lf`, not around it — doing them by hand breaks worktree placement,
-release state, and Run authority.
+release state, and execution authority.
 
 Check availability; install only if the user asks:
 
@@ -30,27 +30,26 @@ status and start a Session when the user asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
 An agent launched by Loopflow is a Loopflow-launched internal participant. It
-receives `LOOPFLOW.md` automatically, writes through its exact Work/Run
+receives `LOOPFLOW.md` automatically, writes through its exact Work and execution
 authority, and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
 
 ```bash
-lf commit -m "message"                 # commit locally
-lf pr open                             # push, prepare a draft, and open its review page
-lf pr publish --title "..."            # push + create/update PR, print state+URL (no browser)
-lf submit                              # done; the user clicks merge
-lf land                                # done; loopflow lands it hands-off
-lf land -c                             # land and complete the owning Task
-lf rebase --plan                       # show strategy; bare `lf rebase` applies it
-lf task run CHILD --stack-on PARENT    # dependent Task, separate worktree
+lf commit -m "message"               # local checkpoint
+lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
+lf pr submit                         # done; the user clicks merge
+lf land                              # request auto-merge; return
+lf pr land -c                        # land and complete the owning Task
+lf task sync --plan                       # show strategy; bare `lf task sync` applies it
+lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
-prepares it for the user's merge click; **arm/land** request auto-merge.
+prepares it for the user's merge click; **land** request auto-merge.
 `lf pr open` creates or updates a draft and opens its page when a person asks
 to see it. Existing ready PRs stay ready; opening a draft does not publish it.
-Publish/submit/arm/land make drafts ready.
+Publish/submit/land make drafts ready.
 
 Stay in the worktree loopflow placed for this run. Never use raw
 `git worktree`; the sibling naming convention (`<repo>.<name>`) is
@@ -71,7 +70,7 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                 # durable Task Work, own worktree
+lf --task <issue-id> flow start                 # durable Task Work, own worktree
 lf comment <issue-id> "smaller approach" # post direction for the Task advancer
 lf task status <issue-id> --json       # inspect durable state
 lf wait <issue-id> --until terminal
@@ -86,9 +85,9 @@ When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf wave list --json                    # every durable Wave and its Home/runtime evidence
-lf wave status <wave> --json           # one Wave's Work hierarchy, Runs, and Task conditions
-lf roadmap --json                      # current plan across Waves joined to runtime truth
+lf wave list --json              # every durable Wave and its Home/runtime evidence
+lf wave status <wave> --json   # one Wave's Work hierarchy, Sessions, and Task conditions
+lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
 
 These are read surfaces. `lf wave status` is the focused operational view;
@@ -101,8 +100,8 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
-lf wave place <wave-id> <home-id>          # only while no Run is live
-lf --as wave:<wave> wave/operate                    # one finite pass here
+lf wave place <wave-id> <home-id>          # only while no execution is live
+lf --wave <wave> wave/operate                    # one finite pass here
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```

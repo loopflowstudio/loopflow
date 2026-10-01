@@ -69,8 +69,8 @@ lf session list --task INF-123 --json
 lf session list --interactive false --history --task INF-123 --json
 lf session history SESSION --json
 lf session connect SESSION
-lf usage --days 0 --task INF-123 --json
-lf monitor show SESSION --final
+lf mon show --task INF-123 --json
+lf mon show run_ab12 --final
 lf replay run_ab12
 ```
 
@@ -79,7 +79,7 @@ successful provider turn, the command's outcome and the Flow's progress can
 differ: the engine can finish after its driver dies, and a completed command
 can leave a Flow parked at review.
 
-`lf monitor list` and `lf replay` retain their historical selectors during the conversion.
+`lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
 [cutover status](architecture-reference.md#cutover-status) and the
 [CLI reference](lf-reference.md#monitor-history-and-live-activity). Replay uses the captured prompt,
@@ -116,12 +116,12 @@ much of CI repair happened without a person.
 Reading is half; the system stays steerable while it runs.
 
 ```bash
-lf --as wave:<wave> wave/operate "ship the parser fix first"
-lf --as wave:<wave> : "Review this plan"          # start a conversation
+lf --wave <wave> wave/operate "ship the parser fix first"
+lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions
-lf session connect <session-id> --json           # recover one exact conversation
+lf session open <session-id> --json           # recover one exact conversation
 ```
 
 Task steering posts a Linear Task comment; commenting in Linear also steers the
@@ -133,7 +133,7 @@ prove that the agent applied the correction. See [The Agent API](agent-api.md#st
 `lf ask` is a synchronous boundary with a person. It opens an interactive AgentSession
 against the caller's exact checkout, enters the Sessions surface, and blocks
 the caller until the user completes the conversation.
-Use `lf --as <work> : "<prompt>"` when only another agent perspective is needed.
+Use `lf --task <task> : "<prompt>"` when only another agent perspective is needed.
 
 A review node retains its exact FlowSession boundary and captured Skill. Opening
 its AgentSession returns to the conversation. Ready saves feedback; Complete
@@ -154,7 +154,7 @@ Task workspace shells run directly in the app's terminal.
 Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
 resolve every unresolved Session.
 Use `lf comment` for durable Task direction,
-`lf --as` for another agent perspective, and `lf ask` for a new review boundary.
+`lf --task` for another agent perspective, and `lf ask` for a new review boundary.
 
 ## Next
 

@@ -10,7 +10,7 @@ Help the User dream big, detail the idea, then shape one exact design artifact.
 Treat the Task as the user's problem and desired experience. Explore possible
 solutions before choosing one; distinguish observations, proposed mechanisms,
 real constraints, and accepted decisions. The design owns architecture,
-implementation sequencing, and proof. A Task need not arrive with an
+implementation sequencing, and acceptance checks. A Task need not arrive with an
 implementation plan. Preserve its original problem when the solution changes.
 
 Continue an existing design and investigate its material gaps; a newly filed
@@ -46,7 +46,15 @@ Classify the shape:
 - **Indivisible change:** detail the full architecture and explicitly state
   that implementation proceeds in internal slices but ships as one PR. Keep
   the target architecture, integration/deletion path, forbidden near-misses,
-  and full proof intact while `This slice` moves.
+  and acceptance conditions intact while `This slice` moves.
+
+Sequence the deepest cuts first: remove obsolete concepts, authorities, and
+paths before building on what remains. Mark concrete files/symbols and their
+exclusive tests/fixtures **Delete — do not maintain** in the plan so later
+passes never repair code scheduled for removal. Name required behavior, data,
+and tests that must survive. If removal needs a consumer cutover or migration,
+include that minimum work in the same cut; do not first modernize the old path.
+Additive work needs no invented deletion.
 
 ### 3. Size-check
 
@@ -54,7 +62,7 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits or its state is unavailable, record that exact ambiguity instead of inventing ownership.
+Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Home state out of the design.
 
 Tighten the artifact to:
 
@@ -64,14 +72,17 @@ Tighten the artifact to:
 - **Data structures** — core domain values.
 - **Key functions** — signatures and intent.
 - **Constraints** — choices that would force a rewrite if guessed wrong.
-- **Done when** — focused behavioral proof and expected outcome.
+- **Done when** — headless gate command and expected outcome.
 - **Current system** — concepts, authorities, writers, and paths that the change
   reshapes or deletes.
+- **Delete — do not maintain** — concrete removal targets, their exclusive
+  tests/fixtures, and any cutover dependencies; keep this list current as slices
+  finish or the design changes.
 - **Forbidden outcomes** — duplicate representations, compatibility layers, or
   locally passing states that still violate the intended architecture.
-- **Internal slices** — ordered coherent cuts, one marked `This slice`. Keep
-  consequential evidence and unresolved gaps in the working design while
-  preserving the full target; no separate pass ledger is required.
+- **Internal slices** — deepest deletions first, then build on the surviving
+  structure; one coherent cut marked `This slice`. Keep
+  remaining work current without a pass ledger.
 - **Measure** — only when a meaningful before/after quantity exists.
 
 For an additive series, describe the keystone fully and list the intended follow-ups precisely enough for `launch-plan` to encode. Do not file them yet. Before finishing, reread the artifact and present the consequential scope, keystone boundary, follow-ups, and open assumptions.
@@ -82,7 +93,20 @@ and execution updates in authorized Task comments, with links to detailed eviden
 Comments may be collapsed: keep current blockers, dependencies, and accepted scope
 visible in the description. Reconcile changed scope instead of appending amendments.
 
+## Checks run unattended
+
+Specify headless acceptance commands and expected results for gate to run once.
+Desktop uses app builds and view/interaction tests. Never require a person,
+display session or permission dialog. Defer unavailable checks to capable CI
+without blocking earlier steps. Put judgment in demo/review. Implement/compress
+only build and run focused tests; scratch keeps one command/result line.
+
 ## Handoff
+
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Home
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
 
 Leave the current design and its evidence ready for kickoff to shape into an
 implementation plan. Task allocation and launch belong to launch-plan when

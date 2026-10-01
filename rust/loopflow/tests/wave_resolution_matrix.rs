@@ -36,7 +36,7 @@ enum WaveForm {
 
 struct Cmd {
     id: &'static str,
-    /// Subcommand path for the completeness guard (e.g. `["wave", "sync"]`).
+    /// Subcommand path for the completeness guard (e.g. `["repo", "refresh"]`).
     path: &'static [&'static str],
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
@@ -61,11 +61,12 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["monitor", "activity"],
-    &["repo", "ci"],
-    &["wave", "cron", "list"],
-    &["monitor", "list"],
-    &["monitor", "usage"],
+    &["activity"],
+    &["ci"],
+    &["cron", "list"],
+    &["exec", "list"],
+    &["runs"],
+    &["usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -73,14 +74,14 @@ const FILTER_ONLY: &[&[&str]] = &[
 /// operations must name the installed Wave whose authority they validate.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
-    &["wave", "relocate"],
+    &["wave", "rename"],
     &["discord", "serve"],
-    &["wave", "cron", "preflight"],
-    &["wave", "cron", "sync"],
-    &["wave", "cron", "run"],
-    &["wave", "cron", "history"],
-    &["wave", "cron", "trigger"],
-    &["wave", "cron", "remove"],
+    &["cron", "preflight"],
+    &["cron", "sync"],
+    &["cron", "run"],
+    &["cron", "history"],
+    &["cron", "trigger"],
+    &["cron", "remove"],
 ];
 
 const COMMANDS: &[Cmd] = &[
@@ -104,16 +105,16 @@ const COMMANDS: &[Cmd] = &[
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
         id: "wave connect",
-        path: &["wave", "connect"],
-        base_args: &["wave", "connect"],
+        path: &["repo", "connect"],
+        base_args: &["repo", "connect"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
         id: "wave sync",
-        path: &["wave", "sync"],
-        base_args: &["wave", "sync"],
+        path: &["repo", "refresh"],
+        base_args: &["repo", "refresh"],
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         global_default: true,

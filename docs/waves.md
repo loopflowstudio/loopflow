@@ -1,7 +1,7 @@
 # Waves
 
 ```bash
-lf --as wave:shipper wave/operate "invoices first"
+lf --wave shipper wave/operate "invoices first"
 lf wave status shipper
 ```
 
@@ -21,9 +21,9 @@ Session for a conversation, or invoke `wave/operate` for a bounded planning pass
 ## Operate manually
 
 ```bash
-lf --as wave:shipper wave/operate "Review delivery and the checkout dependency"
+lf --wave shipper wave/operate "Review delivery and the checkout dependency"
 lf vsm-operate
-lf --as wave:shipper s2 : "Investigate the repeated checkout conflict"
+lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
 `wave/operate` considers delivery, coordination, present capacity, adaptation
@@ -61,8 +61,8 @@ track remaining implementation and acceptance.
 
 ```bash
 lf roadmap --json
-lf new-chapter 2026-10 --dry-run
-lf new-chapter 2026-10
+lf repo new-chapter 2026-10 --dry-run
+lf repo new-chapter 2026-10
 ```
 
 A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
@@ -92,7 +92,7 @@ newer. A Wave without a current Project requires an unambiguous predecessor;
 the command never selects an arbitrary historical plan.
 
 There is no transaction across Linear mutations or across Homes. A second Home
-observes the same statuses on `lf wave sync --wave <wave>` or its next normal
+observes the same statuses on `lf repo refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
 A successful preview does not authorize ignoring later external reassignments.
 
@@ -106,9 +106,9 @@ flow: feature
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf task run <task>` uses that Flow unless `--flow` overrides it. Existing
+`lf --task <task> flow start` uses that Flow unless a template argument selects another. Existing
 Projects observed before the status-model upgrade retain their identity and
-custom default Flow. The first explicit `lf wave sync` or chapter rotation
+custom default Flow. The first explicit `lf repo refresh` or chapter rotation
 converts their old `recommended:` line to `flow:` and marks the recorded current
 Project In Progress. Until then, planning reads project that same conversion
 without changing Linear. Deliberately Planned successors stay Planned; archived
@@ -145,7 +145,7 @@ radius crosses storage, auth, or public APIs.
 ```
 
 Work placement records the owning Home. Use `lf cron`
-for scheduled commands and `lf --as wave:<name> wave/operate` for an immediate pass.
+for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
 `s1`…`s5`. Goal authoring is covered in [Authoring → Goals](authoring.md#goals).
@@ -184,7 +184,7 @@ Set targets in the chapter plan, not the instrument contract:
 ```
 
 Apply this complete Wave plan with
-`lf update-plan --wave <wave> --plan plan.json`. For the next chapter,
+`lf wave update-plan --wave <wave> --plan plan.json`. For the next chapter,
 edit the Planned Project in Linear.
 An omitted metric has no target in that chapter; its observations remain visible
 without a pass/fail verdict. Changing a target preserves instrument identity,
@@ -230,7 +230,7 @@ The cursor exists only in memory. Every start skips existing channel history;
 restarting after a failure does not replay missed messages. The bridge uses the
 channel binding; `guild_id` is configuration metadata, not a process owner. Run a single bridge per channel to avoid duplicate replies.
 There is no local Wave transcript, inbox, listener or automatic service startup.
-Use Sessions for native conversations and `lf usage --days 0 --wave product` for historical launch inspection.
+Use Sessions for native conversations and `lf mon show --wave product` for historical launch inspection.
 
 ### Memory
 
@@ -274,12 +274,8 @@ filesystem cleanup after the locator commits. It does not move historical Wave
 journals or Home-local execution history. Source and target PM Teams must match; use
 `lf repo reteam` for a provider ownership change.
 
-Observation follows the same rule. `lf wave status`, `lf mon list`, and `lf usage` read
-this Home; prefix them with `lf ssh <home-id>` to read another one. Homes do not
-silently replicate or aggregate execution records.
-
-See [Get Started → Go Remote](getting-started.md#go-remote) and
-[Security → Account authority over SSH](security.md#understand-account-authority-over-ssh).
+See [Homes and processes](architecture/homes.md) and
+[Security](security.md#understand-account-authority-over-ssh).
 
 ## Chapter plans and KRs
 
@@ -303,14 +299,14 @@ the default Flow, retaining any explicitly prepared successor plan.
 Tasks live in Linear; there are no local task lists. A Wave maps to an
 Initiative, its Project for each Chapter maps to a Linear Project, and each
 Task maps to an Issue. The chapter name groups the current Projects. Connect
-once — `lf wave connect` links or creates the Wave Initiative and establishes one
+once — `lf repo connect` links or creates the Wave Initiative and establishes one
 repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
 namespace. Don't paste ids by hand.
 
 ```bash
-lf wave connect --wave infra --team-key LOO # first Wave establishes the repo Team
-lf wave connect --all                  # all nested Waves reuse it
-lf wave sync --wave infra              # refresh the local SQLite snapshot
+lf repo connect infra --team-key LOO # first Wave establishes the repo Team
+lf repo connect --all                  # all nested Waves reuse it
+lf repo refresh infra              # refresh the local SQLite snapshot
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
 lf task complete 1207... --summary "Dark mode delivered"
@@ -330,10 +326,10 @@ durable Task Work in its own stable sibling worktree:
 lf task create --run --wave <wave> --title "add retry to token refresh"
 pbpaste | lf task create --run --wave incidents
 lf checkout INF-123
-lf --as task:INF-123 research "write scratch/retry-analysis.md"
-lf task run INF-123
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
-lf task run INF-125 --flow incident
+lf --task INF-123 research "write scratch/retry-analysis.md"
+lf --task INF-123 flow start
+lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent merges
+lf --task INF-125 flow start incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its

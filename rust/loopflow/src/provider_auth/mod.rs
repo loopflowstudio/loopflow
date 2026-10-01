@@ -8,7 +8,7 @@
 
 #[cfg(unix)]
 mod browser_handoff;
-mod codex;
+pub(crate) mod codex;
 pub mod credential_socket;
 
 use std::collections::{HashMap, HashSet};
@@ -2690,6 +2690,7 @@ pub(crate) fn codex_identity_from_home(
     Some(crate::provider_account::identity::AccountIdentity {
         email: email.into(),
         subject: subject.into(),
+        credential_digest: None,
     })
 }
 

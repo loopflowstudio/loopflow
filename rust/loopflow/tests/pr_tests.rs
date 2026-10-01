@@ -1243,8 +1243,9 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completed PR chain");
-    assert_eq!(prs.len(), 1, "the empty successor is removed atomically");
+    assert_eq!(prs.len(), 2, "retain branch identity for cleanup retries");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
+    assert_eq!(prs[1].phase(), PrPhase::Abandoned);
     assert!(!repo.path().join("scratch/review.md").exists());
 }
 

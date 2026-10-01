@@ -21,7 +21,6 @@ use anyhow::{anyhow, Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 use time::OffsetDateTime;
 
-use super::profile::{find_provider_account, parse_managed_provider};
 use crate::lf::AccountCommand;
 use crate::profile::{AccessProfile, EmailAddress, LocalChromeProfile, ProfileId};
 use crate::provider_account::{
@@ -39,6 +38,7 @@ use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
     RoutingState, SharedStore, StoreError,
 };
+use crate::subscription::SubscriptionUsage;
 
 const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on the browser login to finish; give
@@ -99,6 +99,22 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 None => connect(provider, chrome_profile.as_deref()).await,
             }
         }
+        AccountCommand::RedeemReset {
+            provider,
+            email,
+            idempotency_key,
+            credit_id,
+            json,
+        } => {
+            redeem_reset(
+                provider,
+                email,
+                idempotency_key.as_deref(),
+                credit_id.as_deref(),
+                *json,
+            )
+            .await
+        }
         AccountCommand::Route {
             cmd,
             repo,
@@ -126,7 +142,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 || *clear_paid_through;
             if !lifecycle && !clear_cooldown && chrome_profile.is_empty() && !clear_chrome_profiles
             {
-                return Err(anyhow!("account set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
+                return Err(anyhow!("auth set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
             }
             if lifecycle {
                 set_account_lifecycle(
@@ -157,7 +173,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
 }
 
 async fn connect(raw_provider: &str, selection: Option<&str>) -> Result<()> {
-    let provider = raw_provider.parse::<Provider>()?;
+    let provider = parse_provider(raw_provider)?;
     let store = open_account_store().await?;
     let (profiles, remember) = browser_profiles(&store, provider, None, selection).await?;
     let mut failures = Vec::new();
@@ -283,6 +299,113 @@ async fn remember_browser_profile(
         .set_auth_browser_profiles(provider, account_id, std::slice::from_ref(&profile.id))
         .await?;
     Ok(())
+}
+
+async fn redeem_reset(
+    provider: &str,
+    email: &str,
+    key: Option<&str>,
+    credit_id: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        parse_managed_provider(provider)? == Provider::Codex,
+        "banked resets are available only for Codex"
+    );
+    anyhow::ensure!(
+        key.is_none_or(|value| !value.trim().is_empty()),
+        "idempotency key must not be empty"
+    );
+    anyhow::ensure!(
+        credit_id.is_none_or(|value| !value.trim().is_empty()),
+        "credit ID must not be empty"
+    );
+    let store = open_account_store().await?;
+    let accounts = store.list_provider_accounts(Some("codex")).await?;
+    let account = match match_account(&accounts.iter().collect::<Vec<_>>(), email) {
+        AccountMatch::One(account) => account,
+        AccountMatch::Ambiguous(_) => anyhow::bail!("ambiguous login prefix; use a full email"),
+        AccountMatch::None => anyhow::bail!("no managed Codex login matches {email}"),
+    };
+    let home = account
+        .home
+        .as_deref()
+        .context("account has no managed credential home")?;
+    let _lock = acquire_managed_login_lock(home, Provider::Codex, &account.account_id)?;
+    let key = key
+        .map(str::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // Print before the request so a lost reply can be retried without another spend.
+    eprintln!("Reset attempt {key}; retry this attempt with --idempotency-key {key}");
+    let redemption = crate::subscription::redeem_codex_reset(account, &accounts, &key, credit_id)
+        .await
+        .with_context(|| {
+            format!("reset outcome unconfirmed; retry only with --idempotency-key {key}")
+        })?;
+    if json {
+        let snapshot = |usage: &SubscriptionUsage| {
+            serde_json::json!({
+                "windows": usage.windows, "reset_credits": usage.reset_credits,
+            })
+        };
+        let report = serde_json::json!({
+            "provider": "codex", "account_id": account.account_id, "login": account_login(account),
+            "idempotency_key": key, "outcome": redemption.outcome,
+            "before": snapshot(&redemption.before),
+            "after": redemption.after.as_ref().ok().map(snapshot),
+            "refresh_error": redemption.after.as_ref().err().map(ToString::to_string),
+        });
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "{}: {} (attempt {key})",
+            account_login(account),
+            redemption.outcome
+        );
+        println!("Before:");
+        print_reset_usage(&redemption.before);
+        println!("After:");
+        match &redemption.after {
+            Ok(usage) => print_reset_usage(usage),
+            Err(error) => println!("  unknown; {error}"),
+        }
+    }
+    for usage in std::iter::once(&redemption.before).chain(redemption.after.as_ref().ok()) {
+        store
+            .upsert_provider_account_limits("codex", &account.account_id, &usage.windows, "poll")
+            .await
+            .with_context(|| {
+                format!(
+                    "reset outcome {}; failed to save usage; attempt {key}",
+                    redemption.outcome
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn print_reset_usage(usage: &SubscriptionUsage) {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    for window in &usage.windows {
+        if window.resets_at.is_some_and(|reset| reset <= now) {
+            println!("  {}: usage unknown; reset passed", window.window);
+        } else {
+            println!(
+                "  {}: {}% used, {}% left",
+                window.window,
+                window.used_percent,
+                100u8.saturating_sub(window.used_percent)
+            );
+        }
+    }
+    println!(
+        "  banked resets: {}",
+        usage
+            .reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count.to_string())
+            .unwrap_or_else(|| "unknown".into())
+    );
 }
 
 async fn connect_account(
@@ -657,6 +780,7 @@ async fn register_managed_account(
         });
     account.observed_email = Some(identity.email);
     account.observed_subject = Some(identity.subject);
+    account.observed_credential_digest = identity.credential_digest;
     account.observed_plan = plan;
     account.home = Some(account_home);
     account.login_email = Some(login_email);
@@ -821,7 +945,7 @@ fn open_chrome_profile(profile: &LocalChromeProfile, _url: &str) -> Result<()> {
 }
 
 async fn disconnect(raw_provider: &str) -> Result<()> {
-    let provider = raw_provider.parse::<Provider>()?;
+    let provider = parse_provider(raw_provider)?;
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
     println!("Disconnected local {}", provider.display_name());
@@ -831,7 +955,7 @@ async fn disconnect(raw_provider: &str) -> Result<()> {
 async fn disconnect_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
-    let mut account = find_provider_account(&store, provider, raw_email).await?;
+    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     let account_id = account.account_id.clone();
     let _login_lock = account
         .home
@@ -870,12 +994,12 @@ async fn set_browser_profiles(
     email: Option<&str>,
     selections: &[String],
 ) -> Result<()> {
-    let provider = provider.parse::<Provider>()?;
+    let provider = parse_provider(provider)?;
     let store = open_account_store().await?;
     let account = match email {
         Some(email) => {
             parse_managed_provider(provider.as_str())?;
-            Some(find_provider_account(&store, provider, email).await?)
+            Some(super::profile::find_provider_account(&store, provider, email).await?)
         }
         None => None,
     };
@@ -911,6 +1035,17 @@ async fn set_account_lifecycle(
     raw_email: &str,
     update: AccountLifecycleUpdate<'_>,
 ) -> Result<()> {
+    if update.login_email.is_none()
+        && update.routing.is_none()
+        && update.plan.is_none()
+        && !update.clear_plan
+        && update.paid_through.is_none()
+        && !update.clear_paid_through
+    {
+        return Err(anyhow!(
+            "lf account set needs --login-email, --routing, --plan, or --paid-through"
+        ));
+    }
     let provider = parse_managed_provider(raw_provider)?;
     let login_email = update
         .login_email
@@ -921,7 +1056,7 @@ async fn set_account_lifecycle(
     let plan = update.plan.map(parse_plan).transpose()?;
     let paid_through = update.paid_through.map(parse_paid_through).transpose()?;
     let store = open_account_store().await?;
-    let mut account = find_provider_account(&store, provider, raw_email).await?;
+    let mut account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     if let Some(login_email) = login_email {
         if let Some(home) = &account.home {
             let observed = match provider {
@@ -992,7 +1127,7 @@ fn parse_paid_through(value: &str) -> Result<time::Date> {
 async fn clear_account_cooldown(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
-    let account = find_provider_account(&store, provider, raw_email).await?;
+    let account = super::profile::find_provider_account(&store, provider, raw_email).await?;
     store
         .clear_provider_account_cooldown(provider.as_str(), &account.account_id)
         .await
@@ -1009,6 +1144,17 @@ fn account_store_error(provider: Provider, account: &str, error: StoreError) -> 
     match error {
         StoreError::NotFound => anyhow!("unknown {} account '{}'", provider, account),
         other => anyhow!(other),
+    }
+}
+
+fn parse_managed_provider(raw: &str) -> Result<Provider> {
+    let provider = parse_provider(raw)?;
+    if matches!(provider, Provider::Claude | Provider::Codex) {
+        Ok(provider)
+    } else {
+        Err(anyhow!(
+            "managed OAuth accounts support Claude and Codex only"
+        ))
     }
 }
 
@@ -1049,7 +1195,7 @@ fn format_account(account: &ProviderAccount) -> String {
 }
 
 async fn configure(raw_provider: &str) -> Result<()> {
-    let provider = raw_provider.parse::<Provider>()?;
+    let provider = parse_provider(raw_provider)?;
     if let Some(message) = provider.api_key_configure_error() {
         return Err(anyhow!(message));
     }
@@ -1099,6 +1245,11 @@ async fn local_store() -> Result<SharedStore> {
         .await
         .map_err(|err| anyhow!("failed to open local credential store: {err}"))?;
     Ok(Arc::new(store))
+}
+
+fn parse_provider(raw: &str) -> Result<Provider> {
+    raw.parse::<Provider>()
+        .map_err(|_| anyhow!("unknown provider: {raw}"))
 }
 
 fn format_relative_delta(seconds: i64) -> String {
@@ -1195,6 +1346,7 @@ mod tests {
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
@@ -1234,6 +1386,7 @@ mod tests {
             login_email: Some(EmailAddress::parse("operator@example.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,
@@ -1647,6 +1800,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             login_email: Some(EmailAddress::parse(login).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: if account_home.is_some() {
                 CredentialState::Connected
@@ -2142,6 +2296,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             login_email: Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Missing,
             routing_state: RoutingState::Automatic,

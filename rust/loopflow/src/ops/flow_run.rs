@@ -1,16 +1,17 @@
-//! What a saved Flow keeps outside its invocation row: the driver's kernel
-//! lock and the step identity a Run carries in its environment. The cursor,
-//! attempt and failure live on `flow_sessions`.
+//! The driver's kernel lock and the step identity a child Exec carries in its
+//! environment. Captured progression and claims live on `flow_sessions`.
 use std::fs::{self, File, OpenOptions};
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
+use crate::session_record::{SessionFlowMembership, SessionFlowStep};
+
 pub(crate) const FLOW_STEP_ENV: &str = "LF_FLOW_STEP";
 
-/// The invocation and cursor version a step's Run was launched for. A write
-/// from the Run is refused once the cursor moved on.
+/// The Flow and cursor version a step's Exec was launched for. A write
+/// from the step is refused once the cursor moved on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ActiveStep {
     pub invocation: String,
@@ -57,12 +58,11 @@ pub(crate) fn token() -> Result<Option<ActiveStep>> {
 /// Helpers and prepared reviews retain their independent admission paths.
 #[derive(Debug)]
 pub(crate) struct StepExec {
-    pub membership: crate::session_record::SessionFlowMembership,
+    pub membership: SessionFlowMembership,
     pub reserved: Option<(ActiveStep, i64, String)>,
 }
 
 pub(crate) fn capture_membership() -> Result<StepExec> {
-    use crate::session_record::{SessionFlowMembership, SessionFlowStep};
     let independent = StepExec {
         membership: SessionFlowMembership::Independent,
         reserved: None,
@@ -102,8 +102,7 @@ pub(crate) async fn exec_driver(id: &str) -> Result<()> {
     let lf = crate::engine::process::resolve_current_home_lf_binary_checked()?;
     let argv = vec![
         lf.display().to_string(),
-        "--mode".into(),
-        "batch".into(),
+        "-b".into(),
         "flow".into(),
         "resume".into(),
         id.into(),

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -99,9 +99,23 @@ impl Step {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Command {
+    #[serde(deserialize_with = "deserialize_command_name")]
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+}
+
+// Saved invocations outlive CLI spellings. Migrate the stored operation name;
+// preserve captured arguments and topology instead of reloading today's Flow.
+fn deserialize_command_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    Ok(if name == "rebase" {
+        "sync".to_string()
+    } else {
+        name
+    })
 }
 
 impl Command {
@@ -204,6 +218,59 @@ pub enum ConcreteStep {
     Xor(ConcreteXor),
 }
 
+/// Resolved template composition. Flattening is the sole execution expansion.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) enum ResolvedFlowItem {
+    Skill(ConcreteSkill),
+    Command(ConcreteCommand),
+    Group {
+        name: String,
+        items: Vec<ResolvedFlowItem>,
+    },
+    Xor {
+        router: Skill,
+        paths: BTreeMap<String, ResolvedFlowPath>,
+        sources: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResolvedFlowPath {
+    pub description: String,
+    pub items: Vec<ResolvedFlowItem>,
+}
+
+pub(crate) fn flatten_resolved(items: &[ResolvedFlowItem]) -> Vec<ConcreteStep> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            ResolvedFlowItem::Skill(skill) => vec![ConcreteStep::Skill(skill.clone())],
+            ResolvedFlowItem::Command(op) => vec![ConcreteStep::Command(op.clone())],
+            ResolvedFlowItem::Group { items, .. } => flatten_resolved(items),
+            ResolvedFlowItem::Xor {
+                router,
+                paths,
+                sources,
+            } => vec![ConcreteStep::Xor(ConcreteXor {
+                router: router.clone(),
+                sources: sources.clone(),
+                paths: paths
+                    .iter()
+                    .map(|(name, path)| {
+                        (
+                            name.clone(),
+                            ConcretePath {
+                                description: path.description.clone(),
+                                steps: flatten_resolved(&path.items),
+                            },
+                        )
+                    })
+                    .collect(),
+            })],
+        })
+        .collect()
+}
+
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
     resolve_definition(repo, name, None).map(Target::into_flow)
 }
@@ -259,7 +326,8 @@ pub fn wave_memory_section(memory: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
+    let reference = crate::engine::prompt::render_reference(trimmed);
+    Some(format!("<lf:wave-memory>\n{reference}\n</lf:wave-memory>"))
 }
 
 /// Sections run stable → volatile so providers can prefix-cache the front of
@@ -368,11 +436,16 @@ impl<'a> DefinitionLoader<'a> {
 }
 
 pub fn compile_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
-    let items = compile_with_sources(flow, repo, &[])?;
+    Ok(flatten_resolved(&resolve_flow(flow, repo)?))
+}
+
+pub(crate) fn resolve_flow(flow: &Flow, repo: &Path) -> Result<Vec<ResolvedFlowItem>, LoadError> {
+    let resolved = compile_with_sources(flow, repo, &[])?;
+    let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
     validate_repeats(&items)?;
-    Ok(items)
+    Ok(resolved)
 }
 
 pub(crate) fn validate_repeats(items: &[ConcreteStep]) -> Result<(), LoadError> {
@@ -945,7 +1018,7 @@ fn compile_branch(
     branch_def: &XorDef,
     repo: &Path,
     sources: &[String],
-) -> Result<ConcreteXor, LoadError> {
+) -> Result<ResolvedFlowItem, LoadError> {
     let router = match &branch_def.router {
         Some(name) => load_skill(name, repo)?,
         None => Skill {
@@ -966,14 +1039,14 @@ fn compile_branch(
         .map(|(name, path)| {
             Ok((
                 name.clone(),
-                ConcretePath {
+                ResolvedFlowPath {
                     description: path.description.clone(),
-                    steps: compile_steps(&path.steps, repo, sources)?,
+                    items: compile_steps(&path.steps, repo, sources)?,
                 },
             ))
         })
         .collect::<Result<_, LoadError>>()?;
-    Ok(ConcreteXor {
+    Ok(ResolvedFlowItem::Xor {
         router,
         paths,
         sources: sources.to_vec(),
@@ -1062,7 +1135,7 @@ fn compile_with_sources(
     flow: &Flow,
     repo: &Path,
     sources: &[String],
-) -> Result<Vec<ConcreteStep>, LoadError> {
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     validate_flow_nesting(sources, &flow.name)?;
     let mut sources = sources.to_vec();
     sources.push(flow.name.clone());
@@ -1073,7 +1146,7 @@ fn compile_steps(
     steps: &[Step],
     repo: &Path,
     sources: &[String],
-) -> Result<Vec<ConcreteStep>, LoadError> {
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     let mut items = Vec::new();
     for step in steps {
         if !matches!(step.target, Target::Skill(_))
@@ -1084,23 +1157,24 @@ fn compile_steps(
             ));
         }
         match &step.target {
-            Target::Command(command) => items.push(ConcreteStep::Command(ConcreteCommand {
+            Target::Command(command) => items.push(ResolvedFlowItem::Command(ConcreteCommand {
                 item: command.clone(),
                 sources: sources.to_vec(),
             })),
             Target::Flow(flow) => {
-                items.extend(compile_with_sources(flow, repo, sources)?);
+                items.push(ResolvedFlowItem::Group {
+                    name: flow.name.clone(),
+                    items: compile_with_sources(flow, repo, sources)?,
+                });
             }
-            Target::Skill(skill) => items.push(ConcreteStep::Skill(ConcreteSkill {
+            Target::Skill(skill) => items.push(ResolvedFlowItem::Skill(ConcreteSkill {
                 skill: resolve_skill_reference(skill, repo)?,
                 id: step.id.clone(),
                 human: step.human,
                 repeat: step.repeat.clone(),
                 sources: sources.to_vec(),
             })),
-            Target::Xor(branch) => {
-                items.push(ConcreteStep::Xor(compile_branch(branch, repo, sources)?))
-            }
+            Target::Xor(branch) => items.push(compile_branch(branch, repo, sources)?),
         }
     }
     Ok(items)
@@ -1331,11 +1405,7 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(
-            flows.join("invalid.yaml"),
-            "- cmd: task rebase\n  human: true\n",
-        )
-        .unwrap();
+        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()
@@ -2012,6 +2082,9 @@ Design the feature.
             &[],
         )
         .unwrap();
+        let ConcreteStep::Xor(branch) = super::flatten_resolved(&[branch]).remove(0) else {
+            panic!("expected XOR");
+        };
         let suffix = build_xor_routing_suffix(&branch);
         assert!(suffix.find("**alpha**").unwrap() < suffix.find("**zeta**").unwrap());
         assert!(suffix.contains("declared JSON object"));

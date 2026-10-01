@@ -12,16 +12,18 @@ use crate::engine::process::ProcessGroupGuard;
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
-struct Connection {
+#[derive(Debug)]
+pub(crate) struct Connection {
     // Both guards remain owned through completion, cancellation and early errors.
     _child: Child,
     _process_group: ProcessGroupGuard,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    next_request_id: i64,
 }
 
 impl Connection {
-    async fn start(command: &mut Command) -> Result<Self, AuthError> {
+    pub(crate) async fn start(command: &mut Command) -> Result<Self, AuthError> {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -51,10 +53,10 @@ impl Connection {
             _process_group: process_group,
             stdin,
             stdout,
+            next_request_id: 1,
         };
         connection
             .request(
-                1,
                 "initialize",
                 json!({"clientInfo": {
                     "name": "loopflow", "title": "loopflow", "version": env!("CARGO_PKG_VERSION")
@@ -83,26 +85,36 @@ impl Connection {
         serde_json::from_str(&line).map_err(|_| failed("invalid Codex app-server auth response"))
     }
 
-    async fn request(&mut self, id: i64, method: &str, params: Value) -> Result<Value, AuthError> {
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value, AuthError> {
+        let message = self.request_raw(method, params).await?;
+        if message.get("error").is_some() {
+            return Err(failed("Codex app-server rejected the auth request"));
+        }
+        message
+            .get("result")
+            .cloned()
+            .ok_or_else(|| failed("Codex app-server auth response has no result"))
+    }
+
+    pub(crate) async fn request_raw(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, AuthError> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
         tokio::time::timeout(Duration::from_secs(15), async {
             self.send(json!({"id": id, "method": method, "params": params}))
                 .await?;
             loop {
                 let message = self.receive().await?;
-                if message["id"].as_i64() != Some(id) {
-                    continue;
+                if message["id"].as_i64() == Some(id) {
+                    return Ok(message);
                 }
-                if message.get("error").is_some() {
-                    return Err(failed("Codex app-server rejected the auth request"));
-                }
-                return message
-                    .get("result")
-                    .cloned()
-                    .ok_or_else(|| failed("Codex app-server auth response has no result"));
             }
         })
         .await
-        .map_err(|_| failed("timed out waiting for Codex app-server auth response"))?
+        .map_err(|_| failed("timed out waiting for Codex app-server response"))?
     }
 
     async fn complete_login(mut self, login_id: String) -> Result<(), AuthError> {
@@ -129,7 +141,7 @@ impl Connection {
 pub(super) async fn refresh(command: &mut Command) -> Result<Value, AuthError> {
     Connection::start(command)
         .await?
-        .request(2, "account/read", json!({"refreshToken": true}))
+        .request("account/read", json!({"refreshToken": true}))
         .await
 }
 
@@ -137,7 +149,7 @@ pub(super) async fn start_login(command: &mut Command) -> Result<AuthFlowHandle,
     let mut connection = Connection::start(command).await?;
     // Unlike `codex login`, this endpoint sets open_browser=false inside Codex.
     let result = connection
-        .request(2, "account/login/start", json!({"type": "chatgpt"}))
+        .request("account/login/start", json!({"type": "chatgpt"}))
         .await?;
     let login_id = result["loginId"]
         .as_str()

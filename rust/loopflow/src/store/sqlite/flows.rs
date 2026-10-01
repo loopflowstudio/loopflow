@@ -236,6 +236,23 @@ pub(super) fn task_flow_in(
     .transpose()
 }
 
+/// Terminal Tasks retire only their selected, unclaimed execution and retain history.
+pub(super) fn retire_unclaimed_task_flow_in(
+    conn: &Connection,
+    task_id: &TaskId,
+) -> StoreResult<()> {
+    conn.execute(
+        &format!("UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {TASK_INVOCATION} AND claim_json IS NULL"),
+        params![task_id.as_str(), now_unix()],
+    )?;
+    conn.execute(
+        "UPDATE tasks SET current_invocation_id=NULL WHERE id=?1 AND current_invocation_id IN
+         (SELECT id FROM flow_sessions WHERE state='replaced' AND claim_json IS NULL)",
+        [task_id.as_str()],
+    )?;
+    Ok(())
+}
+
 fn current_flow_in(conn: &Connection, id: &str) -> StoreResult<FlowSession> {
     let flow = flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
     if flow.finished {
@@ -410,9 +427,8 @@ fn fail_flow_in(
     )
 }
 
-/// Release the position: the attempt and any failure go, the recorded
-/// candidate is discarded, and the step runs again as a new attempt.
-fn release_in(
+/// Reset selected input and failure for another execution at the same position.
+fn reset_input_in(
     tx: &Transaction<'_>,
     flow: &FlowSession,
     version: u64,
@@ -881,36 +897,24 @@ impl SqliteStore {
         ).optional()?)
     }
 
-    /// The process selected for an unfinished mechanical boundary, if recorded.
-    pub(crate) fn pending_flow_operation_exec(
-        &self,
-        id: &str,
-    ) -> StoreResult<Option<crate::id::ExecId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let exec: Option<String> = conn.query_row(
-            "SELECT start.exec_id FROM flow_sessions f JOIN flow_events start ON start.seq=f.operation_start
-             WHERE f.id=?1 AND NOT EXISTS(SELECT 1 FROM flow_events done WHERE done.operation_start=start.seq)",
-            [id], |row| row.get(0),
-        ).optional()?.flatten();
-        exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
-            .transpose()
-    }
-
-    /// The selected agent process remains owned until it exits, even after its
-    /// provider has returned. Mechanical steps retain their existing result gate.
+    /// A selected process remains owned until it exits, even after its provider
+    /// or mechanical effect has returned.
     pub(crate) fn pending_flow_step_exec(
         &self,
         id: &str,
     ) -> StoreResult<Option<crate::id::ExecId>> {
-        if let Some(exec) = self.pending_flow_operation_exec(id)? {
-            return Ok(Some(exec));
-        }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let exec: Option<String> = conn.query_row(
-            "SELECT captured.exec_id FROM flow_sessions f JOIN session_events captured ON captured.seq=f.current_capture
+        let exec: Option<String> = conn
+            .query_row(
+                "SELECT COALESCE(operation.exec_id,captured.exec_id) FROM flow_sessions f
+             LEFT JOIN flow_events operation ON operation.seq=f.operation_start
+             LEFT JOIN session_events captured ON captured.seq=f.current_capture
              WHERE f.id=?1 AND f.state='current'",
-            [id], |row| row.get(0),
-        ).optional()?.flatten();
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
         exec.map(|id| crate::id::ExecId::parse(&id).map_err(invalid))
             .transpose()
     }
@@ -1289,13 +1293,13 @@ impl SqliteStore {
                 "reopen the human Session to complete this review".into(),
             ));
         }
-        release_in(&tx, &flow, flow.version, flow.claim.as_ref(), direction)?;
+        reset_input_in(&tx, &flow, flow.version, flow.claim.as_ref(), direction)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
     }
 
-    /// Give the position back after a step ended without a result.
+    /// Release the driver without discarding its selected effect or conversation.
     pub fn release_flow(
         &self,
         id: &str,
@@ -1305,7 +1309,26 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
-        release_in(&tx, &flow, version, claim, None)?;
+        let mut cursor = flow.cursor.clone();
+        clear_candidate(&mut cursor);
+        write_cursor_in(&tx, (id, version), &cursor, None, false, claim, true)?;
+        let flow = current_flow_in(&tx, id)?;
+        tx.commit()?;
+        Ok(flow)
+    }
+
+    /// Recapture input after the caller proves that an unpublished launch or
+    /// its provider has exited. Releasing a driver alone cannot authorize this.
+    pub(crate) fn reset_flow_input(
+        &self,
+        id: &str,
+        version: u64,
+        claim: Option<&TaskWorkerClaim>,
+    ) -> StoreResult<FlowSession> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flow = current_flow_in(&tx, id)?;
+        reset_input_in(&tx, &flow, version, claim, None)?;
         let flow = current_flow_in(&tx, id)?;
         tx.commit()?;
         Ok(flow)
@@ -1771,6 +1794,57 @@ mod tests {
                 updated_at: time::OffsetDateTime::now_utc(),
             })
             .unwrap()
+    }
+
+    #[test]
+    fn repeated_node_acknowledges_only_consumed_successful_steers() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        for status in ["failed", "interrupted", "completed"] {
+            let flow = launched(&store, vec![step("work", None), step("next", None)], 0);
+            let session = attempt(&store, flow.id(), None, "codex");
+            for (seq, evidence) in [
+                serde_json::json!({"type":"user_input","op":"steer_seed_through","text":"10"}),
+                serde_json::json!({"type":"user_input","op":"steer_transport_accepted:11","text":"live direction"}),
+            ].into_iter().enumerate() {
+                let source = format!("events.jsonl:{seq}");
+                store.retain_session_observation(&session, &crate::session::SessionObservation {
+                    artifact_key: session.artifact_key.clone(), source: source.clone(),
+                    observed_at: 1, task_id: None, wave_id: None,
+                    payload: serde_json::json!({"input_id":session.artifact_key,"source":source,"evidence":evidence}),
+                }).unwrap();
+            }
+            let turn = store.test_flow_turn(&session.artifact_key);
+            store.test_finish_flow_turn(&turn, status);
+            assert_eq!(store.completed_step_steer_id(&flow).unwrap(), 0);
+            let recovered = store.recover_flow(flow.id(), None).unwrap();
+            if status != "completed" {
+                assert!(recovered.failure.is_some());
+                assert_eq!(store.completed_step_steer_id(&flow).unwrap(), 0);
+                continue;
+            }
+            let mut cursor = recovered.cursor.clone();
+            cursor.finish(&recovered.invocation.steps).unwrap();
+            let next = store
+                .checkpoint_flow(flow.id(), recovered.version, &cursor, None, None)
+                .unwrap();
+            assert_eq!(store.completed_step_steer_id(&next).unwrap(), 0);
+            let mut repeated = flow.clone();
+            repeated.cursor.iteration = 1;
+            assert_eq!(store.completed_step_steer_id(&repeated).unwrap(), 11);
+            let other = launched(&store, vec![step("work", None)], 0);
+            assert_eq!(store.completed_step_steer_id(&other).unwrap(), 0);
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "DELETE FROM session_events WHERE kind='observed' AND captured_event=?1",
+                    [session.captured],
+                )
+                .unwrap();
+            assert_eq!(store.completed_step_steer_id(&repeated).unwrap(), 0);
+        }
     }
 
     #[test]
@@ -2647,7 +2721,7 @@ mod tests {
             vec![
                 ConcreteStep::Command(ConcreteCommand {
                     item: Command {
-                        command: "rebase".into(),
+                        command: "sync".into(),
                         args: vec!["--plan".into()],
                     },
                     sources: vec![],

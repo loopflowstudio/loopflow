@@ -40,7 +40,8 @@
       ],
       "verified_windows": [
         "session"
-      ]
+      ],
+      "reset_credits": null
     },
     {
       "provider": "codex",
@@ -58,7 +59,21 @@
       "cooldown_until": null,
       "expires_at": null,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": {
+        "availableCount": 2,
+        "credits": [
+          {
+            "id": "credit-fixture",
+            "resetType": "codexRateLimits",
+            "status": "available",
+            "grantedAt": 1799900000,
+            "expiresAt": 1800100000,
+            "title": null,
+            "description": null
+          }
+        ]
+      }
     },
     {
       "provider": "claude",
@@ -76,7 +91,8 @@
       "cooldown_until": null,
       "expires_at": null,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     },
     {
       "provider": "claude",
@@ -94,7 +110,8 @@
       "cooldown_until": null,
       "expires_at": null,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     },
     {
       "provider": "claude",
@@ -123,7 +140,8 @@
           "source": "poll"
         }
       ],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     },
     {
       "provider": "codex",
@@ -141,7 +159,8 @@
       "cooldown_until": null,
       "expires_at": null,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     },
     {
       "provider": "claude",
@@ -159,7 +178,8 @@
       "cooldown_until": null,
       "expires_at": 1790000000,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     },
     {
       "provider": "codex",
@@ -177,7 +197,8 @@
       "cooldown_until": null,
       "expires_at": null,
       "windows": [],
-      "verified_windows": []
+      "verified_windows": [],
+      "reset_credits": null
     }
   ],
   "browser": {

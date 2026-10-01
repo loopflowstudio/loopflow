@@ -102,17 +102,17 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
-    /// Resolved Wave context for an admitted launch.
-    #[arg(skip)]
+    /// Add Wave context and identity without changing the working directory
+    #[arg(long, value_name = "WAVE")]
     pub wave: Option<String>,
 
-    /// Resolved Task context for an admitted launch.
-    #[arg(skip)]
+    /// Execute in this Task's checkout
+    #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
-    /// Select one Work for a direct skill, flow or inline prompt
-    #[arg(long = "as", value_name = "WORK")]
-    pub as_work: Option<String>,
+    /// Execute in an existing worktree by name or branch
+    #[arg(long, value_name = "NAME", conflicts_with = "task")]
+    pub wt: Option<String>,
 
     /// Keep a Work-bound internal launch in this exact checkout.
     #[arg(long = "__cwd", value_name = "PATH", hide = true)]
@@ -190,7 +190,7 @@ impl Cli {
             max_turns: self.max_turns,
             wave: self.wave.clone(),
             task: self.task.clone(),
-            as_work: self.as_work.clone(),
+            wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,
             flow_step: self.flow_step.clone(),
@@ -213,12 +213,10 @@ impl Cli {
 
     /// The most specific Work selected for direct execution.
     pub fn work_subject_selector(&self) -> Option<String> {
-        self.as_work.clone().or_else(|| {
-            self.task
-                .as_ref()
-                .map(|task| format!("task:{task}"))
-                .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
-        })
+        self.task
+            .as_ref()
+            .map(|task| format!("task:{task}"))
+            .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
     }
 }
 
@@ -299,7 +297,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: HomeCommand,
     },
-    /// Bridge new Discord messages to finite Wave Runs
+    /// Bridge new Discord messages to finite Wave Sessions
     Discord {
         #[command(subcommand)]
         cmd: DiscordCommand,
@@ -341,6 +339,9 @@ pub enum Commands {
         /// Scope to one Wave (default: every Wave in the current repository)
         #[arg(long)]
         wave: Option<String>,
+        /// Find an exact issue identifier, including retained historical Tasks.
+        #[arg(long)]
+        task: Option<String>,
         /// Emit the roadmap snapshot as JSON
         #[arg(long)]
         json: bool,
@@ -385,6 +386,27 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
+    /// Start or continue a Task through its saved Flow
+    Start {
+        /// Template for a new Task Flow; existing saved progress remains authoritative
+        template: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        /// Explain what changed after an execution blocker
+        #[arg(long)]
+        reason: Option<String>,
+        /// Retry uncertain native work after confirmed engine exit.
+        #[arg(long)]
+        retry: bool,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// List authored flows or saved FlowSessions
     List {
         #[arg(long)]
@@ -541,8 +563,8 @@ pub enum SessionCommand {
     },
     /// Run one ad-hoc request in its durable terminal
     #[command(name = "serve-ask", hide = true)]
-    ServeAsk { run_id: String },
-    /// Stop one exact native provider Run after its review completes
+    ServeAsk { input: String },
+    /// Stop one exact native provider client after its review completes
     #[command(name = "stop-client", hide = true)]
     StopClient { input: String },
 }
@@ -554,8 +576,7 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: CronCommand,
     },
-    /// List every wave in the registry (running and stopped), marking which
-    /// have a live server. Local-only query over the shared ledger.
+    /// List authored Waves and retained planning identities without starting work.
     List {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
@@ -568,8 +589,7 @@ pub enum WaveCommand {
         #[arg(long)]
         current: bool,
     },
-    /// Show one Wave's chapter, Tasks, Runs, and live loop
-    /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
+    /// Show one Wave's current plan, Task details, and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -580,45 +600,6 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
-    Connect {
-        /// Wave name (auto-detected if omitted)
-        wave: Option<String>,
-        /// Wave name (flag form; same as positional wave)
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        /// Recursively initialize every Wave under wave/
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
-        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
-        #[arg(long = "team-key")]
-        team_key: Option<String>,
-        /// Repository Team display name. Defaults to the repository name.
-        #[arg(long = "team-name")]
-        team_name: Option<String>,
-    },
-    /// Refresh shared planning from Linear
-    Sync {
-        wave: Option<String>,
-        #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
-        wave_flag: Option<String>,
-        #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
-        all: bool,
-    },
-    /// Rename the provider Initiative
-    Rename {
-        wave: String,
-        #[arg(long)]
-        title: String,
-    },
-    /// Forget an empty Wave registration, preserving authored files
-    Forget {
-        name: String,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Place a Wave on a Home
     Place {
         name: String,
@@ -626,25 +607,19 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Rename or rehome a stopped Wave
-    Relocate {
+    /// Rename or relocate an authored Wave and its provider mapping
+    Rename {
         wave: String,
         #[arg(long)]
         repo: Option<PathBuf>,
         #[arg(long)]
         name: Option<String>,
+        /// Change the linked Initiative display title
+        #[arg(long)]
+        title: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Retire the Wave, retaining history
-    Retire {
-        name: String,
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        json: bool,
-    },
-
     /// Replace the current chapter's KRs, targets, and Flow recommendation
     UpdatePlan {
         #[arg(short = 'w', long)]
@@ -655,23 +630,23 @@ pub enum WaveCommand {
 }
 
 #[derive(Args, Debug)]
-pub struct RebaseArgs {
-    /// Print the planned rebase strategy without mutating git
-    #[arg(long, conflicts_with_all = ["manual", "continue_rebase", "abort"])]
+pub struct SyncArgs {
+    /// Print the planned sync strategy without mutating git
+    #[arg(long, conflicts_with_all = ["manual", "continue_sync", "abort"])]
     pub plan: bool,
-    /// Keep the rebase local and leave conflicts for this process to resolve
-    #[arg(long, conflicts_with_all = ["plan", "continue_rebase", "abort"])]
+    /// Keep the sync local and leave conflicts for this process to resolve
+    #[arg(long, conflicts_with_all = ["plan", "continue_sync", "abort"])]
     pub manual: bool,
-    /// Stage resolved conflict paths and continue the local rebase
+    /// Stage resolved conflict paths and continue the local sync
     #[arg(long = "continue", conflicts_with_all = ["plan", "manual", "abort"])]
-    pub continue_rebase: bool,
-    /// Abort the local rebase in progress
-    #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
+    pub continue_sync: bool,
+    /// Abort the local sync in progress
+    #[arg(long, conflicts_with_all = ["plan", "manual", "continue_sync"])]
     pub abort: bool,
-    /// Explicitly claim a raw rebase that has no Loopflow owner
+    /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to rebase onto
+    /// Branch to sync onto
     pub onto: Option<String>,
 }
 
@@ -687,8 +662,8 @@ pub enum TaskCommand {
         #[command(subcommand)]
         cmd: WtCommand,
     },
-    /// Rebase current branch onto target (default: main)
-    Rebase(RebaseArgs),
+    /// Merge upstream into the current branch (default: main or stack parent)
+    Sync(SyncArgs),
     /// Commit changes
     Commit {
         #[arg(short = 'm', long = "message")]
@@ -709,28 +684,6 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Start or continue a Task through its saved Flow
-    Run {
-        issue: String,
-        #[arg(long)]
-        name: Option<String>,
-        /// Select a Flow for this Task worker; defaults to the chapter recommendation
-        #[arg(long, value_name = "FLOW")]
-        flow: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
-        stack_on: Option<String>,
-        #[arg(long)]
-        directive: Option<String>,
-        /// Explain what changed after an execution blocker
-        #[arg(long)]
-        reason: Option<String>,
-        /// Retry uncertain native work after confirmed engine exit.
-        #[arg(long)]
-        retry: bool,
         #[arg(long)]
         json: bool,
     },
@@ -808,7 +761,23 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Delete a Task from Linear and reconcile its local record
+    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    Abandon {
+        /// Issue ID or branch; defaults to the Task in this checkout
+        issue: Option<String>,
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview open issues outside current chapters; apply safe cancellations explicitly
+    Sweep {
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
     Delete { issue: String },
     /// Edit a Task's title or notes, before or after placement
     Edit {
@@ -820,10 +789,13 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
-    /// Read the comment thread, or append direction without starting execution
+    /// Read the thread or publish a comment; agent comments default to progress
     Comment {
         issue: String,
         message: Option<String>,
+        /// Deliver new direction even when publishing from an agent Session
+        #[arg(long, requires = "message")]
+        steer: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
         #[arg(long)]
@@ -856,6 +828,32 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl TaskCommand {
+    pub fn selector(&self) -> Option<&str> {
+        match self {
+            Self::Worker { .. }
+            | Self::Create { .. }
+            | Self::Sweep { .. }
+            | Self::Pr { .. }
+            | Self::Wt { .. }
+            | Self::Sync(_)
+            | Self::Commit { .. } => None,
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
+            Self::Checkout { issue, .. }
+            | Self::Diff { issue, .. }
+            | Self::File { issue, .. }
+            | Self::Save { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Delete { issue }
+            | Self::Edit { issue, .. }
+            | Self::Comment { issue, .. }
+            | Self::Interrupt { issue, .. }
+            | Self::Wait { issue, .. }
+            | Self::Restart { issue, .. } => Some(issue),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -993,32 +991,13 @@ pub enum PrCommand {
         #[arg(long = "body")]
         body: Option<String>,
     },
-    /// Prepare a PR to land: rebase, clear scratch, mark ready, and assign it
+    /// Prepare a PR to land: sync, clear scratch, mark ready, and assign it
     /// to you. Nothing merges until you click merge on GitHub.
     Submit {
         #[arg(long)]
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
-        #[arg(short = 'w', long = "worktree")]
-        worktree: Option<String>,
-        #[arg(short = 'm', long = "message")]
-        message: Option<String>,
-        #[arg(long = "title")]
-        title: Option<String>,
-        #[arg(long = "body")]
-        body: Option<String>,
-    },
-    /// Prepare a PR, request exact-head auto-merge, and return without watching.
-    Arm {
-        #[arg(long)]
-        strict: bool,
-        #[arg(long)]
-        local: bool,
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1151,6 +1130,27 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
+    Connect {
+        /// Wave name (auto-detected if omitted)
+        wave: Option<String>,
+        /// Recursively initialize every Wave under wave/
+        #[arg(long, conflicts_with = "wave")]
+        all: bool,
+        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
+        #[arg(long = "team-key")]
+        team_key: Option<String>,
+        /// Repository Team display name. Defaults to the repository name.
+        #[arg(long = "team-name")]
+        team_name: Option<String>,
+    },
+    /// Refresh shared planning from Linear
+    Refresh {
+        wave: Option<String>,
+        #[arg(long, conflicts_with = "wave")]
+        all: bool,
+    },
+
     /// Advance every Wave to the named Project plan
     NewChapter {
         name: String,
@@ -1334,6 +1334,19 @@ pub enum AccountCommand {
         #[arg(long)]
         clear_chrome_profiles: bool,
     },
+    /// Spend one banked Codex reset for this named login
+    RedeemReset {
+        provider: String,
+        email: String,
+        /// Reuse this key when retrying the same redemption
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        /// Opaque credit ID returned by live status (otherwise the service chooses)
+        #[arg(long)]
+        credit_id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Explain configured and automatic account selection, or replace a route
     #[command(args_conflicts_with_subcommands = true)]
     Route {
@@ -1453,8 +1466,8 @@ pub enum WtCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove a worktree
-    Remove {
+    /// Delete a worktree and its local and remote branch; retain PR and Task outcomes
+    Delete {
         /// Worktree name to remove
         name: String,
         #[arg(short = 'f', long = "force")]
@@ -1481,7 +1494,7 @@ mod tests {
                 "removed root command {verb}"
             );
         }
-        for name in ["pr", "wt", "commit", "rebase", "op"] {
+        for name in ["pr", "wt", "commit", "sync", "op"] {
             assert!(
                 command.find_subcommand(name).is_none(),
                 "removed root {name}"
@@ -1520,8 +1533,8 @@ mod tests {
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
             vec!["lf", "task", "pr", "checks"],
-            vec!["lf", "wave", "sync", "product"],
-            vec!["lf", "wave", "sync", "--all"],
+            vec!["lf", "repo", "refresh", "product"],
+            vec!["lf", "repo", "refresh", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec![
                 "lf",
@@ -1537,7 +1550,7 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         for verb in [
-            "abandon", "recover", "enable", "disable", "prepare", "resume", "advance",
+            "recover", "enable", "disable", "prepare", "resume", "advance",
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
@@ -1662,14 +1675,14 @@ mod tests {
             "lf",
             "--mode",
             "batch",
-            "--as",
-            "wave:product",
+            "--wave",
+            "product",
             ":",
             "Which KR matters?",
         ])
         .expect("parse bound inline prompt");
 
-        assert_eq!(cli.as_work.as_deref(), Some("wave:product"));
+        assert_eq!(cli.wave.as_deref(), Some("product"));
         assert!(matches!(
             cli.command,
             Some(Commands::Inline { prompt }) if prompt == vec!["Which KR matters?"]
@@ -1950,56 +1963,16 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_positional_wave() {
-        let cli = Cli::try_parse_from(["lf", "wave", "connect", "pm"]).expect("parse");
-        let Some(Commands::Wave {
-            cmd:
-                WaveCommand::Connect {
-                    wave,
-                    wave_flag,
-                    all,
-                    ..
-                },
+        let cli = Cli::try_parse_from(["lf", "repo", "connect", "pm"]).expect("parse");
+        let Some(Commands::Repo {
+            cmd: RepoCommand::Connect { wave, all, .. },
         }) = cli.command
         else {
             panic!("expected pm init command");
         };
 
         assert_eq!(wave.as_deref(), Some("pm"));
-        assert_eq!(wave_flag, None);
         assert!(!all);
-    }
-
-    #[test]
-    fn task_run_accepts_linear_identifier_and_json() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "run",
-            "INF-123",
-            "--name",
-            "release-scoped-migrations",
-            "--stack-on",
-            "INF-122",
-            "--json",
-        ])
-        .expect("parse task run");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Run {
-                    issue,
-                    name,
-                    stack_on,
-                    json,
-                    ..
-                },
-        }) = cli.command
-        else {
-            panic!("expected task run command");
-        };
-        assert_eq!(issue, "INF-123");
-        assert_eq!(name.as_deref(), Some("release-scoped-migrations"));
-        assert_eq!(stack_on.as_deref(), Some("INF-122"));
-        assert!(json);
     }
 
     #[test]
@@ -2036,31 +2009,6 @@ mod tests {
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert_eq!(directive.as_deref(), Some("collect both reports"));
         assert!(json);
-    }
-
-    #[test]
-    fn task_run_accepts_flow_selection() {
-        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--flow", "incident"])
-            .expect("parse task lifecycle overrides");
-        let Some(Commands::Task {
-            cmd: TaskCommand::Run { flow, .. },
-        }) = cli.command
-        else {
-            panic!("expected task run command");
-        };
-        assert_eq!(flow.as_deref(), Some("incident"));
-    }
-
-    #[test]
-    fn task_run_rejects_design_only_outcome() {
-        assert!(Cli::try_parse_from(["lf", "task", "run", "INF-123", "--design-only"]).is_err());
-    }
-
-    #[test]
-    fn task_run_rejects_retired_reviewer_flag() {
-        assert!(
-            Cli::try_parse_from(["lf", "task", "run", "INF-123", "--reviewer", "parent"]).is_err()
-        );
     }
 
     #[test]
@@ -2109,15 +2057,6 @@ mod tests {
         assert!(
             matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Create { run: true, title: Some(title), notes: Some(notes), .. } }) if title == "New task" && notes == "Full report")
         );
-    }
-
-    #[test]
-    fn task_run_rejects_retired_headless_flag() {
-        let error = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--headless"])
-            .expect_err("--headless must not remain as an alias");
-        assert!(error
-            .to_string()
-            .contains("unexpected argument '--headless'"));
     }
 
     #[test]
@@ -2246,6 +2185,7 @@ mod tests {
                     message,
                     json,
                     wave: _,
+                    steer: _,
                 },
         }) = steer.command
         else {
@@ -2254,6 +2194,21 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message.as_deref(), Some("take the smaller approach"));
         assert!(Cli::try_parse_from(["lf", "task", "comment", "INF-123"]).is_ok());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "lf",
+                "task",
+                "comment",
+                "INF-123",
+                "--steer",
+                "keep the API"
+            ])
+            .unwrap()
+            .command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Comment { steer: true, .. }
+            })
+        ));
         assert!(
             Cli::try_parse_from(["lf", "task", "edit", "INF-123", "--notes", "revised"]).is_ok()
         );
@@ -2279,33 +2234,6 @@ mod tests {
                 "{removed} must not remain as a compatibility command"
             );
         }
-    }
-
-    #[test]
-    fn task_run_accepts_blocker_feedback() {
-        let task = Cli::try_parse_from([
-            "lf",
-            "task",
-            "run",
-            "W2-135",
-            "--reason",
-            "credential repaired",
-            "--json",
-        ])
-        .expect("parse Task advancement retry");
-        assert!(matches!(
-            task.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Run {
-                    issue,
-                    reason: Some(reason),
-                    json: true,
-                    ..
-                }
-            }) if issue == "W2-135" && reason == "credential repaired"
-        ));
-
-        assert!(Cli::try_parse_from(["lf", "task", "run", "W2-135", "--model", "codex",]).is_err());
     }
 
     #[test]
@@ -2335,14 +2263,30 @@ mod tests {
     #[test]
     fn navigation_belongs_to_flow_decisions() {
         for args in [
-            vec!["lf", "task", "run", "LOO-1", "--session", "review"],
-            vec!["lf", "task", "run", "LOO-1", "--summary", "approved"],
+            vec![
+                "lf",
+                "--task",
+                "LOO-1",
+                "flow",
+                "start",
+                "--session",
+                "review",
+            ],
+            vec![
+                "lf",
+                "--task",
+                "LOO-1",
+                "flow",
+                "start",
+                "--summary",
+                "approved",
+            ],
             vec!["lf", "session", "advance", "review", "approved"],
             vec!["lf", "session", "iterate", "review", "revise"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "task", "run", "LOO-1"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "--task", "LOO-1", "flow", "start"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_ok());
     }
 
@@ -2447,22 +2391,22 @@ mod tests {
     }
 
     #[test]
-    fn rebase_manual_recovery_modes_are_explicit_and_exclusive() {
-        let manual = Cli::try_parse_from(["lf", "task", "rebase", "--manual", "origin/main"])
-            .expect("parse manual rebase");
+    fn sync_manual_recovery_modes_are_explicit_and_exclusive() {
+        let manual = Cli::try_parse_from(["lf", "task", "sync", "--manual", "origin/main"])
+            .expect("parse manual sync");
         assert!(matches!(
             manual.command,
-            Some(Commands::Task { cmd: TaskCommand::Rebase(RebaseArgs {
+            Some(Commands::Task { cmd: TaskCommand::Sync(SyncArgs {
                 manual: true,
-                continue_rebase: false,
+                continue_sync: false,
                 abort: false,
                 onto: Some(ref onto),
                 ..
             }) }) if onto == "origin/main"
         ));
 
-        assert!(Cli::try_parse_from(["lf", "task", "rebase", "--continue", "--abort"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "rebase", "--plan", "--manual"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "sync", "--continue", "--abort"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "sync", "--plan", "--manual"]).is_err());
     }
 
     #[test]
@@ -2505,12 +2449,11 @@ mod tests {
 
     #[test]
     fn pm_init_accepts_all_flag() {
-        let cli = Cli::try_parse_from(["lf", "wave", "connect", "--all"]).expect("parse");
-        let Some(Commands::Wave {
+        let cli = Cli::try_parse_from(["lf", "repo", "connect", "--all"]).expect("parse");
+        let Some(Commands::Repo {
             cmd:
-                WaveCommand::Connect {
+                RepoCommand::Connect {
                     wave,
-                    wave_flag,
                     all,
                     team_key,
                     team_name,
@@ -2521,7 +2464,6 @@ mod tests {
         };
 
         assert_eq!(wave, None);
-        assert_eq!(wave_flag, None);
         assert!(all);
         assert_eq!(team_key, None);
         assert_eq!(team_name, None);
@@ -2531,9 +2473,8 @@ mod tests {
     fn pm_init_accepts_team_key_and_name() {
         let cli = Cli::try_parse_from([
             "lf",
-            "wave",
+            "repo",
             "connect",
-            "--wave",
             "product",
             "--team-key",
             "PRD",
@@ -2541,9 +2482,9 @@ mod tests {
             "Product",
         ])
         .expect("parse");
-        let Some(Commands::Wave {
+        let Some(Commands::Repo {
             cmd:
-                WaveCommand::Connect {
+                RepoCommand::Connect {
                     team_key,
                     team_name,
                     ..
@@ -2637,6 +2578,6 @@ mod tests {
 
 #[derive(Debug, Subcommand)]
 pub enum DiscordCommand {
-    /// Poll a configured channel and post each Run's final answer
+    /// Poll a configured channel and post each Session's final answer
     Serve { wave: String },
 }

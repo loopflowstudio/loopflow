@@ -70,6 +70,84 @@ struct TaskReadings<Value> {
 @MainActor
 @Observable
 final class PodiumModel {
+    private(set) var taskLinkURL: URL?
+    private(set) var taskLinkReading: PodiumReading<RoadmapSnapshot> = .loading
+    var showsTaskLink = false
+    @ObservationIgnored private var destinationGeneration = 0
+
+    @ObservationIgnored private var taskLinkExpectedID: String?
+
+    func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
+        destinationGeneration &+= 1
+        let generation = destinationGeneration
+        taskLinkURL = url
+        taskLinkExpectedID = expectedTaskID
+        taskLinkReading = .loading
+        showsTaskLink = true
+        do {
+            let link = try TaskLink(url: url)
+            let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
+            guard destinationGeneration == generation else { return }
+            let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
+            let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
+            if let expectedTaskID {
+                guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
+                    throw RegistryQueryError("The recent Task no longer resolves to its recorded identity.")
+                }
+                if matches.isEmpty, !unavailable {
+                    navigation.recentDestinations.removeAll { $0.id == .task(expectedTaskID) }
+                }
+            }
+            taskLinkReading = .available(result)
+            if matches.count == 1, !unavailable, let match = matches.first {
+                openTaskDestination(wave: match.0, task: match.1)
+            }
+        } catch {
+            guard destinationGeneration == generation else { return }
+            taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+        }
+    }
+
+    func dismissTaskLink() {
+        destinationGeneration &+= 1
+        showsTaskLink = false
+    }
+
+    func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
+        setRepoPath(wave.wave.repo)
+        navigation.selectedTaskEvidence = (wave, task)
+        select(.task(id: task.id))
+        remember(.task(task.id))
+    }
+
+    func remember(_ destination: WorkspaceDestination) {
+        guard let row = paletteRows.first(where: { $0.id == destination }) else { return }
+        navigation.recentDestinations.removeAll { $0.id == destination }
+        navigation.recentDestinations.insert(row, at: 0)
+        navigation.recentDestinations = Array(navigation.recentDestinations.prefix(20))
+    }
+
+    func openPaletteTask(_ id: String) async {
+        if let found = task(id: id) {
+            openTaskDestination(wave: found.wave, task: found.task)
+            return
+        }
+        guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
+              let repoPath else { return }
+        var components = URLComponents()
+        components.scheme = "loopflow"
+        components.host = "task"
+        components.path = "/" + recent.key
+        components.queryItems = [URLQueryItem(name: "repo", value: repoPath)]
+        guard let url = components.url else { return }
+        await openTaskLink(url, expectedTaskID: id)
+    }
+
+    func retryTaskLink() async {
+        guard let taskLinkURL else { return }
+        await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID)
+    }
+
     var historyWave: WaveSnapshot?
     var historyReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
@@ -88,6 +166,16 @@ final class PodiumModel {
     var workspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
     }
+    var breadcrumb: WorkspaceBreadcrumb? {
+        if let current = workspace.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {
+            return current
+        }
+        guard let retained = navigation.selectedTaskEvidence, selection == .task(id: retained.task.id) else { return nil }
+        // Exact lookup evidence supports inspection without joining the current plan.
+        return WorkspaceProjection(roadmaps: [retained.wave], sessions: sessions.value ?? [])
+            .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
+    }
+
     /// Visibility never changes the inventory used by panes and selection.
     var visibleWorkspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
@@ -395,6 +483,7 @@ final class PodiumModel {
     }
 
     func setRepoPath(_ path: String?) {
+        dismissTaskLink()
         let path = path.map(WaveOrigin.resolve)
         if repoPath?.normalizedFilePath != path?.normalizedFilePath {
             historyLookup?.cancel()
@@ -431,6 +520,7 @@ final class PodiumModel {
     }
 
     func select(_ requested: WorkReference?) {
+        dismissTaskLink()
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind != .project {
@@ -727,10 +817,12 @@ final class PodiumModel {
                 return (wave, task)
             }
         }
-        if let previous = navigation.selectedTaskEvidence, previous.task.id == id,
-           let current = wave(id: previous.wave.wave.id),
-           current.tasks.unavailableReason != nil || current.projects.unavailableReason != nil || current.projects.items.filter { $0.status == .started }.count != 1 {
-            return (current, previous.task)
+        if let retained = navigation.selectedTaskEvidence, retained.task.id == id {
+            if let current = wave(id: retained.wave.wave.id),
+               current.tasks.unavailableReason != nil || current.projects.unavailableReason != nil || current.projects.items.filter({ $0.status == .started }).count != 1 {
+                return (current, retained.task)
+            }
+            return retained
         }
         return nil
     }
@@ -748,6 +840,7 @@ final class PodiumModel {
 
     func clearSelectionIfOutsideScope() {
         guard let selection else { return }
+        if selection.kind == .task, navigation.selectedTaskEvidence?.task.id == selection.id { return }
         // The repository's Session reading retains Work even when current
         // planning no longer contains it. Keep that conversation's selection.
         if let records = sessions.value {

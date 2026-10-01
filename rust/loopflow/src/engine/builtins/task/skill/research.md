@@ -65,6 +65,6 @@ complexity, quality gaps or latent capabilities when they bear on the question.
 Open questions are a valid result; do not force recommendations or a report shape.
 
 When contributing independent research to another active writer, use the exact
-assigned artifact or a distinct topic/Run path and leave the canonical design to
+assigned artifact or a distinct topic path and leave the canonical design to
 its owner. Publish a complete artifact atomically; a path alone does not deliver
 its contents to another checkout. Preserve source attribution and proof limits.

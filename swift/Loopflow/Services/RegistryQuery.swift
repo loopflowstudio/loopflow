@@ -44,7 +44,7 @@ public struct RegistryQuery: Sendable {
         self.observe = watchActiveSessions
     }
 
-    /// Current Waves across the machine, including stopped Waves. The shared
+    /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
         let stdout = try await run(["wave", "list", "--all", "--current", "--json"], nil)
@@ -52,7 +52,7 @@ public struct RegistryQuery: Sendable {
         return snapshots.map { $0.toWave() }
     }
 
-    /// Every wave the registry knows (running and stopped alike), scoped to one
+    /// Every current Wave the registry knows, scoped to one
     /// repo. This replaces the old `/ws` connected snapshot — a point-in-time
     /// read the caller re-queries on a cadence, not a stream.
     public func waves(repoPath: String) async throws -> [Wave] {
@@ -61,8 +61,7 @@ public struct RegistryQuery: Sendable {
         return waves.filter { $0.repo.normalizedFilePath == target }
     }
 
-    /// One wave's Project/Task work, plus the live loop state when its resident
-    /// is answering.
+    /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
@@ -82,6 +81,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
+        var args = ["roadmap", "--task", issue, "--json"]
+        if repo == nil { args.append("--all") }
+        return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
+    }
+
     /// Exact OS-live Loopflow process trees and unattributed provider processes.
     public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)
@@ -97,7 +102,7 @@ public struct RegistryQuery: Sendable {
         try await observe()
     }
 
-    /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
+    /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.
     /// Filters are composed by `lf` before its bounded presentation window.
     public func workActivity(
         since: String = "7d",
@@ -130,8 +135,8 @@ public struct RegistryQuery: Sendable {
 
     /// Start (preparing when needed) the Task's managed Flow.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
-        var args = ["task", "run", issue]
-        if let flow { args += ["--flow", flow] }
+        var args = ["--task", issue, "flow", "start"]
+        if let flow { args.append(flow) }
         _ = try await run(args, cwd)
     }
 
@@ -258,7 +263,7 @@ public struct RegistryQuery: Sendable {
         cwd: String?,
         sync: Bool = false
     ) async throws -> WavePlan {
-        if sync { _ = try await run(["wave", "sync", wave], cwd) }
+        if sync { _ = try await run(["repo", "refresh", wave], cwd) }
         let stdout = try await run(["wave", "status", wave, "--json"], cwd)
         let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
         return WavePlan(objective: objective, projects: snapshot.projects)

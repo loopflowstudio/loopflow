@@ -10,7 +10,7 @@ or inspect its cron schedule:
 
 ```bash
 lf wave status <wave> --json
-lf --as wave:<wave> wave/operate
+lf --wave <wave> wave/operate
 lf cron list
 ```
 
@@ -53,11 +53,11 @@ lf session connect <session-id>
 lf session complete <session-id>       # return saved review or Ask feedback
 lf comment INF-123 "address the latest feedback"
 lf interrupt INF-123
-lf task run INF-123
-lf task run INF-123 --reason "provider credentials repaired"
+lf --task INF-123 flow start
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-`task run` continues the captured Flow with the Task Work, Steers, worktree, and
+`flow start` continues the captured Flow with the Task Work, Steers, worktree, and
 active PR. It refuses while another exact Task worker is live. A Task Steer
 is a Linear Task comment; the active Task worker receives new comments when
 possible and the next Skill seed always reads them. `task interrupt` ends the
@@ -84,10 +84,10 @@ account in the grant. `--account` retains the normal route as fallback;
 After repairing provider access, retry the Task or Project operation:
 
 ```bash
-lf task run INF-123 --reason "provider credentials repaired"
+lf --task INF-123 flow start --reason "provider credentials repaired"
 ```
 
-Wave planning uses finite conversations. Invoke `lf --as wave:<wave> wave/operate`
+Wave planning uses finite conversations. Invoke `lf --wave <wave> wave/operate`
 for another planning pass; it has no resident Project process to resume.
 
 Other options:
@@ -110,17 +110,15 @@ lf wt prune                            # remove those worktrees and their branch
 
 Prune always preserves uncommitted files. Without terminal evidence, an open PR
 or branch activity in the last seven days also prevents cleanup. Use
-`lf wt remove NAME --force` only when intentionally discarding a worktree.
-
-Feature-worktree integration fetches and pins `origin/<default>` without
-moving the default-branch checkout:
+`lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
-lf rebase
+lf task sync
 ```
 
-The feature branch uses the current remote base even when the sibling default
-checkout has not moved.
+Refreshes the local default branch, preserving its unpublished commits and edits,
+then merges it into the feature branch. Stacked Tasks merge their live parent
+until it lands, then merge the default branch using their recorded fork.
 
 ## Status says `ready`, but the Task is waiting
 

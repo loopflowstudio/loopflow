@@ -5,6 +5,18 @@ Trace & Context in one measured bet: explicitly selected work is explainable fro
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
 
+## Check ownership (2026-09-30)
+
+Jack Heart requested fewer checks and no Flow blocks on display access or a
+person's judgment (LOO-357). Implement/compress build and run focused sanity
+tests; gate owns affected suites and acceptance once. Unavailable checks go to
+capable gate/CI, judgment to demo/review. Scratch keeps one command/result line.
+Historical measurements below describe their original scope; they do not impose
+new verification obligations on each pass. Desktop's default Swift checks build
+the app and inspect production views without launching windows; native window
+and terminal diagnostics are opt-in. The September 30 baseline and repeatable
+collector live in `performance/check-cost.md`.
+
 ## Attribution and feedback evidence (curated 2026-09-25)
 
 - A first-page GraphQL query captured author names while pagination fetched

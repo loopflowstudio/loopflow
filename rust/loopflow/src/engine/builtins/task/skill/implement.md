@@ -1,6 +1,6 @@
 ---
 requires: intended change and an implementation plan
-produces: working implementation, focused proof, and an updated plan
+produces: working implementation, focused check, and an updated plan
 action_style: procedural
 ---
 Turn the design doc into working code.
@@ -32,36 +32,43 @@ Use the supplied design and repository conventions. A small change may have its
 plan in the conversation; do not require a document template or a prior skill.
 
 1. **Understand the design**
-   Recover the intended outcome, accepted constraints, approach, and proof.
+   Recover the intended outcome, accepted constraints, approach, and acceptance checks.
    Read the current plan wherever it lives. Reconstruct the affected concepts,
    owners, persistence, and call paths before choosing where behavior belongs.
+   Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
+   and their exclusive tests/fixtures slated for removal, with required behavior,
+   data, and tests to preserve. Keep it current across passes.
 
 2. **Implement**
-   - Data structures first—get the core types right
+   - Make the deepest planned deletions first: remove obsolete concepts,
+     authorities, and paths, then build data structures on what remains.
+   - Never repair, refactor, or extend a deletion target or its exclusive
+     tests/fixtures. When one fails, carry out the planned removal instead.
+     Preserve coverage of required behavior on the surviving path.
+   - Move real consumers end to end and include any required data migration in
+     the deletion cut. Temporary compile/test breakage within the cut is no
+     reason to repair the predecessor; finish the cut before checking the result.
+     New capabilities need no invented predecessor or deletion quota.
    - Functions one at a time, following the signatures
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation
-   - Delete the authority or path the design makes obsolete
-   - When replacing an existing path, move a real consumer end to end and
-     delete the predecessor in the same cut. New capabilities need no invented
-     predecessor or deletion quota.
    - Follow the design's delivery boundary. An indivisible architectural change
      proceeds in coherent internal slices but ships as one PR. Keep the complete
      target and update the remaining work as implementation teaches us more.
      Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
-3. **Verify**
-   - Run the smallest behavioral test that proves the behavior you changed
-   - Run the "done when" check from the design doc
-   - If a required proof cannot run, stop dependent work and record the exact
-     command and blocker. "Authored, not executed" is not a completed pass.
-   - Update the working plan in place with remaining work, consequential
-     discoveries, and proof results or links. Delete stale instructions; retain
-     accepted requirements and unresolved counterexamples. Leave a brief summary
-     of progress, learning, and proof when useful for the handoff; avoid
-     duplicating the plan in a report for each pass.
-   - Do not run an affected-suite or full-repository gate here; gate and CI own
-     those broader proofs
+3. **Sanity check**
+   - Build the changed code and run the focused test for the behavior changed.
+     Skip builds for prose-only edits. Reuse a still-applicable passing result;
+     do not repeat a command without a change or failure that warrants it.
+   - Gate owns affected suites and the design's automated acceptance checks,
+     once. Do not run them early because they appear in Done when.
+   - If a check cannot run headless here, use a headless equivalent or leave it
+     to gate/CI. Human judgment belongs to demo/review. Neither is a reason to
+     stop implementation or block the Flow. An actual build or test failure
+     still needs a fix.
+   - Update remaining work in place. Keep one command/result line with any
+     deferred owner; no pass ledger or repeated caveats.
 
 ## Rules
 
@@ -74,7 +81,7 @@ concept. Legacy/New enums, v2 types, adapters, fallbacks, dual writes,
 compatibility shims, and parallel stores are blocking by default. Use one only
 when the reviewed design explicitly authorizes it and names its deletion point.
 
-**Tests prove it works.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
+**Test behavior.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
 
 ## Task context
 
@@ -100,6 +107,11 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 - Note drift from wave constraints in `scratch/questions.md`
 
 ## When the design is wrong
+
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Home
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
 
 If the design doc is unclear, make the simplest reversible choice and record it
 in `scratch/questions.md`.

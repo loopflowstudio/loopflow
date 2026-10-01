@@ -177,6 +177,7 @@ while read -r line; do :; done
             login_email: Some(loopflow::profile::EmailAddress::parse(&email).unwrap()),
             observed_email: None,
             observed_subject: None,
+            observed_credential_digest: None,
             observed_plan: None,
             credential_state: CredentialState::Connected,
             routing_state: RoutingState::Automatic,

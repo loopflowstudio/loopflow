@@ -3,31 +3,26 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::git::{
-    abort_rebase as abort_git_rebase, continue_rebase as continue_git_rebase, current_branch,
-    fetch, get_default_branch, intervention_state, rebase as start_git_rebase_for_resolution,
-    rerere_remaining, rev_parse, squash_merge_fork_point,
+    abort_merge, continue_merge, current_branch, fetch, get_default_branch, intervention_state,
+    merge, rerere_remaining, rev_parse,
 };
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::git_operation::{
-    authorize_rebase_control, begin_rebase_operation, GitOperationOwner, RebaseOperation,
+    authorize_sync_control, begin_sync_operation, GitOperationOwner, SyncOperation,
 };
 use crate::ops::progress::Progress;
 
 #[derive(Debug, Clone)]
-pub struct RebaseOptions {
+pub struct SyncOptions {
     pub onto: String,
     pub push: bool,
-    /// The durable fork commit a stacked child was placed on. When set, the
-    /// rebase replays exactly `fork_base..HEAD` onto `onto` via `git rebase
-    /// --onto`, dropping the parent commits deterministically — squash-proof,
-    /// because it never depends on patch-id matching. `None` keeps the
-    /// runtime fork-point heuristic used for ordinary branches.
+    /// The recorded parent tip used as the merge base after squash landing.
     pub fork_base: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RebaseClass {
+pub enum SyncClass {
     StaleEmpty,
     ScratchOnly,
     GeneratedOnly,
@@ -36,39 +31,35 @@ pub enum RebaseClass {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RebaseStrategy {
+pub enum SyncStrategy {
     Noop,
-    MergeMain,
     ResetToBase,
-    DirectRebase,
+    MergeTarget,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebasePlan {
+pub struct SyncPlan {
     pub branch: String,
     pub base_ref: String,
-    /// The durable stacked fork base, when this branch is a stacked child. The
-    /// rebase replays `fork_base..HEAD` onto `base_ref`; `--plan`, execution,
-    /// and the PR range all read this one value.
+    /// The recorded stack base shared by planning, integration and the PR range.
     pub fork_base: Option<String>,
-    pub class: RebaseClass,
-    pub strategy: RebaseStrategy,
+    pub class: SyncClass,
+    pub strategy: SyncStrategy,
     pub unique_commits: usize,
     pub changed_files: Vec<PathBuf>,
     pub scratch_stashed: bool,
 }
 
 #[derive(Debug)]
-struct RebaseExpectation {
-    strategy: RebaseStrategy,
-    authored_commits: usize,
-    expected_nonempty_range: bool,
+struct SyncExpectation {
+    strategy: SyncStrategy,
     tracked_dirty: BTreeSet<String>,
     stacked: bool,
+    require_changes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebaseVerification {
+pub struct SyncVerification {
     pub branch: String,
     pub head: String,
     pub target_sha: String,
@@ -76,17 +67,17 @@ pub struct RebaseVerification {
 }
 
 #[derive(Debug)]
-pub struct RebaseRecovery {
-    operation: RebaseOperation,
-    expected: RebaseExpectation,
+pub struct SyncRecovery {
+    operation: SyncOperation,
+    expected: SyncExpectation,
     push: bool,
 }
 
-pub fn plan_rebase(
+pub fn plan_sync(
     repo: &Path,
     onto: Option<&str>,
     fork_base: Option<String>,
-) -> OpsResult<RebasePlan> {
+) -> OpsResult<SyncPlan> {
     let default_branch = get_default_branch(repo)?;
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
     let base_ref = if let Some(onto) = onto {
@@ -95,9 +86,10 @@ pub fn plan_rebase(
         format!("origin/{default_branch}")
     };
 
-    let unique_commits = count_unique_commits(repo, &base_ref).unwrap_or(0);
-    let mut changed_files = diff_names(repo, &base_ref).unwrap_or_default();
-    for path in dirty_paths(repo).unwrap_or_default() {
+    let comparison_base = fork_base.as_deref().unwrap_or(&base_ref);
+    let unique_commits = count_unique_commits(repo, comparison_base)?;
+    let mut changed_files = diff_names(repo, comparison_base)?;
+    for path in dirty_paths(repo)? {
         if !changed_files.contains(&path) {
             changed_files.push(path);
         }
@@ -115,31 +107,40 @@ pub fn plan_rebase(
 
     let (class, strategy) = if branch == default_branch {
         let strategy = if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
-            RebaseStrategy::Noop
-        } else if base_ref == format!("origin/{default_branch}") {
-            RebaseStrategy::MergeMain
+            SyncStrategy::Noop
         } else {
-            RebaseStrategy::DirectRebase
+            SyncStrategy::MergeTarget
         };
-        (RebaseClass::Protected, strategy)
+        (SyncClass::Protected, strategy)
     } else if protected {
-        (RebaseClass::Protected, RebaseStrategy::DirectRebase)
+        (SyncClass::Protected, SyncStrategy::MergeTarget)
     } else if unique_commits == 0 && scratch_only {
-        (RebaseClass::ScratchOnly, RebaseStrategy::ResetToBase)
+        (SyncClass::ScratchOnly, SyncStrategy::ResetToBase)
     } else if unique_commits == 0 && changed_files.is_empty() {
-        (RebaseClass::StaleEmpty, RebaseStrategy::ResetToBase)
+        (SyncClass::StaleEmpty, SyncStrategy::ResetToBase)
     } else if has_non_scratch_changes {
-        (RebaseClass::CleanAuthored, RebaseStrategy::DirectRebase)
-    } else if scratch_only || generated_only(repo, &base_ref).unwrap_or(false) {
-        (RebaseClass::GeneratedOnly, RebaseStrategy::ResetToBase)
+        (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
+    } else if scratch_only || generated_only(repo, comparison_base)? {
+        (SyncClass::GeneratedOnly, SyncStrategy::ResetToBase)
     } else {
-        (RebaseClass::CleanAuthored, RebaseStrategy::DirectRebase)
+        (SyncClass::CleanAuthored, SyncStrategy::MergeTarget)
+    };
+    // A stacked child's scratch deletion is intentional history. Resetting to
+    // the parent would discard it and copy the parent's notes back into the child.
+    let strategy = if fork_base.is_some() {
+        if crate::engine::git::is_ancestor(repo, &base_ref, "HEAD")? {
+            SyncStrategy::Noop
+        } else {
+            SyncStrategy::MergeTarget
+        }
+    } else {
+        strategy
     };
 
     let scratch_stashed =
-        matches!(strategy, RebaseStrategy::ResetToBase) && repo.join("scratch").exists();
+        matches!(strategy, SyncStrategy::ResetToBase) && repo.join("scratch").exists();
 
-    Ok(RebasePlan {
+    Ok(SyncPlan {
         branch,
         base_ref,
         fork_base,
@@ -151,103 +152,86 @@ pub fn plan_rebase(
     })
 }
 
-pub fn rebase_with_recovery(
+pub fn sync_with_recovery(
     repo: &Path,
-    options: &RebaseOptions,
+    options: &SyncOptions,
     progress: &impl Progress,
-) -> OpsResult<RebaseVerification> {
+) -> OpsResult<SyncVerification> {
     let default = get_default_branch(repo)?;
     if current_branch(repo)?.as_deref() == Some(&default)
         && options.onto == format!("origin/{default}")
     {
         crate::ops::checkout::refresh_main(repo, progress)?;
         let target_sha = rev_parse(repo, &options.onto)?;
-        return Ok(RebaseVerification {
+        return Ok(SyncVerification {
             branch: default,
             head: rev_parse(repo, "HEAD")?,
             unique_commits: count_unique_commits(repo, &target_sha)?,
             target_sha,
         });
     }
-    start_owned_rebase(repo, options, false, progress)
+    start_owned_sync(repo, options, false, progress)
 }
 
-/// Submit/land's final replay: collapse disposable history inside the owned
-/// integration operation. Kept crate-private so ordinary rebase has one stable,
-/// history-preserving contract.
-pub(crate) fn rebase_final_with_recovery(
+/// Delivery must not publish an empty tree, even for an unmanaged branch.
+pub(crate) fn sync_for_delivery(
     repo: &Path,
-    options: &RebaseOptions,
+    options: &SyncOptions,
     progress: &impl Progress,
-) -> OpsResult<RebaseVerification> {
-    start_owned_rebase(repo, options, true, progress)
+) -> OpsResult<SyncVerification> {
+    start_owned_sync(repo, options, true, progress)
 }
 
-/// Start a local rebase and preserve conflicts for inline resolution.
-pub fn start_rebase_for_resolution(
-    repo: &Path,
-    options: &RebaseOptions,
-    progress: &impl Progress,
-) -> OpsResult<RebaseVerification> {
-    let local = RebaseOptions {
-        onto: options.onto.clone(),
-        push: false,
-        fork_base: options.fork_base.clone(),
-    };
-    rebase_with_recovery(repo, &local, progress)
+/// Continue a local sync after its conflict paths have been resolved.
+pub fn continue_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
+    continue_sync_after_authorization(repo, adopt, || Ok(()))
 }
 
-/// Continue a local rebase after its conflict paths have been resolved.
-pub fn continue_rebase_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    continue_rebase_after_authorization(repo, adopt, || Ok(()))
-}
-
-pub(crate) fn continue_rebase_after_authorization(
+pub(crate) fn continue_sync_after_authorization(
     repo: &Path,
     adopt: bool,
     before_mutation: impl FnOnce() -> OpsResult<()>,
 ) -> OpsResult<()> {
-    let authorization = authorize_rebase_control(repo, adopt)?;
+    let authorization = authorize_sync_control(repo, adopt)?;
     before_mutation()?;
-    let result = continue_git_rebase(repo)?;
+    let result = continue_merge(repo, authorization.owner().target_sha.as_deref())?;
     if result.success {
-        let owner = authorization.owner().clone();
-        verify_control_completion(repo, &owner)?;
-        record_control_task_state(repo, &owner)?;
+        verify_control_completion(repo, authorization.owner())?;
+        record_control_task_state(repo, authorization.owner())?;
         authorization.complete()?;
         return Ok(());
     }
-    Err(OpsError::RebaseConflict {
+    Err(OpsError::SyncConflict {
         onto: authorization.owner().target_ref.clone(),
         detail: conflict_detail(result.conflicts),
         recovery: None,
     })
 }
 
-/// Abort a local rebase that was left open for inline resolution.
-pub fn abort_rebase_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    abort_rebase_after_authorization(repo, adopt, || Ok(()))
+/// Abort a local sync that was left open for inline resolution.
+pub fn abort_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
+    abort_sync_after_authorization(repo, adopt, || Ok(()))
 }
 
-pub(crate) fn abort_rebase_after_authorization(
+pub(crate) fn abort_sync_after_authorization(
     repo: &Path,
     adopt: bool,
     before_mutation: impl FnOnce() -> OpsResult<()>,
 ) -> OpsResult<()> {
-    let authorization = authorize_rebase_control(repo, adopt)?;
+    let authorization = authorize_sync_control(repo, adopt)?;
     before_mutation()?;
-    abort_git_rebase(repo)?;
+    abort_merge(repo)?;
     authorization.complete()?;
     Ok(())
 }
 
-pub fn recover_rebase(
-    recovery: RebaseRecovery,
+pub fn recover_sync(
+    recovery: SyncRecovery,
     launch: impl FnOnce(&BTreeMap<String, String>) -> OpsResult<()>,
-) -> OpsResult<RebaseVerification> {
+) -> OpsResult<SyncVerification> {
     let worktree = recovery.operation.owner().worktree.clone();
     launch(&recovery.operation.scoped_env())?;
-    finish_rebase(
+    finish_sync(
         &worktree,
         recovery.operation,
         &recovery.expected,
@@ -255,90 +239,58 @@ pub fn recover_rebase(
     )
 }
 
-fn start_owned_rebase(
+fn start_owned_sync(
     repo: &Path,
-    options: &RebaseOptions,
-    collapse: bool,
+    options: &SyncOptions,
+    require_changes: bool,
     progress: &impl Progress,
-) -> OpsResult<RebaseVerification> {
-    let mut operation = begin_rebase_operation(repo, &options.onto)?;
+) -> OpsResult<SyncVerification> {
+    let mut operation = begin_sync_operation(repo, &options.onto)?;
     let tracked_dirty = tracked_dirty_state(repo)?;
     fetch_target(repo, &options.onto)?;
     let target_sha = rev_parse(repo, &options.onto)?;
-    let plan = plan_rebase(repo, Some(&options.onto), options.fork_base.clone())?;
+    let plan = plan_sync(repo, Some(&options.onto), options.fork_base.clone())?;
     operation.pin_target(target_sha.clone())?;
     revalidate_start(repo, operation.owner())?;
 
-    let collapsed_fork = if collapse {
-        Some(collapse_authored_history(
-            repo,
-            operation.owner(),
-            options.fork_base.as_deref(),
-            &target_sha,
-            progress,
-        )?)
-    } else {
-        None
-    };
-    let prepared_head = rev_parse(repo, "HEAD")?;
-    let authored_commits = cherry_authored_count(repo, &target_sha, "HEAD")?;
-    let strategy = if collapse {
-        RebaseStrategy::DirectRebase
-    } else {
-        plan.strategy.clone()
-    };
-    let expected = RebaseExpectation {
-        strategy: strategy.clone(),
-        authored_commits: if collapse { 1 } else { authored_commits },
-        expected_nonempty_range: collapse
-            || (matches!(strategy, RebaseStrategy::DirectRebase) && authored_commits > 0),
+    let expected = SyncExpectation {
+        strategy: plan.strategy.clone(),
         tracked_dirty,
         stacked: options.fork_base.is_some(),
+        require_changes,
     };
-    revalidate_owned_head(repo, &operation.owner().branch, &prepared_head)?;
+    validate_fork_base(repo, options.fork_base.as_deref())?;
 
-    if matches!(strategy, RebaseStrategy::ResetToBase) {
+    if matches!(plan.strategy, SyncStrategy::ResetToBase) {
         reset_to_base(repo, &plan, progress)?;
-        return finish_rebase(repo, operation, &expected, options.push);
+        return finish_sync(repo, operation, &expected, options.push);
     }
-    if matches!(strategy, RebaseStrategy::Noop) {
-        return finish_rebase(repo, operation, &expected, options.push);
+    if matches!(plan.strategy, SyncStrategy::Noop) {
+        return finish_sync(repo, operation, &expected, false);
     }
 
-    let fork_point = match collapsed_fork {
-        Some(base) => Some(base),
-        None => match resolve_fork_point(repo, options)? {
-            Some(base) => Some(base),
-            None => squash_merge_fork_point(repo, &target_sha).unwrap_or(None),
-        },
-    };
-    revalidate_owned_head(repo, &operation.owner().branch, &prepared_head)?;
-    progress.status(&format!("Rebasing onto {}...", options.onto));
-    let result = start_git_rebase_for_resolution(repo, &target_sha, fork_point.as_deref())?;
+    progress.status(&format!("Merging {}...", options.onto));
+    let result = merge(repo, &target_sha, options.fork_base.as_deref())?;
     if result.success {
-        if fork_point.is_some() {
-            progress.status("Skipped merged parent commits");
-        }
-        return finish_rebase(repo, operation, &expected, options.push);
+        return finish_sync(repo, operation, &expected, options.push);
     }
-    if intervention_state(repo)? != Some("rebase") {
+    if intervention_state(repo)? != Some("merge") {
         operation.complete()?;
         return Err(OpsError::Message(format!(
-            "git rebase onto {} stopped before creating a recoverable sequencer",
+            "git merge of {} stopped before creating a recoverable sequencer",
             options.onto
         )));
     }
 
     if continue_reused_resolutions(repo, progress)? {
         progress.status("Reused recorded conflict resolution");
-        return finish_rebase(repo, operation, &expected, options.push);
+        return finish_sync(repo, operation, &expected, options.push);
     }
 
-    let detail = conflict_detail(result.conflicts);
-    Err(OpsError::RebaseConflict {
+    Err(OpsError::SyncConflict {
         onto: options.onto.clone(),
-        detail: detail.clone(),
-        recovery: Some(Box::new(RebaseRecovery {
+        detail: conflict_detail(result.conflicts),
+        recovery: Some(Box::new(SyncRecovery {
             operation,
             expected,
             push: options.push,
@@ -346,35 +298,23 @@ fn start_owned_rebase(
     })
 }
 
-/// Continue as long as every active conflict was populated by rerere. The Git
-/// wrapper stages only the current unmerged paths, never unrelated work, and
-/// keeps rerere's own auto-stage behavior disabled.
+/// Complete a merge when rerere populated every unresolved path.
 fn continue_reused_resolutions(repo: &Path, progress: &impl Progress) -> OpsResult<bool> {
-    loop {
-        let conflicts = git(repo, &["diff", "--diff-filter=U", "--name-only"])?;
-        if conflicts.trim().is_empty() || !rerere_remaining(repo)?.is_empty() {
-            return Ok(false);
-        }
-        progress.status("Applying recorded conflict resolution...");
-        let result = continue_git_rebase(repo)?;
-        if result.success {
-            return Ok(true);
-        }
-        if intervention_state(repo)? != Some("rebase") {
-            return Err(OpsError::Message(
-                "rebase stopped after rerere without a recoverable sequencer".to_string(),
-            ));
-        }
+    let conflicts = git(repo, &["diff", "--diff-filter=U", "--name-only"])?;
+    if conflicts.trim().is_empty() || !rerere_remaining(repo)?.is_empty() {
+        return Ok(false);
     }
+    progress.status("Applying recorded conflict resolution...");
+    Ok(continue_merge(repo, None)?.success)
 }
 
-fn finish_rebase(
+fn finish_sync(
     repo: &Path,
-    operation: RebaseOperation,
-    expected: &RebaseExpectation,
+    operation: SyncOperation,
+    expected: &SyncExpectation,
     push: bool,
-) -> OpsResult<RebaseVerification> {
-    let verification = verify_rebase(repo, operation.owner(), expected)?;
+) -> OpsResult<SyncVerification> {
+    let verification = verify_sync(repo, operation.owner(), expected)?;
     if !expected.stacked {
         crate::ops::task::validate_task_pr_range_for_integration(
             repo,
@@ -383,11 +323,11 @@ fn finish_rebase(
         )?;
     }
     if push {
-        // Rebase owns a force-push path rather than the ordinary commit helper,
+        // Sync owns a force-push path rather than the ordinary commit helper,
         // but it must cross the same Task settlement fence first.
         let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
         crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
-        push_rebased_branch(repo, &verification.branch)?;
+        push_synced_branch(repo, &verification.branch)?;
         crate::ops::commit::verify_remote_branch_head(
             repo,
             &verification.branch,
@@ -405,37 +345,37 @@ fn finish_rebase(
     Ok(verification)
 }
 
-fn verify_rebase(
+fn verify_sync(
     repo: &Path,
     owner: &GitOperationOwner,
-    expected: &RebaseExpectation,
-) -> OpsResult<RebaseVerification> {
+    expected: &SyncExpectation,
+) -> OpsResult<SyncVerification> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: Git still reports an active {state} operation"
+            "sync incomplete: Git still reports an active {state} operation"
         )));
     }
     let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("rebase incomplete: HEAD is detached".to_string()))?;
+        .ok_or_else(|| OpsError::Message("sync incomplete: HEAD is detached".to_string()))?;
     if branch != owner.branch {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: expected branch {}, found {branch}",
+            "sync incomplete: expected branch {}, found {branch}",
             owner.branch
         )));
     }
     let head = rev_parse(repo, "HEAD")?;
     let target_sha = owner.target_sha.as_deref().ok_or_else(|| {
-        OpsError::Message("rebase verification has no pinned target commit".to_string())
+        OpsError::Message("sync verification has no pinned target commit".to_string())
     })?;
     if !crate::engine::git::is_ancestor(repo, target_sha, &head)? {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: pinned target {target_sha} is not an ancestor of HEAD {head}"
+            "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD {head}"
         )));
     }
     let conflicts = git(repo, &["diff", "--diff-filter=U", "--name-only"])?;
     if !conflicts.trim().is_empty() {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: unresolved paths remain: {}",
+            "sync incomplete: unresolved paths remain: {}",
             conflicts.lines().collect::<Vec<_>>().join(", ")
         )));
     }
@@ -446,21 +386,27 @@ fn verify_rebase(
         .collect::<Vec<_>>();
     if !introduced.is_empty() {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: new tracked dirty state remains: {}",
+            "sync incomplete: new tracked dirty state remains: {}",
             introduced.join(", ")
         )));
     }
     let unique_commits = count_unique_commits(repo, target_sha)?;
-    if matches!(expected.strategy, RebaseStrategy::DirectRebase)
-        && expected.expected_nonempty_range
-        && unique_commits == 0
+    if matches!(expected.strategy, SyncStrategy::MergeTarget)
+        && !crate::engine::git::is_ancestor(repo, &owner.head, &head)?
     {
-        return Err(OpsError::Message(format!(
-            "rebase incomplete: {} authored commit(s) were expected, but {target_sha}..HEAD is empty",
-            expected.authored_commits
-        )));
+        return Err(OpsError::Message(
+            "sync lost the original branch history".to_string(),
+        ));
     }
-    Ok(RebaseVerification {
+    if expected.require_changes
+        && rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))?
+    {
+        return Err(OpsError::Message(
+            "no authored changes remain after integration; refusing to publish an empty PR"
+                .to_string(),
+        ));
+    }
+    Ok(SyncVerification {
         branch,
         head,
         target_sha: target_sha.to_string(),
@@ -471,15 +417,15 @@ fn verify_rebase(
 fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
-            "rebase incomplete: Git still reports an active {state} operation"
+            "sync incomplete: Git still reports an active {state} operation"
         )));
     }
     if owner.branch != "HEAD" {
         let branch = current_branch(repo)?
-            .ok_or_else(|| OpsError::Message("rebase incomplete: HEAD is detached".to_string()))?;
+            .ok_or_else(|| OpsError::Message("sync incomplete: HEAD is detached".to_string()))?;
         if branch != owner.branch {
             return Err(OpsError::Message(format!(
-                "rebase incomplete: expected branch {}, found {branch}",
+                "sync incomplete: expected branch {}, found {branch}",
                 owner.branch
             )));
         }
@@ -487,21 +433,20 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     if let Some(target_sha) = owner.target_sha.as_deref() {
         if !crate::engine::git::is_ancestor(repo, target_sha, "HEAD")? {
             return Err(OpsError::Message(format!(
-                "rebase incomplete: pinned target {target_sha} is not an ancestor of HEAD"
+                "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
             )));
         }
         let introduced = tracked_dirty_state(repo)?;
         if !introduced.is_empty() {
             return Err(OpsError::Message(format!(
-                "rebase incomplete: tracked dirty state remains: {}",
+                "sync incomplete: tracked dirty state remains: {}",
                 introduced.into_iter().collect::<Vec<_>>().join(", ")
             )));
         }
-        let authored_commits = cherry_authored_count(repo, target_sha, &owner.head)?;
-        if authored_commits > 0 && count_unique_commits(repo, target_sha)? == 0 {
-            return Err(OpsError::Message(format!(
-                "rebase incomplete: {authored_commits} authored commit(s) were expected, but {target_sha}..HEAD is empty"
-            )));
+        if !crate::engine::git::is_ancestor(repo, &owner.head, "HEAD")? {
+            return Err(OpsError::Message(
+                "sync lost the original branch history".to_string(),
+            ));
         }
     }
     Ok(())
@@ -513,7 +458,7 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
         let clear_parent = stacked.parent_branch.is_none();
-        return crate::ops::task::record_stack_rebase(&stacked, target_sha, clear_parent);
+        return crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent);
     }
     crate::ops::task::validate_task_pr_range_for_integration(repo, &owner.target_ref, target_sha)?;
     crate::ops::task::record_task_pr_range_after_integration(repo, &owner.target_ref, target_sha)
@@ -527,91 +472,22 @@ fn fetch_target(repo: &Path, target: &str) -> OpsResult<()> {
 }
 
 fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
-    revalidate_owned_head(repo, &owner.branch, &owner.head)
-}
-
-fn revalidate_owned_head(repo: &Path, expected_branch: &str, expected_head: &str) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
-            "refusing to start the owned rebase: a {state} operation appeared during preparation"
+            "refusing to start the owned sync: a {state} operation appeared during preparation"
         )));
     }
     let branch = current_branch(repo)?.ok_or_else(|| {
-        OpsError::Message("refusing to start the owned rebase from detached HEAD".to_string())
+        OpsError::Message("refusing to start the owned sync from detached HEAD".to_string())
     })?;
     let head = rev_parse(repo, "HEAD")?;
-    if branch != expected_branch || head != expected_head {
+    if branch != owner.branch || head != owner.head {
         return Err(OpsError::Message(format!(
-            "refusing to start the owned rebase: branch/HEAD changed during preparation (expected {} at {}, found {branch} at {head})",
-            expected_branch, expected_head
+            "refusing to start the owned sync: branch/HEAD changed during preparation (expected {} at {}, found {branch} at {head})",
+            owner.branch, owner.head
         )));
     }
     Ok(())
-}
-
-/// Replace disposable checkpoint history with one commit whose tree exactly
-/// matches the scratch-cleared source tree. The recovery ref preserves the
-/// original head before any rewrite; the returned fork drives the one-commit
-/// final replay onto the pinned target.
-fn collapse_authored_history(
-    repo: &Path,
-    owner: &GitOperationOwner,
-    recorded_fork: Option<&str>,
-    target_sha: &str,
-    progress: &impl Progress,
-) -> OpsResult<String> {
-    let fork = match recorded_fork {
-        Some(fork) => {
-            if !crate::engine::git::is_ancestor(repo, fork, "HEAD")? {
-                return Err(OpsError::UnsafeRebaseBase {
-                    base: fork.to_string(),
-                    commits: git(repo, &["log", "--oneline", &format!("{fork}..HEAD")])?,
-                });
-            }
-            fork.to_string()
-        }
-        None => crate::engine::git::merge_base(repo, target_sha, "HEAD")?,
-    };
-    let source_tree = rev_parse(repo, "HEAD^{tree}")?;
-    let fork_tree = rev_parse(repo, &format!("{fork}^{{tree}}"))?;
-    if source_tree == fork_tree {
-        return Err(OpsError::Message(
-            "no authored changes remain after clearing scratch; refusing final history collapse before rewriting or pushing"
-                .to_string(),
-        ));
-    }
-    let safe_branch = owner
-        .branch
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    let recovery_ref = format!("refs/loopflow/recovery/{safe_branch}-{}", owner.id());
-    git(repo, &["update-ref", &recovery_ref, &owner.head])?;
-
-    if git(repo, &["show", "-s", "--format=%P", "HEAD"])? == fork {
-        progress.status("Preserving the existing authored commit");
-        return Ok(fork);
-    }
-
-    progress.status("Collapsing authored history for final integration...");
-    git(repo, &["reset", "--soft", &fork])?;
-    git(
-        repo,
-        &["commit", "-m", "lf land: collapse authored history"],
-    )?;
-    let collapsed_tree = rev_parse(repo, "HEAD^{tree}")?;
-    if collapsed_tree != source_tree {
-        return Err(OpsError::Message(format!(
-            "final history collapse changed the source tree: expected {source_tree}, found {collapsed_tree}; recover from {recovery_ref}"
-        )));
-    }
-    Ok(fork)
 }
 
 fn tracked_dirty_state(repo: &Path) -> OpsResult<BTreeSet<String>> {
@@ -623,14 +499,7 @@ fn tracked_dirty_state(repo: &Path) -> OpsResult<BTreeSet<String>> {
     )
 }
 
-fn cherry_authored_count(repo: &Path, target_sha: &str, head: &str) -> OpsResult<usize> {
-    Ok(git(repo, &["cherry", target_sha, head])?
-        .lines()
-        .filter(|line| line.starts_with("+ "))
-        .count())
-}
-
-fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
+fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {
     let reference = format!("refs/heads/{branch}");
     let remote = git(repo, &["ls-remote", "--heads", "origin", &reference])?;
     let lease = if remote.trim().is_empty() {
@@ -643,25 +512,19 @@ fn push_rebased_branch(repo: &Path, branch: &str) -> OpsResult<()> {
     git(repo, &["push", &lease, "-u", "origin", &reference]).map(|_| ())
 }
 
-/// Validate a durable stacked fork base before it drives a `git rebase --onto`.
-///
-/// The base must be an ancestor of HEAD; only then does replaying
-/// `fork_base..HEAD` preserve exactly the child-authored commits. If the base
-/// diverged from HEAD (the child was itself rewritten, or the base is
-/// unreachable), refuse rather than silently rewrite history, and name the
-/// commits since the common ancestor for manual reconciliation.
-fn resolve_fork_point(repo: &Path, options: &RebaseOptions) -> OpsResult<Option<String>> {
-    let Some(base) = options.fork_base.as_deref() else {
-        return Ok(None);
+/// Validate the recorded comparison base before merging a squash-landed parent.
+fn validate_fork_base(repo: &Path, fork_base: Option<&str>) -> OpsResult<()> {
+    let Some(base) = fork_base else {
+        return Ok(());
     };
     if crate::engine::git::is_ancestor(repo, base, "HEAD")? {
-        return Ok(Some(base.to_string()));
+        return Ok(());
     }
     let merge_base =
         crate::engine::git::merge_base(repo, base, "HEAD").unwrap_or_else(|_| base.to_string());
     let commits =
         git(repo, &["log", "--oneline", &format!("{merge_base}..HEAD")]).unwrap_or_default();
-    Err(OpsError::UnsafeRebaseBase {
+    Err(OpsError::UnsafeSyncBase {
         base: base.to_string(),
         commits,
     })
@@ -681,7 +544,7 @@ fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
         .unwrap_or_else(|| "manual resolution required".to_string())
 }
 
-fn reset_to_base(repo: &Path, plan: &RebasePlan, progress: &impl Progress) -> OpsResult<()> {
+fn reset_to_base(repo: &Path, plan: &SyncPlan, progress: &impl Progress) -> OpsResult<()> {
     let stash_path = if repo.join("scratch").exists() {
         let path = scratch_stash_path(repo, &plan.branch);
         if let Some(parent) = path.parent() {
@@ -761,7 +624,7 @@ fn count_unique_commits(repo: &Path, base_ref: &str) -> OpsResult<usize> {
 fn diff_names(repo: &Path, base_ref: &str) -> OpsResult<Vec<PathBuf>> {
     // Three-dot: diff from the merge-base, so we see only what this branch
     // authored — not files the base advanced past us. A stale branch (the whole
-    // reason to rebase) would otherwise report the base's new files as its own,
+    // reason to sync) would otherwise report the base's new files as its own,
     // misclassifying a scratch-only branch as clean_authored.
     let stdout = git(
         repo,
@@ -828,22 +691,21 @@ fn is_protected_path(path: &Path) -> bool {
         || path == Path::new(".lf/config.yaml")
 }
 
-pub fn rebase_class_name(class: &RebaseClass) -> &'static str {
+pub fn sync_class_name(class: &SyncClass) -> &'static str {
     match class {
-        RebaseClass::StaleEmpty => "stale_empty",
-        RebaseClass::ScratchOnly => "scratch_only",
-        RebaseClass::GeneratedOnly => "generated_only",
-        RebaseClass::CleanAuthored => "clean_authored",
-        RebaseClass::Protected => "protected",
+        SyncClass::StaleEmpty => "stale_empty",
+        SyncClass::ScratchOnly => "scratch_only",
+        SyncClass::GeneratedOnly => "generated_only",
+        SyncClass::CleanAuthored => "clean_authored",
+        SyncClass::Protected => "protected",
     }
 }
 
-pub fn rebase_strategy_name(strategy: &RebaseStrategy) -> &'static str {
+pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
     match strategy {
-        RebaseStrategy::Noop => "noop",
-        RebaseStrategy::MergeMain => "merge_main",
-        RebaseStrategy::ResetToBase => "reset_to_base",
-        RebaseStrategy::DirectRebase => "direct_rebase",
+        SyncStrategy::Noop => "noop",
+        SyncStrategy::ResetToBase => "reset_to_base",
+        SyncStrategy::MergeTarget => "merge_target",
     }
 }
 

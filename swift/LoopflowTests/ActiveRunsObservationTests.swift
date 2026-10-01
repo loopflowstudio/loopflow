@@ -190,7 +190,7 @@ struct ActiveSessionsObservationTests {
             let firstID = "run_00000000000000000000000000000001"
             let secondID = "run_00000000000000000000000000000002"
             try await publishClient(client, id: firstID, home: home)
-            let process = fixtureProcess(["monitor", "active", "--watch", "--json"], home: home)
+            let process = fixtureProcess(["runs", "--active", "--watch", "--json"], home: home)
             let reader = try LocalActiveSessionsObservation.start(process: process, configurationChanged: { false })
             observation = reader
             var iterator = reader.snapshots.makeAsyncIterator()
@@ -279,27 +279,29 @@ struct ActiveSessionsObservationTests {
                                       "terminal_id": NSNull(), "started_at": Date().ISO8601Format(.init(includingFractionalSeconds: true))]
         try JSONSerialization.data(withJSONObject: receipt).write(
             to: directory.appendingPathComponent("provider-clients/\(client.processIdentifier).json"), options: .atomic)
-        let native: [String: Any] = ["schema_version": 1, "provider_session_id": "fixture-\(id)", "account_id": NSNull()]
-        try JSONSerialization.data(withJSONObject: native).write(
-            to: directory.appendingPathComponent("provider-session.json"), options: .atomic)
         let initialize = fixtureProcess(["session", "list", "--json"], home: home)
         initialize.standardOutput = FileHandle.nullDevice
         try await runFixture(initialize)
-        let payload = String(data: try JSONSerialization.data(withJSONObject: [
+
+        let capture = try JSONSerialization.data(withJSONObject: [
             "artifact_key": id, "cwd": home.path, "provider": "cat",
-        ]), encoding: .utf8)!
-        let literal = { (value: String) in "'" + value.replacingOccurrences(of: "'", with: "''") + "'" }
+        ])
+        let payload = try #require(String(data: capture, encoding: .utf8))
+        func literal(_ value: String) -> String {
+            "'\(value.replacingOccurrences(of: "'", with: "''"))'"
+        }
         let seed = Process()
         seed.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         seed.arguments = [home.appendingPathComponent("loopflow.db").path, """
-        BEGIN;
-        INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published)
-        VALUES(\(literal(id)),'Watch','generated',1577836800,'cat',\(literal("fixture-" + id)),\(literal(home.path)),1);
-        INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-        VALUES(\(literal(id)),'captured',\(literal(id)),1577836800,\(literal(payload)));
-        UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=\(literal(id));
-        COMMIT;
-        """]
+            PRAGMA foreign_keys=ON;
+            BEGIN;
+            INSERT INTO agent_sessions(id,title,title_source,created_at,provider,provider_thread,cwd,input_published)
+            VALUES(\(literal(id)),'Watch','generated',1577836800,'cat',\(literal("fixture-" + id)),\(literal(home.path)),1);
+            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES(\(literal(id)),'captured',\(literal(id)),1577836800,\(literal(payload)));
+            UPDATE agent_sessions SET current_capture=last_insert_rowid() WHERE id=\(literal(id));
+            COMMIT;
+            """]
         try await runFixture(seed)
     }
 

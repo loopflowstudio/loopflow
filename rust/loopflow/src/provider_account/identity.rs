@@ -2,13 +2,17 @@
 
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
+
 use crate::provider_auth::{codex_identity_from_home, Provider};
 use crate::store::ProviderAccount;
+use crate::subscription::SubscriptionError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AccountIdentity {
     pub email: String,
     pub subject: String,
+    pub credential_digest: Option<String>,
 }
 
 impl AccountIdentity {
@@ -53,18 +57,15 @@ pub(crate) fn validate_identity(
         other.provider == account.provider && other.account_id != account.account_id
     }) {
         // Inspect current bytes: historical observations do not prove a login is still held.
-        if let Some(other_identity) = if account.provider == "codex" {
-            other.home.as_deref().and_then(codex_identity_from_home)
-        } else {
-            other
-                .observed_email
-                .as_ref()
-                .zip(other.observed_subject.as_ref())
-                .map(|(email, subject)| AccountIdentity {
-                    email: email.clone(),
-                    subject: subject.clone(),
-                })
-        } {
+        let other_identity = cached_identity(other).or_else(|| {
+            // A copied credential is the same login even before its destination
+            // has a saved profile observation.
+            identity.credential_digest.as_ref().and_then(|digest| {
+                (current_credential_digest(other).as_ref() == Some(digest))
+                    .then(|| identity.clone())
+            })
+        });
+        if let Some(other_identity) = other_identity {
             if identity.same_login(&other_identity) {
                 return Err(format!("account '{}' and account '{}' share login {}; disconnect the duplicate with lf account disconnect {} {}, then {recovery}",
                     account.account_id, other.account_id, identity.email, other.provider, super::account_login(other)));
@@ -78,18 +79,17 @@ pub(crate) async fn validate_observed_identity(
     account: &ProviderAccount,
     identity: &AccountIdentity,
     accounts: &[ProviderAccount],
-) -> Result<(), crate::subscription::SubscriptionError> {
+) -> Result<(), SubscriptionError> {
     if account.provider != "claude" {
         return validate_identity(account, identity, accounts)
-            .map_err(crate::subscription::SubscriptionError::NeedsLogin);
+            .map_err(SubscriptionError::NeedsLogin);
     }
     let mut catalog = accounts.to_vec();
-    for other in catalog
-        .iter_mut()
-        .filter(|other| other.provider == "claude" && other.account_id != account.account_id)
-    {
-        other.observed_email = None;
-        other.observed_subject = None;
+    for other in catalog.iter_mut().filter(|other| {
+        other.provider == "claude"
+            && other.account_id != account.account_id
+            && cached_identity(other).is_none()
+    }) {
         if let Some(home) = other
             .home
             .as_deref()
@@ -98,24 +98,77 @@ pub(crate) async fn validate_observed_identity(
             let observed = crate::subscription::claude_identity(home).await?;
             other.observed_email = Some(observed.email);
             other.observed_subject = Some(observed.subject);
+            other.observed_credential_digest = observed.credential_digest;
         }
     }
-    validate_identity(account, identity, &catalog)
-        .map_err(crate::subscription::SubscriptionError::NeedsLogin)
+    validate_identity(account, identity, &catalog).map_err(SubscriptionError::NeedsLogin)
 }
 
 pub(crate) fn check_account_identity(
     account: &ProviderAccount,
     accounts: &[ProviderAccount],
 ) -> Result<(), String> {
-    if account.provider != Provider::Codex.as_str() {
-        return Ok(());
-    }
-    let identity = account.home.as_deref().and_then(codex_identity_from_home).ok_or_else(|| {
-        format!("account '{}' has no readable Codex email and user identity; lf account connect codex {}",
-            account.account_id, super::account_login(account))
+    let identity = cached_identity(account).ok_or_else(|| {
+        format!("account '{}' has no identity verified against its current {} credential; run lf account {}",
+            account.account_id, account.provider, account.provider)
     })?;
     validate_identity(account, &identity, accounts)
+}
+
+/// Claude tokens are opaque. Only a profile observation bound to these bytes
+/// can supply offline identity; native metadata in `.claude.json` cannot.
+pub(crate) fn cached_identity(account: &ProviderAccount) -> Option<AccountIdentity> {
+    let home = account.home.as_deref()?;
+    match account.provider.as_str() {
+        "codex" => codex_identity_from_home(home),
+        "claude" => {
+            let digest = current_credential_digest(account)?;
+            if account.observed_credential_digest.as_ref() != Some(&digest) {
+                return None;
+            }
+            Some(AccountIdentity {
+                email: account.observed_email.clone()?,
+                subject: account.observed_subject.clone()?,
+                credential_digest: Some(digest),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn current_credential_digest(account: &ProviderAccount) -> Option<String> {
+    let raw = std::fs::read_to_string(account.home.as_ref()?.join(".credentials.json")).ok()?;
+    Some(credential_digest(&raw))
+}
+
+pub(crate) fn credential_digest(credential: &str) -> String {
+    format!("{:x}", Sha256::digest(credential.as_bytes()))
+}
+
+/// Routing may refresh missing evidence; cached inspection never calls this.
+pub(crate) async fn check_current_identity(
+    account: &ProviderAccount,
+    accounts: &[ProviderAccount],
+) -> Result<(), SubscriptionError> {
+    if account.provider != Provider::Claude.as_str() {
+        return check_account_identity(account, accounts).map_err(SubscriptionError::NeedsLogin);
+    }
+    let identity = match cached_identity(account) {
+        Some(identity) => identity,
+        None => {
+            let home = account.home.as_deref().ok_or_else(|| {
+                SubscriptionError::NeedsLogin("account has no credential home".into())
+            })?;
+            crate::subscription::claude_identity(home).await?
+        }
+    };
+    validate_observed_identity(account, &identity, accounts).await?;
+    if current_credential_digest(account) != identity.credential_digest {
+        return Err(SubscriptionError::Unavailable(
+            "credential changed during identity verification; retry".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Serialize duplicate detection and credential installation across managed accounts.
@@ -135,7 +188,7 @@ pub(crate) fn acquire_identity_install_lock(account_home: &Path) -> anyhow::Resu
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{check_account_identity, validate_identity};
     use crate::profile::EmailAddress;
     use crate::provider_account::{new_account, order_accounts_by_strain};
@@ -144,6 +197,16 @@ mod tests {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use std::fs;
     use std::path::Path;
+
+    pub(crate) fn write_claude_identity(account: &mut crate::store::ProviderAccount) {
+        let home = account.home.as_ref().unwrap();
+        fs::create_dir_all(home).unwrap();
+        let raw = serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{}", account.account_id),"expiresAt":4102444800000i64}}).to_string();
+        fs::write(home.join(".credentials.json"), &raw).unwrap();
+        account.observed_email = Some(account.login_email.as_ref().unwrap().to_string());
+        account.observed_subject = Some(account.account_id.to_string());
+        account.observed_credential_digest = Some(super::credential_digest(&raw));
+    }
 
     fn account(root: &Path, id: &str, email: &str, subject: &str) -> crate::store::ProviderAccount {
         let home = root.join(id);

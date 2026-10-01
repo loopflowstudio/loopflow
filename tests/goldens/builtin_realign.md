@@ -20,20 +20,20 @@ and continue whatever can be completed locally.
 
 ```bash
 lf commit -m "<what changed and why>"  # local checkpoint
-lf rebase --plan                       # inspect integration strategy
-lf rebase                              # apply it
-lf pr publish --title "..."            # push and create/update PR
-lf submit                              # prepare for the user's merge click
-lf arm                                 # prepare and request auto-merge; return
-lf land                                # watch CI, repair, and finish merged
+lf task sync --plan                       # inspect integration strategy
+lf task sync                              # apply it
+lf pr publish --title "..."          # push and create/update PR
+lf pr submit                         # prepare for the user's merge click
+lf land                            # prepare and request auto-merge; return
+lf pr land                           # watch CI, repair, and finish merged
 ```
 
-Publish makes a PR ready for review; it does not rebase. Submit is
-for a reviewer to land; arm/land request auto-merge. Bare land keeps the Task open;
+Publish makes a PR ready for review; it does not sync. Submit is
+for a reviewer to land; land request auto-merge. Bare land keeps the Task open;
 `-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
-It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
+It preserves an existing PR's readiness. Publish/submit/land make drafts ready.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -41,17 +41,13 @@ Do not ask permission for reversible edits or local tests. Ask before pushing,
 PR mutations, external messages or other external side effects, and destructive
 operations unless already authorized by the user or selected workflow.
 
-## Evidence Loop
+## Checks and Flow boundaries
 
-Make the finish line explicit: the observable result, proof, and near-misses
-that do not count. When uncertainty matters, record observations separately
-from hypotheses in the working design or evidence notes.
-
-Use the smallest safe check that distinguishes the leading explanations.
-Verify against all relevant recorded evidence, not only the latest case.
-Treat unexpected tool, test, or user output as a
-counterexample: stop dependent steps, revise the model, then continue. Never
-rewrite an observation to preserve an explanation or call a simulation live proof.
+Implement and compress do basic build/focused-test sanity checks. Gate owns
+verification once; CI owns its matrix. Checks must run headless. Leave unavailable
+checks to a capable later step and human judgment to demo/review; neither blocks
+earlier work. Record a one-line result in scratch, not a verification ledger.
+Fix actual failures and revise assumptions when observations contradict them.
 
 Delegate only when authorized and when an independent subset makes the problem
 smaller. Keep the main blocker inline. A supplied Flow is an instruction;
@@ -89,6 +85,16 @@ terminal output, logs, and chat; follow the repository's secret-management polic
 
 ## Context and durable knowledge
 
+Keep agent progress in local working notes and the final Run response. Do not
+post routine progress to Linear: Task comments are for new direction from people.
+Agent comments published through `lf task comment` carry a progress marker and
+are excluded from steers. Use `--steer` only for deliberate new direction.
+Preserve `<!-- loopflow-progress:... -->` provenance
+when writing progress through another integration.
+
+Launch context has explicit budgets. An excerpt names its complete local source;
+read relevant omitted sections before acting, rather than rereading whole archives.
+
 Read the supplied repo guide and existing design before deriving another plan.
 Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
 context belongs to that Work. A path in another checkout does not transfer its
@@ -110,9 +116,9 @@ Run mode is headless. No one is available in this conversation. Do not ask a
 conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
-Work's perspective, launch an ordinary Run explicitly with
-`lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
-run `lf ask "<exact request>"`. It opens a durable session in this Run's
+Work's perspective, launch an ordinary contribution explicitly with
+`lf --task <task> : "<prompt>"`. When progress genuinely requires a decision from the user,
+run `lf ask "<exact request>"`. It opens a durable session in this
 checkout and blocks until the user completes the conversation. The session
 agent marking itself ready does not complete or remove the session.
 
@@ -152,8 +158,8 @@ Bring the plan and the implementation into agreement with what the work has taug
    Find where the work changed our understanding. Which assumptions failed?
    Which planned mechanisms became unnecessary? What remains unimplemented,
    or works differently than intended? Separate observations from explanations.
-   Reuse applicable proof; run a focused check when it will resolve uncertainty.
-   An unexecuted check is still a gap.
+   Reuse applicable results; run a focused check when it will resolve uncertainty.
+   Do not rerun tests just because reconciliation began.
 
 3. Reconcile at the source. Rewrite stale portions of the plan, delete obsolete
    steps and explanations, and update the remaining work to fit what is now known.
@@ -167,7 +173,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
    and write durable decisions and lessons learned from this work into its
    existing memory. Attribute decisions by name and preserve contrary evidence
-   and proof limits. Keep the live implementation plan in its own artifact;
+   and limits of the observations. Keep the live implementation plan in its own artifact;
    memory carries what future Wave work should know, not a copy of the pass.
    Follow the repository's memory workflow. If identified memory is unavailable
    or cannot be updated within the supplied authority, state that exact gap
@@ -175,23 +181,22 @@ Bring the plan and the implementation into agreement with what the work has taug
 
 4. Check the resulting agreement. The plan must distinguish what exists from
    what remains, and the code must support claims of completed behavior. Verify
-   repairs with the smallest relevant proof. Keep blockers, contrary evidence,
-   and proof limits visible where they affect the next action. Stop dependent
-   work when a required check cannot run; state the command and blocker.
+   repairs with the smallest relevant check. Keep blockers, contrary evidence,
+   and deferred checks visible where they affect the next action. If a check cannot
+   run headless, leave it to gate/CI or replace it with a headless check; do not
+   block the Flow on it. Human judgment belongs to demo/review.
+
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Home
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
 
 If no plan exists, update the supplied working context or write the smallest
 useful plan when continued work needs one.
 
-Finish with a minimal review that makes the next decision easy:
-
-- Where the work stands against the plan: what is implemented and what remains.
-- What worked, with the checks or observations that support it and their limits.
-- What implementation taught us, and how the plan, code, or Wave memory changed.
-- What remains unresolved: contrary evidence, untested claims, blockers, or choices.
-
-Keep it short and link to the current artifacts and proof. Update an existing
-summary when one serves the handoff; otherwise use the caller's output surface.
-Preserve useful evidence without copying the plan or accumulating a pass ledger.
+Finish briefly: what changed, what remains, and any decision needed. Keep the
+check result to one line with its command and result or deferred owner. Update
+the existing plan; do not accumulate reports or repeated untested-claim lists.
 If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-decide to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to

@@ -73,11 +73,11 @@ is an approval prerequisite. Each Task's selected Flow carries its work through
 landing; do not perform that Flow's steps or create another cursor here. Preserve selected Flows, review gates,
 worktrees, placement and execution history.
 
-- Start selected authorized work with `lf task run <issue-id>`; use the
+- Start selected authorized work with `lf --task <issue-id> flow start`; use the
   current Project's Flow unless an explicit choice is warranted. Existing
   execution is reconciled through Task operations, never a duplicate driver.
 - Inspect `lf task status` before recovery. Active work continues; unresolved
-  human Sessions remain waiting. Resume interrupted work through `lf task run`
+  human Sessions remain waiting. Resume interrupted work through `lf flow start`
   only when current evidence supports it. Unknown liveness is not idle.
 - Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
   when execution is intended and authorized. Give work an observable outcome.
@@ -96,8 +96,8 @@ reconcile uncertain effects before retry. Keep planning at its existing owners
 without introducing a resident or another execution cursor.
 
 A chapter boundary previews the whole repository with
-`lf new-chapter <name> --dry-run --json`. Apply with
-`lf new-chapter <name> --json` only after repository direction and disposition
+`lf repo new-chapter <name> --dry-run --json`. Apply with
+`lf repo new-chapter <name> --json` only after repository direction and disposition
 review gates are satisfied; existing authorization remains valid. An ordinary
 Wave pass does not authorize rotation. The operation has no per-Wave selector
 or plan input. Started work moves intact, proven untouched backlog is canceled

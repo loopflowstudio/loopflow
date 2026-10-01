@@ -117,6 +117,7 @@ pub fn prepare_exec_prompt(
         });
     }
 
+    crate::engine::context_budget::bound_context(&mut components)?;
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -154,6 +155,10 @@ pub fn prepare_exec_prompt(
         )]
         .into(),
     };
+    crate::engine::context_budget::check_input(
+        &crate::engine::agent::system_prompt_with_structured_replies(&launch),
+        &launch.task_prompt,
+    )?;
 
     Ok(PreparedExecPrompt {
         config: launch,
@@ -248,6 +253,174 @@ Test skill body.
             paste: false,
             ..Config::default()
         }
+    }
+
+    #[test]
+    fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
+        use crate::engine::context_budget::{
+            GOAL_TOKENS, INPUT_BYTES, INPUT_TOKENS, MEMORY_TOKENS, SCRATCH_TOKENS,
+        };
+        use crate::engine::prompt::count_tokens;
+
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+        let evidence =
+            "Retain the observed failure and verify the configured user path.\n".repeat(2_000);
+        for index in 0..14 {
+            fs::write(tmp.path().join(format!("scratch/{index:02}.md")), &evidence).unwrap();
+        }
+        let message = format!(
+            "Task definition\n{}\nLatest direction: preserve the public API",
+            (0..384)
+                .map(|id| format!(
+                    "Comment {id}: {}\n",
+                    "A recorded implementation result. ".repeat(100)
+                ))
+                .collect::<String>()
+        );
+        assert!(message.len() > 1_048_576);
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("test".into()),
+                wave: Some("infrastructure".into()),
+                wave_memory: Some(evidence.clone()),
+                message: Some(message.clone()),
+                surface: Surface::Headless,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let config = &prepared.config;
+        let bytes = config.system_prompt.len() + config.task_prompt.len();
+        let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
+        assert!(bytes <= INPUT_BYTES, "{bytes}");
+        assert!(tokens <= INPUT_TOKENS, "{tokens}");
+        assert!(count_tokens(prepared.components.message.as_ref().unwrap()) <= GOAL_TOKENS);
+        assert!(
+            count_tokens(&prepared.components.wave_memory.as_ref().unwrap().content)
+                <= MEMORY_TOKENS
+        );
+        assert!(
+            prepared
+                .components
+                .docs
+                .iter()
+                .filter(|doc| doc.source == DocumentSource::Scratch)
+                .map(|doc| count_tokens(&doc.content))
+                .sum::<usize>()
+                <= SCRATCH_TOKENS
+        );
+        assert!(config.task_prompt.contains("Task definition"));
+        assert!(config
+            .task_prompt
+            .contains("Latest direction: preserve the public API"));
+        assert!(config.task_prompt.contains("scratch/13.md"));
+        let sources: Vec<_> = fs::read_dir(tmp.path().join(".lf/tmp/context"))
+            .unwrap()
+            .collect();
+        assert_eq!(sources.len(), 3);
+        assert_eq!(prepared.components.budget_decisions.len(), 3);
+        let path = sources
+            .iter()
+            .map(|entry| entry.as_ref().unwrap().path())
+            .find(|path| fs::read_to_string(path).unwrap() == message)
+            .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), message);
+        assert!(config.task_prompt.contains(path.to_str().unwrap()));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("scratch/00.md")).unwrap(),
+            evidence
+        );
+        eprintln!("384-comment launch: {tokens} tokens, {bytes} bytes");
+    }
+
+    #[test]
+    fn oversized_explicit_instructions_report_local_input_budget() {
+        let tmp = create_repo_fixture();
+        let error = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                resolved_skill: Some(Skill {
+                    content: Some("Follow this instruction. ".repeat(100_000)),
+                    ..Skill::named("large")
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("exceeds the input budget"));
+    }
+
+    #[test]
+    fn structured_reply_guidance_counts_toward_the_launch_budget() {
+        let tmp = create_repo_fixture();
+        let config = default_test_config();
+        let input = |content: String, has_ui| ExecPromptInput {
+            repo_root: tmp.path().to_path_buf(),
+            resolved_skill: Some(Skill {
+                content: Some(content),
+                ..Skill::named("budget")
+            }),
+            client_context: ClientContext {
+                has_ui,
+                compact: false,
+            },
+            ..Default::default()
+        };
+        let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
+        let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
+            + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
+        let content = " x".repeat(crate::engine::context_budget::INPUT_TOKENS - overhead - 32);
+        prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
+        let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
+            panic!("structured reply guidance exceeded the launch budget without rejection");
+        };
+        assert!(error.to_string().contains("exceeds the input budget"));
+    }
+
+    #[test]
+    fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
+        let plan = "Jack Heart accepted the design on 2026-09-30. Build Unit 1 first.";
+        let intent = "> $kickoff\n> ok just run kickoff here then";
+        fs::write(tmp.path().join("scratch/plan.md"), plan).unwrap();
+        fs::write(tmp.path().join("scratch/nested/intent.md"), intent).unwrap();
+        let prepared = prepare_exec_prompt(
+            &default_test_config(),
+            ExecPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("implement".into()),
+                agent: Some("codex".into()),
+                wave_memory: Some("Jack previously invoked $kickoff.".into()),
+                message: Some(
+                    "Build the accepted plan.\n<lf:steers>\nJack wrote `$kickoff`.\n</lf:steers>"
+                        .into(),
+                ),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let submitted = &prepared.config.task_prompt;
+        assert!(submitted.contains("<lf:skill:implement>"));
+        assert!(submitted.contains("Turn the design doc into working code."));
+        assert!(submitted.contains(plan));
+        assert!(submitted.contains("scratch/nested/intent.md"));
+        assert_eq!(submitted.matches("&#36;kickoff").count(), 3);
+        assert!(!submitted.contains("$kickoff"));
+        assert!(!submitted.contains("<lf:skill:kickoff>"));
+        assert!(prepared
+            .components
+            .docs
+            .iter()
+            .any(|doc| doc.content == intent));
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("scratch/nested/intent.md")).unwrap(),
+            intent
+        );
     }
 
     #[test]

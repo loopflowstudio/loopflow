@@ -1,1241 +1,1465 @@
 # lf command reference
 
-For examples ordered by workflow, see [lf CLI](lf.md). This page lists
-individual controls, arguments, and effects.
-
 ```bash
-lf debug -c                            # investigate an error from the clipboard
-lf run feature                         # run a named flow or skill
-lf : "fix the broken link"             # run an inline prompt
-lf list                                # discover commands, skills, and flows
-lf help task pr                        # inspect pull-request operations
+lf help --all
+lf help task pr land
+lf monitor --json
 ```
 
-Run a skill or flow by name. Use the command tree to manage work, inspect
-execution, and operate the machine.
+Generated from the compiled Clap tree. [The workflow guide](lf.md) uses
+short forms; this reference names each canonical owner. Hidden commands
+are internal process boundaries and are marked below.
 
-## Find a command
+## Selection and output
+
+`--task` selects a Task checkout; `--wt` selects an existing worktree.
+`--wave` adds context without moving directories and must match a Task's
+owning Wave. Named direct Flows are independent contributions; `flow start`
+selects the Task's saved managed Flow. Saved state, identity and feedback
+survive continuation. `task restart` explicitly replaces that workflow.
+
+A preference (`--account`) permits fallback. A restriction (`--only-account`)
+limits this launch and its children. Saved Flows retain provider selections;
+children check their destination's access before starting a provider.
+Account observations distinguish unavailable, expired and measured capacity.
+
+JSON readers emit one document; `monitor active --watch --json` emits NDJSON
+until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
+failure, and 130 interruption. A successful auto-merge request is not a merge.
+
+## Flow decisions and recovery
 
 ```bash
-lf help                                # brief overview
-lf help --all                          # the complete command tree
-lf help task                           # concrete work and delivery
-lf help task pr land                   # explain one operation
-lf task pr land --help                 # the same page
-lf help debug                          # explain a definition without running it
-lf debug --help                        # the same definition page
-lf run debug --help                    # the same definition page
-
-lf list                                # commands, skills, and flows
-lf list --json                         # stable, structured entries
-lf list skill                          # skills and namespaces
-lf list skill team                     # skills inside a namespace
-lf flow list                           # authored flows and their steps
+lf --task EXP-12 flow start
+lf flow resume FLOW_ID --retry
+lf task restart EXP-12 --flow feature
 ```
 
-Help shows the canonical command path, arguments, and effects. Definition help
-shows its kind and source. Help and list never start an agent, connect an
-account, or fetch a missing skill. An uncached external skill is identified as
-uncached, with the invocation that would fetch it.
+Resume retains the captured graph. Retry retains its position. Restart
+deliberately captures a replacement. Completing a review returns feedback;
+the authored Flow decides what follows.
 
-Lists keep skills and flows separate even when they share a name. JSON uses
-stable ordering rather than usage rankings.
+## lf
 
-| Command | What it does |
+Open Loopflow or run its CLI
+
+| Argument | What it does |
 |---|---|
-| `run`, `skill`, `flow` | Execute and inspect definitions |
-| `:` | Run an inline prompt |
-| `list`, `help` | Discover names and explain commands |
-| `task` | Manage concrete work, worktrees, commits, and pull requests |
-| `wave` | Maintain goals, memory, conversations, schedules, and chapters |
-| `session` | Open conversations, ask for input, and complete reviews |
-| `monitor` (`mon`) | Inspect history, live activity, replay, and usage |
-| `account` | Connect accounts, inspect capacity, and configure routing |
-| `home` | Install Loopflow, inspect the machine, and reach other Homes |
-| `repo` | Release software, inspect CI, and configure repository integrations |
+| `--docs` | Docs paths, globs, or directories to include in context |
+| `--clipboard / -c` | Include clipboard content in prompt Default: false. |
+| `--model / -m` | Model to use (harness or harness:model) |
+| `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
+| `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
+| `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
+| `--yolo` | Skip permission prompts Default: false. |
+| `--mode` | Choose the provider surface; omission inherits configuration and terminal context |
+| `--chrome` | Override Chrome integration; omission inherits configuration |
+| `--diff` | Select changed-code context; omission inherits configuration |
+| `--max-turns` | Maximum agent turns for this invocation |
+| `--wave` | Add Wave context and identity without changing the working directory |
+| `--task` | Execute in this Task's checkout |
+| `--wt` | Execute in an existing worktree by name or branch |
+| `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
+| `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
+| `--__flow-step` | Execute a skill from this saved Flow boundary, without resolving its definition again Internal. |
+| `--help / -h` | Print help |
+| `--version / -V` | Print version |
 
-## Omit an unambiguous owner
+## lf monitor
 
-```bash
-lf task pr land                        # canonical path
-lf pr land                             # omit task
-lf land                                # omit task and pr
+Show waiting, blocked, active, and finished work with next actions
 
-lf task publish                        # task pr publish
-lf repo publish                        # repo release publish
-```
-
-An exact command wins first. Otherwise, Loopflow searches beneath the owner
-already entered. One exact match expands to its full path. If no exact name matches, a unique
-command-name prefix expands the same way (for example `mon` for `monitor`). Multiple matches execute nothing. At the root, the search
-covers the whole command tree. Any number of leading owners can be omitted.
-
-Multiple matches print the choices and execute nothing:
-
-```text
-$ lf publish  # lf-doc: ambiguous
-"publish" matches multiple commands:
-  lf task pr publish
-  lf repo release publish
-```
-
-Use an explicit owner to narrow the search. `lf task status` keeps its own
-meaning; inspecting just the PR is `lf task pr`.
-
-Shortcuts have the same arguments and effects as their canonical command.
-`lf help land` shows `lf task pr land`. Examples below use full paths so the
-owner is visible; omitted-owner shortcuts are derived from that tree.
-
-### Long and short names
-
-```bash
-lf monitor top                         # full name
-lf mon top                             # unique command prefix
-lf account
-```
-
-Commands have one canonical name. `mon` resolves to `monitor` through unique-prefix resolution. Ambiguous prefixes fail; no extra
-registered aliases are added.
-Already-short names such as `pr`, `task`, and `land` use that one spelling.
-Print the machine identifier with `lf home id`. The account family has no
-short alias.
-
-### Commands take precedence over definitions
-
-```bash
-lf land                                # the built-in PR operation
-lf run land                            # an authored flow or skill named land, if installed
-lf skill pr-land                       # the bundled landing skill
-```
-
-Installed skills do not participate in command-shortcut matching. Adding a
-skill named `land` does not change `lf land`. A name matching several commands
-still reports those choices, even when a same-named skill exists.
-
-Only a name with no command matches falls through to definition lookup.
-`lf run NAME` explicitly enters definition lookup. Within that lookup, a
-flow takes precedence over a same-named skill.
-
-## Run a skill or flow
-
-```bash
-lf debug -c                            # shorthand when no command matches debug
-lf run debug -c                        # explicitly select a definition
-lf skill debug -c                      # explicitly select the skill
-lf flow feature                        # select a flow
-lf run team/review "Check the API"
-lf : "Explain why this test fails"
-```
-
-When both kinds exist, an authored flow wins. Adding a flow with the same
-name intentionally changes what an untyped definition reference runs. Select
-the skill explicitly to keep running its prompt directly:
-
-```bash
-lf run release-run                     # repository flow, when present
-lf skill release-run                   # the skill with the same name
-lf help release-run                    # selected definition and the other typed choice
-```
-
-Names use `/` for namespaces and `-` within words: `wave/operate`,
-`review-design`, `team/review`.
-
-Command words remain available as definition names. Use the explicit kind;
-if the name is also a verb within that family, put `--` before it:
-
-```bash
-lf skill commit                        # a skill named commit
-lf flow -- list                        # a flow named list
-lf help flow -- list                   # inspect a flow named list without running it
-```
-
-### Skills
-
-```bash
-lf help skill debug
-lf skill debug "The request fails after reconnecting"
-lf skill implement: add caching
-lf run npx/vercel-labs/deep-research
-```
-
-A skill supplies a prompt with assembled context. `{args}` expands to the
-arguments after `:`. Execution can fetch an external `npx/` skill; inspection
-uses only local definitions and cached content.
-
-Within the skill kind, repository definitions override personal and bundled
-definitions. Lookup checks:
-
-1. `.lf/skills/` and `.claude/commands/` in the repository.
-2. `~/.lf/skills/` and `~/.claude/commands/`.
-3. Bundled skills, including a unique short name within a namespace.
-4. Available external skill sources and cached Agent Skills.
-
-Use `lf list skill` for the current catalog. See [Authoring](authoring.md)
-for skill files and [Configuration](config.md) for defaults.
-
-### Flows
-
-```bash
-lf flow show feature
-lf help flow feature
-lf run code                            # implement and simplify
-lf run queue                           # prepare and verify without publishing
-lf run pursue                          # iterate, publish, and review the demo
-lf run feature                         # design review through delivery
-```
-
-A flow composes skills and operations. Repository flows live in `.lf/flows/`.
-`lf help flow NAME` also validates expansion and stable review IDs without execution.
-Inspect the definition before choosing its endpoint; starting an agent is not
-the same as asking it to publish or merge.
-
-| Flow | What it does |
+| Argument | What it does |
 |---|---|
-| `code` | Implement and simplify locally |
-| `task-design` | Shape the implementation plan and review the design |
-| `refresh` | Rebase, then reconcile the design and implementation |
-| `queue` | Simplify, refresh, and verify without PR publication |
-| `pursue` | Iterate on implementation, publish, and review a demo |
-| `feature` | Review the design, pursue the work, verify, land, and complete |
-| `ship` | Verify, then land and complete |
-| `ship-demo` | Verify, review a demo, then land and complete |
-| `deploy` | Verify and land while keeping the Task open |
-| `incident` | Restore the workflow, investigate causes, and select prevention |
-| `vsm-operate` | Work through delivery, coordination, capacity, adaptation, and identity |
+| `--json` | json Default: false. |
+| `--all` | all Default: false. |
+| `--help / -h` | Print help |
 
-Flow-oriented callers that accept skills use the same flow-first selection.
-A skill can serve as a one-step flow conceptually; direct skill execution is
-used when it preserves the behavior that caller needs. This does not create
-another authored flow or another catalog entry.
+## lf monitor list
 
-Bare YAML names and `flow: NAME` accept either kind with flow first.
-`step: NAME` selects a skill explicitly, including when a same-named flow
-exists. Use `step:` for a flow that calls its own same-named skill; an untyped
-self-reference is a cycle. XOR `skill:`, `steps:`, and `router:` slots select
-skills; XOR `flow:` accepts either kind.
+List a bounded page of recorded commands, newest first
 
-### Context and launch options
-
-```bash
-lf --as task:DES-123 run research "Map the runtime behavior"
-lf --as wave:designer skill wave/operate "Review the chapter evidence"
-lf --as wave:designer : "Which outcome needs attention?"
-lf -m codex run implement --docs src/api/ -c
-lf skill design --mode tui
-```
-
-`--task`, `--wave`, and `--as` select the work a direct launch concerns. They
-do not advance a Task's managed Flow. A direct flow has its own FlowSession.
-Inside a registered Task checkout, an unqualified launch inherits that Task;
-an ordinary branch stays unbound.
-
-| Option | What it does |
+| Argument | What it does |
 |---|---|
-| `--task ISSUE` | Bind a direct launch to an existing Task and its checkout |
-| `-w, --wave NAME` | Bind to a Wave, or qualify a selected Task |
-| `--as WORK` | Select Work explicitly, such as `wave:designer` |
-| `-m, --model MODEL` | Select a provider/model independently of the account |
-| `--docs PATH[,PATH...]` | Add files, directories, or globs to context |
-| `-c, --clipboard` | Include clipboard content |
-| `--diff files\|patch\|both\|none` | Select changed file bodies, patch, both, or neither; omission inherits config |
-| `--no-loopflow` | Omit Loopflow's operating guidance |
-| `--mode interactive\|batch\|tui\|ide` | Choose the launch surface; omission inherits configuration and terminal context |
-| `--max-turns N` | Bound provider turns for this launch |
-| `--chrome on\|off` | Override browser automation; omission inherits config |
+| `--json` | json Default: false. |
+| `--all` | Include all repositories Default: false. |
+| `--limit` | limit Default: 100. |
+| `--after` | Continue with the previous page's next object, encoded as JSON |
+| `--parent` | Direct children of an exact or unambiguous parent Exec |
+| `--caller` | Commands issued by this AgentSession |
+| `--search` | Literal command text, ignoring ASCII case |
+| `--outcome` | outcome |
+| `--task` | Recorded work for a Task, including completed Tasks |
+| `--wave` | Recorded work for a Wave |
+| `--help / -h` | Print help |
 
-Repository agent guidance, recursive scratch notes, and selected work context
-are assembled automatically. Direct launches leave edits for an explicit
-commit. Several AgentSessions may concern the same Task; attribution does not grant
-exclusive ownership of its files.
+## lf monitor show
 
-Put global options before the command. Command-local options retain their
-meaning after shorthand expansion: `lf task commit -m "Fix startup"` supplies a
-commit message, not a model. `--` ends option interpretation where literal
-arguments are accepted.
+Inspect an Exec or Session by identity
 
-### Flow decisions and recovery
-
-```sh
-lf task run DES-123 --flow feature  # create a Task-owned invocation
-lf task run DES-123             # drive its captured graph
-lf task run DES-123 --reason "provider credentials repaired"
-lf task restart DES-123 --flow incident
-```
-
-Use `lf flow resume INVOCATION --retry` or `lf task run DES-123 --retry`
-after a command and its native engine both stop before recording completion.
-Retry requires confirmed engine exit and keeps the earlier outcome unknown.
-A surviving engine is observed through completion without sending another turn.
-Task failure reasons and decision-unblock feedback still apply. Automatic provider
-retries retain each turn's history; a failed turn's decision or route is discarded
-when its successor is selected.
-
-A **loopflow** is a Flow with one or more backward edges. Each edge names an
-earlier node. There is no pass limit. Steps outside a backward edge's body
-do not repeat when that edge is taken. Advance enters the remaining steps;
-Iterate traverses the declared section again. A slice is a unit of work within
-a pass. Task binding adds context and Task authority.
-
-`loop-decide` compares the caller's objective and previous direction with the
-available evidence and feedback. It works with any Flow; its selected native turn supplies
-one typed result from its final answer:
-
-```json
-{"decision":"iterate","summary":"Remaining work, next action, and proof to collect"}
-```
-
-The captured step declares `advance` or `iterate` with a nonempty `summary`,
-or `blocked` with a nonempty `reason`.
-The provider receives that schema before generation. The Flow consumes only the
-selected successful turn's validated result. Invalid output gets at most two
-corrective turns in the same conversation; exhaustion retains all evidence and
-stops the boundary. To request feedback, end the turn with:
-
-```json
-{"decision":"blocked","reason":"What stalled, what was tried, and which question needs an answer"}
-```
-
-The answer starts another turn in the same conversation for reassessment.
-
-Implement builds the intended behavior and updates the working plan with what
-remains. When replacing a path, move its consumer and delete the predecessor.
-Compress simplifies code related to the change. Refresh rebases, then runs
-realign. Realign edits the plan, corrects clear code mismatches, and reads and
-updates the identified Wave's memory using what the work has taught us. Accepted
-requirements and unresolved evidence stay visible; no per-pass report or
-replacement count is required. Loop-decide reads the current work and evidence
-to decide whether to continue. Pursue publishes after convergence, before demo.
-
-Concept-review is interactive, on request or inside unblock, and does not own
-navigation. Blocked ends the deciding turn and requests feedback. Meaningful learning
-counts as progress; repeating a failure without new evidence calls for help.
-
-A blocked result keys one Ask to its exact captured event and Flow position;
-recovery reuses that question and its saved completion. Its Session
-runs `unblock`, using concept-review with the human by default or addressing a
-specific missing input. Human Complete returns the summary and shared artifact
-changes to loop-decide for reassessment. It supplies evidence, not a navigation decision.
-While a live Task decision waits, CLI status and the desktop show Blocked with
-its selected conversation and unblock Session. Complete that Session to return feedback to the
-same caller; no Task resume is needed. Completed or earlier-boundary Asks do
-not keep that caller Blocked. If the blocker remains unresolved, report it
-instead of opening identical Asks.
-An alive Task body shows Stalled after five minutes without an execution event or
-sampled CPU progress in the body and its tool descendants. The Task worker
-samples every 15 seconds; missing samples, a changed body identity, and
-observations older than 45 seconds stay Unknown. Status names the selected execution and the
-same recovery in CLI and desktop: interrupt the Task, then resume it. A live
-unblock Session still shows Blocked. Observation never authorizes termination.
-
-If a Task decision finishes without a valid verdict, its saved Flow becomes
-Blocked, retains its history and failure reason, and opens the same keyed unblock
-Session. CLI status and the desktop use that shared projection. After completing
-the Session, run `lf task run TASK`; its feedback seeds reassessment at the
-failed decision, without choosing Advance or Iterate. Retrying Session launch
-reuses its record, including after a launcher failure.
-A candidate decision takes effect only after its selected native turn succeeds. Inspect any
-operation's effects before choosing `--retry`, since an interrupted operation
-may already have changed external state.
-
-An invocation keeps its definition, cursor and return counts
-in the current Home's SQLite store. Continuation uses those captured facts even
-if source definitions disappear. Completion grants no implicit merge or
-Task-completion authority. Before launch the Task page shows its Flow template;
-after starting it shows the compiled graph.
-
-The graph JSON field `sources` lists each step's source definitions, outermost
-first. Desktop uses it for the `from …` breadcrumb. These labels grant no
-execution authority.
-
-Composed templates compile before execution. Taking an Iterate edge moves the
-cursor and increments its return counter in the same FlowSession. Retry retains
-the pass; resume retains the selected boundary, including a pending review.
-Membership names a node and iteration tuple in the
-captured graph; an independent conversation about the same Task does not become
-a Flow step. Graph keys, current/completed nodes, return edges and Session
-membership use captured numeric node IDs, local to that FlowSession. Authored
-occurrence names remain labels; nested containment comes from the graph.
-
-A boundary can fail several times before succeeding. AgentSession history keeps
-each provider start, result and usage receipt; the Flow consumes only its exact
-selected successful completion. A mechanical boundary runs in its own child
-`lf` process and records start and outcome in Flow history. Resume waits for a
-surviving step and consumes its result once. Task stop includes the selected step
-even when its driver has exited. An earlier success, helper completion or stale writer cannot
-advance the current selection. Missing capture data is reported without replacing
-it with today's catalog; missing external-effect evidence requires inspection.
-
-A `human:true` step opens an interactive AgentSession at the FlowSession's
-selected boundary. The reviewer saves feedback and revised artifacts, then calls `lf session ready "feedback and remaining work"`.
-The reviewer ends the conversation with `lf session complete <session-id>`.
-Completion returns feedback to the next step. A following loop-decide interprets
-it and records Advance or Iterate against its own authored edge. Human reviews
-have no implicit revision target. Closing the provider, marking ready, or
-reopening a Session does not complete it.
-Already finished invocations report completion rather than starting again.
-
-Invocations capture all XOR routers and branch definitions at creation. A router returns `{"path":"NAME"}` constrained to its captured paths;
-failed native turns cannot donate that candidate to a retry. Nested paths and review completion use the
-same cursor transition. Recovery fixtures prove these paths locally; live
-provider/desktop review completion → decision → implementation → Ask → reassessment remains a
-separate demonstration.
-
-The `advance` skill also resolves these actions from an ordinary coding
-conversation: complete an exact review, resume a Task, or prepare work from an
-approved design. It reports the actual Task state after the handoff.
-
-### Saved FlowSessions
-
-```bash
-lf flow list --sessions --json --limit 100
-lf flow list --sessions --for-task INF-123 --managed true --json
-lf flow show --sessions --json FLOW_SESSION
-```
-
-List saved progress without starting work. `--after` accepts the previous page's
-`next` ID with the same filters. `--all` includes other repositories and unknown
-historical repository evidence. `--state` selects current, completed or replaced
-records; `--search` matches a literal name or identity. Detail reads the captured
-graph even if its template or checkout is gone. Loop passes share that graph and
-FlowSession; their node and iteration positions distinguish their history.
-
-`lf flow list --json` and `lf flow show TEMPLATE` still inspect reusable templates.
-
-
-## Task: concrete work and delivery
-
-```bash
-lf roadmap                             # current plans and recorded work
-lf roadmap --wave designer
-lf roadmap --all                        # plans across this Home's repositories
-lf task status                         # Task bound to this checkout
-lf task pr                      # current branch's PR, with or without a Task
-```
-
-Task commands manage concrete work. Commit, rebase, worktree, and PR operations
-also work in an ordinary checkout. They do not create an issue merely to satisfy
-the command path.
-
-Roadmap joins planning evidence with recorded Task execution. Use `lf task wt list`
-for checkout inventory. Neither read creates a Task.
-
-### Create and advance a Task
-
-```bash
-lf task create --wave designer --title "Repair keyboard navigation" \
-  --notes "Tab order should follow the visible controls"
-lf task checkout DES-123               # prepare its worktree without launching a worker
-lf task run DES-123                    # start or continue the saved workflow
-lf task run DES-124 --stack-on DES-123
-lf task create --run --wave designer --title "Repair keyboard navigation"
-```
-
-Connected Task creation files the issue and refreshes local planning. Checkout
-preserves the Task's identity and prepares its worktree. Repeating checkout
-reuses that placement; repeating run continues the saved workflow or reports
-the active worker.
-
-`--stack-on` gives a dependent Task its own worktree and PR, based on the
-parent Task's published PR. Its PR initially targets the parent branch and
-can move to the default branch after the parent merges.
-
-### Change direction and recover
-
-```bash
-lf task edit DES-123 --title "Repair dialog keyboard navigation"
-lf task comment DES-123 "Keep this change inside the dialog"
-lf task comment DES-123 --json         # read the thread
-lf task interrupt DES-123              # interrupt the active provider turn
-lf task run DES-123                    # continue after interruption
-lf task restart DES-123 --flow feature
-lf task run DES-123 --reason "Repository credentials repaired"
-lf task wait DES-123 --until terminal --timeout 15m
-```
-
-Comments provide direction without starting an idle Task. The advancing worker
-reads them; independent Task-bound AgentSessions do not receive a broadcast. Use
-restart to replace a saved workflow after the captured worker stops. Use
-`run --reason` after repairing a reported execution blocker.
-
-Manage Task state through Task commands and inspect the resulting facts with
-task status. Planning, provider liveness, review readiness, PR state, and
-completion remain distinct. A missing worker does not prove completion.
-
-```bash
-lf task complete DES-123 --summary "Keyboard navigation verified"
-lf task delete DES-123
-```
-
-Complete planning work directly, or complete a placed Task after its delivery
-obligations settle. Delete removes the connected issue and reconciles the local
-record; it preserves authored files and retained history. Deleting unfinished
-work does not record success. If an operation partially succeeds, its error
-identifies the retained state and the command to retry.
-
-### Read and edit another Task's files
-
-```bash
-lf task diff DES-123 --files --base head --json
-lf task diff DES-123 src/parser.rs --base parent
-lf task file DES-123 src/parser.rs --json
-lf task save DES-123 src/parser.rs --revision REVISION --json < draft.rs
-```
-
-File reads use recorded placement without starting a Run. Comparisons default
-to the recorded PR base (`parent`); use `head` for the current commit or a
-returned base SHA for a pinned comparison. `diff --files --json` returns the
-changed-path inventory with base/head revisions, rename paths and working-tree
-states; ordinary `diff --json` returns the patch with binary/truncation evidence.
-`--files` excludes a file path and `--draft`. `diff --draft` compares stdin
-without writing it.
-
-Save requires the revision returned by file inspection. A detected conflict
-leaves the current file intact. Submitted drafts and displaced versions are
-retained for recovery; `task file --recoveries` includes that history. Text
-operations require UTF-8 files within 1 MB and exclude symlinks and Git metadata.
-
-### Worktrees
-
-```bash
-lf task wt create parser
-lf task wt create parser --plan
-lf task wt switch parser
-lf task wt list --json
-lf task wt prune --dry-run
-lf task wt remove parser
-```
-
-Create a worktree for ordinary local work, or use `task checkout ISSUE` for a
-tracked Task. Creation refreshes the default branch before choosing its base;
-`--plan` previews local placement without fetching or writing.
-
-Prune removes eligible clean, settled or stale worktrees. It preserves dirty
-work, the current checkout, the default branch, nonterminal Tasks, and live
-owned work. Inspect `--dry-run` before cleanup. Explicit forced removal is a
-separate destructive choice.
-
-### Commit and rebase
-
-```bash
-lf task commit -m "Fix keyboard navigation in dialogs"
-lf task commit --no-add                # commit only the existing index
-lf task rebase --plan                  # inspect the integration strategy
-lf task rebase                         # integrate and publish the branch with a lease
-```
-
-Commit stages changes and generates a message unless given explicit options.
-Publishing is a separate PR operation.
-
-Rebase refreshes upstream, preserves local edits, integrates the appropriate
-base, and pushes the resulting branch with a lease. The default branch's local
-unpublished commits are preserved; it is not pushed. `--plan` uses local
-evidence and makes no changes.
-
-```bash
-lf task rebase --manual
-lf task rebase --continue
-lf task rebase --abort
-```
-
-Manual recovery stays local and does not push. A retained conflict keeps its
-sequencer and recovery context. An interrupted edit restoration reports the
-retained stash. Use `--adopt` with `--continue` or `--abort` only when explicitly
-taking over an operation started outside Loopflow.
-
-### Pull requests
-
-```bash
-lf task pr open                        # push a draft and open its page
-lf task pr publish                     # push and mark ready, without opening a browser
-lf task pr checks --watch
-lf task pr submit                      # prepare for a reviewer's merge click
-lf task pr arm                         # request auto-merge and return
-lf task pr land                        # watch, repair CI, and finish merged
-```
-
-These operations use the selected Task or checkout. An unbound branch uses
-ordinary branch and PR behavior; no synthetic Task or Linear connection is
-required. An unreadable Task binding reports an error rather than being treated
-as an unbound branch.
-
-| Operation | What it does |
+| Argument | What it does |
 |---|---|
-| `status` | Read the current PR's state |
-| `checks` | Read CI; `--watch` waits and `--logs` includes failure logs |
-| `open` | Push, create/update a draft, and open its page; ready PRs stay ready |
-| `publish` | Push, create/update a ready PR, and print its URL |
-| `submit` | Integrate, prepare, assign, and stop for manual merge |
-| `arm` | Prepare the head, request auto-merge, and return |
-| `land` | Prepare, request auto-merge, watch, repair CI, and finish merged |
-| `next` | Continue a Task on its next PR after an out-of-band merge |
-| `abandon` | Close the PR and remove its branch and worktree |
-
-Publish leaves scratch notes and integration history alone. It does not rebase.
-Submit, arm, and land preserve useful conclusions, clear scratch, prepare a
-reviewable commit, and integrate the branch before publication. They preserve
-valid reviewer-facing copy and update Task merge consequences.
-
-```bash
-lf task pr publish --title "Make dialog navigation follow tab order" \
-  --body "Keyboard focus now follows the visible controls."
-lf task pr land -c                     # merge, then complete the owning Task
-lf task pr land --next focus-ring      # merge, then continue the same Task
-lf task pr next focus-ring             # reconcile a merge performed elsewhere
-```
-
-Bare land keeps the Task open. `-c` requests completion after authoritative
-merge evidence; `--next` continues its PR chain. Arm records the same intended
-outcome, but returns before merge. A published PR alone does not complete work.
-
-On failing required checks, land runs bounded repair for that PR head and
-observes the replacement head. Repeating land resumes retained work. It does
-not invent another PR when settled work can already complete the Task.
-
-## Wave: goals, memory, and chapters
-
-```bash
-lf wave list
-lf wave status designer
-lf --as wave:designer : "Review the plan"
-lf --as wave:designer skill wave/operate "Review progress toward keyboard access"
-```
-
-A Wave keeps long-term goals and persistent notes in `wave/NAME/GOAL.md` and
-`wave/NAME/MEMORY.md`. It is useful before connecting a planning service or
-creating Tasks. Wave discovery combines authored files with registered state
-and shows whether each Wave is connected.
-
-Edit authored goals and memory as repository files. Task owns concrete work;
-Wave owns the direction that work serves.
-
-### Connect planning
-
-```bash
-doppler run -- lf account connect linear
-lf wave connect designer --team-key DSG
-lf wave sync designer
-lf wave status designer --sync
-lf wave status designer
-```
-
-Connection links the Wave to its planning service. Chapter is the repository
-clock; each Wave has one Project per Chapter, holding Tasks, KRs, metric targets
-and its Flow template. Current navigation is Wave → Task; history retains past plans.
-
-Status reads local planning unless asked to refresh. A failed fresh read is
-reported rather than presented as current evidence. Connecting a repository's
-other Waves reuses its Team; `wave connect --all` discovers authored Waves.
-
-### Replace the chapter
-
-```bash
-lf wave update-plan --wave designer --plan plan.json
-lf repo new-chapter 2026-10 --dry-run --json
-lf repo new-chapter 2026-10 --json
-```
-
-Update-plan changes the current Project's KRs, metric targets, and Flow.
-New-chapter advances every Wave together and records a boundary receipt. Started,
-unfinished Tasks retain their identities, worktrees, PRs, and FlowSessions.
-Untouched backlog is abandoned; completed work remains historical. Missing
-evidence stays unresolved.
-
-Use the dry run to inspect each Task's disposition. A stale planning label
-alone does not erase recorded execution or authored work. Repeat the same
-operation to recover an incomplete transition rather than manually rotating
-provider Projects.
-
-### Conversations
-
-```bash
-lf --as wave:product : "Which Task should own this change?"
-lf --as wave:product wave/operate "Review the current blockers"
-doppler run -- lf discord serve product
-```
-
-Ordinary Sessions retain conversations; `wave/operate` makes one finite planning
-pass. Memory stays in `wave/<name>/MEMORY.md`. The independent Discord bridge
-uses the GOAL.md channel binding, starts a bounded conversation for each new message and
-posts its final answer. Its cursor is in memory and startup skips old messages;
-see [Discord bridge](waves.md#discord-bridge) for the delivery limits.
-
-### Schedules
-
-```bash
-lf wave cron preflight --wave designer
-lf wave cron sync --wave designer
-lf wave cron list --wave designer --json
-lf wave cron trigger --wave designer --flow vsm-operate --wait
-lf wave cron history --wave designer --days 35
-```
-
-Author schedules in the Wave's `GOAL.md`. Preflight checks its placement and
-installed target without changing launchd. Sync reconciles the declaration on
-the owning Home. Trigger exercises the installed job; history reads its
-durable firing receipts.
-
-Use `wave cron add` or `wave cron remove` for explicit installed-job changes.
-Schedules run through the installed CLI and use flow-first definition lookup.
-The Home's installation-update schedule is separate under `home install`.
-
-### Placement and retirement
-
-```bash
-lf wave place WAVE_ID HOME_ID
-lf wave probe designer
-lf wave relocate WAVE_ID --name platform
-lf wave relocate WAVE_ID --repo ../platform
-lf wave retire designer --reason "Responsibility transferred"
-lf wave forget WAVE_ID --dry-run
-lf wave recover designer
-```
-
-Placement selects the Home responsible for execution. It does not launch work
-or redirect every local command to that machine. Relocation preserves identity
-and authored state; it reports live work that must settle first.
-
-Retirement retains history. Forget removes an empty registration after authored
-files have been removed. Recover inspects retained historical continuations;
-cancel one explicitly with `--cancel SEQUENCE --reason TEXT` when appropriate.
-`wave rename NAME --title TEXT` changes the connected provider's display title.
-
-## Session: conversations and reviews
-
-These examples use current spellings. The lifecycle contract and remaining
-implementation are in [cutover status](architecture-reference.md#cutover-status).
-
-```bash
-lf --mode batch implement
-lf session list --interactive false --task INF-123 --json
-lf session connect SESSION
-lf session rename SESSION "Migration review"
-lf session bind SESSION --task INF-123
-lf session ready "Ready for review"
-lf session complete SESSION
-```
-
-Every agent conversation has an AgentSession, including headless skills, inline
-prompts, helpers, Asks and reviews. Default lists show interactive conversations;
-explicit filters expose headless and completed history. `--all` retains its
-all-repositories meaning. Interactive mode does not decide Flow membership,
-completion or permission to advance a review.
-
-List state `unknown` means there is no observed active client, explicit readiness,
-or recorded closure. The conversation remains visible and can be connected;
-Connect validates its current owner and native history. Lists retain recorded
-Flow membership even when its relative position is unknown. They do not open
-captured graphs or transcript/history bodies to fill missing display facts.
-
-For bounded inventory, use `lf session list --page --json --limit 100` and pass
-`--after NEXT` until `next` is null. Pages use stable Session IDs, so renaming does
-not shift their order. They are separate reads, not a snapshot of concurrent
-insertions or filter changes. Desktop merges partial pages with retained records
-and removes absent Sessions only after the final successful page. A failed page
-keeps the last observations and open terminals.
-
-Use `--interactive all` for both modes in one inventory. In Desktop, the outline
-menu's **Show headless Sessions** reveals headless conversations. Hiding them
-keeps their open terminals and drafts.
-
-Choose **Bind to Task…** beside a Session name, enter an issue identifier or
-stable Task ID, then review the resolved Task before **Bind permanently**.
-`lf session bind SESSION --task INF-123 --dry-run --json` resolves that same
-identity without assigning work. Confirmation submits its stable Task ID;
-existing Wave and Flow constraints are checked by the binding transaction.
-
-Connect uses the live engine where possible and retains conversation identity,
-name, feedback and native history. The new driver receives write authority; the
-old client can remain a passive display. Restart explicitly replaces the exact
-conversation owner. It preserves recorded history and does not kill a shared
-engine or its other conversations. Unsubmitted editor text requires its own
-surface-preservation proof.
-
-Explicit `--task`, `--wave` or `--as` selects ancestry at launch; a registered
-Task checkout supplies it when no explicit selector is present. A conversation
-can remain unbound. CLI states the permanent bind target and writes; Desktop confirms it. Same-target bind is a no-op; there is no reassignment or unbind.
-Existing Wave ancestry must agree. Done/landed Tasks remain valid without being
-reopened. Flow membership cannot be changed to make an incompatible bind work.
-
-Jack Heart selected prospective attribution: binding affects subsequent work;
-prior usage retains its recorded owner. First assignment, including bind, sets
-Task Started once without rewriting earlier work or usage.
-Inspection commands are still visible in Exec history but do not start Tasks.
-Help, version and rejected arguments retain their actual exit code when a
-compatible process ledger already exists. These early paths do not initialize
-or migrate a Home. Missing storage is reported without changing the command's
-result; agent launch still requires durable admission.
-Rename and bind retain the Session ID, pane, draft and membership. Human names
-survive generated suggestions. A bound Session absent from the visible roadmap
-remains bound.
-
-Ready saves feedback without closing the Session. Complete persists the result
-before teardown; keyed Ask retries return the same answer. Flow reviews pass
-feedback to the following decision, which owns navigation. Closing a pane,
-exiting a provider, or marking ready never completes that review implicitly.
-
-Session identity and captured-input selection come from SQLite. Exact Session
-IDs select their current input; `lf monitor show SESSION --input INPUT --json` reads its recorded history
-without requiring the payload file. There is no legacy Home import command.
-
-## Monitor: history and live activity
-
-```bash
-lf monitor                              # waiting, blocked, active, finished and unknown
-lf monitor --all --json                  # Home-wide overview with observation gaps
-lf monitor list --limit 25 --json        # recorded Execs with continuation cursor
-lf monitor list --parent EXEC --json     # direct child commands, including completed ones
-lf monitor show EXEC --json              # command outcome and execution evidence
-lf monitor show SESSION --final          # latest captured provider conclusion
-lf monitor show SESSION --input INPUT --events # retained evidence for one input
-lf monitor active --task INF-123 --json  # current Session/process linkage and gaps
-lf monitor active --watch --json         # NDJSON observation until stdin closes (macOS)
-lf monitor usage --days 30               # provider consumption, preserving unknown usage
-lf monitor usage --parent SESSION --json # captured child inputs without a date cutoff
-lf monitor activity --task INF-123 --json # durable Work changes
-lf monitor ps --json                     # current process and call-tree snapshot
-lf monitor top                          # refresh on a terminal; snapshot when redirected
-lf monitor prune --dry-run               # exact orphan process and stale receipt targets
-lf home doctor --json                    # consistency and continuity diagnosis
-```
-
-The overview reads the current repository, or all repositories with `--all`.
-It separates Session/FlowSession state, live provider observations and recorded
-Exec outcomes. Missing liveness remains unknown; saved progress is not proof of
-an active driver. Every item carries a reason and next action. JSON preserves
-observation gaps and continuation cursors when an inventory exceeds its page.
-
-`monitor list` replaces the duplicate command-history readers. Session usage
-retains its distinct accounting window and attribution filters. Active discovery
-retains its stream and stdin lifetime; `top --json` is only one process snapshot.
-`monitor show` accepts an Exec or Session identity, never a captured-input key
-alone. Use `--input` with its owning Session to inspect older retained evidence.
-Continue conversations with `lf session connect SESSION`; replaying an immutable
-request remains the separate `lf replay INPUT` launch operation.
-
-Session replacement and native client stopping require readable process evidence.
-If inspection fails, retry after it is available; the command leaves termination
-unconfirmed and preserves native history. Saved Ask or Flow feedback survives a
-cleanup failure, which is reported separately from completing the review.
-Native client publication and stopping share exact launch exclusion, so stopping waits
-for an in-flight launcher to publish its client before inspecting it. A Task
-with confirmed deletion cannot start an Ask or resume a native Session. Exact
-`lf monitor active --task ISSUE` still inspects its retained process evidence.
-
-`lf wave list` reads the local Wave registry. `--current` excludes abandoned and retired
-registrations. `lf roadmap --all` spans repositories without inheriting the
-launching process's Wave; an explicit `--wave` still scopes the query.
-
-```bash
-lf wave forget <wave-id> --dry-run --json
-lf wave forget <wave-id> --json
-```
-
-Forget an abandoned, empty registration after removing its authored
-`GOAL.md`. The command leaves repository files alone and refuses registrations
-with Projects, Tasks, child Waves, planning snapshots, or metric evidence.
-Use installed `lf` to change installed data; development binaries use private
-branch data directories.
-
-When a source build inherits the installed data directory from a Session, it
-reports and uses `~/.lf-dev/worktrees/<source-identity>` instead. Its first database open
-starts from a SQLite snapshot of the installed store, including committed WAL
-data. Later invocations keep branch writes; they never copy them back. Explicit
-disposable data directories still work. The snapshot does not copy Run bundles
-or account files, and does not transfer the launching Session's execution authority.
-An explicit private `LF_HOME` also selects the observation and Run destination,
-even when the Session supplied installed control paths. Child processes use
-that same data directory; re-entering it preserves its own Run context.
-`LF_HOME` is the data-directory setting, not a Home placement selector. The
-snapshot retains recorded Home IDs and placements; it does not register a new
-execution Home or move work to another machine.
-
-```bash
-target/debug/lf task run LOO-321       # reports the installed executable and data directory
-target/debug/lf task status LOO-321    # reads the independent branch copy
-```
-
-When an installation exists, managed Task operations use its CLI and store from
-the start: `run`, `create --run`, `restart`, and Task review Session completion.
-Preparation, issue creation, checkpoints and worker claims happen there.
-The returned Task state comes from the installed database. Non-launching data
-commands keep using the branch copy. A Task that exists only in the branch is preserved there;
-these commands do not register it in installation. Review completion names the
-exact invocation boundary and consumes the installed Session's readiness, without
-copying branch feedback. Direct branch workers are refused while an installation
-owns execution. With no installation, the source build runs workers against its
-own branch data directory; installation is not a prerequisite for development.
-Later `target/debug/lf task status` reads still show the private branch copy.
-Follow managed execution with the installed executable and data directory reported
-by the operation; the two data copies do not synchronize.
-A private data copy does not isolate external effects such
-as provider issue deletion or shared worktree edits.
-
-`lf wave status` focuses one Wave's local
-planning and runtime projection. `lf roadmap` overlays the current
-Linear-backed plan without creating a second runtime model. `lf activity`
-orders durable Work creation, execution, Task PR, and Steer facts; it reuses
-`WorkRef` identity and does not read reconstructable Task or Project wake
-events. `lf usage --days 0 --task` selects retained AgentSession input history from the
-Home's SQLite store before decoding its evidence. Each input keeps its original
-Work attribution, provider, usage and outcome across conversation continuation.
-The historical command and JSON names remain during the coordinated wire cutover.
-
-`lf monitor active` returns live AgentSessions.
-Rows use stable Session `id`, `title`, current typed `work`, and verified `processes`;
-input replacement does not change their identity. The JSON collection is `sessions`,
-replacing `runs`. Per-input subjects, harness, model and repository metadata are
-removed from this live projection. Historical input/usage commands are unchanged.
-
-Current SQL drivers attribute exact live Exec/process receipts. Native client
-receipts resolve through retained input membership, including after driver exit.
-Retained provider PID/start evidence keeps earlier engines off a later Session in
-one Exec. A driver, endpoint or idle engine alone never proves activity. Ambiguous
-shared engines or multiple current Sessions stay explicit gaps. This observation
-has no process-control or Flow-settlement authority.
-
-On macOS, `--watch --json` emits bounded newline-delimited snapshots every two
-seconds. Each tick rereads SQL ownership, including a database outside Home;
-filesystem events only invalidate process receipts. Send `{"action":"refresh"}`
-for an immediate read or `{"action":"rescan"}` after sleep/wake. Closing stdin or
-stdout exits only this reader. Notification loss requests a full cold rescan;
-unchanged warm reads avoid enumerating retained input directories. Linux supports
-one-shot reads and reports continuous discovery as unsupported.
-
-JSON requires `discovery` (`scanning`, `ready`, `unavailable`), `home`,
-`observed_at`, optional `task`, `sessions`, and `gaps`. Empty `sessions` confirms
-no observed active conversations only when discovery is ready and gaps are empty.
-Ownership changes during projection yield Scanning; Desktop retains its last good
-frame. A replaced Home requires a fresh reader. Use one unfiltered Home observation
-for several Task views, matching typed `work`, never a checkout or subject string.
-
-The `--parent` drill resolves one exact Run and returns all direct children
-without the seven-day presentation cap. The one-Run `--final` read projects the
-last durable provider conclusion from normalized conversation events in Session
-history. Final and event reads retain their input order after import and work
-without the old artifact directory. Summary and usage reads exclude conversation
-text before loading payloads. Records
-without a phase receipt are labeled and expose streamed prose from their last
-completed provider turn. It does not parse vendor output or invent a conclusion
-for an unsettled Run.
-Replay uses the immutable prompt, agent/model, non-secret provider account ID,
-and tool boundary recorded before spawn; it never reconstructs those inputs
-from current planning or prompt configuration. Managed Claude/Codex replay
-resolves that account ID through the current Home's deterministic credential
-directory or an explicit forwarded lease; replay uses the same validated Run
-creation path as any other launch.
-None of these commands silently queries or aggregates another Home.
-
-```bash
-lf monitor list --task LOO-298 --json
-lf monitor list --all --search 'pr land' --outcome failed --limit 25 --json
-lf monitor list --all --parent EXEC_ID --json
-lf monitor show EXEC_ID --json
-```
-
-Exec history records actual `lf` processes and observed command results.
-`list` defaults to the current repository; `--all` includes every repository.
-`--task` and `--wave` select recorded agent or mechanical work, including historical
-Tasks. `--caller` selects commands issued by an AgentSession. These are distinct
-from the command's own recorded Wave context and causal parent.
-
-JSON returns `entries` and an optional `next` cursor. Pass that object as JSON to
-`--after`, retaining the same filters. The default page size is 100; zero is invalid.
-Pages sort by descending start time, then ID. Refresh from page one for new data:
-continuation does not freeze a snapshot across imports or changing outcomes.
-
-Search matches literal command text across argv elements, ignoring ASCII case;
-`%` and `_` are ordinary characters. The original stored command remains in JSON.
-Malformed historical command text remains searchable as recorded. Exact lookup
-accepts a full ID or an unambiguous prefix. An `unknown` outcome means no terminal
-observation, and says nothing about whether the process is alive. Discovery reads
-bounded command rows without loading conversation captures or transcripts.
-
-`lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
-attach `lf` processes to call records; exact ancestry attaches provider
-processes. Completed calls and launches disappear. Unclaimed providers remain
-separate because Loopflow has no exact authority to attach or signal them.
-Elapsed time never implies death.
-
-Both commands read process identity from the selected Exec ledger and ownership
-registry without migration. They do not replay command journals to reconstruct
-Execs or treat a recorded command outcome as current OS liveness. Source builds
-retain the same private-data selection as other commands.
-`lf mon prune` is the separate write boundary. It removes dead Exec receipts and
-reaps only OpenCode process groups whose registered owner is absent. It never
-kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
-
-```bash
-lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route
-lf --account claude=jack@ --account codex=loopflow-eng@ implement
-lf --only-account codex=manabot-eng@ review             # no fallback login
-```
-
-`--account <email-prefix>` prefers each matching managed login before its
-provider's normal route. The first preferred attempt bypasses stored health;
-a missing credential continues through the healthy fallback route.
-`--only-account` restricts the launch and its children to exactly the
-selected provider accounts. Both flags are repeatable and accept
-`claude=<selector>` or `codex=<selector>`. They cannot be combined.
-
-Use the flags for Claude and Codex terminal sessions too (`--mode tui`): logging
-into a managed login with a bare `codex login` creates a second session and
-evicts the managed one ("needs re-login"); entering through lf shares one
-session.
-
-Without an account flag, managed Claude and Codex launches use the repository
-route, then the default route. If neither exists, all automatic managed logins
-are eligible and Loopflow skips known cooling or limited accounts. If no
-managed login exists, the provider CLI uses its ambient default credentials.
-
-`lf usage` reads Home-local Session input and provider usage history, newest first.
-`--days` defaults to 30; zero selects all retained history. Original manifest/SQL time selects imported history; new captures use their
-event observation time. Native turns without a captured input use
-their own first observed receipt, preserving missing capture/start membership.
-`--wave`, `--project`, and `--task` select recorded ownership, including native
-turns after a bind. Earlier usage keeps its original owner. Receipts without an
-original start remain unattributed and appear in unfiltered discovery.
-
-JSON returns `SessionHistory` rows with `session_id`, optional `captured`, retained
-`artifact_key`/`caller_artifact_key` selectors, `providers`, and `usage`. A provider
-entry references its exact native thread/turn/start/completion, or older recorded
-attempt evidence beneath a captured event. `recorded_outcome`/`recorded_at` retain
-old recorder results separately from provider outcomes and actual Exec exits.
-These projections have no resumable lifecycle. Rust and Swift use the same shape;
-`RunSnapshot`, string `subjects`, and input-level `outcome`/`ended` are removed.
-
-Cumulative counters are reduced once per stream. Omitted counters stay unknown,
-final receipts and evidence gaps remain explicit. Native thread/turn correlation
-prevents counting recorder checkpoints twice. Without a retained baseline, usage
-reports the observed suffix as partial. A native completion supplies neither
-missing usage nor a command outcome.
-
-Session usage summaries select their window before reading history payloads,
-retaining every eligible unfinished entry. Exact Task and caller drills have no
-presentation cap. A Session selector reads its current captured event. Historical records from
-retired owners are not imported; configured-provider acceptance remains separate.
-
-`lf ci` reads durable CI incidents from the local Home store. One failed head is
-one attempt; later passing and merge observations close every open attempt on
-that PR. `--wave` and `--repo owner/repo` filter the same local report.
-
-`lf doctor` also prints the binary's build provenance, the resolved database
-path, and the latest known and applied migrations. Those fields still print
-when the database is too new or came from a divergent development build.
-
-The `continuity` check reads installed cron activation and scheduled receipts.
-Only the latest due interval for each cron is live: a missing receipt names the
-cron, Home, expected interval, and `lf cron history` command. Pre-activation and
-older ledger gaps remain visible history without keeping every later doctor
-red. A failed target still proves the scheduler fired; its own receipt and
-target error remain the actionable evidence.
-
-## Account: connections, capacity, and routing
-
-```bash
-lf account                             # refresh managed identity and usage
-lf account codex                        # refresh one provider
-lf account --cached --json              # offline evidence as one JSON document
-lf account route                       # inspect configured and automatic selection
-lf account route set codex work@ personal@
-```
-
-Account reports credential state, routing, capacity and next actions per provider
-and managed login. The default refreshes supported provider observations;
-`--cached` starts no provider, contacts no origin broker and writes no state.
-`--details --json` includes sources, browser choices and timestamps.
-
-JSON retains dated observations after an unavailable refresh. Check each window's
-reset and observation times; an expired window does not establish current
-capacity. Text labels expired capacity unknown. Identity rejection, unavailable
-verification and cached credential presence remain distinct.
-
-Account selection does not change the selected model. An incompatible explicit
-account/model combination reports an error. Route inspection is read-only;
-`route set` replaces the selected repository or default route.
-
-### Connect and configure
-
-```bash
-lf account connect claude personal@example.com --chrome-profile Personal
-lf account set claude personal@ --chrome-profile Personal
-lf account set claude personal@ --routing explicit-only
-lf account set claude personal@ --clear-cooldown
-lf account disconnect claude personal@
-doppler run -- lf account connect linear
-```
-
-A managed login is an existing spending identity, not a new provider account.
-A browser profile is only the venue used to authenticate it. Saved browser
-choices can be reused on reconnect. `account connect claude EMAIL --import`
-explicitly adopts an ambient Claude login.
-
-Claude and Codex accounts can be routed individually. Service credentials such
-as GitHub and Linear are connected for their operations. Source secrets through
-Doppler; never paste credentials into command arguments or saved documents.
-
-### Choose accounts for a launch
-
-```bash
-lf -m codex --account work@ run implement
-lf --account claude=personal@ --account codex=work@ run feature
-lf --only-account codex=work@ skill review-design
-```
-
-`--account` prefers matching accounts before the normal provider route.
-`--only-account` restricts the launch and its children to the selected accounts.
-Both accept provider-qualified selectors and can be repeated; they cannot be
-combined. Use these flags for terminal launches too, so the provider shares
-the managed credential rather than creating a competing login.
-
-```bash
-lf account route set codex work@ personal@
-lf account route set codex personal@ --default
-lf account route set codex work@ --repo owner/repository
-lf account route --json
-```
-
-Repository routes override the default route. Where automatic selection is
-used, accounts with known cooling or limited state are skipped. Selection,
-credential readiness, and observed capacity are reported separately.
-
-## Home: installation and machines
-
-```bash
-lf home id --json
-lf home doctor
-lf home user
-lf home desktop
-lf home install
-lf home install schedule daily
-```
-
-A Home has a stable machine identity. Its SSH route can change without changing
-that identity. Installation and machine inspection work outside a repository.
-
-### Reach another Home
-
-```bash
-lf home observe HOME_ID ssh://jack@mini.local
-lf home ssh HOME_ID wave status designer --json
-lf home ssh HOME_ID task status DES-123 --json
-```
-
-Everything after the SSH target is the remote `lf` invocation. Origin SSH
-options belong before that target. The target resolves and verifies its Home
-identity. Foreground credential forwarding does not install managed provider
-credentials remotely; durable descendants must have the authority they need.
-
-### Install and diagnose
-
-```bash
-lf home install                        # latest published release
-lf home install schedule               # login and weekly checks on macOS
-lf home doctor --planning
-lf home doctor --json
-```
-
-Install updates the CLI and supported application components from verified
-release artifacts. It does not require a source checkout. Use `task rebase`
-to update repository work instead. Scheduled installation supports weekly,
-daily, hourly, and five-minute cadences on macOS; Linux supports explicit
-installation.
-
-Doctor reports build provenance, database and migration state, planning drift,
-and continuity evidence. Missing scheduler receipts point to the relevant
-`wave cron history` command. Inspection does not repair state silently.
-
-Source builds may use a private data directory. Managed Task launches report
-the installation that owns execution; follow that reported binary and store
-when inspecting the running work. A private database does not isolate shared
-worktree edits or external service effects.
-
-### Capture a page
-
-```bash
-lf home screenshot page.html -o page.png
-lf home screenshot https://loopflow.studio -o mobile.png --width 390 --height 844
-```
-
-Screenshot uses a standalone headless browser and a temporary profile. Failed
-or interrupted captures preserve existing output. If the backend is missing,
-install it with `playwright install --only-shell chromium`.
-
-## Repo: releases and integrations
-
-```bash
-lf repo ci --since 7d
-lf repo ci --since 7d --json
-lf repo release check
-lf repo release run patch
-lf repo release status
-```
-
-CI reports repair attempts and their later passing or merge observations.
-Release run owns the release lifecycle: preparation, verification, notes,
-tagging, publication, and recovery. An interrupted release resumes its
-recorded state rather than skipping to a newer version.
-
-### Measure context
-
-```bash
-lf repo tokens
-lf repo tokens --days 365
-lf repo tokens --json
-```
-
-Tokens reports line and model-token counts by tracked path. History reads Git
-blobs without checking them out; untracked and non-UTF-8 files are skipped.
-
-### Release operations
-
-```bash
-lf repo release run minor
-lf repo release notes 1.2.3 --preview
-lf repo release bump 1.2.3
-lf repo release tag 1.2.3
-lf repo release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
-lf repo release publish v1.2.3 --finalize
-```
-
-Use the full run for a release, or individual operations for deliberate control.
-Tag creates and pushes a tag; publish changes the hosted release. Notes preview
-prints the selected version's narrative without writing release state.
-
-Repository-specific checks and artifact publishers live under `release.targets`
-in configuration. Release evidence combines the exact shipped range with
-`release/unreleased/DECISIONS.md`; published records live under
-`release/vVERSION/`. `RELEASE_NOTES.md` holds the latest notes.
-
-### Planning integrations
-
-```bash
-lf repo reteam                         # preview the repository Team migration
-lf repo reteam --apply
-```
-
-Reteam moves linked planning onto the repository's Team and refreshes ownership
-and snapshots. It defers work that can still write an old identifier and resumes
-an incomplete migration.
-
-## Scripts and structured output
-
-```bash
-lf task status DES-123 --json
-lf wave status designer --json
-lf mon list --task DES-123 --json
-lf account --details --json
-```
-
-Use `--json` on read commands that advertise it. Help lists the supported
-options at each command. JSON distinguishes unknown values from empty results
-and keeps ordering independent of terminal presentation. Errors go to stderr.
-
-Use canonical command paths in durable automation. They state the owner and
-remain explicit when a future command adds another matching short name.
-Use `run`, `skill`, or `flow` when the intended target is an authored definition.
-
-## See also
-
-[Get Started](getting-started.md) · [Waves](waves.md) ·
-[The Agent API](agent-api.md) · [Conducting](conducting.md) ·
-[Authoring](authoring.md) · [Configuration](config.md) · [Security](security.md)
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--events` | Print a Session's retained raw input events Default: false. |
+| `--final` | Print a Session's last recorded provider conclusion Default: false. |
+| `--input` | Inspect an exact retained input belonging to this Session |
+| `--help / -h` | Print help |
+
+## lf monitor active
+
+Observe active conversations and missing process evidence
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--watch` | Stream NDJSON until stdin closes Default: false. |
+| `--task` | task |
+| `--help / -h` | Print help |
+
+## lf monitor usage
+
+Show direct provider-authored usage from recorded Session inputs
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit Session usage evidence as JSON Default: false. |
+| `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--parent` | Inputs issued by this Session or retained capture |
+| `--wave` | Limit to Session inputs attributed to one Wave |
+| `--project` | Limit to Session inputs attributed to one Project |
+| `--task` | Limit to Session inputs attributed to one Task |
+| `--help / -h` | Print help |
+
+## lf monitor ps
+
+Print one parseable snapshot of live Loopflow call trees
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the versioned activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor top
+
+Refresh live Loopflow call trees on a terminal; print once when redirected
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit one versioned activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor prune
+
+Reap registered orphan providers and remove dead process receipts
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
+| `--json` | Emit the versioned prune report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf monitor activity
+
+Show one ordered record of durable Work, Session, PR, and Steer facts
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--json` | Emit the typed activity snapshot as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf :
+
+Run an inline prompt
+
+| Argument | What it does |
+|---|---|
+| `<prompt>` | prompt |
+| `--help / -h` | Print help |
+
+## lf __screenshot-supervisor
+
+Internal owner-loss supervisor for one browser capture
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<source>` | URL or local HTML file to capture |
+| `--output / -o` | PNG destination |
+| `--width` | Viewport width in pixels Default: 1440. |
+| `--height` | Viewport height in pixels Default: 900. |
+| `--help / -h` | Print help |
+
+## lf __provider-session
+
+Internal provider callback that records one native interactive session
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf session
+
+Inspect and continue Sessions
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf session ask
+
+Open a durable session and wait for the user to complete it
+
+| Argument | What it does |
+|---|---|
+| `--skill` | Named skill for the session |
+| `<question>` | What the session should work through |
+| `--help / -h` | Print help |
+
+## lf session history
+
+Read this conversation's native start, usage and completion receipts
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--after` | Continue after an observed event sequence Default: 0. |
+| `--limit` | limit Default: 100. |
+| `--help / -h` | Print help |
+
+## lf session list
+
+List Sessions
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include waiting steps from every repository on this machine Default: false. |
+| `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
+| `--history` | Include completed conversations and historical reviews Default: false. |
+| `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
+| `--offset` | offset Default: 0. |
+| `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
+| `--after` | Previous page's next identity; keep the same filters |
+| `--task` | task |
+| `--search` | search |
+| `--help / -h` | Print help |
+
+## lf session connect
+
+Connect to the live conversation, or resume its saved history
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
+| `--try` | Ask the provider to resume even when another client is active Default: false. |
+| `--help / -h` | Print help |
+
+## lf session complete
+
+Complete a review, blocked Ask, or interactive session
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--help / -h` | Print help |
+
+## lf session rename
+
+Rename a Session; a human name is never replaced by a suggestion
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `<name>` | name |
+| `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf session bind
+
+Assign a Task to a Session that has none; the Task never changes after
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
+| `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf session ready
+
+Mark the active session ready for your review
+
+| Argument | What it does |
+|---|---|
+| `<summary>` | summary |
+| `--help / -h` | Print help |
+
+## lf session serve-flow
+
+Run the exact review skill in its durable terminal
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<task_id>` | task id |
+| `<invocation_id>` | invocation id |
+| `<flow>` | flow |
+| `<node_id>` | node id |
+| `<skill>` | skill |
+| `<iteration>` | iteration |
+| `--help / -h` | Print help |
+
+## lf session serve-ask
+
+Run one ad-hoc request in its durable terminal
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<input>` | input |
+| `--help / -h` | Print help |
+
+## lf session stop-client
+
+Stop one exact native provider client after its review completes
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<input>` | input |
+| `--help / -h` | Print help |
+
+## lf account
+
+Refresh account access and capacity, or manage logins and routing
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | Limit observations to one provider |
+| `--cached` | Inspect cached evidence without contacting providers or the origin broker Default: false. |
+| `--details` | Include credential sources, browser choices, and timestamps Default: false. |
+| `--json` | Emit the account overview as one JSON document Default: false. |
+| `--help / -h` | Print help |
+
+## lf account disconnect
+
+Disconnect local credentials or one managed login
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--help / -h` | Print help |
+
+## lf account connect
+
+Connect local credentials or a managed login using a remembered browser
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--chrome-profile` | chrome profile |
+| `--import` | Adopt an existing Claude login Default: false. |
+| `--api-key` | Read the provider's API key environment variable Default: false. |
+| `--help / -h` | Print help |
+
+## lf account set
+
+Edit account configuration or remembered browser choices
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--login-email` | login email |
+| `--routing` | routing |
+| `--plan` | plan |
+| `--clear-plan` | clear plan Default: false. |
+| `--paid-through` | paid through |
+| `--clear-paid-through` | clear paid through Default: false. |
+| `--clear-cooldown` | clear cooldown Default: false. |
+| `--chrome-profile` | Replace the ordered browser choices (repeat for fallback profiles) |
+| `--clear-chrome-profiles` | clear chrome profiles Default: false. |
+| `--help / -h` | Print help |
+
+## lf account redeem-reset
+
+Spend one banked Codex reset for this named login
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<email>` | email |
+| `--idempotency-key` | Reuse this key when retrying the same redemption |
+| `--credit-id` | Opaque credit ID returned by live status (otherwise the service chooses) |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf account route
+
+Explain configured and automatic account selection, or replace a route
+
+| Argument | What it does |
+|---|---|
+| `--repo` | repo |
+| `--default` | default Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf account route set
+
+Replace a provider's ordered route
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<accounts>` | accounts |
+| `--repo` | repo |
+| `--default` | default Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo
+
+Repository releases, source measurement, CI evidence, and provider administration
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf repo connect
+
+Connect a Wave to its Initiative and the repository's Team (Task prefix)
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name (auto-detected if omitted) |
+| `--all` | Recursively initialize every Wave under wave/ Default: false. |
+| `--team-key` | Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name |
+| `--team-name` | Repository Team display name. Defaults to the repository name |
+| `--help / -h` | Print help |
+
+## lf repo refresh
+
+Refresh shared planning from Linear
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--all` | all Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo new-chapter
+
+Advance every Wave to the named Project plan
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--dry-run` | dry run Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo release
+
+Release operations (run, check, notes, bump, tag, status)
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf repo release run
+
+Run the full release workflow end-to-end
+
+| Argument | What it does |
+|---|---|
+| `<version>` | Version to release: patch\|minor\|major\|X.Y.Z (default: patch) |
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo release check
+
+Check if PRs have merged since the last tag
+
+| Argument | What it does |
+|---|---|
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo release notes
+
+Generate release notes for a version
+
+| Argument | What it does |
+|---|---|
+| `<version>` | Version (e.g. 0.9.6) |
+| `--prev-tag` | prev tag |
+| `--preview` | Print notes without updating manifests or release archives Default: false. |
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo release bump
+
+Bump version in manifest files
+
+| Argument | What it does |
+|---|---|
+| `<version>` | Version to bump to (e.g. 0.9.6) |
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo release tag
+
+Create a git tag and push it
+
+| Argument | What it does |
+|---|---|
+| `<version>` | Version to tag (e.g. 0.9.6) |
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo release publish
+
+Stage or publish a GitHub Release
+
+| Argument | What it does |
+|---|---|
+| `<tag>` | Release tag (for example v0.12.4) |
+| `--notes` | Release notes used while creating or updating the draft |
+| `--asset` | Asset to upload; repeat for multiple files |
+| `--finalize` | Publish the existing draft and mark it latest Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo release status
+
+Check release workflow status
+
+| Argument | What it does |
+|---|---|
+| `--target / -t` | target |
+| `--help / -h` | Print help |
+
+## lf repo tokens
+
+Measure this codebase: lines and tokens per directory (tracked files only)
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit as JSON Default: false. |
+| `--days` | Walk git history instead: the codebase's size on each day it changed |
+| `--help / -h` | Print help |
+
+## lf repo ci
+
+Show how failed CI is detected, repaired, and landed across this Home
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--wave` | Scope to one Wave |
+| `--repo` | Scope to one GitHub owner/repo |
+| `--json` | Emit the complete incident report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo reteam
+
+Reconcile linked Waves to the repository's Linear Team
+
+| Argument | What it does |
+|---|---|
+| `--apply` | apply Default: false. |
+| `--help / -h` | Print help |
+
+## lf home
+
+Inspect this Home and observe routes to other Homes
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf home desktop
+
+Open or focus Loopflow.app
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf home screenshot
+
+Capture a URL or local HTML file without claiming the user's browser
+
+| Argument | What it does |
+|---|---|
+| `<source>` | URL or local HTML file to capture |
+| `--output / -o` | PNG destination |
+| `--width` | Viewport width in pixels Default: 1440. |
+| `--height` | Viewport height in pixels Default: 900. |
+| `--help / -h` | Print help |
+
+## lf home install
+
+Install the latest published Loopflow release from any directory
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf home install schedule
+
+Install the latest Loopflow at login and weekly by default (macOS launchd)
+
+| Argument | What it does |
+|---|---|
+| `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf home install recover-switch
+
+Continue one interrupted machine install switch from its pinned candidate
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--switch` | The fixed machine switch receipt to continue |
+| `--help / -h` | Print help |
+
+## lf home install preflight
+
+Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the structured PromotionPreview as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf home install local-preflight
+
+Validate this exact local candidate against one receipt-selected store
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--store` | store |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf home install advance-switch
+
+Advance the receipt-selected store with this exact candidate's registry
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--switch` | switch |
+| `--help / -h` | Print help |
+
+## lf home install promote
+
+Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--from-build` | Promote this exact unpublished local lf into a disposable installed Home |
+| `--coordinated-build` | Candidate delegated to the receipt-pinned active coordinator Internal. |
+| `--fresh` | Abandon an incompatible disposable Home and fork published data again Default: false. |
+| `--reuse-home` | Reuse a retained development installation and its existing Home data |
+| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
+| `--app-source` | A staged Loopflow.app bundle to install alongside the CLI |
+| `--app-target` | The global Loopflow.app path to replace atomically |
+| `--legacy-app-target` | A retired app bundle to remove after the new app commits |
+| `--sync-skills` | Regenerate global skills after the promotion commits Default: false. |
+| `--preview` | Validate and print the preview but change nothing Default: false. |
+| `--help / -h` | Print help |
+
+## lf home install rollback
+
+Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
+| `--candidate` | The immutable content-addressed prior executable to activate |
+| `--help / -h` | Print help |
+
+## lf home sync-skills
+
+Compile loopflow skills into your home vendor Skills directories
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
+| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--help / -h` | Print help |
+
+## lf home doctor
+
+Audit the local run ledger: continuity, vocabulary, attribution, identity, lineage, coverage
+
+| Argument | What it does |
+|---|---|
+| `--planning` | Diagnose repository planning without changing it Default: false. |
+| `--json` | Emit the audit as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf home ssh
+
+Run lf on a Home or SSH host carrying your local credentials
+
+| Argument | What it does |
+|---|---|
+| `--account` | Prefer this origin account when the remote lf chooses a provider |
+| `--only-account` | Restrict remote provider launches to these origin accounts |
+| `<target>` | HomeId (preferred), SSH alias, or user@host |
+| `--repo` | Repository path on the remote, relative to $HOME |
+| `--secret` | Doppler secret to resolve locally and forward as an env var (repeatable). The Doppler token itself is never forwarded |
+| `--forward-agent` | Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk Default: false. |
+| `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
+| `--help / -h` | Print help (see more with '--help') |
+
+## lf home user
+
+Print the configured participant display name
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf home id
+
+Print this machine's stable local Home identity
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf home observe
+
+Record the current route for a known Home identity
+
+| Argument | What it does |
+|---|---|
+| `<home_id>` | home id |
+| `<route>` | route |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf discord
+
+Bridge new Discord messages to finite Wave Sessions
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf discord serve
+
+Poll a configured channel and post each Session's final answer
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--help / -h` | Print help |
+
+## lf wave
+
+Manage Wave identity, placement and planning
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wave cron
+
+Local launchd jobs that run lf commands on a schedule
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf wave cron add
+
+Install or replace a scheduled lf invocation
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` (ambient if omitted) |
+| `--flow` | Flow or skill name to run |
+| `--schedule` | Fixed-daily cron expression, or the `daily` alias Default: daily. |
+| `--help / -h` | Print help |
+
+## lf wave cron list
+
+List installed loopflow cron jobs
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Only jobs for this Wave |
+| `--json` | Emit machine-readable job state Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave cron preflight
+
+Validate Home authority and declared jobs without changing launchd
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave whose GOAL.md `crons:` are validated |
+| `--help / -h` | Print help |
+
+## lf wave cron sync
+
+Reconcile installed launchd jobs to match a wave's declared `crons:`
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave whose GOAL.md `crons:` drive the installed jobs |
+| `--help / -h` | Print help |
+
+## lf wave cron run
+
+Execute one installed cron job and persist its terminal receipt
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave whose installed declaration is executed |
+| `--flow` | Flow or skill name to run |
+| `--scheduled` | Mark a launchd-owned invocation Default: false. Internal. |
+| `--help / -h` | Print help |
+
+## lf wave cron history
+
+Show durable cron receipts
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave whose receipts are shown |
+| `--flow` | Only receipts for this flow or skill |
+| `--days` | Receipt window in days Default: 35. |
+| `--json` | Emit machine-readable receipts Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave cron trigger
+
+Ask launchd to fire an installed job
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave whose installed job is fired |
+| `--flow` | Flow or skill name to run |
+| `--wait` | Wait for and return the scheduled receipt Default: false. |
+| `--timeout` | Maximum wait for a receipt Default: 15m. |
+| `--help / -h` | Print help |
+
+## lf wave cron remove
+
+Uninstall a scheduled lf invocation
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | Wave name passed to `lf <flow> --wave <wave>` |
+| `--flow` | Flow or skill name to remove |
+| `--help / -h` | Print help |
+
+## lf wave list
+
+List authored Waves and retained planning identities without starting work
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the wave snapshot as JSON (Loopflow's dashboard snapshot) Default: false. |
+| `--all` | List Waves from every repository on this machine, not just the current repository (worktrees collapse to their main checkout) Default: false. |
+| `--current` | Exclude abandoned and retired registrations from current navigation Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave status
+
+Show one Wave's current plan, Task details, and execution evidence
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | Wave name (default: the ambient wave) |
+| `--json` | Emit the status snapshot as JSON Default: false. |
+| `--sync` | Refresh planning from Linear before reading Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave place
+
+Place a Wave on a Home
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<home_id>` | home id |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave rename
+
+Rename or relocate an authored Wave and its provider mapping
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--repo` | repo |
+| `--name` | name |
+| `--title` | Change the linked Initiative display title |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave update-plan
+
+Replace the current chapter's KRs, targets, and Flow recommendation
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | wave |
+| `--plan` | plan |
+| `--help / -h` | Print help |
+
+## lf task
+
+Concrete work, worktrees, commits, and pull requests
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task pr
+
+Pull request lifecycle
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task pr checks
+
+Show CI status for current branch
+
+| Argument | What it does |
+|---|---|
+| `--watch / -w` | watch Default: false. |
+| `--logs / -l` | logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task pr next
+
+After an out-of-band merge, rotate this Task to its next serial PR, carrying committed and uncommitted follow-up onto the new branch
+
+| Argument | What it does |
+|---|---|
+| `<slug>` | Name the next serial branch (defaults to the settled PR's next slug, then the sequence number) |
+| `--help / -h` | Print help |
+
+## lf task pr publish
+
+Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface
+
+| Argument | What it does |
+|---|---|
+| `--model / -m` | model |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf task pr open
+
+Push and create or update a draft PR, then open its GitHub page. Existing ready PRs stay ready; opening a draft does not publish it
+
+| Argument | What it does |
+|---|---|
+| `--model / -m` | model |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf task pr submit
+
+Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--create-pr / -p` | create pr Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf task pr land
+
+Arm and watch a PR through CI repair and authoritative merge
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--local` | local Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf task pr abandon
+
+Abandon branch: close PR, remove worktree, delete branch
+
+| Argument | What it does |
+|---|---|
+| `<branch>` | Branch to abandon (default: current) |
+| `--force / -f` | force Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wt
+
+Worktree operations
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task wt create
+
+Create a low-level sibling worktree
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name |
+| `--plan` | Print the placement plan without creating a worktree Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wt switch
+
+Switch to a worktree by name, identity leaf, or full branch
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name or full branch name to switch to |
+| `--help / -h` | Print help |
+
+## lf task wt list
+
+List worktrees (read-only; reflects the last-synced main)
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--sync` | Fetch origin and fast-forward main before listing (mutates the canonical checkout). Off by default so a list never touches it Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wt prune
+
+Remove clean terminal or inactive worktrees
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be pruned without removing anything Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wt delete
+
+Delete a worktree and its local and remote branch; retain PR and Task outcomes
+
+| Argument | What it does |
+|---|---|
+| `<name>` | Worktree name to remove |
+| `--force / -f` | force Default: false. |
+| `--help / -h` | Print help |
+
+## lf task sync
+
+Merge upstream into the current branch (default: main or stack parent)
+
+| Argument | What it does |
+|---|---|
+| `--plan` | Print the planned sync strategy without mutating git Default: false. |
+| `--manual` | Keep the sync local and leave conflicts for this process to resolve Default: false. |
+| `--continue` | Stage resolved conflict paths and continue the local sync Default: false. |
+| `--abort` | Abort the local sync in progress Default: false. |
+| `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
+| `<onto>` | Branch to sync onto |
+| `--help / -h` | Print help |
+
+## lf task commit
+
+Commit changes
+
+| Argument | What it does |
+|---|---|
+| `--message / -m` | message |
+| `--no-add` | no add Default: false. |
+| `--help / -h` | Print help |
+
+## lf task __worker
+
+Internal: drive a Task Flow from its claimed boundary
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<task_id>` | task id |
+| `--help / -h` | Print help |
+
+## lf task checkout
+
+Ensure tracked Task Work and its worktree without starting a worker
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--name` | name |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--directive` | directive |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task create
+
+File a Task in the current chapter; optionally prepare and run it
+
+| Argument | What it does |
+|---|---|
+| `--wave` | Wave name; defaults to the bound Wave |
+| `--title` | Task title; omitted when stdin supplies the report and first line |
+| `--notes` | Description; defaults to a report read from stdin |
+| `--run` | Validate placement and execution before filing, then run the Task Default: false. |
+| `--name` | name |
+| `--flow` | Select a Flow for this Task worker; defaults to the chapter recommendation |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task status
+
+Show durable Task facts and current worker evidence
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | Task issue; defaults to the Task in this checkout |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task diff
+
+Show this Task's patch or list its changed files
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--files` | List changed paths and comparison revisions instead of a patch Default: false. |
+| `--base` | base Default: parent. |
+| `--draft` | Compare a UTF-8 draft read from stdin without writing the worktree Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task file
+
+Read one file from this Task's worktree
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--recoveries` | Inspect retained versions, including late writes; omitted for fast content reads Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task save
+
+Save UTF-8 stdin with an expected revision and retained recovery files
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<path>` | path |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task complete
+
+Complete planning work, or a placed Task whose pull requests are settled
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--summary` | summary |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task abandon
+
+Cancel the Task in Linear and locally, close its PRs and delete its branches
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | Issue ID or branch; defaults to the Task in this checkout |
+| `--force / -f` | force Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task sweep
+
+Preview open issues outside current chapters; apply safe cancellations explicitly
+
+| Argument | What it does |
+|---|---|
+| `--apply` | apply Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task delete
+
+Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--help / -h` | Print help |
+
+## lf task edit
+
+Edit a Task's title or notes, before or after placement
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--title` | title |
+| `--notes` | notes |
+| `--wave / -w` | wave |
+| `--help / -h` | Print help |
+
+## lf task comment
+
+Read the thread or publish a comment; agent comments default to progress
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<message>` | message |
+| `--steer` | Deliver new direction even when publishing from an agent Session Default: false. |
+| `--wave / -w` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task interrupt
+
+Interrupt the active provider turn
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task wait
+
+Wait without polling an LM
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--until` | until Default: terminal. |
+| `--timeout` | timeout |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task restart
+
+Stop the pinned Flow and begin a new one in a fresh Task worker; defaults to the chapter's currently recommended Flow
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<advice>` | advice |
+| `--flow` | Replacement Flow; validated before any checkpoint or stop |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf __telemetry-scorecard
+
+Internal: render the repository maintainer scorecard for telemetry-daily
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit structured JSON for operator automation Default: false. |
+| `--help / -h` | Print help |
+
+## lf list
+
+Discover commands, skills, and flows
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf help
+
+Explain a command, skill, or flow without launching it
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--all` | all Default: false. |
+| `--help / -h` | Print help |
+
+## lf roadmap
+
+Show the current repository's roadmap: every open Task across the repo's Waves, joined to live evidence and bucketed into Now / Waiting / Available / Later. `--wave` scopes it; `--all` spans every repository on this machine. Local-only, deterministic
+
+| Argument | What it does |
+|---|---|
+| `--wave` | Scope to one Wave (default: every Wave in the current repository) |
+| `--task` | Find an exact issue identifier, including retained historical Tasks |
+| `--json` | Emit the roadmap snapshot as JSON Default: false. |
+| `--all` | Span every repository on this machine, not just the current one Default: false. |
+| `--help / -h` | Print help |
+
+## lf replay
+
+Launch the immutable provider request retained for a captured input
+
+| Argument | What it does |
+|---|---|
+| `<run>` | Captured input identity or an unambiguous displayed prefix |
+| `--help / -h` | Print help |
+
+## lf __flow-step
+
+Execute one captured Flow boundary in its own process
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `<version>` | version |
+| `--help / -h` | Print help |
+
+## lf run
+
+Run a definition, preferring a flow over a same-named skill
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `<args>` | args |
+| `--help / -h` | Print help |
+
+## lf flow
+
+Run or inspect authored flows
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf flow start
+
+Start or continue a Task through its saved Flow
+
+| Argument | What it does |
+|---|---|
+| `<template>` | Template for a new Task Flow; existing saved progress remains authoritative |
+| `--name` | name |
+| `--stack-on` | Fork this Task's worktree from another Task's active PR |
+| `--directive` | directive |
+| `--reason` | Explain what changed after an execution blocker |
+| `--retry` | Retry uncertain native work after confirmed engine exit Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf flow list
+
+List authored flows or saved FlowSessions
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--sessions` | List or show saved FlowSessions instead of reusable templates Default: false. |
+| `--all` | Include every repository and flows with unknown repository evidence Default: false. |
+| `--limit` | FlowSession page size (default 100) |
+| `--after` | Previous page's next identity; retain the same filters |
+| `--search` | Literal name or identity containment |
+| `--state` | state |
+| `--for-task` | Retained Task ID or issue identifier, including completed Tasks |
+| `--for-wave` | Retained Wave ID or name |
+| `--taskless` | taskless Default: false. |
+| `--managed` | Whether the Task currently selects this FlowSession |
+| `--help / -h` | Print help |
+
+## lf flow show
+
+Inspect an authored flow or a saved FlowSession
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--json` | json Default: false. |
+| `--sessions` | sessions Default: false. |
+| `--help / -h` | Print help |
+
+## lf flow resume
+
+Continue a saved Flow invocation
+
+| Argument | What it does |
+|---|---|
+| `<invocation>` | invocation |
+| `--retry` | retry Default: false. |
+| `--help / -h` | Print help |
+
+## lf skill
+
+Run a skill explicitly
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |

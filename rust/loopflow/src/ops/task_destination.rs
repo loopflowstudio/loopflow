@@ -84,11 +84,31 @@ pub(super) fn check_task(context: &ChildExecutionContext, issue: &str) -> Result
 }
 
 pub(super) fn exec_args(operation: &str, options: &TaskExecOptions) -> Vec<String> {
-    let mut args = vec!["task".into(), operation.into()];
+    let mut args = vec![
+        if operation == "start" {
+            "flow".into()
+        } else {
+            "task".into()
+        },
+        operation.into(),
+    ];
+    if operation == "start" {
+        if let Some(flow) = &options.flow {
+            args.push(flow.clone());
+        }
+    }
     for (flag, value) in [
+        ("--wave", &options.wave),
         ("--model", &options.agent),
         ("--name", &options.name),
-        ("--flow", &options.flow),
+        (
+            "--flow",
+            if operation == "start" {
+                &None
+            } else {
+                &options.flow
+            },
+        ),
         ("--stack-on", &options.stack_on),
         ("--directive", &options.directive),
         ("--reason", &options.reason),
@@ -127,6 +147,13 @@ pub(super) fn execute(
         if name.to_string_lossy().starts_with("LF_") {
             command.env_remove(name);
         }
+    }
+    if let Some(selection) = std::env::var_os(crate::provider_account::lease::ACCOUNT_SELECTION_ENV)
+    {
+        command.env(
+            crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            selection,
+        );
     }
     if let Some(declaration) = std::env::var_os(crate::lf::WORK_DECLARATION_ENV) {
         command.env(crate::lf::WORK_DECLARATION_ENV, declaration);

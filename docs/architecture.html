@@ -2325,9 +2325,10 @@ payloads remain files, but readers select and page rows before opening them.</p>
 <p>Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Explicit restart
-replaces only the exact conversation owner; it never kills a shared engine to
-restart one thread. Engine PID, client PID and conversation driver are distinct.</p>
+replace the provider generation or interrupt an existing turn. Client replacement
+leaves the engine alive; Flow retry can recover after confirmed engine exit while
+retaining native history. Neither operation authorizes killing a shared engine
+for one thread. Engine PID, client PID and conversation driver are distinct.</p>
 <p>Exec ancestry records the actual lf caller. A direct child names its parent's
 Exec; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
 The provider's generation resolves to the current driver at child admission.
@@ -2344,10 +2345,9 @@ the current boundary. Conversation continuation is separate from Flow retry.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done
-and landed Tasks remain valid targets. Under the current conservative attribution
-assumption, earlier usage retains its recorded owner; binding affects subsequent
-work, and uncertain mid-turn allocation remains unknown.</p>
+or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+usage retains its recorded owner; binding affects subsequent work, and uncertain
+mid-turn allocation remains unknown.</p>
 <p><code>tasks.started_at</code> is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
 also checks authored work, PRs and active claims; missing history alone cannot
@@ -2355,8 +2355,8 @@ prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
-write contracts. Run is a historical representation to import and remove, not a
-fourth execution object or a generic attempt type under another name.</p>
+write contracts and the current-state conversion boundary. Exec, AgentSession
+and FlowSession are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf debug -c
@@ -2366,8 +2366,8 @@ lf gate --diff files
 record, return.</p>
 <h3 id="direct-task-work">Direct Task work<a class="anchor-link" href="#direct-task-work" title="Link to this section">#</a></h3>
 <pre tabindex="0"><code class="language-bash">lf checkout INF-123
-lf --as task:INF-123 research &quot;write scratch/runtime.md&quot;
-lf --as task:INF-123 research &quot;write scratch/prompts.md&quot;
+lf --task INF-123 research &quot;write scratch/runtime.md&quot;
+lf --task INF-123 research &quot;write scratch/prompts.md&quot;
 lf commit -m &quot;Reconcile Task research&quot;
 lf pr publish
 lf submit
@@ -2377,13 +2377,12 @@ lf task status INF-123 --json
 serial PR identity. It starts no Task execution. Each <code>--task</code> command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code>,
-<code>arm</code>, and <code>land</code> therefore work the same whether the Task was pursued by its
+Those commands act on delivery facts, not on Flow-driving authority. <code>submit</code> and <code>land</code> therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper AgentSessions, or another system.</p>
 <h3 id="bounded-task-advancement">Bounded Task advancement<a class="anchor-link" href="#bounded-task-advancement" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf --as wave:product wave/operate        # one finite planning pass
-lf task run INF-123
-lf --as wave:&lt;wave&gt; wave/operate &quot;ship invoices first&quot;
+<pre tabindex="0"><code class="language-bash">lf --wave product wave/operate        # one finite planning pass
+lf --task INF-123 flow start
+lf --wave &lt;wave&gt; wave/operate &quot;ship invoices first&quot;
 lf wave status product
 </code></pre>
 <p>Task commands claim the Task's managed FlowSession. Repository rotation converges

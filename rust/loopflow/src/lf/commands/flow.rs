@@ -81,8 +81,15 @@ fn execute(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut invocation = QueuedInvocation::new(flow_name, items.to_vec())?;
+    invocation.accounts = Some(Box::new(
+        crate::provider_account::lease::AccountSelection::from_flags_or_env(
+            &cli.account,
+            &cli.only_account,
+        )?,
+    ));
     let flow = FlowSession {
-        invocation: QueuedInvocation::new(flow_name, items.to_vec())?,
+        invocation,
         cursor: ExecutionCursor::default(),
         version: 0,
         task_id: binding.and_then(|binding| match &binding.work {
@@ -148,8 +155,8 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                     .block_on(store.task_flow(task_id))?
                     .is_some_and(|managed| managed.id() == id)
                 {
-                    // The Task owns launch policy, agent choice and unblock feedback.
-                    // Its worker enters the same driver under the existing claim path.
+                    // A managed Flow resumes through its Task's worker claim.
+                    // The worker enters the same shared driver.
                     let task = runtime
                         .block_on(store.get_task(task_id))?
                         .ok_or_else(|| anyhow!("Task {task_id} is missing"))?;
@@ -228,9 +235,6 @@ pub(crate) async fn prepare_native_retry(
     flow: FlowSession,
 ) -> Result<FlowSession> {
     wait_for_step(store, &flow).await?;
-    if store.sqlite.pending_flow_conversation(flow.id())?.is_none() {
-        return Ok(flow);
-    }
     let _driver = flow_run::driver_lock(flow.id())?;
     let saved = store
         .flow(flow.id())
@@ -301,7 +305,7 @@ async fn recover_native_flow(
                 {
                     // No provider may start before publication. Retain this capture
                     // in history and let the next command capture its own input.
-                    return Ok(store.release_flow(id, flow.version, claim).await?);
+                    return Ok(store.reset_flow_input(id, flow.version, claim).await?);
                 }
             }
         }
@@ -311,7 +315,7 @@ async fn recover_native_flow(
         if retry && crate::session_record::conversation_engine_exited(&store.sqlite, &session_id)? {
             // Missing native completion remains unknown. Explicit retry releases
             // only the fenced boundary after exact engine exit evidence.
-            return Ok(store.release_flow(id, flow.version, claim).await?);
+            return Ok(store.reset_flow_input(id, flow.version, claim).await?);
         }
         let (endpoint, thread_id) =
             store
@@ -408,11 +412,38 @@ async fn drive_loop(
     let id = flow.id().to_owned();
     let _driver = flow_run::driver_lock(&id)?;
     let _flow_env = EnvVarGuard::set("LOOPFLOW_FLOW_NAME", &flow.invocation.flow);
+    let _accounts = flow
+        .invocation
+        .accounts
+        .clone()
+        .unwrap_or_default()
+        .activate()?;
     let mut owned_claim = claim;
     loop {
         let mut flow = recover_native_flow(&store, &id, owned_claim.as_ref(), false).await?;
         if flow.finished {
             return Ok(FlowOutcome::Completed);
+        }
+        if let Some(task_id) = &flow.task_id {
+            if store
+                .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
+                .await?
+                == crate::durable::WorkStatus::Done
+                && store
+                    .task_flow(task_id)
+                    .await?
+                    .is_some_and(|managed| managed.id() == id)
+            {
+                store
+                    .end_flow(&id, flow.version, owned_claim.as_ref(), "Task completed")
+                    .await?;
+                let task = store
+                    .get_task(task_id)
+                    .await?
+                    .context("completed Task disappeared")?;
+                crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                return Ok(FlowOutcome::Completed);
+            }
         }
         if let Some(failure) = &flow.failure {
             anyhow::bail!(
@@ -461,6 +492,13 @@ async fn drive_loop(
                         progress.as_deref().unwrap_or_default(),
                     )
                     .await?;
+                if let Some(task_id) = flow.task_id.as_ref().filter(|_| claim.is_some()) {
+                    let task = store
+                        .get_task(task_id)
+                        .await?
+                        .context("Flow Task disappeared")?;
+                    crate::ops::task::cleanup_completed_task(&store, &task).await?;
+                }
                 Ok(FlowOutcome::Completed)
             }
             Ok(Some(FlowOutcome::Waiting)) => Ok(FlowOutcome::Waiting),
@@ -819,6 +857,9 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
         })
         .await
         .context("Flow operation worker failed")?;
+        // Interrupt cleanup can kill the operation and wake this waiter. Its
+        // exit is not evidence that the external effect failed or completed.
+        crate::engine::agent::wait_for_interrupt_cleanup();
         store.sqlite.finish_flow_operation(
             id,
             version,
@@ -841,7 +882,10 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
         command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
     } else {
-        command.args(cli.step_args());
+        let mut step_cli = cli.exec_options();
+        step_cli.account.clear();
+        step_cli.only_account.clear();
+        command.args(step_cli.step_args());
         command.args([
             "--__flow-step",
             &flow_run::ActiveStep::of(flow).env_value()?,

@@ -400,23 +400,22 @@ Aim for a mix:
 
 ## Verification Cadence
 
-Each phase owns one proof level:
+- **Implement/compress:** build changed code and run its focused test. Skip
+  builds for prose-only edits; no change or still-applicable pass means no rerun.
+- **Realign:** reconcile the plan; test only a repair or a concrete uncertainty.
+- **Lint:** formatting and static analysis only.
+- **Rebase:** no tests when conflict-free; after conflicts, one focused test.
+- **Gate:** affected suites and automated acceptance checks once. Reuse only
+  identical tracked/untracked content and the identical command plan.
+- **CI/release:** the full machine-runnable matrix and deployment checks.
+- **Demo/review:** the real user experience and people's judgment.
 
-- **Implement:** one focused behavioral proof for the changed behavior, plus
-  the design's Done When.
-- **Compress:** rerun a focused proof only when the reduction changed behavior.
-- **Lint:** formatting and static analysis only; never add tests for ceremony.
-- **Rebase:** no tests when conflict-free; after conflicts, one smallest proof
-  for the reconciled behavior.
-- **Gate:** affected suites once. Reuse a pass only for identical tracked and
-  untracked content and the identical command plan.
-- **CI/release:** the full matrix, hosted checks, and deployment gates.
-- **Demo:** prefer the real configured or deployed user path and observable
-  logs. Simulations are fallback evidence and must be labeled.
-
-Do not rerun a broader proof because another lifecycle phase began. Escalate
-scope only when the narrower proof fails, the change crosses a boundary the
-narrow test cannot exercise, or release guidance explicitly requires it.
+Required checks run headless, without a display session, permission dialog or
+person. Use app builds and view/interaction tests for Desktop. An unavailable
+check goes to capable gate/CI or gets a headless equivalent; it never blocks
+an earlier Flow step. Actual build/test failures still need repair. Keep scratch
+check results to one line with command, result and any deferred owner.
+Do not rerun broader checks because another lifecycle phase began.
 
 ## When to Mock
 

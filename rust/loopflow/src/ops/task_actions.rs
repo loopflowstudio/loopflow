@@ -162,7 +162,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
     match predecessor {
         Some(PrPhase::Abandoned) => action(
             TaskAction::Resume,
-            "parent PR was abandoned; rebase or abandon this stack",
+            "parent PR was abandoned; sync or abandon this stack",
         ),
         Some(PrPhase::Merged) | None => model,
         Some(_)

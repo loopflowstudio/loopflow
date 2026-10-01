@@ -136,8 +136,42 @@ ownership evidence cannot report confirmed emptiness. Closing a Monitor preserve
 the window's shared reader and terminals. **Sessions** selects an exact conversation and
 returns keyboard focus to its terminal with unfinished input retained.
 
-Wave details show the objective, current chapter plan/KRs, all Tasks and chapter
-history. Projects are internal chapter records and add no navigation tier. Task
+Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
+selected repository. Empty search shows recent destinations first; arrows select,
+Return opens and Escape returns focus to the previous terminal. Flow entries
+inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+The sidebar search remains a filter. Each repository retains up to 20 recent
+destinations for the window. Visited historical Tasks remain in recents after
+leaving their pages; opening one reads its exact identity again. This does not
+search all historical Tasks. Failed reads preserve the workspace and offer Retry.
+If a highlighted row disappears, Return opens the first remaining visible result;
+with no results it does nothing.
+
+With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
+the Session name. Both open the same picker: review the named Task, then choose
+**Bind permanently**. Opening the picker leaves the conversation and terminal intact.
+
+```sh
+open 'loopflow://task/LOO-303'
+open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
+```
+
+Task links and palette Task entries open details, including Tasks outside the
+current chapter. They never start work or enter a Task's sole Session. Ambiguous
+links offer repository-qualified choices; unavailable reads keep the current
+workspace and offer Retry. Only one workspace window receives a link.
+
+Wave details show the objective, current chapter plan/KRs, the current Project's
+Flow template, all Tasks and chapter history. Templates fold composed Flows;
+click a group or its disclosure control to expand it. Repeated uses disclose
+independently, and both return edges remain visible at folded boundaries. Tab to
+a disclosure, then use Right/Left to expand/collapse or Space/Return to toggle;
+this includes nested and empty groups and XOR paths. Inspecting a return names
+its target step even while the containing Flow is folded.
+Task previews use the same template view until an invocation exists, including
+Tasks with independent conversations. Captured invocations keep their expanded
+graph. Changing a template resets its disclosure; it does not change a capture.
+Projects are internal chapter records and add no navigation tier. Task
 details include the directive, recorded condition, current KRs, Activity, PR and
 worktree references. Choose **Edit directive**, then
 **Save directive** to write through the shared PM API. Failed saves retain your
@@ -148,7 +182,7 @@ partial reads remain visible in the outline.
 Each terminal pane owns one native libghostty surface. A Session without a local
 terminal shows its shared Open or Move here action; opening and failure states
 remain in that pane. Sessions
-include interactive provider Runs, Task human FlowSteps, and ad-hoc Asks.
+include interactive provider Sessions, Task human FlowSteps, and ad-hoc Asks.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session until Complete.
 
@@ -171,7 +205,7 @@ The shared Session projection supplies action labels, unavailable reasons and Wo
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
-Task FlowSteps run ordinary `lf --mode tui --as task:<id> <skill>` provider Runs.
+Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
 Ad-hoc Asks run in the originating Run's exact checkout so the session can edit
 files before the caller resumes. The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
@@ -255,7 +289,7 @@ codebase tree, and registry health.
   it has no separate operator.
 - **Task workspace presentation** reads `lf diff --files --json`,
   `lf diff --json` and `lf file --json`.
-  Lifecycle mutations remain `lf task run/interrupt`; review nodes use
+  Lifecycle mutations remain `lf flow start` and `lf interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
@@ -361,7 +395,7 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
 Verified Exec/process and native-client receipts establish activity independently
 of command outcomes. Input replacement keeps the same row; unresolved engine
 ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness
@@ -373,3 +407,15 @@ and clears its evidence before starting the new one. Pipes drain off the main
 actor, frames are limited to 16 MiB, and pending delivery retains only the latest
 snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
 closes stdin, then terminates and reaps only the owned reader if necessary.
+
+## Headless checks
+
+```bash
+scripts/test_desktop.sh --filter DesktopHeadlessTests
+uv run python scripts/test.py --swift
+```
+
+Gate and CI build the app and inspect production views and controls without
+launching a window. Display/terminal integration is opt-in with
+`LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
+See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.

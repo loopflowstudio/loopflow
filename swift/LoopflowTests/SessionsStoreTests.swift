@@ -50,7 +50,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args == ["session", "connect", "native", "--json", "--replace"])
+                #expect(args == ["session", "open", "native", "--json", "--replace"])
                 return session(id: "native", state: "closed", kind: "conversation")
             }
         )

@@ -16,7 +16,7 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task recent Runs and Session rows native proof", .serialized)
+@Suite("Task recent Runs and Session rows native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskRunsProofTests {
     @Test("Recent Runs load on demand for their own Task; Session rows show recorded provider and summary")
@@ -99,7 +99,7 @@ struct TaskRunsProofTests {
         await source.reply("W2-131", with: .runs(["run_a1", "run_a2"]))
         try find("task-runs-toggle").button().tap()
         try await waitFor { (try? find("task-run-run_a2:12")) != nil && !model.recentRuns.inFlight.contains("issue-review") }
-        #expect(await source.reads == [["usage", "--days", "0", "--task", "W2-131", "--json"]])
+        #expect(await source.reads == [["runs", "--task", "W2-131", "--json"]])
         #expect(try label("task-runs-toggle") == "Recent runs, expanded")
         _ = try find("task-run-run_a1:12")
         #expect((try? find("task-run-run_a2:12").find(text: "Unknown")) != nil)

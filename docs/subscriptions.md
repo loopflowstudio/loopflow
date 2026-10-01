@@ -139,7 +139,7 @@ account, route or conversation. An inherited account lease carries no cached ide
 origin broker. Local token metadata is cached evidence, not server acceptance;
 live status reports local server verification unavailable.
 
-`account` persists recognized managed subscription windows before
+`auth status` persists recognized managed subscription windows before
 printing percentages, reset times and plan. Each window keeps its own observation
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
@@ -192,11 +192,14 @@ decides remaining ties. A provider session stays
 pinned to the account that created it so a resume does not silently switch
 identities.
 
-The identity core keeps account state in each execution Home. Claude's cached
-status and routing do not yet check live profile identity. Connect stages and
-rejects the wrong identity. [Account usability follow-ups · LOO-340](https://linear.app/loopflow/issue/LOO-340)
-owns the remaining shared account state, Claude cached identity and routing,
-Flow account bundles, and reset credits.
+Claude's cached identity is bound to the credential bytes checked by the profile
+endpoint. Cached status reports changed or previously unverified credentials as
+unknown; stale `.claude.json` metadata never establishes identity. Live status
+and connect save that binding. Routing checks expected email, user UUID and
+duplicate logins, requesting a profile observation when the credential changed.
+Recorded Claude and Codex launches both require their owning account catalog.
+
+Account state remains in the Home database.
 
 Control automatic routing per account:
 
@@ -271,6 +274,47 @@ lf --only-account claude=personal@ --only-account codex=work@ implement
 `--account` and `--only-account` are repeatable. An unqualified selector is
 resolved independently for Claude and Codex. The two flags cannot be combined.
 A provider omitted from `--only-account` is unavailable to that process tree.
+
+Choose both providers once for a Flow or Task:
+
+```bash
+lf --only-account claude=personal@ --only-account codex=work@ flow code
+lf --account claude=personal@ --account codex=work@ --task LOO-123 flow start
+```
+
+Flow invocations save these choices and restore them for autonomous steps,
+review children and later resumes. `--account` keeps fallback routing;
+`--only-account` restricts the entire invocation. Resuming a saved invocation
+keeps its captured choices; restart it to choose again. Steps have no account
+overrides. Native Session affinity remains authoritative within that selection.
+Local choices use the Home's catalog directly and survive the initiating CLI's
+exit; a forwarded SSH credential still needs its origin broker.
+
+## Banked Codex resets
+
+```bash
+lf account codex
+lf account redeem-reset codex work@example.com
+# Retry an interrupted attempt with the key printed before its request:
+lf account redeem-reset codex work@example.com --idempotency-key <same-key>
+```
+
+Live status shows the provider's available reset count and any returned credit
+statuses and expiry times. `--cached` reports resets as unknown. A missing detail
+list does not mean zero credits; the provider's count is authoritative.
+
+Only `redeem-reset` spends a credit. It requires a named managed Codex login,
+validates identity, reports usage before and after, and supports `--json`.
+`--credit-id <id>` selects a particular returned credit; otherwise Codex chooses.
+Status, routing and Flow launches never redeem resets.
+
+Each attempt prints an idempotency key before sending the request. Reuse it
+if the reply is lost. `reset` confirms a spend; `alreadyRedeemed` confirms that
+the same attempt completed earlier. `nothingToReset` and `noCredit` report no
+spend. If the following usage refresh fails, the command retains the confirmed
+outcome and reports the after-state as unknown. It never guesses new capacity.
+The [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server#8-earned-rate-limit-resets-chatgpt)
+owns these outcomes and retry semantics.
 
 ## Use subscriptions over SSH
 
@@ -364,9 +408,17 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
   expose `set_auth_browser_profiles` / `list_auth_browser_profiles` in place of
   the account-access methods. In the list method, a missing account filter lists
   both scopes; filter binding rows when selecting a local service.
-- Include `plan: Option<String>` when constructing `SubscriptionUsage`. Read
+- Include `plan: Option<String>` and `reset_credits: Option<RateLimitResetCredits>`
+  when constructing `SubscriptionUsage`. Read
   the account's stored `home` instead of the removed `subscription::account_home`
   path constructor.
+- Include `observed_credential_digest: Option<String>` in `ProviderAccount`.
+  Pass the optional credential digest to `record_provider_account_identity`;
+  an absent digest retains historical identity without asserting a Claude
+  credential binding.
+- `AccountLeaseBroker` is internal to SSH forwarding; its `start_root` and
+  `local_env_value` entry points are removed. Launch local commands with
+  `--account` or `--only-account`; saved Flow invocations own those choices.
 
 The forward database migration preserves existing account/profile identities,
 ordered bindings and configured expected logins. Source API compatibility and

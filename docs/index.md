@@ -16,10 +16,10 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 ## The pieces
 
 ```bash
-lf --mode batch implement
+lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf task run INF-123
+lf --task INF-123 flow start
 ```
 
 A Skill supplies instructions; a Flow composes skills, mechanical operations and

@@ -14,9 +14,9 @@ GitHub and completes the Task only after an authoritative merge.
 
 ## Workflow
 
-1. **Rebase first**
-   - Preserve existing work with `lf commit` when needed, then run `lf rebase`.
-   - Resolve conflicts and continue the rebase before investigating CI. Keep
+1. **Sync first**
+   - Preserve existing work with `lf commit` when needed, then run `lf sync`.
+   - Resolve conflicts and continue the sync before investigating CI. Keep
      the watched failed SHA as evidence even when the local head changes.
 
 2. **Resolve the watched PR and failures**
@@ -32,7 +32,7 @@ GitHub and completes the Task only after an authoritative merge.
      gh api "repos/$repo/commits/$sha/check-runs"
      ```
    - Focus on the most recent completed failed checks and their logs. Compare
-     the failures with the rebased code; an old failure may already be fixed.
+     the failures with the synced code; an old failure may already be fixed.
    - If a previous repair conclusion is supplied, inspect its existing changes
      and continue from them. The same head can recover through a check rerun;
      do not manufacture a commit just to change its SHA.
@@ -69,7 +69,7 @@ GitHub and completes the Task only after an authoritative merge.
 
 ## Guardrails
 
-- Invoking this skill authorizes rebase, commit, push, and auto-merge for the
+- Invoking this skill authorizes sync, commit, push, and auto-merge for the
   watched PR. Route mutations through `lf`.
 - Stay scoped to the CI failures and their prevention; prefer targeted fixes.
 - Do not call `lf land`, spawn another watcher, or wait for merge. Return

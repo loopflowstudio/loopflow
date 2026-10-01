@@ -27,7 +27,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf --as wave:<name> wave/operate` → `lf wave status` |
+| Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
 | Run on another machine | `lf ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
@@ -54,7 +54,7 @@ scratch notes, and clipboard—and passes it to the coding agent. Before the
 provider starts, Loopflow reserves the AgentSession and captures its input in
 this Home. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Exec records the command result. Add repo
-docs explicitly with `--docs` and changed file bodies with `--diff files`.
+docs explicitly with `--docs` and changed file bodies with `--diff-files`.
 
 `LOOPFLOW.md` ships as default operating guidance for every run; opt out with `--no-loopflow`.
 
@@ -167,7 +167,7 @@ and Wave goals.
 lf pr open                             # push + create or update a draft, then open its page
 lf pr publish                          # push + create or update PR and mark ready (no browser)
 lf submit                              # prepare the exact head; you click merge
-lf arm                                 # arm exact-head auto-merge and return
+lf land                                 # arm exact-head auto-merge and return
 lf land                                # watch, repair CI, and return after GitHub merges
 ```
 
@@ -179,7 +179,7 @@ branch and Task PR record when present; they do not require a live Task worker.
 ## Scale with Waves
 
 ```bash
-lf --as wave:shipper wave/operate "Review the release blockers"
+lf --wave shipper wave/operate "Review the release blockers"
 lf wave status shipper
 lf ps --json
 ```
@@ -192,7 +192,7 @@ through merge.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations, Asks and Flow reviews; open one with
-`lf session connect <session-id>`. Completing it returns its saved feedback.
+`lf session open <session-id>`. Completing it returns its saved feedback.
 
 [Waves →](waves.md) · [Conducting →](conducting.md)
 

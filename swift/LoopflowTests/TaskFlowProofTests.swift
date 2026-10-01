@@ -55,6 +55,38 @@ struct TaskFlowTests {
         #expect(catalog.map(\.name) == ["feature", "broken"])
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
         #expect(catalog[0].graph?.steps[0].sources == ["feature"])
+        let graph = try #require(catalog[0].graph)
+        let template = try #require(catalog[0].template)
+        #expect(FlowTemplateProjection(graph: graph, items: template.items,
+                                       expanded: ["group-0"]).graph == graph)
+    }
+
+    @Test("Template disclosure keeps repeated and empty groups, XOR paths and both returns")
+    @MainActor
+    func templateDisclosure() throws {
+        let entry = try JSONDecoder().decode(FlowCatalogEntry.self, from: fixture("flow_template.json"))
+        let template = try #require(entry.template)
+        let graph = try #require(entry.graph)
+        let folded = FlowTemplateProjection(graph: graph, items: template.items, expanded: [])
+        #expect(folded.graph.steps.map(\.key) == [8, 9, 10, 2, 12])
+        #expect(folded.graph.steps[0].label == folded.graph.steps[1].label)
+        #expect(folded.graph.steps[2].label.contains("0"))
+        let returns = FlowTemplateView.spans(graph, projection: folded)
+        #expect(returns.map(\.decider) == [5, 7])
+        #expect(returns.allSatisfy { $0.from == 4 && $0.to == 4 })
+        let partial = FlowTemplateProjection(graph: graph, items: template.items, expanded: ["group-0", "group-4"])
+        #expect(partial.graph.steps.map(\.key) == [0, 8, 9, 2, 4, 5, 6, 7])
+        let all = FlowTemplateProjection(graph: graph, items: template.items, expanded: Set((0...4).map { "group-\($0)" }))
+        #expect(all.graph == graph)
+        #expect(all.graph.node(3)?.label == "implement")
+
+        var missing = try #require(JSONSerialization.jsonObject(with: fixture("flow_template.json")) as? [String: Any])
+        var body = try #require(missing["template"] as? [String: Any])
+        body.removeValue(forKey: "items")
+        missing["template"] = body
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(FlowCatalogEntry.self, from: JSONSerialization.data(withJSONObject: missing))
+        }
     }
 
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
@@ -131,12 +163,13 @@ struct TaskFlowTests {
 }
 
 #if canImport(GhosttyKit)
-@Suite("Task Flow native proof", .serialized)
+@Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
     @Test("Flow preview, controls and execution updates keep the Session's terminal, draft and companion")
     func flowControlsRetainTerminals() async throws {
         _ = NSApplication.shared
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let registry = SessionsWorkspaceRegistry()
@@ -174,13 +207,18 @@ struct TaskFlowProofTests {
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1500, height: 820),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = NSHostingView(rootView: view)
-        defer { window.contentView = nil }
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
         try await settle(window)
         let draft = "flow-proof-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         func find(_ id: String) throws -> InspectableView<ViewType.ClassifiedView> {
-            try view.inspect().find(viewWithAccessibilityIdentifier: id)
+            do {
+                return try view.inspect().find(viewWithAccessibilityIdentifier: id)
+            } catch {
+                throw RegistryQueryError("Missing \(id): \(error)")
+            }
         }
         func text(_ id: String) throws -> String { try find(id).text().string() }
 
@@ -193,7 +231,129 @@ struct TaskFlowProofTests {
         #expect(try find("task-flow-loop-3").text().string() == "Loop 1")
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2")
         #expect((try? find("task-flow-iteration")) == nil, "a preview has no iteration")
+        #expect((try? find("flow-node-4")) == nil, "composition starts folded")
+        try find("flow-node-9").button().tap()
+        try await settle(window)
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
+        try find("template-group-group-0").disclosureGroup().collapse()
+        try await settle(window)
+        #expect((try? find("flow-node-4")) == nil)
+        #expect(await source.controls.isEmpty, "disclosure never starts work")
+
+        // The Wave uses the current Project's template and shares disclosure state.
+        model.select(.wave(id: "wave-1"))
+        try await settle(window)
+        _ = try find("flow-template-feature")
+        #expect((try? find("task-flow-start")) == nil)
+        try find("template-group-group-0").disclosureGroup().expand()
+        try await settle(window)
+        model.select(.task(id: "issue-available"))
+        try await settle(window)
+        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
+
+
+        let oldRevision = try #require(model.flowCatalog.value?.first?.template?.revision)
+        try await source.reviseTemplate()
+        await model.loadFlowCatalog(force: true)
+        try await settle(window)
+        #expect(model.flowCatalog.value?.first?.template?.revision != oldRevision)
+        #expect((try? find("flow-node-4")) == nil, "a new source revision starts folded")
+        #expect(await source.controls.isEmpty)
+
+        // A return outside a folded composition still names its semantic target.
+        try await source.crossingReturns()
+        await model.loadFlowCatalog(force: true)
+        try await settle(window)
+        let inputBeforeInspection = surfaces.map(terminalText)
+        #expect(inputBeforeInspection[0].contains(draft))
+        #expect(terminals.allSatisfy { !$0.acceptsFirstResponder })
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(window.contentView)
+        for _ in 0..<30 where focusedLabel(in: window) != "build · 1 steps" {
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+        }
+        try #require(focusedLabel(in: window) == "build · 1 steps")
+        for prefix in ["", "3/fix/"] {
+            if !prefix.isEmpty {
+                try press("\t", keyCode: 48, in: window)
+                try await settle(window)
+                #expect(focusedLabel(in: window) == "xor-route · fix")
+                try press("\u{f703}", keyCode: 124, in: window)
+                try await settle(window)
+                try press("\t", keyCode: 48, in: window)
+                try await settle(window)
+            }
+            #expect(focusedLabel(in: window) == "build · 1 steps")
+            func expanded(_ suffix: String) -> Bool {
+                model.navigation.expandedTemplateGroups["crossing-returns"]?.contains(prefix + suffix) == true
+            }
+            try press("\u{f703}", keyCode: 124, in: window)
+            try await settle(window)
+            #expect(expanded("outer"))
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "edit · 1 steps")
+            try press(" ", keyCode: 49, in: window)
+            try await settle(window)
+            #expect(expanded("inner"))
+            try press("\t", keyCode: 48, in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "empty · 0 steps")
+            try press("\r", keyCode: 36, in: window)
+            try await settle(window)
+            #expect(expanded("empty"))
+            #expect(try find("template-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("empty"))
+            try press("\u{19}", keyCode: 48, modifiers: [.shift], in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "edit · 1 steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("inner"))
+            try press("\u{19}", keyCode: 48, modifiers: [.shift], in: window)
+            try await settle(window)
+            #expect(focusedLabel(in: window) == "build · 1 steps")
+            try press("\u{f702}", keyCode: 123, in: window)
+            try await settle(window)
+            #expect(!expanded("outer"))
+        }
+        for prefix in ["", "3/fix/"] {
+            for expanded in [false, true, false] {
+                let group = try find("template-group-\(prefix)outer").disclosureGroup()
+                if expanded {
+                    try group.expand()
+                    try await settle(window)
+                    try find("template-group-\(prefix)inner").disclosureGroup().expand()
+                } else { try group.collapse() }
+                try await settle(window)
+                for (number, offset) in [1, 2].enumerated() {
+                    let key = (prefix.isEmpty ? 0 : 4) + offset
+                    #expect(try text("task-flow-loop-\(key)") == "Loop \(number + 1)")
+                    try pressElement("flow-node-\(key)", in: window)
+                    try await settle(window)
+                    let expected = prefix.isEmpty ? "implement" : "fix-implement"
+                    let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
+                        .filter { $0.hasPrefix("Iterate returns to") }
+                    #expect(details.contains("Iterate returns to \(expected)"))
+                    #expect(details.allSatisfy { $0 == "Iterate returns to implement" || $0 == "Iterate returns to fix-implement" })
+                }
+            }
+        }
+        #expect(await source.controls.isEmpty, "template inspection never starts work")
+        #expect(surfaces.map(terminalText) == inputBeforeInspection, "disclosure keys never reach a PTY")
+
+        // Started alone does not establish historical Run membership.
+        model.select(.task(id: "issue-later"))
+        try await settle(window)
+        #expect(try text("task-flow-status") == "No Flow recorded")
+        _ = try find("flow-template-feature")
+        #expect((try? find("task-flow-iteration")) == nil)
+        #expect(await source.controls.isEmpty)
+        model.select(.task(id: "issue-available"))
+        try await settle(window)
 
         // Typeahead: Cancel keeps the recommendation; choosing previews only.
         try find("task-flow-name").button().tap()
@@ -214,7 +374,7 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "choosing a preview mutates nothing")
         try find("task-flow-start").button().tap()
         for _ in 0..<20 where await source.controls.isEmpty { try await settle(window) }
-        #expect(await source.controls == [["task", "run", "W2-156", "--flow", "build"]])
+        #expect(await source.controls == [["--task", "W2-156", "flow", "start", "build"]])
 
         // Pinned and waiting for review: the saved position, not the catalogue.
         model.select(.task(id: "issue-review"))
@@ -227,6 +387,12 @@ struct TaskFlowProofTests {
         #expect(try find("task-flow-loop-5").text().string() == "Loop 2 · 1 return")
         #expect(try text("task-flow-iteration") == "Iteration (1, 1)")
         #expect(try find("task-flow-resume").button().isDisabled())
+        for key in ["3", "5"] {
+            try pressElement("flow-node-\(key)", in: window)
+            try await settle(window)
+            let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
+            #expect(details.contains { $0.contains("Iterate returns to implement · taken 1×") })
+        }
         try captureIfRequested(window, name: "task-flow-pinned")
 
         // Stop & restart: Cancel leaves everything; a rejected replacement keeps
@@ -282,9 +448,47 @@ struct TaskFlowProofTests {
         }
     }
 
+    private func press(_ character: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], in window: NSWindow) throws {
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: character, charactersIgnoringModifiers: character, isARepeat: false, keyCode: keyCode))
+            NSApp.sendEvent(event)
+        }
+    }
+
+    private func ax(_ element: NSObject, _ property: String) -> Any? {
+        let key = property == "Focused" ? "isAccessibilityFocused" : "accessibility" + property
+        guard element.responds(to: NSSelectorFromString(key)) else { return nil }
+        return element.value(forKey: key)
+    }
+
+    private func accessible(_ root: Any) -> [NSObject] {
+        guard let element = root as? NSObject else { return [] }
+        return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
+    }
+
+    private func focusedLabel(in window: NSWindow) -> String? {
+        accessible(window.contentView!).first { ax($0, "Focused") as? Bool == true }
+            .flatMap { ax($0, "Label") as? String }
+    }
+
+    private func pressElement(_ id: String, in window: NSWindow) throws {
+        let element = try #require(accessible(window.contentView!).first { ax($0, "Identifier") as? String == id })
+        let action = NSSelectorFromString("accessibilityPerformPress")
+        try #require(element.responds(to: action))
+        element.perform(action)
+    }
+
     private func settle(_ window: NSWindow) async throws {
         window.contentView?.layoutSubtreeIfNeeded()
         window.layoutIfNeeded()
+        // Drive AppKit's dynamic key loop in this unhosted window, alongside layout.
+        window.recalculateKeyViewLoop()
+        if let content = window.contentView,
+           let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+        }
         try await Task.sleep(for: .milliseconds(100))
     }
 
@@ -315,7 +519,7 @@ struct TaskFlowProofTests {
 /// `task resume` count as controls; anything else unexpected fails loudly.
 private actor FlowSource {
     private var roadmap: [String: Any]
-    private let catalog: String
+    private var catalog: String
     private let session: String
     private(set) var controls: [[String]] = []
 
@@ -332,6 +536,46 @@ private actor FlowSource {
         entries.insert(build, at: 1)
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
         self.session = String(decoding: session, as: UTF8.self)
+    }
+
+    func crossingReturns() throws {
+        var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
+        func steps(_ prefix: String) -> [[String: Any]] {
+            (0...2).map { index -> [String: Any] in
+                let target = prefix.isEmpty ? "implement" : "fix-implement"
+                return ["key": (prefix.isEmpty ? 0 : 4) + index, "id": NSNull(),
+                 "label": index == 0 ? target : "loop-decide", "kind": "skill",
+                 "human": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
+                 "sources": ["feature"], "paths": []]
+            }
+        }
+        func items(_ prefix: String) -> [[String: Any]] {
+            [["kind": "group", "id": "\(prefix)outer", "name": "build", "items": [
+                ["kind": "group", "id": "\(prefix)inner", "name": "edit", "items": [
+                    ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 0, "paths": [:]]
+                ]],
+                ["kind": "group", "id": "\(prefix)empty", "name": "empty", "items": []]
+            ]],
+             ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 1, "paths": [:]],
+             ["kind": "node", "key": (prefix.isEmpty ? 0 : 4) + 2, "paths": [:]]]
+        }
+        var nodes = steps("")
+        nodes.append(["key": 3, "id": NSNull(), "label": "xor-route", "kind": "xor",
+                      "human": false, "returns_to": NSNull(), "sources": ["feature"],
+                      "paths": [["name": "fix", "description": "Repair", "steps": steps("3/fix/")]]])
+        var tree = items("")
+        tree.append(["kind": "node", "key": 3, "paths": ["fix": items("3/fix/")]])
+        entries[0]["graph"] = ["name": "feature", "steps": nodes]
+        entries[0]["template"] = ["revision": "crossing-returns", "items": tree]
+        catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
+    }
+
+    func reviseTemplate() throws {
+        var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
+        var template = try #require(entries[0]["template"] as? [String: Any])
+        template["revision"] = "changed-feature-definition"
+        entries[0]["template"] = template
+        catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
     }
 
     func respond(_ args: [String]) throws -> String {

@@ -1,11 +1,11 @@
 # Planning
 
 ```bash
-lf --as wave:product wave/operate
+lf --wave product wave/operate
 lf checkout INF-124
-lf --as task:INF-124 research "write scratch/runtime.md"
-lf task run INF-124
-lf new-chapter 2026-10 --dry-run
+lf --task INF-124 research "write scratch/runtime.md"
+lf --task INF-124 flow start
+lf repo new-chapter 2026-10 --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
@@ -18,8 +18,8 @@ records the remaining implementation and proof gaps.
 ## Rotate the plan, preserve the work
 
 ```bash
-lf new-chapter 2026-10
-lf wave sync --wave product
+lf repo new-chapter 2026-10
+lf repo refresh product
 ```
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
@@ -50,12 +50,11 @@ lf flow build
 lf flow resume FLOW_SESSION
 ```
 
-Flow is the reusable definition; FlowSession is one captured execution. Capture
-expands template composition and saves every Skill, router, alternative and
-review policy. Source edits or deletion cannot change a saved execution. The
-record owns graph, cursor, return counts, nullable Task/Wave, current boundary,
-claim and completion. Only actual runtime loop nesting creates child FlowSessions;
-template composition does not. Parent and child nullable Task ancestry agree.
+Starting a Flow compiles its definition into one FlowSession's captured graph,
+including every Skill, router, alternative and review policy. Source edits or
+deletion cannot change it. One cursor and its return counters identify loop
+passes; retry retains the same pass. Subflows and passes are display lenses,
+with no separate FlowSession, process or claim.
 
 A Task selects one managed FlowSession and may have other attributed Flows.
 Taskless and managed execution share the driver. The Project's Flow supplies the
@@ -69,12 +68,12 @@ no successor; Flow completion alone does not complete Task Work.
 A boundary is the FlowSession, node and iteration tuple. Its claim and version
 fence each mutation. Agent boundaries select a native start in an AgentSession
 and consume its exact successful completion once. Mechanical boundaries retain
-correlated starts and results in Flow history; they create neither fake agent
-conversations nor synthetic Execs. One actual lf process can execute several
-boundaries and then fail; its command outcome is not every boundary's outcome.
+correlated starts and results in Flow history. Each executed skill or operation
+runs in its own child lf Exec through the ordinary command path. The Flow driver
+owns navigation; a child's command outcome alone cannot settle agent work.
 
-A deciding step declares a JSON object containing `decision` (`advance` or
-`iterate`) and a nonempty `summary`. A router declares a JSON object containing
+A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
+`summary`, or `blocked` with a nonempty `reason`. A router returns a JSON object containing
 `path`, constrained to the captured branch's path names. Each provider receives
 the schema before generation. Session history retains the native output and
 completion separately; only the exact selected successful result is consumed
@@ -89,10 +88,10 @@ the answer instead of opening duplicate conversations.
 ## Recover without inventing an outcome
 
 ```bash
-lf task run INF-124
+lf --task INF-124 flow start
 lf flow resume FLOW_SESSION
 lf flow resume FLOW_SESSION --retry
-lf task run INF-124 --retry
+lf --task INF-124 flow start --retry
 ```
 
 The Flow orchestration claim and conversation driver claim have different owners.
@@ -108,7 +107,8 @@ select only an authorized successor. An uncertain mechanical effect requires
 inspection or explicit retry; moving a cursor does not establish exactly-once
 external effects.
 
-Managed dispatch keeps Task agent choice, adoption checks and unblock policy.
+Task commands supply the same explicit attribution and shared Flow execution;
+their claim and background placement are driver mechanics.
 A live claimed worker cannot be replaced because a status read timed out. Missing
 process evidence is uncertainty, and causal ancestry grants no signal authority.
 
@@ -141,15 +141,15 @@ live process; an absent terminal result cannot prove liveness. Binding to a done
 Task assigns work history without reopening it or acquiring its managed claim.
 
 ```bash
-lf comment INF-124 "keep the public name"
-lf --as wave:product wave/operate "review the current priorities"
+lf task comment INF-124 "keep the public name"
+lf --wave product wave/operate "review the current priorities"
 ```
 
-Linear owns authored Task comments. Only the claimed Task advancer attempts live
-delivery; independent attributed conversations receive their own launch context.
-Idle steering starts no worker. Publication, prompt inclusion and provider
-acceptance are distinct evidence and do not prove the model followed a correction.
-Wave planning is an ordinary finite AgentSession; no resident operator is needed.
+Linear owns authored Task comments. The shared skill path supplies Task context
+and live steers when the checkout or explicit attribution selects a Task.
+Idle steering starts no worker. Prompt inclusion and provider acceptance do not
+prove the model followed a correction. Wave planning uses ordinary finite
+AgentSessions.
 
 Work reservation sets Task Started once; an inspection Exec does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event
@@ -165,20 +165,16 @@ and Flow membership never substitute for that authority.
 A `Flow` contains `Step { target, id, human, repeat }`; Xor paths contain the same Steps.
 Loading resolves bare names and `flow:` names flow-first, including nested Flow
 bodies, and rejects recursive references. `step:` selects a Skill explicitly,
-retaining its name and options until expansion; Xor router names also load then.
+retaining its name and options until compilation; Xor router names also load then.
 Loading a Flow alone does not capture all instruction bodies.
 There is no separate FlowRef node. Review IDs and repeat edges belong to the
-Step itself, not to a reusable Target. The captured-step and journal APIs also
-expose those fields directly; only the private saved-plan codec retains the
-older nested `policy` JSON layout.
+Step itself, not to a reusable Target.
 
-Expansion produces `ConcreteStep` execution plans: nested Flows are flattened,
-parent paths are recorded, and every Skill body and Xor router/path is captured.
-Those plans are the persistence boundary for both Task and ordinary execution;
-resume never resolves names from the current source. Their existing serialized
-operation tags remain unchanged.
+Compilation produces `ConcreteStep` plans containing every Skill body and Xor
+router/path. The `sources` breadcrumb retains definition provenance for display.
+These captured plans serve both Task and ordinary execution; resume never
+resolves names from current source.
 
 Review Sessions launch the captured Skill explicitly, escaping command names.
 Execution selection reads that captured value before looking for authored files;
 help and list continue to inspect local definitions without Session state.
-

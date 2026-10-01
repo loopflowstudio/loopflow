@@ -1704,6 +1704,9 @@ fn _exec_harness_once(
                 .send_input(&prompt)
                 .await
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            if let (Some(input), Some(capture)) = (&process.task_input, capture) {
+                input.record_seed(capture).await;
+            }
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;

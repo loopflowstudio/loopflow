@@ -27,7 +27,7 @@ Lead with experienced improvements, remaining friction, active work, and gaps.
 Ask what mattered, surprised, or should become possible; reflect the user's
 language and unresolved tensions. Discuss any Wave boundary changes.
 
-**Gate 1:** the user explicitly accepts direction before scoped planning Runs.
+**Gate 1:** the user explicitly accepts direction before scoped planning contributions.
 In an interactive session, ask in the conversation. Headless, use `lf ask` and wait
 for an explicit completed decision. Silence, elapsed time, or provider exit is
 not acceptance. Existing accepted direction remains valid; do not ask again.
@@ -40,13 +40,13 @@ These notes do not own live planning or recovery.
 
 ## Shape one plan per Wave
 
-Launch bounded `lf --mode batch --wave <name> wave/start-chapter "<chapter name, accepted
-brief, exact prior ledger>"` Runs. For a proposed uninitialized Wave use an
-unbound Run with its exact name and boundary. Children propose, return agree or
-challenge, and never mutate live planning. Do not launch Project planning Runs.
+Launch bounded `lf -b --wave <name> wave/start-chapter "<chapter name, accepted
+brief, exact prior ledger>"` contributions. For a proposed uninitialized Wave use an
+unbound contribution with its exact name and boundary. Children propose, return agree or
+challenge, and never mutate live planning. Do not launch Project planning contributions.
 
 Keep each complete proposal and exact JSON plan in scratch. Preview the whole
-repository with `lf new-chapter <name> --dry-run --json`; there is no
+repository with `lf repo new-chapter <name> --dry-run --json`; there is no
 per-Wave rotation or plan-file argument. A preview classifies current provider
 facts, not unapplied proposal content. Reconcile challenges and show the user
 Wave objectives, proposed KRs and metric targets, retained successor content,
@@ -75,8 +75,8 @@ Flow or competing current Projects require explicit resolution in Linear.
 Refresh the repository preview after preparation, then apply the accepted name:
 
 ```bash
-lf new-chapter <name> --dry-run --json
-lf new-chapter <name> --json
+lf repo new-chapter <name> --dry-run --json
+lf repo new-chapter <name> --json
 ```
 
 Retain dated command output and exit status as evidence. Retry an interrupted
@@ -92,7 +92,7 @@ delete predecessor Projects, or count canceled backlog as completed work.
 To apply an accepted plan after its Project becomes current, use:
 
 ```bash
-lf update-plan --wave <wave> --plan <plan.json>
+lf wave update-plan --wave <wave> --plan <plan.json>
 ```
 
 The file replaces the complete current Project content:
@@ -118,7 +118,7 @@ Curate durable lessons into Wave memory and retain useful decisions and evidence
 in existing durable records before scratch cleanup. Linear retains Project
 plans and history; do not create a second local chapter owner. Checkpoint
 coherent repository edits with `lf commit`. Obtain push authority unless already
-given, then use the selected PR workflow; default to `lf submit` for a manual
+given, then use the selected PR workflow; default to `lf pr submit` for a manual
 merge. Until merged, explicitly report that operational application is complete
 but repository publication is pending. Corrections append dated observations;
 never rewrite earlier evidence.

@@ -218,9 +218,10 @@ payloads remain files, but readers select and page rows before opening them.
 Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
-replace the provider generation or interrupt an existing turn. Explicit restart
-replaces only the exact conversation owner; it never kills a shared engine to
-restart one thread. Engine PID, client PID and conversation driver are distinct.
+replace the provider generation or interrupt an existing turn. Client replacement
+leaves the engine alive; Flow retry can recover after confirmed engine exit while
+retaining native history. Neither operation authorizes killing a shared engine
+for one thread. Engine PID, client PID and conversation driver are distinct.
 
 Exec ancestry records the actual lf caller. A direct child names its parent's
 Exec; an agent-issued child also records `via_agent` and AgentSession provenance.
@@ -240,10 +241,9 @@ the current boundary. Conversation continuation is separate from Flow retry.
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
-or change Flow membership. Done
-and landed Tasks remain valid targets. Under the current conservative attribution
-assumption, earlier usage retains its recorded owner; binding affects subsequent
-work, and uncertain mid-turn allocation remains unknown.
+or change Flow membership. Done and landed Tasks remain valid targets. Earlier
+usage retains its recorded owner; binding affects subsequent work, and uncertain
+mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
@@ -253,8 +253,8 @@ explicit target name and stable Project identities. A partially rotated reposito
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts. Run is a historical representation to import and remove, not a
-fourth execution object or a generic attempt type under another name.
+write contracts and the current-state conversion boundary. Exec, AgentSession
+and FlowSession are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
 
@@ -272,8 +272,8 @@ record, return.
 
 ```bash
 lf checkout INF-123
-lf --as task:INF-123 research "write scratch/runtime.md"
-lf --as task:INF-123 research "write scratch/prompts.md"
+lf --task INF-123 research "write scratch/runtime.md"
+lf --task INF-123 research "write scratch/prompts.md"
 lf commit -m "Reconcile Task research"
 lf pr publish
 lf submit
@@ -284,16 +284,15 @@ lf task status INF-123 --json
 serial PR identity. It starts no Task execution. Each `--task` command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. `submit`,
-`arm`, and `land` therefore work the same whether the Task was pursued by its
+Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by its
 Task worker, piecemeal helper AgentSessions, or another system.
 
 ### Bounded Task advancement
 
 ```bash
-lf --as wave:product wave/operate        # one finite planning pass
-lf task run INF-123
-lf --as wave:<wave> wave/operate "ship invoices first"
+lf --wave product wave/operate        # one finite planning pass
+lf --task INF-123 flow start
+lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 

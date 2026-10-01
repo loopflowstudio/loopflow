@@ -4,7 +4,7 @@ description: Control Loopflow from a live terminal conversation.
 
 # Terminal control
 
-When the human wants to step back and rethink a Task mid-flight, use
+When the user wants to step back and rethink a Task mid-flight, use
 `concept-review` to examine its product concepts, core types, and APIs together.
 
 Keep this conversation open as the User's terminal-native Loopflow control
@@ -16,7 +16,7 @@ At the beginning of every User turn, and again after any Session mutation, run:
 lf session list --json
 ```
 
-Treat that command as the only current unresolved work awaiting review. Never rely
+Use the fresh list to identify conversations and unresolved reviews. Never rely
 on Session content remembered from an earlier turn or embedded in the launch
 prompt.
 
@@ -24,10 +24,10 @@ The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
 Add `--all` to see every repository's review steps on this machine. The same
 repository scope governs `lf wave list` and `lf roadmap` (both take `--all`); `lf wave
-status` is already single-Wave and repo-resolved.
+status` resolves one Wave within the repository.
 
-When the User selects a Session, run `lf session connect <session-id> --json`.
-It prepares or recovers the boundary's ordinary provider Run and returns its
+When the User selects a Session, run `lf session open <session-id> --json`.
+It prepares or recovers the boundary's AgentSession and captured input and returns its
 `open_argv` for the app or requested terminal. Execute that argv unchanged: it
 carries the executable and owning data together. JSON preparation does not mean
 the conversation opened; verify provider readiness in the requested terminal.
@@ -37,7 +37,7 @@ installations.
 
 Normal Loopflow inspection commands remain available here. Questions for this
 present User stay in this conversation. A separate Work perspective is an
-ordinary `lf --as <work> : "<prompt>"` Run. `lf ask` creates a new session,
+ordinary `lf --task <task> : "<prompt>"` contribution. `lf ask` creates a new session,
 so do not use it merely to reach the User already here.
 
 ## Launching and advancing work
@@ -59,7 +59,7 @@ BRIEF
 For an existing Task, use its identity instead of filing another:
 
 ```bash
-lf task run <existing-issue> --flow <chosen-flow>
+lf --task <existing-issue> flow start <chosen-flow>
 ```
 
 Stdin becomes the durable Task description; `--directive` supplies worker
@@ -70,7 +70,7 @@ Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
-Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
+Current planning edits use `lf wave update-plan --wave <wave> --plan <plan.json>`.
 The complete content object has `metric_targets`, a nonempty `flow` string and
 `krs`; for example, `{"metric_targets":[],"flow":"feature","krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
@@ -78,8 +78,8 @@ future plans; Completed Projects retain history. Future plan edits require an
 available authorized Linear writer, not a current-plan update.
 
 Chapter rotation is repository-wide: preview with
-`lf new-chapter <name> --dry-run --json`, then apply the accepted name with
-`lf new-chapter <name> --json`. It takes no plan file or per-Wave selector.
+`lf repo new-chapter <name> --dry-run --json`, then apply the accepted name with
+`lf repo new-chapter <name> --json`. It takes no plan file or per-Wave selector.
 Respect the start-chapter direction and plan-review gates; prior authorization
 still applies. Retry interruptions with the same name against fresh Linear
 state. Started unfinished Tasks retain identity and execution; proven untouched
@@ -98,7 +98,7 @@ when the catalog or CLI version is unclear.
 For an existing invocation or an exact review:
 
 ```bash
-lf task run <issue>
+lf --task <issue> flow start
 lf session complete <session-id>
 ```
 
@@ -107,7 +107,7 @@ saved feedback to the next step. The following loop-decide owns navigation.
 The `advance` skill resolves the next action from a review, Task, or unbound
 design. State what actually started after checking status.
 
-Use `lf delete ISSUE` to remove a Task from Linear and reconcile its local
+Use `lf task delete ISSUE` to remove a Task from Linear and reconcile its local
 record. Read any partial-outcome report and retry the same command. Authored files
 and retained PRs survive; deletion does not certify process termination.
 
@@ -128,7 +128,7 @@ its maturity, and open questions. Do not invent ownership.
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> --flow <chosen-flow>
+lf --task <issue> flow start <chosen-flow>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs
@@ -162,23 +162,25 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
-Use `lf home id`, then `lf --as wave:<wave> wave/operate` locally or
+Use `lf home id`, then `lf --wave <wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
 be forwarded; durable workers use credentials installed on their Home.
 
-Prepare a Task without launching it with `lf checkout <issue> --json`.
-For one bounded contribution use `lf --as task:<issue> research "<question>"` or
-`lf --as wave:<wave> wave/operate "<direction>"`. `--as task:...` / `--as wave:...`
-selects one skill or inline prompt, never a multi-step Flow. Inside a Run it
-asserts the existing identity. A bounded Run does not advance the Work's Flow
-or claim exclusive ownership. Task execution uses its existing checkout.
+Prepare a Task without launching it with `lf task checkout <issue> --json`.
+For one bounded contribution use `lf --task <issue> research "<question>"` or
+`lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
+attributes a skill, inline prompt, or Flow. Attribution resolves this command's
+`--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
+Process ancestry supplies no Work attribution. A direct contribution does not
+advance the Task's selected managed Flow or claim exclusive ownership. `flow start`
+sets the same declaration and drives the ordinary Flow in the Task checkout.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-Use `lf task run <issue> --flow <chosen-flow>` for managed pursuit. Dependent
+Use `lf --task <issue> flow start <chosen-flow>` for managed pursuit. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
@@ -186,7 +188,7 @@ When evidence invalidates the attempt, update the Task and wait for required
 contributions, then `lf restart <issue> "<changed direction>"`. Restart
 checkpoints and pushes the existing tree, preserves Task/worktree/PR identity,
 and starts the current Project's default Flow fresh. It interrupts an exact live
-Task worker; independent bounded Runs remain independent. Reconcile prior
+Task worker; other attributed Flows and conversations remain independent. Reconcile prior
 scratch against the new evidence rather than treating it as approved design.
 An explicitly selected Flow governs even when it differs from that default.
 

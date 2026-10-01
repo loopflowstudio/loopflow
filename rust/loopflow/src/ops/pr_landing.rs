@@ -294,17 +294,8 @@ fn admit_ci_fix(landing: &PrLanding, incident: &CiIncident) -> OpsResult<()> {
                     )));
                 }
             }
-            for exec in store.sqlite.execs_since(0).map_err(repair_error)? {
-                if exec.cwd.as_deref() == landing.worktree.to_str()
-                    && Some(&exec.id) != crate::journal::current_exec_id().as_ref()
-                    && crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
-                        != crate::journal::ProcessIdentityEvidence::Dead
-                {
-                    return Err(repair_error(format!(
-                        "Exec {} is live or unresolved",
-                        exec.id
-                    )));
-                }
+            if let Some(exec) = live_checkout_exec(&store, &landing.worktree)? {
+                return Err(repair_error(format!("Exec {exec} is live or unresolved")));
             }
         }
         let config = load_config_or_default(Some(&landing.worktree));
@@ -420,6 +411,43 @@ fn repair_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
+/// Checks pending past the deadline become one synthetic failing check.
+const CI_TIMEOUT: &str = "ci-timeout";
+
+fn is_ci_timeout(incident: &CiIncident) -> bool {
+    incident.failure_set == [CI_TIMEOUT]
+}
+
+fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
+    LandingObservation::Failing {
+        head_sha: head_sha.to_string(),
+        failing_checks: vec![CiCheck {
+            name: CI_TIMEOUT.into(),
+            url: None,
+        }],
+    }
+}
+
+/// Another live or unresolved Exec in this checkout, besides the caller.
+fn live_checkout_exec(
+    store: &SharedStore,
+    worktree: &Path,
+) -> OpsResult<Option<crate::id::ExecId>> {
+    let caller = crate::journal::current_exec_id();
+    Ok(store
+        .sqlite
+        .execs_since(0)
+        .map_err(repair_error)?
+        .into_iter()
+        .find(|exec| {
+            exec.cwd.as_deref() == worktree.to_str()
+                && Some(&exec.id) != caller.as_ref()
+                && crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+                    != crate::journal::ProcessIdentityEvidence::Dead
+        })
+        .map(|exec| exec.id))
+}
+
 pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let (store, landing, incident, captured) = runtime.block_on(async {
@@ -481,7 +509,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
                         == incident.identity
             }
             LandingObservation::Pending { head_sha, .. } => {
-                head_sha == incident.failed_head_sha && incident.failure_set == ["ci-timeout"]
+                head_sha == incident.failed_head_sha && is_ci_timeout(&incident)
             }
             _ => false,
         };
@@ -490,7 +518,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
                 "PR evidence changed before repair; next check will reconcile it",
             ));
         }
-        if incident.failure_set == ["ci-timeout"] {
+        if is_ci_timeout(&incident) {
             store
                 .sqlite
                 .consume_timeout_rerun(
@@ -571,7 +599,7 @@ fn exec_ci_fix(
         checks,
         task_context,
     );
-    if incident.failure_set == ["ci-timeout"] {
+    if is_ci_timeout(incident) {
         prompt.push_str("\nThe recorded CI attempt exceeded 30 minutes. Diagnose pending or missing expected checks. This incident authorizes at most one timeout-only rerun; do not loop reruns or manufacture an empty commit. If no eligible run exists or the rerun still blocks, report the blocker.");
     }
     prompt.push_str(
@@ -622,18 +650,9 @@ fn exec_ci_fix(
         chrome: config.chrome,
     };
     let (harness, model) = crate::engine::parse_agent(launch.agent());
-    let reservation = store
-        .sqlite
-        .repair_reservation(&incident.identity)
-        .map_err(repair_error)?;
     let session = store
         .sqlite
-        .session(
-            reservation
-                .session
-                .as_deref()
-                .ok_or_else(|| repair_error("repair has no reserved Session"))?,
-        )
+        .session(session_id)
         .map_err(repair_error)?
         .ok_or_else(|| repair_error("reserved Session disappeared"))?;
     let request = AgentExecRequest::from_prepared(&launch, &capabilities);
@@ -836,8 +855,6 @@ async fn block_landing(
 }
 
 async fn run_driver_operation<T, F>(
-    store: &SharedStore,
-    landing: &PrLanding,
     ownership: &Arc<File>,
     label: &'static str,
     operation: F,
@@ -846,8 +863,6 @@ where
     T: Send + 'static,
     F: FnOnce() -> OpsResult<T> + Send + 'static,
 {
-    let _ = store;
-    let _ = landing;
     let ownership = Arc::clone(ownership);
     let operation = tokio::task::spawn_blocking(move || {
         let _ownership = ownership;
@@ -934,7 +949,7 @@ async fn reconcile_claimed(
             merge_commit: merge_commit.clone(),
         }
     } else {
-        run_driver_operation(store, landing, ownership, "observation", {
+        run_driver_operation(ownership, "observation", {
             let driver = Arc::clone(&driver);
             let landing = landing.clone();
             move || driver.observe(&landing)
@@ -965,13 +980,7 @@ async fn reconcile_claimed(
                 )
                 .await;
             }
-            observed = LandingObservation::Failing {
-                head_sha: head_sha.clone(),
-                failing_checks: vec![CiCheck {
-                    name: "ci-timeout".into(),
-                    url: None,
-                }],
-            };
+            observed = ci_timeout_failure(head_sha);
         }
     }
     if let LandingObservation::Failing {
@@ -988,21 +997,15 @@ async fn reconcile_claimed(
             .observe_ci_incident(&incident)
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
-        observed = run_driver_operation(store, landing, ownership, "CI confirmation", {
+        observed = run_driver_operation(ownership, "CI confirmation", {
             let driver = Arc::clone(&driver);
             let landing = landing.clone();
             move || driver.observe(&landing)
         })
         .await?;
-        if incident.failure_set == ["ci-timeout"] {
+        if is_ci_timeout(&incident) {
             if let LandingObservation::Pending { head_sha, .. } = &observed {
-                observed = LandingObservation::Failing {
-                    head_sha: head_sha.clone(),
-                    failing_checks: vec![CiCheck {
-                        name: "ci-timeout".into(),
-                        url: None,
-                    }],
-                };
+                observed = ci_timeout_failure(head_sha);
             }
         }
         // Changed failures wait for another check; non-failure evidence can
@@ -1118,7 +1121,8 @@ async fn reconcile_claimed(
                 None,
             )
             .await?;
-            let repair = run_driver_operation(store, landing, ownership, "ci-fix", {
+            let identity = incident.identity.clone();
+            let repair = run_driver_operation(ownership, "ci-fix", {
                 let driver = Arc::clone(&driver);
                 let landing = landing.clone();
                 move || driver.repair(&landing, &incident)
@@ -1128,12 +1132,7 @@ async fn reconcile_claimed(
                 return block_landing(store, landing, format!("ci-fix blocked: {error}")).await;
             }
             store
-                .record_ci_response(
-                    &ci_incident(landing, &failing_checks, now).identity,
-                    &landing.id,
-                    landing.generation,
-                    now,
-                )
+                .record_ci_response(&identity, &landing.id, landing.generation, now)
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?;
             persist_landing_state(
@@ -1213,7 +1212,7 @@ async fn refresh_joined_request(store: &SharedStore, landing: &mut PrLanding) ->
     Ok(())
 }
 
-async fn landing_store() -> OpsResult<SharedStore> {
+pub(crate) async fn landing_store() -> OpsResult<SharedStore> {
     let config = storage_config_from_env()
         .map_err(|error| OpsError::Message(format!("resolve landing store: {error}")))?;
     open_store(&config)
@@ -1260,17 +1259,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
     let has_conversation = sessions
         .iter()
         .any(|session| session.cwd == landing.worktree && session.completed_at.is_none());
-    let has_execution = store
-        .sqlite
-        .execs_since(0)
-        .map_err(repair_error)?
-        .iter()
-        .any(|exec| {
-            exec.cwd.as_deref() == landing.worktree.to_str()
-                && Some(&exec.id) != crate::journal::current_exec_id().as_ref()
-                && crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
-                    != crate::journal::ProcessIdentityEvidence::Dead
-        });
+    let has_execution = live_checkout_exec(store, &landing.worktree)?.is_some();
     if has_conversation || has_execution {
         eprintln!("PR merged; retained its checkout for associated work. Use lf wt delete after that work finishes.");
         return Ok(());

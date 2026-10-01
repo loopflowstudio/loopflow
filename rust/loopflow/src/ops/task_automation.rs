@@ -41,11 +41,7 @@ fn error(error: impl std::fmt::Display) -> OpsError {
 pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env().map_err(error)?)
-                .await
-                .map_err(error)?,
-        );
+        let store = super::pr_landing::landing_store().await?;
         let task = store
             .get_task_by_issue(issue)
             .await
@@ -174,6 +170,26 @@ pub(crate) fn session_engine_unresolved(
         }))
 }
 
+async fn repository_tasks(
+    store: &SharedStore,
+    repo: &crate::repository::RepoId,
+) -> OpsResult<Vec<Task>> {
+    let mut tasks = Vec::new();
+    for task in store.list_tasks(None).await.map_err(error)? {
+        let Some(wave) = store.get_wave(&task.wave_id).await.map_err(error)? else {
+            continue;
+        };
+        if crate::repository::RepoId::discover(Path::new(wave.repo()))
+            .ok()
+            .as_ref()
+            == Some(repo)
+        {
+            tasks.push(task);
+        }
+    }
+    Ok(tasks)
+}
+
 pub fn reconcile(repo: &Path) -> OpsResult<AutomationCheck> {
     let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
     let lock = OpenOptions::new()
@@ -198,27 +214,13 @@ pub fn reconcile(repo: &Path) -> OpsResult<AutomationCheck> {
     }
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env().map_err(error)?)
-                .await
-                .map_err(error)?,
-        );
+        let store = super::pr_landing::landing_store().await?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
         super::pr_landing::reconcile_repository_async(&root, &store, deadline, &mut report.errors)
             .await?;
         let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
         let mut tasks = Vec::new();
-        for task in store.list_tasks(None).await.map_err(error)? {
-            let Some(wave) = store.get_wave(&task.wave_id).await.map_err(error)? else {
-                continue;
-            };
-            if crate::repository::RepoId::discover(Path::new(wave.repo()))
-                .ok()
-                .as_ref()
-                != Some(&repo_id)
-            {
-                continue;
-            }
+        for task in repository_tasks(&store, &repo_id).await? {
             let state = store.sqlite.task_automation(&task.id).map_err(error)?;
             if state.enabled.is_some() {
                 tasks.push((task, state));
@@ -389,6 +391,7 @@ async fn reconcile_task(
     super::task::exec_task_process(store, task, None).await?;
     Ok("Flow admitted through its saved claim".into())
 }
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomationStatus {
     pub enabled: bool,
@@ -413,11 +416,7 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
     let root = crate::engine::worktrees::main_repo_root(repo).map_err(error)?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env().map_err(error)?)
-                .await
-                .map_err(error)?,
-        );
+        let store = super::pr_landing::landing_store().await?;
         let local = store.local_home().await.map_err(error)?;
         let key = super::cron::repository_cron_key(&root, &local.id);
         let jobs = super::cron::list_crons(
@@ -457,17 +456,9 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
         };
         let repo_id = crate::repository::RepoId::discover(&root).map_err(error)?;
         let mut tasks = Vec::new();
-        for task in store.list_tasks(None).await.map_err(error)? {
-            let Some(wave) = store.get_wave(&task.wave_id).await.map_err(error)? else {
-                continue;
-            };
-            if crate::repository::RepoId::discover(Path::new(wave.repo()))
-                .ok()
-                .as_ref()
-                == Some(&repo_id)
-                // Finished Tasks get no new work; unsettled deliveries are listed below.
-                && super::task::task_work_status(&store, &task).await? == WorkStatus::Ready
-            {
+        for task in repository_tasks(&store, &repo_id).await? {
+            // Finished Tasks get no new work; unsettled deliveries are listed below.
+            if super::task::task_work_status(&store, &task).await? == WorkStatus::Ready {
                 tasks.push(store.sqlite.task_automation(&task.id).map_err(error)?);
             }
         }

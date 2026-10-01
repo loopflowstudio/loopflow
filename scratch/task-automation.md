@@ -439,10 +439,7 @@ Still owed before the Task's acceptance is met:
 - Integrated scenario gaps in `scheduled_task_tests`: driver killed with a live
   provider vs. both dead, taskless and queued landings in one pass, interrupted
   Linear settlement retry, two Home placements.
-- An overlapping manual `lf task reconcile` makes the scheduled check exit
-  non-zero ("another repository check is running"), which shows as a failed
-  check until the next minute. Decide whether overlap is a quiet no-op.
 - LOO-338 watcher retirement on the installed release, and LOO-353 Unit 2
   Session callers of the same operation.
 
-Check: 2026-10-01 `cargo test -p loopflow --test land_tests lf_pr_land_returns_before` (detached repair, failed-start recovery), `--test scheduled_task_tests --test dto_fixtures`, `--lib ops::cron::tests`, `swift test --filter TaskAutomationTests`, fmt and clippy — results in the commit message; gate owns the full suites.
+Check: 2026-10-01 after compress — `cargo test -p loopflow --test scheduled_task_tests --test land_tests --test dto_fixtures` and `--lib ops::pr_landing`, `ops::cron::tests`, `engine::config` passed; fmt and all-target clippy clean. Gate owns the full suites and Swift.

@@ -99,7 +99,7 @@ final class PodiumModel {
                 }
             }
             taskLinkReading = .available(result)
-            if matches.count == 1, !unavailable, let match = matches.first {
+            if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 openTaskDestination(wave: match.0, task: match.1)
             }
         } catch {

@@ -15,8 +15,8 @@ captured input. Earlier Run-based implementation details below describe the
 pre-merge mechanism. Jack accepted a private copy of the real Home for this
 branch demonstration after the installed CLI and branch UI proved incompatible.
 The app now bundles its matching development CLI and uses existing source-build
-isolation. Native planning renders; Task navigation and the full retained-pane,
-provider and latency walkthrough remain open. [Demo evidence](task-workspace-demo.md)
+isolation. Native planning and LOO-330's workspace render; the full retained-pane,
+provider and latency walkthrough remains open. [Demo evidence](task-workspace-demo.md)
 records Jack's screenshots, the repairs and the current next step. These results
 do not establish live-main-Home operation or acceptance of Unit 1.
 

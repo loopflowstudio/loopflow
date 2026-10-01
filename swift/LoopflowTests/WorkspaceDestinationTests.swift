@@ -61,6 +61,13 @@ struct WorkspaceDestinationTests {
         #expect(destination.task(id: task.id)?.task.task.name == task.task.name)
         #expect(destination.visibleRoadmaps.isEmpty)
         #expect(destination.breadcrumb?.task?.task.id == task.id)
+        let retained = SessionsContentView(
+            model: destination, repoPath: wave.wave.repo,
+            workspaces: SessionsWorkspaceRegistry(), homeId: "local", query: exactQuery
+        )
+        #expect(throws: Never.self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+        }
         #expect(throws: Never.self) {
             try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
         }
@@ -200,6 +207,30 @@ struct WorkspaceDestinationTests {
                 #expect(model.taskLinkReading.errorMessage == nil)
             }
         }
+    }
+
+    @Test(arguments: [false, true])
+    func scopedTaskLinkOpensItsMatchWithAnotherWaveUnavailable(scoped: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        var result = try #require(JSONSerialization.jsonObject(with: Data(exact.utf8)) as? [String: Any])
+        var waves = try #require(result["waves"] as? [[String: Any]])
+        let other = try #require(waves.indices.first { index in
+            let tasks = waves[index]["tasks"] as? [String: Any]
+            return (tasks?["items"] as? [Any])?.isEmpty == true
+        })
+        waves[other]["tasks"] = ["state": "unavailable", "reason": "Chapter unavailable"]
+        result["waves"] = waves
+        let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+        let model = PodiumModel(query: RegistryQuery { _, _ in response })
+        var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
+        await model.openTaskLink(try #require(link.url))
+        #expect(model.selection == (scoped ? .task(id: task.id) : nil))
+        #expect(model.showsTaskLink == !scoped)
     }
 
     @Test func coldAndWarmLinksReachOnlyOneWorkspace() throws {

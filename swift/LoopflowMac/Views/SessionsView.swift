@@ -446,7 +446,7 @@ struct SessionsContentView: View {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
-        return model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId)?.task
+        return model.breadcrumb?.task
     }
 
     var body: some View {

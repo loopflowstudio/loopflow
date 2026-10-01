@@ -8,8 +8,8 @@ Prior local proof: [kickoff-evidence.md](kickoff-evidence.md).
 Ask contract: [ask-evidence.md](ask-evidence.md).
 
 Status: the app/CLI protocol mismatch is repaired using a private copy of Jack's
-Home, as Jack explicitly accepted. Native planning renders; Task navigation is
-still under review. No complete Unit 1 walkthrough or latency target has passed.
+Home, as Jack explicitly accepted. Native planning and LOO-330's Task workspace
+now render. No complete Unit 1 walkthrough or latency target has passed.
 Jack has not accepted the experience or requested a workspace design change.
 
 ## Jack's direction
@@ -123,16 +123,26 @@ Receipt: `.lf/tmp/task-workspace-demo/launch-recording/report.md`.
 
 ## Recommended next action
 
-Finish opening LOO-330's retained workspace in the copied Home, then resume the
-walkthrough and measure actual layout actions. Jack's screenshot at 17:57 showed
+Resume the LOO-330 walkthrough and measure actual layout actions. Jack's screenshot at 17:57 showed
 the Open Task sheet remaining at “Finding Task…”, after the planning repair.
 This is a counterexample to treating healthy planning as a working Task demo.
 The exact CLI lookup succeeds, but an unscoped lookup also reports unavailable
 planning from unrelated repositories and therefore cannot automatically select
 its one match. A scoped lookup for LOO-298 still includes an unavailable engbot
 Wave alongside the infrastructure match. Those observations do not by themselves
-explain a sheet that remains loading. Direct navigation through ⌘K to LOO-330 is
-the next discriminator. Jack's feedback on that step is pending.
+explain a sheet that remains loading. Jack requested reopening instead of reporting
+a result from direct ⌘K navigation. The repaired repo-scoped link now opens its
+one exact match even with another Wave unavailable. Unscoped incomplete or
+ambiguous readings retain their chooser.
+
+At 18:13, an agent-captured screenshot of the running app shows LOO-330 selected,
+its checkout in the header, Show Files, Conversations, Collapse, Focus, New shell,
+Files, and the task-design/review-design participation strip. This supersedes the
+navigation blocker as the current observation. Image:
+`.lf/tmp/task-workspace-demo/loo330-workspace.png`. Jack has not yet supplied
+feedback on this working workspace. Its terminal shows login output; that is not
+proof of a resumed provider conversation. No layout-action or save acceptance is
+inferred from these visible controls.
 
 ## Repair and local proof
 
@@ -163,6 +173,14 @@ Configured observations using the installed branch helper:
   the original JSON error. They do not show the selected Task workspace.
 - A 15-second capture was still loading; a 45-second capture with explicit copied
   Home paths rendered planning. These are observations, not startup latency passes.
+- The AppleScript screenshot definition named `Loopflow.CaptureScreenshotCommand`,
+  but both native build configurations use module `LoopflowMac`. Correcting that
+  reference restores the app's existing screenshot command; the final screenshot
+  above came from the running window, without accessibility automation.
+- Retained Task lookup evidence now supplies the workspace's checkout during
+  planning loading or when the selected historical Task is outside the current
+  plan. Previously the breadcrumb could name the Task while its panes used the
+  generic repository workspace until the plan arrived.
 
 Executed local proof: 10 Rust Flow graph tests, 27 Session/workspace tests, the
 focused raw Ask retry test, the retained-Session repository test, 14 shared DTO
@@ -172,11 +190,18 @@ with all targets and warnings denied, and whitespace checks passed. A duplicate
 raw-key test introduced by concurrent reconciliation was removed; the retained
 behavioral proof and Clippy passed again. All 10 WorkspaceDestinationTests also
 passed, covering exact, historical, unavailable and overlapping Task links with
-simulated transport. The configured LOO-330 file query succeeds as well.
+simulated transport. The scoped-link repair adds an eleventh test, including
+both scoped and unscoped partial-planning behavior. The configured LOO-330 file
+query succeeds as well. The final 11-test run also verifies retained checkout
+controls after the Task disappears from current planning, and the final Xcode
+fallback build-for-testing passed. The app was rebuilt and reopened with those
+changes; a live 18:15 capture confirms Task files/checkout controls are available
+while broader planning is still loading.
 
 Review findings addressed: the UI must use its matching CLI, migrated Sessions must
 remain discoverable without inventing repository identity, numeric occurrence keys
 must stay consistent through graph projection, and a copied Home must not inherit
-live execution authority. The remaining navigation failure is explicit above.
+live execution authority. The native workspace now renders; the remaining
+walkthrough and measurement gaps stay explicit above.
 No PR mutation or push was performed by this demo. This independent Session has no
 Flow completion/navigation verdict.

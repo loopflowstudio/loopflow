@@ -162,9 +162,10 @@ open 'loopflow://task/LOO-303'
 open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
 ```
 
-Task links and palette Task entries open details, including Tasks outside the
-current chapter. They never start work or enter a Task's sole Session. Ambiguous
-links offer repository-qualified choices; unavailable reads keep the current
+Task links and palette Task entries open retained workspaces, including Tasks
+outside the current chapter, without starting a Task Flow. A repository-qualified
+link opens its exact match even when another Wave's planning is unavailable.
+Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's

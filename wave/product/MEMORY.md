@@ -64,8 +64,7 @@ otherwise repeat work leaks into the exit edge.
 Recorded Rust/Swift proofs, shared fixtures, Clippy and both native build paths
 support the implementation; transport fixtures remain simulated. On October 1,
 Jack Heart approved a workspace checkpoint and requested LOO-353 continue, then
-stopped merging until the revised Task Session model is implemented. Auto-merge
-is disabled. Earlier approval does not certify the new revision or missing proof. Real provider continuation, remote
+stopped merging until the revised Task Session model is implemented. The PR was disarmed during the correction. Earlier approval does not certify the new revision or missing proof. Real provider continuation, remote
 association and measured layout/idle behavior remain explicit LOO-353 work.
 The retained signpost is scheduling evidence, not compositor presentation.
 

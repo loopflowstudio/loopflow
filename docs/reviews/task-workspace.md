@@ -1,7 +1,8 @@
 # Task workspace review — October 1, 2026
 
 Jack Heart requested landing, then withdrew the branch from merging until the Task
-Session model is corrected. PR #1369 remains open with auto-merge disabled.
+Session model is corrected. PR #1369 was disarmed during this correction. The revised model is implemented
+and locally verified; the previously requested landing can resume.
 The current implementation contract is in `scratch/growth-thoughts.md`: arbitrary
 Sessions per Task checkout, explicit repo/Wave exclusions, and orphan filtering
 without a creation opt-out. Jack requested retiring Ask rather than extending it.
@@ -110,8 +111,8 @@ Local proof includes 80 Swift tests, 32 Rust human-session tests, three Task ass
 cases, the indexed inventory check, and 21 architecture tests. These are local,
 simulated-transport and fixture-shell results; they do not establish live provider
 continuation or measured presentation latency. The CLI no-opt-out check, prompt golden, Clippy, formatting and both native build
-paths passed. The final navigation refinement passed 29 focused tests. PR #1369
-remains unmerged; these checks do not constitute a configured provider demo.
+paths passed. The final navigation refinement passed 29 focused tests. At this verification checkpoint PR #1369 was unmerged; these checks do not
+constitute a configured provider demo.
 
 The revised private-copy smoke read three Task-associated Sessions and no orphans;
 native capture showed planning and Task counts without an orphan sidebar section.

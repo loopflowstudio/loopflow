@@ -53,7 +53,8 @@
       },
       "interactive": true,
       "caller_session_id": null,
-      "workspace": null
+      "workspace": null,
+      "scope": null
     }
   ],
   "next": null

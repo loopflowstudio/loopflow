@@ -99,14 +99,17 @@ continues; **Expand** returns to it. **Focus** gives one conversation the conten
 area; **Restore** brings back the panes and files. **Terminate** ends a shell.
 New conversations arrive in the list without taking focus.
 
-Task rows show available direct Ask and interactive Flow conversations. Collapsed
-Wave rows roll up those conversations; choose a name to open it directly.
+Task rows show all Sessions in the Task checkout, including independent conversations.
+Repo and Wave Sessions retain their own scopes. Collapsed Wave rows roll up Task
+Sessions; choose a name to open it directly.
 **Available** means the conversation can be joined; **Ready to complete** means
 its agent has recorded a summary. Failed provider starts offer recovery.
 
 Use the outline menu for **Compact**, **Full hierarchy**, or **Sessions**.
 Repository conversations and Sessions with unavailable ancestry stay reachable
-below the outline. **Task details** opens the description, comments and Run history.
+below the outline. Sessions without a Task association are also available under
+**Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
+There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
 The Task's compact Flow shows interactive stages and inspectable background work.
 Select a current stage to join its exact conversation; select a future stage to

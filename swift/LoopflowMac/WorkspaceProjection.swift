@@ -45,7 +45,7 @@ struct WorkspaceProjection {
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
         func attached(to taskId: String?) -> [SessionRecord] {
             guard let taskId else { return [] }
-            let records = sessions.filter { $0.workspace?.taskId == taskId || $0.taskIds.contains(taskId) }
+            let records = sessions.filter { $0.scope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -236,7 +236,7 @@ extension WorkspaceProjection {
                 && waveHasChildren && expanded(wave.id))
             let waveStart = rows.count
             if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren,
-                                      sessions: wave.tasks.flatMap(\.sessions).filter(\.offersParticipation)) }
+                                      sessions: wave.tasks.flatMap(\.sessions)) }
             if flat || expanded(wave.id) {
                 let waveDepth = omitWave ? 0 : 1
                 for session in wave.sessions { appendSession(session, depth: waveDepth, ancestors: [waveSubject]) }
@@ -263,7 +263,7 @@ extension WorkspaceProjection {
         }
         // Known Work stays visible when its planning row is unavailable.
         // Only genuinely unbound Sessions belong in the orphan section.
-        for session in unmatchedSessions where session.work != nil || session.waveId != nil {
+        for session in unmatchedSessions where session.work != nil || session.waveId != nil || session.scope != nil || session.workspace?.taskId != nil || !session.taskIds.isEmpty {
             let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
             let wave = waves.first { $0.roadmap.wave.id == waveId }
             var ancestors: [WorkspaceOutlineSubject] = []
@@ -304,16 +304,17 @@ extension WorkspaceProjection {
         return rows
     }
 
-    /// Sessions with no Work in this repository: the sidebar's bottom section,
-    /// filtered like the outline. Their Task is never guessed from a checkout.
+    /// Diagnostic inventory: no Task association, regardless of attention state.
     func orphanSessions(search: String) -> [SessionRecord] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return unmatchedSessions.filter { session in
-            guard session.work == nil, session.waveId == nil else { return false }
+        let records = waves.flatMap { $0.sessions } + unmatchedSessions
+        return records.filter { session in
+            guard session.workspace?.taskId == nil, session.taskIds.isEmpty else { return false }
             return query.isEmpty || [session.title, session.detail, session.workPath ?? ""]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
+
 }
 
 /// One exact Session's assignment confirmation, retained through a failed commit.
@@ -404,7 +405,6 @@ final class WorkspaceNavigation {
     var repositoryCollapsed = false
     /// The orphan Session section's disclosure. `nil` follows the default:
     /// collapsed beside planned Work, open when orphans are all there is.
-    var orphansDisclosed: Bool?
     var collapsed: Set<WorkspaceNodeKey> = []
     var search = ""
     var selection: WorkReference?

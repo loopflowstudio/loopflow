@@ -68,6 +68,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             page,
             after,
             task,
+            orphan,
             search,
         } => {
             let store = open_shared_store().await?;
@@ -81,6 +82,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                         crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
                     },
                     task: task.clone(),
+                    orphan: *orphan,
                     search: search.clone(),
                     interactive: interactive.interactive(),
                     history: *history,

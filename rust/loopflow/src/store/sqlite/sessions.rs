@@ -122,6 +122,12 @@ fn inventory_query(
             super::task_work::session_ids(&task)
         ));
     }
+    if filter.orphan {
+        sql.push_str(&format!(
+            " AND NOT EXISTS ({})",
+            super::task_work::session_tasks("s")
+        ));
+    }
     if let Some(search) = &filter.search {
         let search = bind(Value::Text(search.clone()));
         sql.push_str(&format!(
@@ -716,6 +722,29 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(session)
+    }
+
+    pub(crate) fn session_scopes(
+        &self,
+    ) -> StoreResult<std::collections::HashMap<String, crate::session::SessionScope>> {
+        use crate::session::SessionScope;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id, CASE WHEN primary_scope='repository' THEN 'repository' ELSE 'wave' END
+             FROM agent_sessions WHERE primary_scope IS NOT NULL OR (wave_id IS NOT NULL AND task_id IS NULL)",
+        )?;
+        let rows = query.query_map([], |row| {
+            let scope: String = row.get(1)?;
+            Ok((
+                row.get(0)?,
+                if scope == "repository" {
+                    SessionScope::Repository
+                } else {
+                    SessionScope::Wave
+                },
+            ))
+        })?;
+        rows.collect::<Result<_, _>>().map_err(Into::into)
     }
 
     /// The scope a Session is or was primary for.

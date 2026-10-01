@@ -1,8 +1,11 @@
 # Task workspace review — October 1, 2026
 
-Jack Heart approved landing PR #1369 and requested that LOO-353 keep going.
-Approval authorizes this delivery checkpoint; unexecuted proof below remains
-unexecuted. This Session is independent, not a waiting managed Flow boundary.
+Jack Heart requested landing, then withdrew the branch from merging until the Task
+Session model is corrected. PR #1369 remains open with auto-merge disabled.
+The current implementation contract is in `scratch/growth-thoughts.md`: arbitrary
+Sessions per Task checkout, explicit repo/Wave exclusions, and orphan filtering
+without a creation opt-out. Jack requested retiring Ask rather than extending it.
+Earlier landing approval does not certify this revision or unexecuted proof.
 
 ## Delivered behavior
 
@@ -13,7 +16,7 @@ and revisioned file saving do not require a Project or PR. Readable symlinks are
 read-only; access changes precede content-revision shortcuts and preserve drafts.
 
 Interactive stages and participation indicators refer to exact captured boundaries;
-Ask retry keys remain caller-scoped. Closing or hiding a pane does not complete a
+The branch’s public Ask retry-key addition has been removed. Closing or hiding a pane does not complete a
 Session, Ask or Flow. The separate Task terminal owner is removed.
 
 Jack rejected the original left-side button stack. The revision uses compact

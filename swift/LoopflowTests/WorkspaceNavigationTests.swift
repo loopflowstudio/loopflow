@@ -8,7 +8,7 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkspaceNavigationTests {
-    @Test("A collapsed Wave exposes direct participation without counting idle conversations")
+    @Test("A collapsed Wave exposes every Task Session, including idle conversations")
     func collapsedWaveParticipation() throws {
         let snapshot = try roadmap()
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("ask", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
@@ -20,7 +20,7 @@ struct WorkspaceNavigationTests {
         let wave = try #require(projection.waves.first)
         let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
         let waveRow = try #require(rows.first { $0.workKey == wave.id })
-        #expect(waveRow.inlineSessions.map(\.id) == ["ask"])
+        #expect(waveRow.inlineSessions.map(\.id) == ["idle", "ask"])
         #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "ask" }) })
     }
 
@@ -59,6 +59,20 @@ struct WorkspaceNavigationTests {
         }
     }
 
+    @Test("Repo and Wave Sessions cannot join a Task through checkout or stored associations")
+    func explicitScopesStaySeparate() throws {
+        let snapshot = try roadmap()
+        let original = try session("scoped", work: .task(id: "ts_review00000000000000000000000000"))
+        for scope in ["repository", "wave"] {
+            var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            value["scope"] = scope
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [record])
+            #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
+            #expect(projection.unmatchedSessions.map(\.id) == ["scoped"])
+        }
+    }
+
     @Test("Repository path spellings share one outline root")
     func repositoryAliasesShareRoot() async throws {
         let source = try ReadingSource(
@@ -73,7 +87,7 @@ struct WorkspaceNavigationTests {
         }
         #expect(roots.count == 1)
         #expect(try roots.first?.accessibilityIdentifier() == "workspace-repository-/src/loopflow")
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
     }
 
     @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
@@ -112,7 +126,7 @@ struct WorkspaceNavigationTests {
         let project = projection.waves[0].id
         let folded = rows(.compact, collapsed: [project])
         #expect(folded.contains { $0.workKey == project })
-        #expect(!folded.contains { $0.inlineSessions.contains { $0.id == "human" } })
+        #expect(folded.contains { $0.inlineSessions.contains { $0.id == "human" } })
         #expect(rows(.sessions, collapsed: [project]).map(\.id) == flat.map(\.id))
         #expect(rows(.compact, readable: false).map(\.id) == full.map(\.id))
         let searched = projection.outline(presentation: .compact, collapsed: [project], search: "human", planningReadable: true)
@@ -183,7 +197,7 @@ struct WorkspaceNavigationTests {
         #expect(projection.orphanSessions(search: "").map(\.id) == ["third"])
     }
 
-    @Test("Orphan Sessions never sit under a Wave; the section exists only while orphans do")
+    @Test("Orphan Sessions are reachable only through the diagnostic menu")
     func orphansStayOutOfTheTree() async throws {
         let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
         let orphan = try session("demo", work: nil)
@@ -208,20 +222,17 @@ struct WorkspaceNavigationTests {
         await model.refresh()
         var opened: [String] = []
         let view = WorkspaceNavigator(model: model, onOpenSession: { opened.append($0.id) })
-        // Collapsed beside planned Work: header and count, no rows.
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open")
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo") }
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-toggle").button().tap()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo").button().tap()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open").button().tap()
-        #expect(opened == ["demo", "demo"])
+        try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo").button().tap()
+        #expect(opened == ["demo"])
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
 
         // Zero orphans hides the section entirely.
         model.sessionResolved("demo", repo: "/src/loopflow")
         #expect(model.workspace.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
     }
 
     @Test("Hierarchy rows open their Task; the Session list opens the exact Session")

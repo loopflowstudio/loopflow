@@ -448,9 +448,6 @@ pub enum FlowCommand {
 
 #[derive(Args, Debug, Default)]
 pub struct AskArgs {
-    /// Reuse this question and its retained answer within the caller Run
-    #[arg(long)]
-    pub key: Option<String>,
     /// Named skill for the session
     #[arg(long)]
     pub skill: Option<String>,
@@ -522,6 +519,9 @@ pub enum SessionCommand {
         after: Option<String>,
         #[arg(long)]
         task: Option<String>,
+        /// Only Sessions without a Task association
+        #[arg(long, conflicts_with = "task")]
+        orphan: bool,
         #[arg(long)]
         search: Option<String>,
     },
@@ -2420,13 +2420,6 @@ mod tests {
             Some(Commands::Session { cmd: crate::lf::SessionCommand::Ask { ask } }) if ask.skill.as_deref() == Some("unblock")
                 && ask.question == ["Resolve", "this blocker"]
         ));
-
-        let keyed =
-            Cli::try_parse_from(["lf", "session", "ask", "--key", "policy", "Choose policy"])
-                .unwrap();
-        assert!(
-            matches!(keyed.command, Some(Commands::Session { cmd: SessionCommand::Ask { ask } }) if ask.key.as_deref() == Some("policy") && ask.question == ["Choose policy"])
-        );
 
         let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
             .expect("parse session readiness");

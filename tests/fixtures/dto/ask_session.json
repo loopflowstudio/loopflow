@@ -48,5 +48,6 @@
   "interactive": true,
   "task_ids": [
     "task_00000000000000000000000000000001"
-  ]
+  ],
+  "scope": null
 }

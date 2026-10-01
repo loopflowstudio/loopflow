@@ -202,18 +202,11 @@ struct WorkspaceNavigationProofTests {
             // Counts only where Sessions exist.
             _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-0")
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-7") }
-            // Orphans: one collapsed section, never a tree row, never an ancestry sentence.
-            _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open")
-            #expect(throws: (any Error).self) { try outline.find(text: "Repository or unavailable ancestry") }
+            // Diagnostic Sessions do not consume main navigation space.
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
-            try capture(window, "density-orphans-collapsed-\(suffix)")
-            try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-toggle").button().tap()
-            try await settle(window)
-            _ = try view.inspect().find(WorkspaceNavigator.self).actualView().inspect()
-                .find(viewWithAccessibilityIdentifier: "session-row-demo")
-            try capture(window, "density-orphans-open-\(suffix)")
-            model.navigation.orphansDisclosed = nil
-            try await settle(window)
+            _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
+            try capture(window, "density-debug-orphans-\(suffix)")
         }
         // Zero orphans hides the section.
         await source.replace(try encode(attached))

@@ -137,6 +137,7 @@ pub enum WorkSource {
 /// SQL selection for conversation inventory; mode and completion are independent.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
+    pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
     pub search: Option<String>,
@@ -151,6 +152,7 @@ pub struct SessionFilter {
 impl Default for SessionFilter {
     fn default() -> Self {
         Self {
+            orphan: false,
             repo: None,
             task: None,
             search: None,
@@ -235,4 +237,12 @@ pub(crate) struct HistoryCapture {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub interactive: bool,
+}
+
+/// Explicit repository/Wave ownership takes precedence over checkout grouping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionScope {
+    Repository,
+    Wave,
 }

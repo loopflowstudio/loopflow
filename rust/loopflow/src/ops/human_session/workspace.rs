@@ -124,9 +124,11 @@ impl WorkspaceResolver {
 pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
     // A failed snapshot propagates: callers must retain their last good inventory.
     let checkouts = store.task_checkouts().await?;
+    let scopes = store.sqlite.session_scopes()?;
     let home = store.local_home().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
+        session.scope = scopes.get(&session.id).copied().or(session.scope);
         if session
             .workspace
             .as_ref()
@@ -135,6 +137,15 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
             continue;
         }
         session.workspace = resolver.resolve(Path::new(&session.cwd), None, session.work.as_ref());
+        if let Some(workspace) = &session.workspace {
+            session.task_ids = workspace.task_id.iter().cloned().collect();
+        }
+        if session.scope.is_some() {
+            session.task_ids.clear();
+            if let Some(workspace) = &mut session.workspace {
+                workspace.task_id = None;
+            }
+        }
     }
     Ok(())
 }

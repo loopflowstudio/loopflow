@@ -1,3 +1,4 @@
+pub use crate::session::SessionScope;
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -218,6 +219,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub scope: Option<SessionScope>,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub caller_session_id: Option<String>,
@@ -291,22 +293,6 @@ enum SessionTarget {
     },
 }
 
-pub(crate) async fn ask_with_key(
-    store: &SharedStore,
-    key: Option<&str>,
-    question: &str,
-    skill: Option<&str>,
-) -> Result<String> {
-    if let Some(key) = key {
-        anyhow::ensure!(!key.trim().is_empty(), "Ask key cannot be empty");
-        let manifest = active_run_manifest()?;
-        let scoped = serde_json::to_string(&("raw_ask", manifest.artifact_key, key))?;
-        ask_once(store, &scoped, question, skill).await
-    } else {
-        ask(store, question, skill).await
-    }
-}
-
 pub(crate) async fn ask(
     store: &SharedStore,
     question: &str,
@@ -321,6 +307,7 @@ pub(crate) async fn ask(
 
 /// Reuse one Ask for an exact Flow boundary, including its completed result.
 /// The key names the Session, so a retry finds the first request's row.
+#[cfg(test)]
 pub(crate) async fn ask_once(
     store: &SharedStore,
     key: &str,
@@ -757,11 +744,58 @@ pub(crate) async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
+    // Checkout resolution must precede Task filtering and pagination: SQL path
+    // prefixes cannot recognize symlink aliases or nested repositories.
+    let association_filter = filter.orphan || filter.task.is_some();
+    let mut selection = filter.clone();
+    if association_filter {
+        selection.task = None;
+        selection.orphan = false;
+        selection.limit = 0;
+        selection.offset = 0;
+    }
     let mut sessions = Vec::new();
-    for session in store.session_summaries(filter).await? {
+    for session in store.session_summaries(&selection).await? {
         sessions.push(summary_surface(&session));
     }
     workspace::associate(store, &mut sessions).await?;
+    if association_filter {
+        let task = if let Some(selector) = &filter.task {
+            store
+                .task_checkouts()
+                .await?
+                .into_iter()
+                .find(|task| {
+                    task.task_id.as_str() == selector
+                        || task.issue_id == *selector
+                        || task.issue_identifier == *selector
+                })
+                .map(|task| task.task_id)
+        } else {
+            None
+        };
+        sessions.retain(|session| {
+            (!filter.orphan || session.task_ids.is_empty())
+                && (filter.task.is_none()
+                    || task
+                        .as_ref()
+                        .is_some_and(|task| session.task_ids.contains(task)))
+        });
+        let offset = if filter.after.is_some() {
+            0
+        } else {
+            filter.offset
+        };
+        sessions = sessions
+            .into_iter()
+            .skip(offset)
+            .take(if filter.limit == 0 {
+                usize::MAX
+            } else {
+                filter.limit
+            })
+            .collect();
+    }
     Ok(sessions)
 }
 
@@ -883,6 +917,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        scope: None,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         caller_session_id: session.caller_session_id.clone(),
@@ -1857,6 +1892,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         },
     };
     let mut reading = SessionRecord {
+        scope: None,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         caller_session_id: session
@@ -2835,61 +2871,6 @@ mod tests {
 
     fn run_dir(run: &AgentSession) -> std::path::PathBuf {
         super::local_session_run_dir(&run.artifact_key).unwrap()
-    }
-
-    #[test]
-    fn raw_ask_keys_retain_answers_within_one_caller_input() {
-        let _lock = crate::journal::test_env_lock();
-        let home = AskHome::new();
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let store = home.store().await;
-            let first_caller = super::active_run_manifest().unwrap();
-            let first = super::ask_with_key(&store, Some("policy"), "Choose a policy", None);
-            let duplicate = super::ask_with_key(&store, Some("policy"), "Choose a policy", None);
-            let human = async {
-                let sessions = wait_until_asks(&store, 1).await;
-                assert_eq!(
-                    sessions[0].caller_artifact_key,
-                    Some(first_caller.artifact_key.clone())
-                );
-                answer(&store, &sessions[0], "Use the first policy").await;
-            };
-            let (first, duplicate, ()) = tokio::join!(first, duplicate, human);
-            assert_eq!(first.unwrap(), "Use the first policy");
-            assert_eq!(duplicate.unwrap(), "Use the first policy");
-            assert_eq!(
-                super::ask_with_key(&store, Some("policy"), "", None)
-                    .await
-                    .unwrap(),
-                "Use the first policy"
-            );
-
-            let mut next_caller = first_caller;
-            next_caller.artifact_key = crate::session_record::new_artifact_key();
-            std::fs::write(
-                home.home.path().join("manifest.json"),
-                serde_json::to_vec(&next_caller).unwrap(),
-            )
-            .unwrap();
-            std::env::set_var("LF_RUN_ID", &next_caller.artifact_key);
-            ASK_LAUNCHERS.lock().unwrap().clear();
-            let human = async {
-                let sessions = wait_until_asks(&store, 1).await;
-                assert_eq!(
-                    sessions[0].caller_artifact_key,
-                    Some(next_caller.artifact_key.clone())
-                );
-                answer(&store, &sessions[0], "Use the second policy").await;
-            };
-            let (second, ()) = tokio::join!(
-                super::ask_with_key(&store, Some("policy"), "Choose again", None),
-                human
-            );
-            assert_eq!(second.unwrap(), "Use the second policy");
-            assert!(super::ask_with_key(&store, Some(" "), "Invalid", None)
-                .await
-                .is_err());
-        });
     }
 
     #[test]

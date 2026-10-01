@@ -1,1 +1,0 @@
-`cargo test -p loopflow --test one_home_tests flow_steps_keep_the_explicit_home_despite_stale_pins_and_path -- --exact` — passed (1 test); retained the obsolete destination module deletion and both independent memory entries.

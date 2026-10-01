@@ -969,6 +969,50 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
     );
     match command {
         TaskCommand::Worker { .. } => unreachable!("Task worker dispatches at process entry"),
+        TaskCommand::Automation { json } => {
+            let status = loopflow::ops::task_automation::status(repo)?;
+            if *json {
+                println!("{}", serde_json::to_string(&status)?);
+            } else {
+                println!(
+                    "{} · every {} seconds",
+                    status.coverage, status.cadence_seconds
+                );
+                for task in status.tasks {
+                    println!(
+                        "{}: {}",
+                        task.issue,
+                        task.detail.as_deref().unwrap_or("not yet checked")
+                    );
+                }
+            }
+            Ok(())
+        }
+        TaskCommand::Reconcile { json } => {
+            let result = loopflow::ops::task_automation::reconcile(repo)?;
+            if *json {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                for task in &result.tasks {
+                    println!(
+                        "{}: {}",
+                        task.task_id,
+                        task.detail.as_deref().unwrap_or("unchecked")
+                    );
+                }
+            }
+            if !result.errors.is_empty() {
+                anyhow::bail!("{}", result.errors.join("\n"));
+            }
+            Ok(())
+        }
+        TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
+            issue,
+            state == "on",
+        )?),
+        TaskCommand::Repair { incident, launcher } => {
+            Ok(loopflow::ops::pr_landing::run_repair(incident, launcher)?)
+        }
         TaskCommand::Checkout {
             issue,
             name,

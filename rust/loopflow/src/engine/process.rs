@@ -229,6 +229,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .join(" ");
     let env = env
         .iter()
+        .filter(|(key, value)| *key != crate::lf::WORK_DECLARATION_ENV || !value.is_empty())
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
@@ -246,6 +247,7 @@ pub(crate) async fn start_tmux_session(
     shell_command: &str,
 ) -> Result<()> {
     let mut command = tokio::process::Command::new("tmux");
+    command.process_group(0);
     for name in forwarded_authority_env_names() {
         command.env_remove(name);
     }

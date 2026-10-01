@@ -2,18 +2,17 @@
 
 2026-09-30 · LOO-332 · Product · Kickoff recommendation for Jack Heart
 
-**Status:** Jack accepted the outcome: selected Tasks keep progressing without
-Desktop or the initiating command, preserving intended steps and reviews. Jack
-reopened the ownership choice on September 30: TaskSession, cron, or primary
-Wave Session. The combination recommended below is a proposal, not a recorded
-approval. This pass changes only scratch documentation.
+**Status:** Jack authorized implementation on 2026-09-30 and waived review.
+Build the finite minute cron on the placed Home now. Primary Task/Wave Session
+callers remain LOO-353 Unit 2. New deliberate Task launches enroll by default;
+existing Tasks do not enroll retroactively. One unchanged-failure retry and one
+timeout-only CI rerun are provisional settings. Hold prevents future admission;
+repair restores the recorded merge intent. Preserve manual revocation.
 
-The existing implementation is retained. Main `6c7335607` is already integrated
-through `f841e14c4` and `136e1de63`; inspection baseline is `b797856f3`.
-LOO-298 and LOO-358 supply the landed Session/Flow/Exec and checkout-association
-model. This replaces the earlier plan's active-stack assumption. The source
-conversation is [discord.md](discord.md); prior implementation receipts and
-integration proof are preserved in [task-automation-evidence.md](task-automation-evidence.md).
+Main is integrated by merge. Historical planning and implementation evidence,
+including the source discussion and inherited LOO-298 notes, is retained at
+commit `291464ef2fc006731814e4692f4ed33647276311`.
+This file owns the live plan; inherited scratch has been pruned as Jack requested.
 
 ## Recommendation and experienced outcome
 
@@ -419,7 +418,7 @@ latency, duplicate admissions (zero), and merge-to-settlement convergence.
    If Jack expects progress through logout or laptop shutdown, use an explicitly
    placed always-on Home; automatic cross-Home failover is outside this Task.
 
-These are review choices, not blockers to the comparison or permission to
-implement them. No new code, live schedule, publication or installation occurred.
+Jack authorized the cron floor independently of these ownership choices. The
+provisional defaults above govern implementation until amended.
 
 Check: 2026-09-30 source/claim/cron and pinned LOO-353 design review completed; `git diff --check` passed; no builds/tests run for this documentation-only pass.

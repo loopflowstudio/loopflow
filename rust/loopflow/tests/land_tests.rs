@@ -1774,13 +1774,14 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 
 #[test]
 fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
-    for (repair, blocked, awaiting_queue, merge_race, flow) in [
-        (false, false, false, true, false),
-        (false, false, false, false, false),
-        (true, false, false, false, false),
-        (true, true, false, false, false),
-        (true, false, true, false, false),
-        (true, false, false, false, true),
+    for (repair, blocked, awaiting_queue, merge_race, flow, fail_start) in [
+        (false, false, false, true, false, false),
+        (false, false, false, false, false, false),
+        (true, false, false, false, false, false),
+        (true, false, false, false, false, true),
+        (true, true, false, false, false, false),
+        (true, false, true, false, false, false),
+        (true, false, false, false, true, false),
     ] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
@@ -1809,6 +1810,7 @@ fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
         );
         let repair_commands = r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
   export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
+  while [ ! -f "$LF_TEST_REPAIR_LAUNCHES.release" ]; do sleep 0.05; done
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
   "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
@@ -1832,6 +1834,7 @@ fi"#;
             ("gh", script.as_str()),
             ("codex", codex.as_str()),
             ("open", noop_open_script()),
+            ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nif [ \"$LF_TEST_FAIL_START\" = 1 ] && [ ! -f \"$LF_TEST_REPAIR_LAUNCHES.failed\" ]; then touch \"$LF_TEST_REPAIR_LAUNCHES.failed\"; exit 1; fi\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\nexit 0\n"),
         ]);
         let worktree = repo.create_named_worktree("watched-land");
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
@@ -1876,6 +1879,7 @@ fi"#;
                 .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_TEST_SYNC_LOG", &sync_log)
                 .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
+                .env("LF_TEST_FAIL_START", if fail_start { "1" } else { "0" })
                 .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
                 .env(
                     "LF_TEST_REPAIR_PROOF",
@@ -1930,15 +1934,79 @@ fi"#;
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "watching");
-        let output = command().args(["pr", "reconcile"]).output().unwrap();
+        let mut output = command().args(["pr", "reconcile"]).output().unwrap();
+        if fail_start {
+            let reserved: String = conn
+                .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert!(
+                !repair_launches.exists(),
+                "failed launch performed no repair"
+            );
+            output = command().args(["pr", "reconcile"]).output().unwrap();
+            let recovered: (String, i64) = conn
+                .query_row(
+                    "SELECT repair_session_id,repair_retries FROM ci_incidents",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                recovered,
+                (reserved, 1),
+                "recovery retains the reserved conversation"
+            );
+        }
         if repair {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN execs e ON e.id=c.repair_exec_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+            assert!(
+                !finished,
+                "check must return before the provider turn finishes"
+            );
+            let overlap = command().args(["pr", "reconcile"]).output().unwrap();
+            assert!(
+                overlap.status.success(),
+                "{}",
+                String::from_utf8_lossy(&overlap.stderr)
+            );
+            fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN execs e ON e.id=c.repair_exec_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+                if done {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "detached repair did not finish: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
             let owner: String = conn
                 .query_row(
                     "SELECT DISTINCT exec_id FROM session_events WHERE kind='started'",
                     [],
                     |row| row.get(0),
                 )
-                .unwrap();
+                .unwrap_or_else(|error| {
+                    let reason: Option<String> = conn
+                        .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
+                            row.get(0)
+                        })
+                        .unwrap();
+                    panic!(
+                        "repair never started: {error}; {reason:?}; sync: {}",
+                        fs::read_to_string(&sync_log).unwrap_or_default()
+                    );
+                });
             assert_ne!(
                 owner, initial.0,
                 "repair belongs to the later reconcile process"
@@ -1951,8 +2019,8 @@ fi"#;
                 )
                 .unwrap();
             assert_eq!(
-                parent,
-                (None, i64::from(blocked)),
+                parent.1,
+                i64::from(blocked),
                 "{}\nNested sync: {}",
                 String::from_utf8_lossy(&output.stderr),
                 fs::read_to_string(&sync_log).unwrap_or_default()
@@ -1965,12 +2033,16 @@ fi"#;
                 )
                 .unwrap();
             assert!(via_agent, "the repair agent invokes the nested sync");
-            assert_eq!(
-                conn.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
-                    .unwrap(),
-                if flow { 4 } else { 3 },
-                "only actual lf processes are Execs"
-            );
+            let check = parent
+                .0
+                .expect("repair has a separate checking parent Exec");
+            assert_ne!(check, owner);
+            let exit: i64 = conn
+                .query_row("SELECT exit_code FROM execs WHERE id=?1", [&check], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(exit, 0, "checking process exited independently");
             assert_eq!(
                 fs::read_to_string(&repair_launches)
                     .unwrap()
@@ -1980,12 +2052,18 @@ fi"#;
             );
         }
         if blocked {
-            assert!(!output.status.success());
-            assert!(String::from_utf8_lossy(&output.stderr)
-                .contains("GitHub credential revoked; reconnect it before retrying."));
+            let error: String = conn
+                .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert!(error.contains("GitHub credential revoked; reconnect it before retrying."));
             assert!(!repair_proof.exists());
             let repeated = command().args(["pr", "reconcile"]).output().unwrap();
-            assert!(!repeated.status.success());
+            assert!(
+                repeated.status.success(),
+                "a useful blocked check is not a failed observation"
+            );
             assert_eq!(
                 fs::read_to_string(&repair_launches)
                     .unwrap()

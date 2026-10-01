@@ -91,7 +91,9 @@ landing share that ancestry check; unrelated or divergent bases still fail.
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
-`lf pr reconcile` checks recorded repository landings once. `submit` performs the
+`lf task reconcile` checks enrolled Tasks and recorded repository landings once;
+`lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
+finite minute check on this Home. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a live
 Task worker or certify that a particular Flow ran.
@@ -189,15 +191,20 @@ read required checks on H1 once
    |      |      |          |
  pending pass  merged      fail
    |      |      |          |
- return return settle   one repair under G, then return
+ return return settle   reserve detached repair under G; return
 ```
 
-The next `lf pr reconcile` repeats this from fresh evidence.
+The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
 
 A check never transfers green checks from one head to another. A failure is
-confirmed by a second observation before repair. One incident (head plus
-failing check set) receives one repair; the same incident failing again blocks
-the landing until the head or evidence changes. A failed read is never evidence
+confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
+Session. Admission reserves that Session and launcher Exec atomically before
+starting its detached worker. A dead launch may retry once using the same
+conversation and native history; a completed blocked repair retains its outcome.
+The same incident failing again waits until the head or evidence changes.
+Required integration is actionable even with green checks. Pending and missing
+checks retain their first-observed clock; provider attempt changes reset that
+clock without resetting the timeout rerun allowance. A failed read is never evidence
 of CI failure or merge. GitHub remains the final merge authority.
 
 An auto-merge request targeting a merge queue keeps waiting when its base
@@ -269,3 +276,27 @@ serial chain to a new branch from fetched main.
 [Planning →](planning.md) separates the Task objective from exact Flow positions.
 [Homes and processes →](homes.md) owns the machine and process boundaries around
 delivery.
+
+
+## Scheduled Task admission
+
+Task owns enrollment, hold and unchanged-failure retry count. A repository check
+never chooses a new Flow for a finished Task. Enrollment without a prior Flow
+captures the Project default once; explicit Task launches preserve their choice.
+Session input reservations, Flow review reservations and worker claims share a
+short checkout admission lock. Automatic claims re-read membership and Hold
+under that boundary. Unknown process identity, live unrelated work and unresolved
+reviews defer admission. A proven-dead managed reservation can recover through
+the common Flow driver; completed effects are consumed without repeating them.
+
+The repository lock skips overlapping observations. Per-Task and per-PR claims
+still fence direct callers. A pass budgets 45 seconds and each Task or external
+operation 10 seconds; deferred work stays visible in check output. launchd's
+calendar entries run each minute and coalesce sleep into a wake-time check.
+The detached tmux launch starts a separate process group, including when it must
+start the tmux server. No resident or provider turn runs inside the tick.
+
+Desktop consumes the Rust automation projection: installed/enabled state,
+last successful and failed receipts, selection and blockers. A missing receipt
+is unknown coverage. Disabling removes the job and prevents its later admissions;
+it leaves running work and explicitly requested GitHub merges intact.

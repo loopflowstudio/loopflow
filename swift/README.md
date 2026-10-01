@@ -13,6 +13,11 @@ Sessions as terminal `lf`.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
+Choose **Background progress** in the repository toolbar to enable minute
+checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
+continue with the app closed on the selected Home. Disabling stops scheduled
+admission; already-running work and requested GitHub merges continue.
+
 ```text
 ⌘D          split right
 ⌘⇧D         split down

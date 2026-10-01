@@ -8,6 +8,7 @@ struct PodiumView: View {
     let initialRepoPath: String?
 
     @Environment(\.palette) private var palette
+    @State private var showsAutomation = false
     @State private var model: PodiumModel
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
@@ -57,6 +58,12 @@ struct PodiumView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
         .accessibilityElement(children: .contain)
+        .toolbar {
+            if let repo = model.repoPath {
+                Button("Background progress", systemImage: "clock.arrow.circlepath") { showsAutomation = true }
+                    .popover(isPresented: $showsAutomation) { TaskAutomationView(query: query, repo: repo) }
+            }
+        }
         .accessibilityLabel("The Podium")
         .accessibilityIdentifier("podium")
         .background {

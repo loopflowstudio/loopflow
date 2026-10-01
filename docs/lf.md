@@ -98,6 +98,35 @@ own preparation and integration; publish does not sync. PR operations work
 on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
 `lf pr reconcile` checks it once and settles verified merges.
 
+## Keep Tasks progressing in the background
+
+```bash
+lf cron sync --repo                 # install this Home's minute check
+lf task run EXP-12                  # new launches enroll automatically
+lf task automate EXP-12 off         # hold future automatic work
+lf task automate EXP-12 on          # enroll or clear its retry hold
+lf task automation --json           # schedule coverage and Task blockers
+lf task reconcile --json            # run one check now
+lf cron sync --repo --disable       # remove the schedule
+```
+
+Checks continue with Desktop closed while the placed Home's user is logged in.
+They resume captured Flows, respect reviews and holds, and reconcile authorized
+landings. CI repair runs in a separate Exec; the check returns after startup.
+An idle check launches no provider. Existing work and GitHub merge requests
+continue when the schedule is disabled or a Task is held.
+
+Set repository defaults in `.lf/config.yaml`:
+
+```yaml
+automation: {enroll_new_tasks: true, retries: 1, timeout_reruns: 1}
+```
+
+Historical Tasks stay unenrolled until selected. One unchanged launch/runtime
+failure may retry; a completed blocked repair waits for changed evidence.
+Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
+Use an always-available Home for progress through laptop logout or shutdown.
+
 ## Accounts and access
 
 ```bash

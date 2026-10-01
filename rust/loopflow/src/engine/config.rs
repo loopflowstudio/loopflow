@@ -184,6 +184,8 @@ pub struct PmConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
+    pub automation: AutomationConfig,
+    #[serde(default)]
     pub context_budgets: BTreeMap<BudgetKey, usize>,
     #[serde(skip)]
     pub context_budget_sources: BTreeMap<BudgetKey, String>,
@@ -270,6 +272,31 @@ fn default_summary_tokens() -> usize {
     5000
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutomationConfig {
+    #[serde(default = "default_enroll")]
+    pub enroll_new_tasks: bool,
+    #[serde(default = "default_retry")]
+    pub retries: u32,
+    #[serde(default = "default_retry")]
+    pub timeout_reruns: u32,
+}
+fn default_enroll() -> bool {
+    true
+}
+fn default_retry() -> u32 {
+    1
+}
+impl Default for AutomationConfig {
+    fn default() -> Self {
+        Self {
+            enroll_new_tasks: true,
+            retries: 1,
+            timeout_reruns: 1,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -284,6 +311,7 @@ impl Default for Config {
             context: Vec::new(),
             exclude: Vec::new(),
             session: SessionConfig::default(),
+            automation: AutomationConfig::default(),
             docs: Vec::new(),
             diff: false,
             diff_files: false,

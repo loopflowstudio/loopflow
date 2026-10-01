@@ -1,5 +1,5 @@
 ---
-requires: recorded PR landing with failing CI checks (or CI failure message context)
+requires: recorded PR landing with failed or timed-out CI, required integration, or CI failure context
 produces: verified CI repair published with auto-merge enabled
 diff_files: false
 action_style: procedural
@@ -38,6 +38,11 @@ GitHub and complete the Task only after an authoritative merge.
      do not manufacture a commit just to change its SHA.
 
 3. **Repair and verify**
+   - For required integration with green checks, finish the sync and verify its
+     result; green checks on an obsolete base do not satisfy required integration.
+   - For a supplied CI timeout, diagnose pending or missing expected checks.
+     Use at most the supplied rerun allowance. A rerun resets the attempt clock,
+     not its allowance; report a blocker if it cannot start or still stalls.
    - Reproduce each failure locally and apply the smallest correct fix.
    - Run focused checks first; broaden only when needed. Do not ignore tests
      or publish an empty commit to manufacture a rerun.

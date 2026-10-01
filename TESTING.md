@@ -835,6 +835,12 @@ Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
 `LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables
 are removed before provider launch.
 
+When changing Home selection, run the affected fixtures with `LF_HOME` unset in
+the test runner; the materialization wrapper's shared test Home can mask missing
+fixture setup. CLI fixtures must select their own disposable Home. Upgrade proofs
+must use published migration authority against a temporary shared store; opening
+an existing experiment intentionally validates its schema without upgrading it.
+
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
 runner. The materialization wrapper clears only its listed variables; it does not

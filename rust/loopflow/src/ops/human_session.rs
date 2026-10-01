@@ -3606,16 +3606,11 @@ mod tests {
     #[test]
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let argv = human_open_argv(None, None, "ask_123");
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        let argv = argv.unwrap();
+        let home = AskHome::new();
+        let argv = human_open_argv(None, None, "ask_123").unwrap();
 
         assert_eq!(&argv[argv.len() - 3..], ["session", "open", "ask_123"]);
+        assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }
 

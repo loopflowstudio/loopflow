@@ -1000,15 +1000,13 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     );
     store.create_wave(&other).unwrap();
     let mut snapshot = store.pm_snapshot(original.id()).unwrap().unwrap();
-    let mut payload: serde_json::Value = serde_json::from_str(&snapshot.payload).unwrap();
-    payload["projects"][0]["id"] = "other-project".into();
-    payload["projects"][0]["initiative_ids"] = serde_json::json!(["other-initiative"]);
-    payload["items"][0]["id"] = "other-task".into();
-    payload["items"][0]["project_id"] = "other-project".into();
-    payload["items"][0]["completed"] = true.into();
+    snapshot.snapshot.projects[0].id = "other-project".into();
+    snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
+    snapshot.snapshot.items[0].id = "other-task".into();
+    snapshot.snapshot.items[0].project_id = Some("other-project".into());
+    snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
-    snapshot.payload = serde_json::to_string(&payload).unwrap();
     store.put_pm_snapshot(&snapshot).unwrap();
 
     for all in [true, false] {

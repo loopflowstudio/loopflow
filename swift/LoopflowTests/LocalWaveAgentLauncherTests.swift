@@ -29,15 +29,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
-    @Test("stop command uses the single-wave lifecycle verb")
-    func stopCommandShape() {
-        #expect(LocalWaveAgentLauncher.waveStopCommand(
-            lfPath: "/Applications/Loopflow.app/Contents/MacOS/lf",
-            waveName: "product"
-        ) == [
-            "/Applications/Loopflow.app/Contents/MacOS/lf", "stop", "product",
-        ])
-    }
 
     @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {

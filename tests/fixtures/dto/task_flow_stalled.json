@@ -7,13 +7,13 @@
       "name": "feature",
       "steps": [
         {
-          "key": "1",
+          "key": 0,
           "id": "implement",
           "label": "implement",
           "kind": "skill",
           "human": false,
           "returns_to": null,
-          "parents": [
+          "sources": [
             "feature",
             "pursue"
           ],
@@ -45,11 +45,11 @@
         ]
       }
     },
-    "current": "1",
+    "current": 0,
     "completed": [],
     "returns": [],
     "execution": "stalled",
-    "reason": "Run run_9fc06d3999af4bcabf1398cc859d49a9 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.",
+    "reason": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.",
     "restart_required": false,
     "iterations": [
       []
@@ -62,7 +62,7 @@
     },
     {
       "kind": "resume",
-      "unavailable": "Run run_9fc06d3999af4bcabf1398cc859d49a9 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it."
+      "unavailable": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it."
     },
     {
       "kind": "restart",

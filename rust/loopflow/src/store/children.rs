@@ -1,11 +1,7 @@
-//! Durable Project and Task compatibility rows and their observation outbox.
+//! Durable Project and Task rows and their events.
 
-use crate::child::ObservationRecipient;
-use crate::durable::{FlowPosition, TaskFlowBlocker, TaskWorkerClaim};
 use crate::id::WaveId;
-use crate::work::project::{
-    ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
-};
+use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
     LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
     TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
@@ -74,117 +70,10 @@ impl Store {
         .await
     }
 
-    pub async fn settle_task_worker(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        next: &FlowPosition,
-        progress: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let next = next.clone();
-        let progress = progress.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_worker(&task, &expected, &next, progress.as_deref())
-        })
-        .await
-    }
-
-    pub async fn finish_task_flow(
-        &self,
-        task: &Task,
-        expected: &TaskWorkerClaim,
-        progress: Option<&str>,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let progress = progress.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_task_flow(&task, &expected, progress.as_deref())
-        })
-        .await
-    }
-
-    pub async fn block_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-        failure: &TaskFlowBlocker,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let failure = failure.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.block_task_flow(&task_id, &expected, &failure)
-        })
-        .await
-    }
-
-    pub async fn release_task_worker(
-        &self,
-        task_id: &TaskId,
-        expected: &TaskWorkerClaim,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.release_task_worker(&task_id, &expected)
-        })
-        .await
-    }
-
-    pub async fn complete_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        next: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<FlowPosition> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let next = next.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_human_task_boundary(&task, &expected, &next, &summary)
-        })
-        .await
-    }
-
-    pub async fn finish_human_task_boundary(
-        &self,
-        task: &Task,
-        expected: &FlowPosition,
-        summary: &str,
-    ) -> StoreResult<()> {
-        let task = task.clone();
-        let expected = expected.clone();
-        let summary = summary.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_human_task_boundary(&task, &expected, &summary)
-        })
-        .await
-    }
-
-    pub async fn retry_task_flow(
-        &self,
-        task_id: &TaskId,
-        expected: &FlowPosition,
-        feedback: Option<&str>,
-    ) -> StoreResult<FlowPosition> {
-        let task_id = task_id.clone();
-        let expected = expected.clone();
-        let feedback = feedback.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retry_task_flow(&task_id, &expected, feedback.as_deref())
-        })
-        .await
-    }
-
     pub(crate) async fn restart_task_flow(
         &self,
         task: &Task,
-        expected: Option<&FlowPosition>,
+        expected: Option<&crate::durable::FlowSession>,
         checkpoint_head: &str,
     ) -> StoreResult<()> {
         let expected = expected.cloned();
@@ -239,6 +128,15 @@ impl Store {
         let wave_id = wave_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.list_tasks(wave_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn stack_task_pr(&self, expected: &TaskPr, parent: &TaskPrId) -> StoreResult<()> {
+        let expected = expected.clone();
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.stack_task_pr(&expected, &parent)
         })
         .await
     }
@@ -520,35 +418,6 @@ impl Store {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.project_events_after(&project_id, cursor)
-        })
-        .await
-    }
-
-    pub async fn pending_observations(
-        &self,
-        recipient: &ObservationRecipient,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let recipient = recipient.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_observations(&recipient)
-        })
-        .await
-    }
-
-    pub async fn pending_project_observations(
-        &self,
-        project_id: &ProjectId,
-    ) -> StoreResult<Vec<ObservationOutboxRow>> {
-        let project_id = project_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.pending_project_observations(&project_id)
-        })
-        .await
-    }
-
-    pub async fn mark_observation_delivered(&self, id: i64) -> StoreResult<()> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.mark_observation_delivered(id)
         })
         .await
     }

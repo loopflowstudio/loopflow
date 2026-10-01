@@ -4,6 +4,7 @@ use loopflow::ops::{
     continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
     OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
+use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
 use support::EnvGuard;
@@ -546,6 +547,52 @@ fn sync_after_squash_merge_leaves_only_unique_diff() {
 }
 
 #[test]
+fn existing_root_child_syncs_parent_from_its_original_fork() {
+    let repo = TestRepo::new();
+    let original_fork = repo.head_sha();
+    repo.create_branch("child");
+    repo.create_file("child.txt", "authored before stacking");
+    repo.stage_all();
+    repo.commit("Child work before selecting a parent");
+    repo.checkout("main");
+    repo.create_branch("parent");
+    repo.create_file("parent.txt", "parent work");
+    repo.stage_all();
+    repo.commit("Parent work");
+    repo.push_new_branch("parent");
+    let parent_head = repo.head_sha();
+    repo.checkout("child");
+
+    let verification = sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/parent".into(),
+            push: false,
+            fork_base: Some(original_fork),
+        },
+        &NullProgress,
+    )
+    .expect("adopt the selected parent without losing child work");
+    assert_eq!(verification.target_sha, parent_head);
+    assert_eq!(
+        git(
+            repo.path(),
+            &["diff", "--name-only", "origin/parent...HEAD"]
+        ),
+        "child.txt"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("child.txt")).unwrap(),
+        "authored before stacking"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("parent.txt")).unwrap(),
+        "parent work"
+    );
+    assert_eq!(git(repo.path(), &["rev-parse", "parent"]), parent_head);
+}
+
+#[test]
 fn stacked_child_merges_main_after_parent_squash() {
     let _env = EnvGuard::new(&[]);
     // A child stacked on a parent whose two commits both edit the same file:
@@ -1013,7 +1060,23 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let child_dir = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let _env = EnvGuard::with_lf_home(
+        &[
+            (
+                "codex",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "claude",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+            (
+                "opencode",
+                "#!/bin/sh\necho 'unexpected conflict agent' >&2\nexit 97\n",
+            ),
+        ],
+        home.path(),
+    );
     repo.create_branch("parent");
     repo.create_file("shared.txt", "parent\n");
     repo.stage_all();
@@ -1034,12 +1097,27 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     );
     let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut pr = runtime
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
         .unwrap();
-    pr.parent_pr_id = Some(parent.pr.id.clone());
-    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
     std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
     git(&child_path, &["commit", "-am", "Child work"]);
     let child_head = git(&child_path, &["rev-parse", "HEAD"]);

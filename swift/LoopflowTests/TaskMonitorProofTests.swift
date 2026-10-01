@@ -10,7 +10,7 @@ import GhosttyKit
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Task Monitor integration proof", .serialized)
+@Suite("Task Monitor integration proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskMonitorProofTests {
     @Test("Focusing another Task's pane cannot redirect returning to the selected Task")
@@ -82,7 +82,7 @@ struct TaskMonitorProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
-        let feed = ActiveRunsTestFeed()
+        let feed = ActiveSessionsTestFeed()
         let query = try query(feed: feed)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
@@ -117,6 +117,12 @@ struct TaskMonitorProofTests {
         try view.inspect().find(ViewType.Button.self, where: {
             try $0.accessibilityIdentifier() == "task-show-monitor-issue-review"
         }).tap()
+        try await waitForActiveSessions {
+            model.activeSessions.value?.sessions.contains {
+                $0.work == .task(id: "ts_review00000000000000000000000000")
+                    && $0.title == "Retained Task Session"
+            } == true
+        }
         try await settle(window)
         let monitorPane = multiplexer.focusedPaneId
         try #require(multiplexer.focusedPane.content == .monitor(taskId: "issue-review"))
@@ -124,21 +130,23 @@ struct TaskMonitorProofTests {
         #expect(multiplexer.layout.pane(for: sessionPane)?.content == .session(id: "monitor-review"))
         #expect(multiplexer.layout.pane(for: shellPane)?.content == .shell)
         #expect(!terminals.contains { window.firstResponder === $0 })
-        let sessionRun = model.sessions.value?.first?.runId
+        let sessionID = model.sessions.value?.first?.id
         let taskWork = model.task(id: "issue-review")?.task.runtime?.workId
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow")
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
-        var chapter = try #require(waves[0]["chapter"] as? [String: Any])
+        var projects = try #require(waves[0]["projects"] as? [String: Any])
+        let plans = try #require(projects["items"] as? [[String: Any]])
         let tasks = try #require(waves[0]["tasks"] as? [String: Any])
-        chapter["id"] = "next-chapter"
-        chapter["source_project_id"] = "successor-project"
-        chapter["source_work_id"] = "successor-work"
+        var successor = plans[0]
+        successor["name"] = "next-chapter"
+        successor["id"] = "successor-project"
+        successor["work_id"] = "successor-work"
         for transferring in [true, false] {
-            chapter["phase"] = transferring ? "transferring" : "complete"
-            waves[0]["chapter"] = chapter
+            projects["items"] = transferring ? plans + [successor] : [successor]
+            waves[0]["projects"] = projects
             waves[0]["tasks"] = transferring ? ["state": "ok", "items": [], "truncated": false] : tasks
             wire["waves"] = waves
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
@@ -147,32 +155,42 @@ struct TaskMonitorProofTests {
             try await settle(window)
             #expect(model.selection == .task(id: "issue-review"))
             #expect(model.task(id: "issue-review")?.task.runtime?.workId == taskWork)
-            if !transferring { #expect(model.task(id: "issue-review")?.wave.chapter?.sourceWorkId == "successor-work") }
-            #expect(model.sessions.value?.first?.runId == sessionRun)
+            if !transferring { #expect(model.task(id: "issue-review")?.wave.currentProject?.workId == "successor-work") }
+            #expect(model.sessions.value?.first?.id == sessionID)
             #expect(multiplexer.focusedPaneId == monitorPane)
             #expect(terminals[0].surface == surfaces[0])
             #expect(terminals[1].surface == surfaces[1])
-            #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Run") }
+            #expect(throws: Never.self) { try TaskMonitorView(taskId: "issue-review", model: model).inspect().find(text: "Retained Task Session") }
         }
         // Automatic delivery and recovery occur while the original unfinished input
         // and companion are retained. No Refresh or pane reopening drives these frames.
-        let original = try #require(model.activeRuns.value)
-        let scanning = ActiveRunsSnapshot(discovery: .scanning, home: original.home,
-            observedAt: original.observedAt, task: nil, runs: [], gaps: ["Recovering coverage"])
+        let original = try #require(model.activeSessions.value)
+        let scanning = ActiveSessionsSnapshot(discovery: .scanning, home: original.home,
+            observedAt: original.observedAt, task: nil, sessions: [], gaps: ["Recovering coverage"])
         try await feed.send(String(decoding: JSONEncoder().encode(scanning), as: UTF8.self))
-        try await waitForActiveRuns { model.isRefreshingActiveRuns }
-        #expect(model.activeRuns.value == original)
+        try await waitForActiveSessions { model.isRefreshingActiveSessions }
+        #expect(model.activeSessions.value == original)
         #expect(!terminals.contains { window.firstResponder === $0 })
-        let empty = ActiveRunsSnapshot(discovery: .ready, home: original.home,
-            observedAt: original.observedAt + 1, task: nil, runs: [], gaps: [])
+        let empty = ActiveSessionsSnapshot(discovery: .ready, home: original.home,
+            observedAt: original.observedAt + 1, task: nil, sessions: [], gaps: [])
         try await feed.send(String(decoding: JSONEncoder().encode(empty), as: UTF8.self))
-        try await waitForActiveRuns { model.activeRuns.value?.runs.isEmpty == true }
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.isEmpty == true }
         try await settle(window)
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
         #expect(!terminals.contains { window.firstResponder === $0 })
         try await feed.send(String(decoding: JSONEncoder().encode(original), as: UTF8.self))
-        try await waitForActiveRuns { model.activeRuns.value?.runs.count == original.runs.count }
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.count == original.sessions.count }
+        let prior = try #require(original.sessions.first)
+        let renamed = ActiveSession(id: prior.id, work: prior.work, title: "Renamed conversation", processes: prior.processes)
+        let renameFrame = ActiveSessionsSnapshot(discovery: .ready, home: original.home,
+            observedAt: original.observedAt + 2, task: original.task, sessions: [renamed], gaps: [])
+        try await feed.send(String(decoding: JSONEncoder().encode(renameFrame), as: UTF8.self))
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.first?.title == "Renamed conversation" }
+        #expect(model.activeSessions.value?.sessions.first?.id == prior.id)
+        #expect(multiplexer.focusedPaneId == monitorPane)
+        #expect(terminals[0].surface == surfaces[0])
+        #expect(terminals[1].surface == surfaces[1])
         let stray = "monitor-only-input"
         for character in stray {
             let event = try #require(NSEvent.keyEvent(
@@ -232,33 +250,33 @@ struct TaskMonitorProofTests {
         try await Task.sleep(for: .milliseconds(100))
     }
 
-    private func query(feed: ActiveRunsTestFeed = ActiveRunsTestFeed()) throws -> RegistryQuery {
+    private func query(feed: ActiveSessionsTestFeed = ActiveSessionsTestFeed()) throws -> RegistryQuery {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow"), as: UTF8.self)
         let records = """
-        [{"id":"monitor-review","run_id":"monitor-review","kind":"interactive",
+        [{"id":"monitor-review","run_id":"monitor-review", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Review Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
-         {"id":"monitor-other","run_id":"monitor-other","kind":"interactive",
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]},
+         {"id":"monitor-other","run_id":"monitor-other", "interactive": true,"kind":"conversation",
           "work":{"kind":"task","id":"ts_now00000000000000000000000000000"},
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "interactive", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
-        var run = try #require((active["runs"] as? [[String: Any]])?.first)
+        var run = try #require((active["sessions"] as? [[String: Any]])?.first)
         run["id"] = "monitor-review"
         run["work"] = ["kind": "task", "id": "ts_review00000000000000000000000000"]
-        run["label"] = "Retained Task Run"
-        active["runs"] = [run]
+        run["title"] = "Retained Task Session"
+        active["sessions"] = [run]
         active["gaps"] = []
         let activeJSON = String(decoding: try JSONSerialization.data(withJSONObject: active), as: UTF8.self)
-        return RegistryQuery(watchActiveRuns: { try await feed.open(initial: activeJSON) }) { args, _ in
+        return RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
             switch args.first {
             case "roadmap": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return records
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(records),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("No provider launch is available in this proof")
             }

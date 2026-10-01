@@ -32,7 +32,7 @@ struct TaskMonitorView: View {
                         .lineLimit(2)
                 }
                 Spacer()
-                Button(model.activeRunsNeedsRetry ? "Retry" : "Refresh") { Task { await model.refreshActiveRuns() } }
+                Button(model.activeSessionsNeedsRetry ? "Retry" : "Refresh") { Task { await model.refreshActiveSessions() } }
                     .buttonStyle(.plain)
                     .font(Typography.body(12))
                     .foregroundStyle(Ink.text)
@@ -41,19 +41,19 @@ struct TaskMonitorView: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Ink.rule))
                     .accessibilityIdentifier("monitor-refresh-\(taskId)")
             }
-            if let snapshot = model.activeRuns.value {
-                Text("Observed \(Date(timeIntervalSince1970: TimeInterval(snapshot.observedAt)).formatted(date: .omitted, time: .standard)) · \(model.activeRunsNeedsRetry ? "Updates paused" : "Updates automatically")")
+            if let snapshot = model.activeSessions.value {
+                Text("Observed \(Date(timeIntervalSince1970: TimeInterval(snapshot.observedAt)).formatted(date: .omitted, time: .standard)) · \(model.activeSessionsNeedsRetry ? "Updates paused" : "Updates automatically")")
                     .font(Typography.caption(11.5))
                     .foregroundStyle(Ink.tertiary)
             }
-            if model.isRefreshingActiveRuns || model.activeRuns.isLoading {
-                ProgressView("Reading active Runs…")
+            if model.isRefreshingActiveSessions || model.activeSessions.isLoading {
+                ProgressView("Reading active Sessions…")
                     .controlSize(.small)
                     .foregroundStyle(Ink.secondary)
             }
-            if let error = model.activeRuns.errorMessage {
-                note("Active Runs unavailable — \(error)")
-                if model.activeRuns.value != nil {
+            if let error = model.activeSessions.errorMessage {
+                note("Active Sessions unavailable — \(error)")
+                if model.activeSessions.value != nil {
                     Text("Showing the last successful observation.")
                         .font(Typography.caption(11.5))
                         .foregroundStyle(Ink.secondary)
@@ -62,9 +62,9 @@ struct TaskMonitorView: View {
             if let error = model.roadmap.errorMessage {
                 note("Task planning unavailable — \(error)")
             }
-            if let snapshot = model.activeRuns.value {
+            if let snapshot = model.activeSessions.value {
                 if snapshot.discovery != .ready {
-                    note(snapshot.discovery == .scanning ? "Discovering active Runs…" : "Active Run discovery unavailable")
+                    note(snapshot.discovery == .scanning ? "Discovering active Sessions…" : "Active Session discovery unavailable")
                 }
                 if !snapshot.gaps.isEmpty {
                     DisclosureGroup("Some activity unavailable") {
@@ -77,30 +77,30 @@ struct TaskMonitorView: View {
                 }
                 if let task = model.task(id: taskId)?.task {
                     let work = task.runtime.map { WorkReference.task(id: $0.workId) }
-                    let runs = snapshot.runs.filter { work != nil && $0.work == work }
-                    if runs.isEmpty {
-                        if snapshot.discovery == .ready && snapshot.gaps.isEmpty && model.activeRuns.errorMessage == nil
+                    let sessions = snapshot.sessions.filter { work != nil && $0.work == work }
+                    if sessions.isEmpty {
+                        if snapshot.discovery == .ready && snapshot.gaps.isEmpty && model.activeSessions.errorMessage == nil
                             && model.roadmap.errorMessage == nil {
-                            Text("No active Runs in this observation")
+                            Text("No active Sessions in this observation")
                                 .font(Typography.body(13))
                                 .foregroundStyle(Ink.secondary)
                                 .accessibilityIdentifier("monitor-empty-\(taskId)")
                         } else {
-                            Text("No matching Runs in the available evidence")
+                            Text("No matching Sessions in the available evidence")
                                 .font(Typography.body(13))
                                 .foregroundStyle(Ink.secondary)
                         }
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: Spacing.sm) {
-                            ForEach(runs) { run in
-                                runRow(run)
+                            ForEach(sessions) { session in
+                                sessionRow(session)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else {
-                    Text("Task planning is unavailable; Run attribution cannot be shown.")
+                    Text("Task planning is unavailable; Session attribution cannot be shown.")
                         .font(Typography.body(13))
                         .foregroundStyle(Ink.secondary)
                 }
@@ -121,16 +121,16 @@ struct TaskMonitorView: View {
             .overlay(alignment: .leading) { Rectangle().fill(Ink.warning).frame(width: 2) }
     }
 
-    private func runRow(_ run: ActiveRun) -> some View {
+    private func sessionRow(_ session: ActiveSession) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(run.label)
+            Text(session.title)
                 .font(Typography.body(13.5).weight(.bold))
                 .foregroundStyle(Ink.text)
-            Text(run.id)
+            Text(session.id)
                 .font(Typography.code(11))
                 .foregroundStyle(Ink.tertiary)
                 .textSelection(.enabled)
-            ForEach(run.processes, id: \.pid) { process in
+            ForEach(session.processes, id: \.pid) { process in
                 HStack(spacing: Spacing.sm) {
                     Text(process.state.rawValue)
                         .font(Typography.caption(10.5).weight(.bold))
@@ -148,6 +148,6 @@ struct TaskMonitorView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.card, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityIdentifier("monitor-run-\(run.id)")
+        .accessibilityIdentifier("monitor-session-\(session.id)")
     }
 }

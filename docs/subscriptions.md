@@ -125,9 +125,10 @@ logins with a reconnect command even during cached inspection. Verification only
 accepts usage after the server and native identity agree. Managed accounts and
 local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
-uninspected. Cached inspection opens the database read-only, starts no provider,
-does not decrypt local tokens or create an encryption key, and leaves an absent
-store absent. An inherited account lease carries no cached identity catalog:
+uninspected. Cached inspection reads account state without starting a provider,
+decrypting local tokens or creating an encryption key. The CLI records the
+command's Exec in its Home; this can initialize an empty store, but creates no
+account, route or conversation. An inherited account lease carries no cached identity catalog:
 `--cached` reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;
 live status reports local server verification unavailable.
@@ -137,9 +138,9 @@ printing percentages, reset times and plan. Each window keeps its own observatio
 age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
-check `resets_at` before treating a recorded percentage as current. `lf usage` reports Run
-token/cost usage separately. By default, status reads forwarded identity
-metadata from the origin broker, without acquiring a remote credential or
+check `resets_at` before treating a recorded percentage as current. `lf usage`
+reports recorded provider token/cost usage separately. By default, status
+reads forwarded identity metadata from the origin broker, without acquiring a remote credential or
 verifying remote accounts. An unavailable broker leaves local evidence visible.
 
 JSON contains `accounts`, optional `forwarded_accounts_diagnostic`, and optional
@@ -244,8 +245,11 @@ lf runs <run-id> --events
 `provider_account_selected` records the actual account and attempt, including
 headless Task steps before a provider session ID is available. Later attempts
 retain earlier account evidence; a null account means ambient execution. Once
-the provider reports its session ID, the Run's session reference records that
-session with its selected account.
+the provider reports its native identity, continuation must retain that identity
+and selected account/native Home. Requested account and actual selection are
+different evidence. The event command above remains a transitional launch
+interface; [cutover status](architecture-reference.md#cutover-status) records the
+remaining history/account conversion.
 
 Prefer an account while keeping the normal route as fallback:
 
@@ -350,14 +354,13 @@ inspection shows `local` or `forwarded` provenance. Forwarded identities are
 read-only: connect, disconnect, and edit their routes on the machine that owns
 them.
 
-Launch selectors govern foreground work. A Wave resident that survives the SSH
-command sheds forwarded state before detaching and selects from routes stored
+Launch selectors govern foreground work. A detached worker sheds forwarded state before detaching and selects from routes stored
 on its own machine. Configure the target repository route for durable account
 choice:
 
 ```bash
 lf ssh my-company route set codex work@
-lf ssh my-company start shipper
+lf ssh my-company --wave shipper wave/operate
 ```
 
 The origin does not copy account homes or refresh credentials. It advertises

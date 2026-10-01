@@ -72,7 +72,7 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 json,
                 ..
             } => print(
-                &crate::controller::wave::relocate::relocate_wave(
+                &crate::work::wave::relocate::relocate_wave(
                     &store,
                     &wave_id,
                     repo,

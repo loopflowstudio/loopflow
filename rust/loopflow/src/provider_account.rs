@@ -378,7 +378,7 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn record_launch_blocking(
+    pub(crate) fn record_exec_blocking(
         &self,
         provider_session_id: Option<String>,
         signal: Option<RateLimitSignal>,
@@ -683,6 +683,24 @@ pub(crate) async fn resolve_provider_account(
     provider_session_id: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     resolve_provider_account_exact(provider, provider_session_id, None).await
+}
+
+pub(crate) async fn preflight_agent_account(
+    agent: &str,
+) -> Result<ProviderAccountId, ProviderAccountError> {
+    let (harness, _) = crate::engine::config::parse_agent(agent);
+    let provider = harness
+        .parse::<Provider>()
+        .map_err(|_| ProviderAccountError::UnsupportedProvider)?;
+    let route = resolve_provider_account_exact(provider, None, None)
+        .await?
+        .ok_or_else(|| ProviderAccountError::NoEligibleAccount {
+            provider,
+            accounts: "a connected managed account is required; configure a route before retrying"
+                .into(),
+        })?;
+    route.verify_ready().await?;
+    Ok(route.account_id().clone())
 }
 
 pub(crate) async fn resolve_provider_account_exact(
@@ -2130,6 +2148,7 @@ mod account_first_tests {
         std::env::remove_var("LF_DB_PATH");
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
@@ -2187,6 +2206,7 @@ mod account_first_tests {
         std::env::remove_var("LF_DB_PATH");
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
@@ -2307,6 +2327,7 @@ mod account_first_tests {
         std::env::remove_var("LF_DB_PATH");
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
@@ -2496,6 +2517,7 @@ mod account_first_tests {
         std::env::remove_var("LF_DB_PATH");
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
 
@@ -2554,6 +2576,7 @@ mod account_first_tests {
         std::env::remove_var("LF_DB_PATH");
         std::env::set_var("LF_HOME", temp.path());
         std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
         std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(

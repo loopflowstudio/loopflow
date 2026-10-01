@@ -2,7 +2,7 @@ Run mode is headless. No one is available in this conversation. Do not ask a
 conversational question or wait for turn text — no one will answer here.
 
 Make safe executive decisions and keep moving. When progress needs another
-Work's perspective, launch an ordinary Run explicitly with
+Work's perspective, launch an ordinary contribution explicitly with
 `lf --as <work> : "<prompt>"`. When progress genuinely requires a decision from the user,
 run `lf ask --key <stable-question-key> "<exact request>"`. Reuse the key when
 retrying the same consequential question; keys belong to this Run, and a retry

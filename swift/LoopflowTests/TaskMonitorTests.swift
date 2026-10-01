@@ -15,48 +15,48 @@ import GhosttyKit
 struct TaskMonitorTests {
     @Test("Monitor isolates Task identity and distinguishes stale, incomplete and empty observations")
     func taskEvidence() async throws {
-        let feed = ActiveRunsTestFeed()
+        let feed = ActiveSessionsTestFeed()
         let query = try query(feed: feed)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        model.observeActiveRuns()
-        try await waitForActiveRuns { model.activeRuns.value != nil }
+        model.observeActiveSessions()
+        try await waitForActiveSessions { model.activeSessions.value != nil }
         let view = TaskMonitorView(taskId: "issue-now", model: model)
         let other = TaskMonitorView(taskId: "issue-review", model: model)
-        #expect(throws: Never.self) { try view.inspect().find(text: "This Task's Run") }
-        #expect(throws: (any Error).self) { try view.inspect().find(text: "Other Task's Run") }
-        #expect(throws: Never.self) { try other.inspect().find(text: "Other Task's Run") }
+        #expect(throws: Never.self) { try view.inspect().find(text: "This Task's Session") }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Other Task's Session") }
+        #expect(throws: Never.self) { try other.inspect().find(text: "Other Task's Session") }
         model.select(.task(id: "issue-review"))
         model.setRepoPath("/src/another")
         model.setRepoPath("/src/loopflow")
-        model.observeActiveRuns()
+        model.observeActiveSessions()
         #expect(await feed.starts == 1)
         // Recovery retains both panes' last observation; it cannot claim emptiness.
-        try await feed.send(activeRuns(empty: true, discovery: "scanning"))
-        try await waitForActiveRuns { model.activeRuns.errorMessage != nil }
-        #expect(throws: Never.self) { try view.inspect().find(text: "This Task's Run") }
-        #expect(throws: Never.self) { try other.inspect().find(text: "Other Task's Run") }
-        #expect(throws: (any Error).self) { try view.inspect().find(text: "No active Runs in this observation") }
-        try await feed.send(activeRuns(empty: true, gaps: ["ownership unavailable"]))
-        try await waitForActiveRuns { model.activeRuns.value?.runs.isEmpty == true }
-        #expect(throws: Never.self) { try view.inspect().find(text: "No matching Runs in the available evidence") }
-        try await feed.send(activeRuns(empty: true))
-        try await waitForActiveRuns { model.activeRuns.value?.gaps.isEmpty == true }
-        #expect(throws: Never.self) { try view.inspect().find(text: "No active Runs in this observation") }
+        try await feed.send(activeSessions(empty: true, discovery: "scanning"))
+        try await waitForActiveSessions { model.activeSessions.errorMessage != nil }
+        #expect(throws: Never.self) { try view.inspect().find(text: "This Task's Session") }
+        #expect(throws: Never.self) { try other.inspect().find(text: "Other Task's Session") }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "No active Sessions in this observation") }
+        try await feed.send(activeSessions(empty: true, gaps: ["ownership unavailable"]))
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.isEmpty == true }
+        #expect(throws: Never.self) { try view.inspect().find(text: "No matching Sessions in the available evidence") }
+        try await feed.send(activeSessions(empty: true))
+        try await waitForActiveSessions { model.activeSessions.value?.gaps.isEmpty == true }
+        #expect(throws: Never.self) { try view.inspect().find(text: "No active Sessions in this observation") }
         await feed.fail()
-        try await waitForActiveRuns { model.activeRunsNeedsRetry && !model.isRefreshingActiveRuns }
-        model.observeActiveRuns()
+        try await waitForActiveSessions { model.activeSessionsNeedsRetry && !model.isRefreshingActiveSessions }
+        model.observeActiveSessions()
         #expect(await feed.starts == 1)
         #expect(throws: Never.self) { try view.inspect().find(text: "Showing the last successful observation.") }
-        await model.refreshActiveRuns()
-        try await waitForActiveRuns { model.activeRuns.value?.runs.count == 2 }
+        await model.refreshActiveSessions()
+        try await waitForActiveSessions { model.activeSessions.value?.sessions.count == 2 }
         #expect(await feed.starts == 2)
-        try await feed.send(activeRuns(empty: true, gaps: ["receipt root replaced"], discovery: "unavailable"))
-        try await waitForActiveRuns { model.activeRunsNeedsRetry && !model.isRefreshingActiveRuns }
-        #expect(model.activeRuns.errorMessage?.contains("receipt root replaced") == true)
-        #expect(model.activeRuns.value?.runs.count == 2)
+        try await feed.send(activeSessions(empty: true, gaps: ["receipt root replaced"], discovery: "unavailable"))
+        try await waitForActiveSessions { model.activeSessionsNeedsRetry && !model.isRefreshingActiveSessions }
+        #expect(model.activeSessions.errorMessage?.contains("receipt root replaced") == true)
+        #expect(model.activeSessions.value?.sessions.count == 2)
         #expect(await feed.cancellations == 2)
-        await model.stopActiveRuns()
+        await model.stopActiveSessions()
         #expect(await feed.cancellations == 2)
     }
 
@@ -88,7 +88,7 @@ struct TaskMonitorTests {
     }
 
 #if canImport(GhosttyKit)
-    @Test("Task selection and Monitor preserve native Session input and its companion")
+    @Test("Task selection and Monitor preserve native Session input and its companion", .requiresDisplay)
     func mixedMonitorRetainsInput() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -111,7 +111,7 @@ struct TaskMonitorTests {
         let shells = store.layout.allPanes
         var session = try #require(JSONSerialization.jsonObject(with: fixture("session")) as? [String: Any])
         session["id"] = "monitor-session"
-        session["kind"] = "interactive"
+        session["kind"] = "conversation"
         session["work"] = ["kind": "task", "id": "ts_now00000000000000000000000000000"]
         session["workspace"] = ["home_id": fixtureHomeId, "worktree": repo,
                                 "task_id": "ts_now00000000000000000000000000000"]
@@ -120,7 +120,7 @@ struct TaskMonitorTests {
         session["actions"] = []
         session["terminal_ids"] = [shells[0].id]
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: [session]), as: UTF8.self)
-        let query = try query(feed: ActiveRunsTestFeed(), sessions: sessionJSON)
+        let query = try query(feed: ActiveSessionsTestFeed(), sessions: sessionJSON)
         let model = PodiumModel(query: query, repoPath: repo)
         await model.refresh()
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -141,12 +141,24 @@ struct TaskMonitorTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-show-monitor-issue-now").button().tap()
-        try await settle(window)
+        // Splitting changes the representable hierarchy around retained views.
+        // Observe attachment; a fixed delay cannot establish that remount finished.
+        let mountDeadline = ContinuousClock.now + .seconds(3)
+        repeat {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            await Task.yield()
+        } while !terminals.allSatisfy({ $0.window === window }) && ContinuousClock.now < mountDeadline
         let monitor = store.focusedPane
         #expect(monitor.content == .monitor(taskId: "issue-now"))
         #expect(store.layout.allPanes.filter { $0.content == .shell } == shells)
         #expect(window.firstResponder !== terminals[0])
-        #expect(terminals.allSatisfy { $0.window === window })
+        for (index, terminal) in terminals.enumerated() {
+            let ancestors = sequence(first: terminal.superview, next: { $0?.superview })
+                .prefix(8).compactMap { view in view.map { "\(type(of: $0)) frame=\($0.frame)" } }
+            #expect(terminal.window === window,
+                "terminal=\(index) id=\(terminal.terminal) window=\(String(describing: terminal.window)) target=\(window.windowNumber) sameSurface=\(terminal.surface == surfaces[index]) focused=\(window.firstResponder === terminal) ancestors=\(ancestors) layout=\(store.layout) lifecycle=\(terminal.mountLifecycle)")
+        }
         store.toggleZoom(monitor.id)
         window.setContentSize(NSSize(width: 1100, height: 650))
         try await settle(window)
@@ -209,23 +221,23 @@ struct TaskMonitorTests {
         return try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/\(name).json"))
     }
 
-    private func activeRuns(empty: Bool = false, gaps: [String] = [], discovery: String = "ready") throws -> String {
+    private func activeSessions(empty: Bool = false, gaps: [String] = [], discovery: String = "ready") throws -> String {
         var snapshot = try #require(JSONSerialization.jsonObject(with: fixture("active_runs")) as? [String: Any])
-        var run = try #require((snapshot["runs"] as? [[String: Any]])?.first)
+        var run = try #require((snapshot["sessions"] as? [[String: Any]])?.first)
         run["work"] = ["kind": "task", "id": "ts_now00000000000000000000000000000"]
-        run["label"] = "This Task's Run"
+        run["title"] = "This Task's Session"
         var other = run
-        other["id"] = "other-run"
+        other["id"] = "other-session"
         other["work"] = ["kind": "task", "id": "ts_review00000000000000000000000000"]
-        other["label"] = "Other Task's Run"
-        snapshot["runs"] = empty ? [] : [run, other]
+        other["title"] = "Other Task's Session"
+        snapshot["sessions"] = empty ? [] : [run, other]
         snapshot["gaps"] = gaps
         snapshot["discovery"] = discovery
         snapshot["task"] = NSNull()
         return String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
     }
 
-    private func query(feed: ActiveRunsTestFeed, sessions: String = "[]") throws -> RegistryQuery {
+    private func query(feed: ActiveSessionsTestFeed, sessions: String = "[]") throws -> RegistryQuery {
         var roadmap = try #require(JSONSerialization.jsonObject(with: try placingTaskWorktrees(
             in: fixture("roadmap_snapshot"), at: "/src/loopflow")) as? [String: Any])
         var waves = try #require(roadmap["waves"] as? [[String: Any]])
@@ -242,12 +254,12 @@ struct TaskMonitorTests {
         waves[0]["tasks"] = tasks
         roadmap["waves"] = waves
         let text = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
-        let initial = try activeRuns()
-        return RegistryQuery(watchActiveRuns: { try await feed.open(initial: initial) }) { args, _ in
+        let initial = try activeSessions()
+        return RegistryQuery(watchActiveSessions: { try await feed.open(initial: initial) }) { args, _ in
             switch args.first {
             case "roadmap": return text
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return sessions
+            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected action in Monitor proof")
             }

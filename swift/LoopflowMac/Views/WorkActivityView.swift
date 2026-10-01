@@ -5,6 +5,7 @@ struct WorkActivityView: View {
     @Bindable var model: PodiumModel
 
     @Environment(\.palette) private var palette
+    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -183,8 +184,8 @@ struct WorkActivityView: View {
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
         case .workCreated: ("plus", .statusNeutral)
-        case .runStarted: ("play.fill", .statusInfo)
-        case .runFinished(_, let status):
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", .statusInfo)
+        case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())

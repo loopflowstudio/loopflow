@@ -4,6 +4,11 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dep
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
+The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
+supersede older Run-owner, historical-import, pinned-development-Home and
+demo-before-landing directions for this cutover. Earlier incident observations
+remain evidence of their own versions, not instructions to restore those owners.
+
 ## Session launch continuity (branch evidence, 2026-09-28)
 
 Jack assigned `jack-heart/session-launch-hardening` an independent main-based
@@ -414,54 +419,167 @@ or proof of Task completion. Do not run LOO-305's branch binary against the inst
 Home: Jack reported that its drafts broke installed `lf` (LOO-321). Use disposable
 fixture stores for source verification; credential repair remains out of scope.
 
-## Data model and performance decisions (2026-09-26)
+## Data model and performance decisions (reconciled 2026-09-30)
 
 Jack's rule, verbatim: "The main user objects should line up with the main
 tables in the DB and when we see stuff like this where a main record is
 actually a union over 4 things, we should be suspicious." The trigger was a
-product-first review of Session/Run/Task/Wave: a Session is four read-time
+2026-09-26 product-first review of Session/Run/Task/Wave: a Session was four read-time
 projections over four stores (Run dir, `task_flow_positions`,
 `human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
 string in a ranked subject list with a two-value source, mirrored into a
-Task event because the Run cannot be queried by Task; every post-launch fact
-(name, completion, attachment) became a sidecar beside the manifest; reads
-reuse the launch resolver, so a bound Session turns into an orphan when its
-Task's PR merges. The store's `runs` table has the Task FK and no writer.
+Task event because the Run could not be queried by Task; every post-launch fact
+(name, completion, attachment) became a sidecar beside the manifest. Reads
+reused the launch resolver, so a bound Session became an orphan when its
+Task's PR merged. The store's `runs` table had the Task FK and no writer.
 
-The approved model belongs to LOO-298, outside the LOO-291 delivery. Rewrite
-docs first as the spec, then tables/readers, then research what the new model
-makes deletable and remove it. The
-[decision history](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-native-workspace.md)
-and [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
-preserve Jack's approval and the follow-up split. These are target contracts,
-not claims about tables already implemented:
+LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
+the three-owner model in this branch. Run no longer exists as a product object
+or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
+and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
 
-- Repository has Chapters, a repo-wide clock incremented for every Wave at
-  once; Project = (Wave, Chapter), unique, owns Tasks, KRs, metric targets and
-  the Flow template its Tasks run by default; Task ⇒ Project ⇒ Wave.
-- Task owns Flow invocations (0..n, one current) and may invoke any Flow
-  ("trust our users"); the invocation records which. An invocation is one
-  object: unrolled graph + cursor + per-loop return counts + nullable parent
-  for runtime nesting only, never template composition (invocations are
-  always fully unrolled). No step-occurrence object, no path-string node key,
-  no "Flow position", no "recommended Flow".
-- `runs`: nullable `invocation_id ⇒ task_id ⇒ wave_id`, constructor fills
-  upward and refuses a mismatch; node + iteration tuple in an invocation;
-  `work_source` declared|checkout|inherited|bound.
-  A Run may have neither Task nor Wave, or a Wave alone. Task implies Wave;
-  bind preserves invocation membership. The manifest remains launch evidence.
-- `sessions` is a child of `runs` (run_id unique, kind, title + provenance,
-  state, ready_summary). Bind = update the Run's task/wave; rename = update
-  the title; started derived from Runs; bind allowed on done Tasks; usage
-  follows the field.
-  Ask and Flow review Sessions become rows keyed by their existing
-  `session_run_id`, replacing the four-store projection.
-- Every denormalization has a Pydantic-style validator or is deleted. No
-  sidecars, no shim: a one-time migration fills the columns from old
-  subjects and `session-name.json` and drops them ("hack my computer if need
-  be, keep the codebase clean").
-- Method for any model review: derive the user's objects and the APIs between
-  them from the product first, then check the infra for hops.
+Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
+autonomously, no need to review with me.” Land #1296 as one PR after technical
+verification, without a demo or review wait. The independent resource-recovery,
+publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
+#1360; local main history records them. Exec/Chapter extraction would remove
+only about 10% and requires manual cutting, so the old decomposition is rejected.
+Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
+authorization is not evidence that #1296 merged or that a release migrated data.
+
+**One client, one main Home.** Jack reports only this machine is a client; the
+pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.
+Do not recreate that Home or make fleet compatibility a cutover requirement.
+The reported transfer is not a verified conversion. Branch verification stays
+in disposable Homes with inherited authority removed; no branch binary writes
+the installed Home. Historical import, old-format compatibility and intermediate
+draft preservation are discarded. Keep current Work/links, account routes and
+resumable conversations. Exactly three direct drafts remain: `record_execs`,
+`project_status_chapters` and `session_ownership`; released SQL remains immutable.
+
+**Merge and conversion have different proof.** The working merge checklist is
+`scratch/remaining-work.md` until delivery clears it. Configured provider and
+Desktop continuity remain unproven; removing Jack's attendance requirement does
+not turn fixtures into acceptance. Before release conversion, quiesce old writers
+and new launches, preserve a consistent SQLite/filesystem backup and matching
+executable, rehearse current-state retention against the exact candidate, then
+verify the converted state before reopening writers. The private-copy converter
+currently reads live sidecars; its database backup plus those reads is not an
+atomic snapshot. Preserve native IDs, pending reviews, selected captures and
+the manually transferred Tasks, without importing old turns or driver authority.
+
+- **Three owners.** Exec is one actual lf process. AgentSession is one
+  conversation, interactive or headless, surviving driver and engine
+  replacement. FlowSession is one started Flow. History is subordinate to its
+  owner and has no lifecycle of its own.
+- **Every Flow step is an Exec** (2026-09-29): "why not have lf flows actually
+  launch skill execs?" A skill step runs the same `lf skill` command a person
+  would run; an op runs its own command. Flow running skills without an Exec was
+  "a big leak" that reimplemented skill machinery; close it fully. Where direct
+  and Task-step behavior differ, "run directly seems like it wins there always."
+- **Parents are processes.** An agent-issued lf command's parent is the lf
+  process driving that agent ("to be clear i still want being called by an
+  agent process to give you the right parent-lf process"). The word parent means
+  Exec to Exec only; loop and template relations need other words.
+  Implementation matches Session/provider generation and origin to the current driver;
+  a replaced provider retains its proven historical parent. Causal ancestry
+  grants neither Task attribution nor Flow settlement authority. The final
+  schema omits the unused caller-turn token and its intermediate archive;
+  selected native events identify Flow completions.
+- **Definitions compile; runs are skills and ops.** A Flow definition may
+  reference other Flows; starting it compiles them into one graph (Jack's word).
+  A subflow is "more of a lens than an operational entity". Loop passes are not
+  child FlowSessions either (2026-09-30, reversing the earlier "runtime nesting
+  creates parents" rule): a pass is a node and iteration position. The direct
+  ownership migration creates this final shape. Earlier child-pass archive and
+  intermediate-schema conversions are deleted under Jack's compression decision;
+  their older proof is not proof of the final three-draft conversion. Retry keeps
+  its pass, Iterate advances return counters, and one FlowSession owns progression.
+- **An ID names an object.** A captured input is not an object: it is an event
+  in AgentSession history that names its Exec. `RunId` and its side table were
+  deleted. Prefer the word Exec over launch or run where the thing is one agent
+  start under one lf process.
+- **Flow decisions are typed results** of the selected successful turn,
+  modelled on PydanticAI and Jev: the step declares its output schema. The
+  in-turn decide and route commands are removed; Jack said the command "felt
+  wrong". On 2026-09-30 Jack selected Blocked with a required reason in that
+  structured result; the blocked command is removed. A keyed Ask returns
+  feedback to another turn of the same conversation without moving the cursor.
+- **Bind** is write-once null to Task, allowed on done Tasks, and sets Started
+  once. Jack selected prospective usage attribution for now on 2026-09-30;
+  earlier usage retains its recorded owner. Keep this one read-time choice for
+  Intelligence to re-evaluate; do not invent a mid-turn token split.
+- Every denormalization has a validator or is deleted. Method for any model
+  review: derive the user's objects and APIs from the product first, then check
+  the infrastructure for hops.
+- **Naming remains a choice.** Jack kept `session_events` → `agent_events` and
+  the earlier `exec_events` rename proposals open. `run_events` is now deleted;
+  Exec results live on `execs`, so there is no current journal table to rename.
+  This observation neither closes the proposal nor authorizes a new event owner.
+- **Chapters follow Project status.** Each Wave's one In Progress Linear Project
+  shares the chapter name and owns the default Flow; there is no Chapter table
+  or plan packet. Preserve started Tasks and expire only proven untouched backlog.
+  Synthetic second-Home proofs exercise retries and missing evidence; they do
+  not imply a second deployed client or a distributed transaction.
+
+**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
+are checkpointed locally; publication/merge is not established by this entry.
+The release-materialized full Rust run recorded 2,004 passes, seven failures and
+17 skips. Focused repair runs cover all seven failures; the original receipt
+remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
+291-case run had one obsolete import fixture; its eight-case observation repair,
+app/runner builds, boundary check and eight distinct fixture captures passed.
+Formatting, final all-target Clippy, architecture and immutable migration checks
+passed. Required hosted CI still owns the final landing candidate.
+
+The runtime finding was cursor order: stable-ID Session pages must retain ID
+order through projection, or renamed titles can repeat/skip records. Stacking
+fixtures must use the dedicated transaction and establish a published parent;
+generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
+launched a real conflict agent in its disposable repository before that repair;
+output reports no push, but native credential effects were not audited. Provider
+stubs now contain that failure path. This does not establish configured acceptance.
+
+At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
+is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
+it is not a net reduction or a parsed statement count. The retained density
+measurement still names its earlier candidate. Installed conversion remains
+subject to the frozen-snapshot/quiescence obligations above; this gate neither
+migrates nor promotes.
+
+Lessons from implementing it (2026-09-29–30):
+
+- Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
+  unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
+  use focused proofs plus hosted CI between items; run the full local Rust
+  matrix without fail-fast before the final gate.
+- Typed CLI discovery must preserve saved execution: inventory flags reach the
+  SQL reader, selected boundaries resolve captured Skills before the mutable
+  catalog, and Ask escapes reserved Skill names. The main integration has 13
+  focused passes for these paths; it is not configured-provider acceptance.
+- Automatic skill checkpointing must use the same Work binding reader as
+  execution: explicit command `--as`, then checkout, then inherited `LF_AS`.
+  Checking explicit flags alone can commit another contributor's edits in a
+  Task checkout. The repair retains the managed Flow and HEAD; its fixture must
+  establish shared skill content before changing branches, without relying on
+  an incidental checkpoint from another launch.
+- The pinned 0.12.23 worker's output classifier read a quoted sentence in a
+  scratch note as a capability denial. The source fix is on the branch; resume
+  with the actual cause until workers run a release carrying it.
+- Task workers had no transient retry or account failover, so one hitting a
+  provider limit stopped instead of switching accounts. Converging on the direct
+  path fixes it.
+- A worker's claim named the process that launched it, not the worker, so stop
+  and liveness targeted the wrong pid (fixed in `5bd311697`).
+
+Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
+logs record 44/46 affected passes, then both failed Session cases passing focused
+repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
+success. The direct SIGINT proof observes owned-child exit and Exec interruption;
+the retained Task-cancellation settlement case remains distinct. These observations
+are not a full final-tree gate, configured-provider acceptance or installed
+conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
+and final documentation/gate reconciliation remain with the working plan.
 
 Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
@@ -484,11 +602,10 @@ Key-to-next-draw and PTY echo are proxies, not glyph presentation. Click ≤100 
 `lf` read ≤300 ms off the main actor and idle ≤5 ms/s hitches remain proposed
 targets until comparable measurements support published budgets.
 
-S5 currently binds checkout launches through the active-PR resolver and records
-inferred subjects as `Declared`. A landed branch without an active PR launches
-unbound. The approved model allows binding to landed/done Tasks; LOO-298 must
-remove the read-time launch-resolver dependency and preserve old attribution
-through the one-time migration rather than mistaking S5's limit for policy.
+The earlier S5 active-PR resolver left landed branches unbound. That is historical
+failure evidence, not binding policy: current Session rows own attribution and
+write-once bind permits done/landed Tasks. Preserve current ownership through the
+one-machine conversion; discarded historical attribution needs no importer.
 
 Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
 store gate keys on the registered installation path, not the bytes, so a demo

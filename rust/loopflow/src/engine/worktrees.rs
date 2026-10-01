@@ -254,7 +254,7 @@ fn short_hash(value: &str, chars: usize) -> String {
     hash
 }
 
-/// Stable flat placement name for a Wave resident. Nested locators keep a
+/// Stable flat placement name for a Wave worktree. Nested locators keep a
 /// readable prefix and a hash of the complete slug so sanitization cannot
 /// collapse distinct Waves onto one checkout.
 pub fn wave_agent_segment(wave: &str) -> Result<WorktreeSegment, PlacementError> {
@@ -811,7 +811,7 @@ fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
 ///
 /// Merged, squash-landed, closed-PR, and remote-gone branches are terminal.
 /// Manual pruning additionally removes branches with no activity for seven days,
-/// unless their current head has an open PR. Explicit `wt remove --force` is the
+/// unless their current head has an open PR. Explicit `wt delete --force` is the
 /// destructive escape hatch; no prune path removes uncommitted files.
 pub fn prune_worktrees(
     repo: &Path,

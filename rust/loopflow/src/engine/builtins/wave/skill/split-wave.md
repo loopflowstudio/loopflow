@@ -20,7 +20,9 @@ re-derive what these already record.
 
 ## Goal
 
-Wave mitosis. The parent's durable responsibility is distributed across N new Waves. Historical chapters remain inspectable.
+Wave mitosis. The parent's durable responsibility is distributed across N new
+Waves. Keep its existing Linear Projects and dated evidence; historical plans
+remain in Linear, with missing historical membership or measurements explicit.
 
 The numeric argument controls how many children to create (default 2).
 
@@ -44,20 +46,43 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - Each resulting wave should stand alone
 
 3. Allocate tasks
-   - Assign each Linear issue to exactly one child — no orphans
+   - Assign proposed new Tasks to one child. Account for every existing issue;
+     active Tasks retain the parent Wave and delivery identity until settled.
 
 4. Create the new waves
    - `wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `wave/<child>/MEMORY.md` — the decisions and context this child inherits
    - `wave/<child>/metrics/*.md` — contracts allocated to that child
    - `lf wave connect --wave <child>` — create each child's Linear Initiative
-   - `lf wave update-plan --wave <child> --plan <plan.json>` — author its one chapter plan
+   - Connection does not create a Project. Inspect each child's Linear plans:
+     one In Progress Project is current; Planned and Completed Projects retain
+     future and historical content. Preserve existing Project identities.
+   - If a current Project exists, `lf wave update-plan --wave <child> --plan <plan.json>`
+     replaces its complete content: `{"metric_targets":[],"flow":"feature","krs":[]}`.
+     Supply the intended nonempty `flow` string and all KRs and targets.
+   - If no current Project exists, arrange its plan through the accepted
+     repository chapter process or an explicitly authorized Linear change.
+     Future plan authoring needs an available Linear writer; `update-plan`
+     cannot write a Planned Project. Report missing access rather than inventing
+     a command or starting Tasks without a current plan.
    - File new Tasks with `lf task create --wave <child> --title "…" --notes "…"`. Describe the problem, desired outcome, observable acceptance, and real constraints. Put allocation history in authorized comments; keep current blockers and dependencies in the description even when comments are collapsed.
    - Record existing active Task dependencies in the child plans; do not reparent a live delivery across Waves or restart its worker.
 
 5. Retire the parent's future planning
-   - Use `lf wave new-chapter --wave <parent> --chapter <id> --dry-run --json` to account for every active Task and untouched backlog.
-   - Apply only the accepted preview. Keep the parent available while carried work finishes; never delete its history.
+   - A split does not authorize a chapter rotation. If a repository boundary is
+     also accepted, preview `lf repo new-chapter <name> --dry-run --json` for all
+     Waves, including the parent and children. There is no per-Wave or plan-file
+     option. Apply with `lf repo new-chapter <name> --json` only after the
+     direction and Task-disposition review gates; retain prior authorization.
+   - Rotation moves started unfinished Tasks within their owning Wave, retaining
+     worktrees, PRs and captured execution. Proven untouched backlog is canceled,
+     retaining issues and history; terminal Tasks stay historical. Missing
+     evidence stays unresolved. Rotation does not transfer Tasks to child Waves.
+   - Predecessor Projects become Completed; an authored Planned successor keeps
+     its content, otherwise only the predecessor's Flow is copied. New Waves
+     without Projects receive an empty `feature` plan. Retry interruption with
+     the same name. Keep the parent available while its active work finishes;
+     do not delete its Projects or imply rotation retired the Wave itself.
 
 6. Verify
    - Each child has a `GOAL.md`, a `MEMORY.md`, and a connected Linear Initiative

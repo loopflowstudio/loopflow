@@ -305,6 +305,36 @@
         "source_window_start": "2026-08-13T18:00:00Z",
         "source_window_end": "2026-08-20T18:00:00Z"
       }
+    },
+    {
+      "identity": {
+        "wave_id": "wave-unavailable",
+        "metric_id": "target-unavailable"
+      },
+      "contract_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "Observed without target planning",
+      "description": "Fraction of qualifying events that settled successfully.",
+      "stage": "installed",
+      "instrumented": true,
+      "instrument": "fixture",
+      "unit": "ratio",
+      "target": null,
+      "window": "7d",
+      "freshness_policy": "6h",
+      "freshness": {
+        "kind": "fresh",
+        "source_time": "2026-08-20T18:00:00Z",
+        "expires_at": "2026-08-21T00:00:00Z"
+      },
+      "evidence": {
+        "kind": "unknown",
+        "cause": {
+          "kind": "target_unavailable",
+          "value": 1.0,
+          "source_window_start": "2026-08-13T18:00:00Z",
+          "source_window_end": "2026-08-20T18:00:00Z"
+        }
+      }
     }
   ],
   "contract_issues": [

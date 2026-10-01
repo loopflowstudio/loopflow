@@ -1,6 +1,6 @@
-use crate::engine::agent::{launch_agent, AgentCapabilities, ProcessConfig};
+use crate::engine::agent::{exec_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
-use crate::engine::git::{current_branch, delete_local_branch, get_default_branch};
+use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
@@ -9,8 +9,8 @@ use crate::engine::worktrees::{
     WorktreePrunePolicy, WorktreeSegment,
 };
 use crate::engine::{
-    prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
-    SkillSyncOptions, Surface,
+    prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
+    Surface,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, resolve_definition, Target};
@@ -428,7 +428,7 @@ fn resolve_sync_conflict(
     }
     progress.status("Launching sync agent to resolve conflicts...");
     Ok(recover_sync(*recovery, |env| {
-        launch_skill_agent(
+        exec_skill_agent(
             repo_root,
             "sync-conflicts",
             Some(&context),
@@ -809,6 +809,31 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     let repo = crate::repo::working_directory()?;
     match cmd {
+        RepoCommand::NewChapter {
+            name,
+            dry_run,
+            json,
+        } => {
+            let rotation = crate::ops::chapter::new_chapter(&repo, name, *dry_run)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rotation)?);
+            } else {
+                println!("Chapter {}", rotation.name);
+                for wave in rotation.waves {
+                    println!(
+                        "  {} → {} ({})",
+                        wave.wave, rotation.name, wave.successor_id
+                    );
+                    for task in wave.tasks {
+                        println!(
+                            "    {}  {:?}  {}",
+                            task.task.identifier, task.disposition, task.reason
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
         RepoCommand::Reteam { apply } => {
             let result = crate::ops::pm::pm_reteam(
                 &repo,
@@ -1307,7 +1332,7 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 
     if changes.commits.is_empty() {
         eprintln!("No commits in the target area since the last tag.");
-        std::process::exit(1);
+        return Err(crate::exec::CommandExit(1).into());
     }
 
     let is_tty = std::io::stdout().is_terminal();
@@ -1482,7 +1507,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Create { name, plan } => wt_create(name, *plan),
         WtCommand::Switch { name } => wt_switch(name),
         WtCommand::List { format, sync, .. } => wt_list(format.as_deref(), *sync),
-        WtCommand::Remove { name, force } => wt_remove(name, *force),
+        WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune { dry_run } => wt_prune(*dry_run),
     }
 }
@@ -1750,47 +1775,9 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
     Ok(())
 }
 
-fn wt_remove(name: &str, force: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-
-    // Find the worktree by short name or directory name
-    let worktrees = list_worktrees(&main_repo)?;
-    let target = worktrees.iter().find(|wt| {
-        sibling_worktree_name(&wt.path).as_deref() == Some(name)
-            || wt
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy() == name)
-                .unwrap_or(false)
-    });
-
-    let wt = match target {
-        Some(wt) => wt,
-        None => return Err(anyhow!("no worktree found for '{}'", name)),
-    };
-
-    if wt.path == repo_root {
-        return Err(anyhow!("cannot remove the current worktree"));
-    }
-
-    let default_branch = get_default_branch(&main_repo)?;
-    if wt.branch.as_deref() == Some(&default_branch) {
-        return Err(anyhow!("cannot remove the main worktree"));
-    }
-
-    if !force && wt.dirty {
-        return Err(anyhow!(
-            "worktree has uncommitted changes (use --force to override)"
-        ));
-    }
-
-    let branch = wt.branch.clone();
-    crate::engine::git::worktree_remove(&main_repo, &wt.path)?;
-    if let Some(branch) = branch {
-        let _ = delete_local_branch(&main_repo, &branch);
-    }
-    println!("Removed {}", name);
+fn wt_delete(name: &str, force: bool) -> Result<()> {
+    crate::ops::wt::delete_worktree(&find_repo_root()?, name, force, &CliProgress)?;
+    println!("Deleted {name}");
     Ok(())
 }
 
@@ -2114,7 +2101,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., sync conflicts that need conflict resolution.
-fn launch_skill_agent(
+fn exec_skill_agent(
     repo_root: &Path,
     skill_name: &str,
     context: Option<&str>,
@@ -2124,15 +2111,14 @@ fn launch_skill_agent(
     let skill = discover_skill(repo_root, skill_name)?;
 
     let message = context.map(|value| value.to_string());
-    let prepared = prepare_launch_prompt(
+    let prepared = prepare_exec_prompt(
         config,
-        LaunchPromptInput {
+        ExecPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
             surface: Surface::Headless,
             message,
-            user_name: crate::engine::config::launch_user_name()?,
             cwd: Some(repo_root.to_path_buf()),
             yolo_mode: config.yolo,
             source_overrides: ContextSourceOverrides {
@@ -2145,7 +2131,7 @@ fn launch_skill_agent(
                 diff: Some(false),
                 ..Default::default()
             },
-            ..LaunchPromptInput::default()
+            ..ExecPromptInput::default()
         },
     )?;
 
@@ -2160,8 +2146,8 @@ fn launch_skill_agent(
         &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
     );
-    let capture = crate::run_record::CaptureHandle::begin_with_context(
-        crate::run_record::RunSpec {
+    let capture = crate::session_record::CaptureHandle::begin_with_context(
+        crate::session_record::SessionCaptureSpec {
             harness: provider,
             model,
             surface: "headless".to_string(),
@@ -2170,9 +2156,16 @@ fn launch_skill_agent(
             worktree: Some(repo_root.to_path_buf()),
             skill: Some(skill_name.to_string()),
             subjects: Vec::new(),
-            flow: crate::run_record::RunFlowMembership::Independent,
+            flow: crate::session_record::SessionFlowMembership::Independent,
+            work: None,
         },
         &context,
+        Some(crate::session_record::AgentExecRequest::from_prepared(
+            &prepared.config,
+            &AgentCapabilities {
+                chrome: config.chrome,
+            },
+        )),
     )?;
     capture.record_input("initial", &prepared.config.task_prompt);
 
@@ -2188,7 +2181,7 @@ fn launch_skill_agent(
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&launch, &process, &capabilities);
+    let result = exec_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

@@ -7,20 +7,65 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test("Active Runs preserve exact attribution, waiting clients, and evidence gaps")
-    func activeRunsFixture() async throws {
+    @Test("Session page retains complete enumeration and requires entries")
+    func sessionPageFixture() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/session_page.json")
+        let data = try Data(contentsOf: url)
+        let page = try JSONDecoder().decode(SessionPage.self, from: data)
+        #expect(page.entries.count == 1)
+        #expect(page.next == nil)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(SessionPage.self, from: Data(#"{"next":null}"#.utf8))
+        }
+    }
+
+    @Test("Exec pages retain command outcomes, caller evidence and continuation")
+    func execPageFixture() throws {
+        let data = try loadFixtureData("exec_page.json")
+        let page = try JSONDecoder().decode(ExecPage.self, from: data)
+        #expect(page.entries[0].exitCode == 42)
+        #expect(page.entries[0].viaAgent == nil)
+        #expect(page.entries[1].parentExecID == page.entries[0].id)
+        #expect(page.entries[1].outcome == nil)
+        #expect(page.next?.id == page.entries[1].id)
+        #expect(try JSONDecoder().decode(ExecPage.self, from: JSONEncoder().encode(page)) == page)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ExecPage.self, from: Data("{}".utf8))
+        }
+    }
+
+    @Test("Conversation history retains native evidence and unknown driver")
+    func sessionHistoryFixture() throws {
+        let data = try loadFixtureData("session_history.json")
+        let events = try JSONDecoder().decode([SessionEvent].self, from: data)
+        #expect(events[1].kind == .completed)
+        #expect(events[1].execID == nil)
+        #expect(events[2].kind == .observed)
+        #expect(events[2].providerThread == nil)
+        #expect(events[2].providerTurn == nil)
+        #expect(events[0].payload == .object([
+            "total": .object(["inputTokens": .integer(40), "outputTokens": .integer(10)]),
+            "last": .object(["inputTokens": .integer(20), "outputTokens": .integer(5)]),
+        ]))
+        #expect(try JSONDecoder().decode([SessionEvent].self, from: JSONEncoder().encode(events)) == events)
+    }
+
+    @Test("Active Sessions preserve exact attribution, waiting clients, and evidence gaps")
+    func activeSessionsFixture() async throws {
         let data = try loadFixtureData("active_runs.json")
-        let snapshot = try JSONDecoder().decode(ActiveRunsSnapshot.self, from: data)
+        let snapshot = try JSONDecoder().decode(ActiveSessionsSnapshot.self, from: data)
         #expect(snapshot.discovery == .ready)
-        #expect(snapshot.runs[0].work == snapshot.task)
-        #expect(snapshot.runs[0].processes[0].state == .waiting)
+        #expect(snapshot.sessions[0].work == snapshot.task)
+        #expect(snapshot.sessions[0].processes[0].state == .waiting)
         #expect(snapshot.gaps.count == 1)
-        #expect(try JSONDecoder().decode(ActiveRunsSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
+        #expect(try JSONDecoder().decode(ActiveSessionsSnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
         var missing = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         missing.removeValue(forKey: "discovery")
         let incomplete = try JSONSerialization.data(withJSONObject: missing)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(ActiveRunsSnapshot.self, from: incomplete)
+            try JSONDecoder().decode(ActiveSessionsSnapshot.self, from: incomplete)
         }
     }
 
@@ -51,19 +96,8 @@ struct DTOFixtureTests {
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.chapter?.flows.recommended == "task-design")
-        #expect(plan.chapter?.krs.count == 1)
-    }
-
-    @Test("Chapter history retains dated evidence for a moved Task")
-    func chapterHistoryRetainsBoundaryEvidence() throws {
-        let snapshot = try JSONDecoder().decode(ChapterSnapshot.self, from: loadFixtureData("chapter_snapshot.json"))
-        let history = try JSONDecoder().decode([ChapterHistoryEntry].self, from: loadFixtureData("chapter_history.json"))
-        #expect(snapshot.closedAt == snapshot.observedAt)
-        #expect(snapshot.tasks[0].disposition == "move")
-        #expect(!snapshot.tasks[0].task.completed)
-        #expect(history[0].id == snapshot.id)
-        #expect(history[1].closedAt == nil)
+        #expect(plan.currentProject?.flow == "task-design")
+        #expect(plan.currentProject?.krs.count == 1)
     }
 
     @Test("Activity fixture preserves exact OS-live process state")
@@ -94,11 +128,11 @@ struct DTOFixtureTests {
         #expect(snapshot.items.map(\.subject) == [
             "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
         ])
-        if case .runFinished(let identity, let status) = snapshot.items[0].fact {
-            #expect(identity.primaryId == "run_00000000000000000000000000000001")
+        if case .inputCompletionRecorded(_, let captured, let status) = snapshot.items[0].fact {
+            #expect(captured == 12)
             #expect(status == "ok")
         } else {
-            Issue.record("expected a typed Run finish")
+            Issue.record("expected a recorded Session outcome")
         }
         #expect(snapshot.items[1].fact.github?.number == 1144)
         #expect(snapshot.items[1].fact.github?.url.host == "github.com")
@@ -108,7 +142,7 @@ struct DTOFixtureTests {
             Issue.record("expected a typed PR merge request")
         }
         #expect(snapshot.items[3].work.kind == .wave)
-        if case .steerIssued(_, .run(let id)) = snapshot.items[3].fact {
+        if case .steerIssued(_, .imported(let id)) = snapshot.items[3].fact {
             #expect(id == "run_00000000000000000000000000000001")
         } else {
             Issue.record("expected a Run-authored Steer")
@@ -125,7 +159,9 @@ struct DTOFixtureTests {
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 
         // The Home runtime evidence carries the state and the one contextual action.
-        #expect(detail.chapter?.flows.recommended == "task-design")
+
+
+        #expect(detail.currentProject?.flow == "task-design")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
@@ -145,12 +181,12 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[1].runtime == nil)
         #expect(detail.tasks.items[1].reference.issueUrl == nil)
         #expect(detail.tasks.items[1].reference.workspace == nil)
-        #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001")
+        #expect(detail.runs.items[0].id == "run_00000000000000000000000000000001:12")
         #expect(detail.runs.items[0].skill == "task/pursue")
         #expect(detail.runs.items[0].taskPrId == "pr_33333333333333333333333333333333")
         #expect(detail.runs.items[0].firstProviderAttemptAt == 1784052010)
         #expect(detail.runs.items[0].usage.inputTokens == 12000)
-        #expect(detail.runs.items[0].outcome == "completed")
+        #expect(detail.runs.items[0].recordedOutcome == "completed")
         #expect(detail.tasks.items[0].condition.state == .waiting)
         #expect(detail.tasks.items[0].condition.reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.tasks.items[0].actions.recommended == .openPr)
@@ -170,6 +206,7 @@ struct DTOFixtureTests {
             try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
         }
 
+
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -181,7 +218,7 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-        #expect(product.chapter?.flows.recommended == nil)
+        #expect(product.currentProject?.flow == "feature")
 
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 
@@ -206,7 +243,10 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("metric_portfolio.json")
         let portfolio = try JSONDecoder().decode(MetricPortfolio.self, from: data)
 
-        #expect(portfolio.metrics.count == 10)
+        #expect(portfolio.metrics.count == 11)
+        #expect(portfolio.metrics.contains {
+            if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
+        })
         #expect(portfolio.contractIssues.count == 5)
         #expect(
             portfolio.metrics[0].description
@@ -242,6 +282,22 @@ struct DTOFixtureTests {
         _ = try JSONDecoder().decode(MetricPortfolio.self, from: futureData)
     }
 
+    @Test("Metadata does not manufacture a live state or current occurrence")
+    func sessionMetadataFixture() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session_metadata.json"))
+        #expect(session.state == .unknown)
+        guard case .step(_, _, _, let node, let iterations, let occurrence) = session.flowMembership else {
+            Issue.record("Retain the known Flow membership")
+            return
+        }
+        #expect(node == nil)
+        #expect(iterations == nil)
+        #expect(occurrence == .unknown)
+        #expect(session.flowMembership.label.contains("position unavailable"))
+        #expect(session.terminalIds.isEmpty)
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
+    }
+
     @Test("Sessions fixture preserves the unresolved Session projection")
     func sessionsFixtureRoundTrips() throws {
         let sessions = try JSONDecoder().decode(
@@ -270,18 +326,26 @@ struct DTOFixtureTests {
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
         #expect(sessions.map(\.flowMembership) == [
             .step(flow: "task-design", invocationId: "00000000-0000-0000-0000-00000000f10w",
-                  step: "review-design", node: "1", iterations: [[]], occurrence: .current),
+                  step: "review-design", node: 1, iterations: [[]], occurrence: .current),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "implement", node: "4/fix/1", iterations: [[2, 1], [1]], occurrence: .earlier),
+                  step: "implement", node: 6, iterations: [[2, 1], [1]], occurrence: .earlier),
             .independent,
             .unknown(reason: "Run run_00000000000000000000000000000004 predates recorded Flow membership"),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f1",
-                  step: "implement", node: "2", iterations: [[2, 1]], occurrence: .past),
+                  step: "implement", node: 2, iterations: [[2, 1]], occurrence: .past),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f0",
                   step: "implement", node: nil, iterations: nil, occurrence: .past),
             .step(flow: "feature", invocationId: "00000000-0000-0000-0000-0000000000f2",
-                  step: "demo", node: "7", iterations: [[0, 0]], occurrence: .current),
+                  step: "demo", node: 9, iterations: [[0, 0]], occurrence: .current),
         ])
+        let graphs = try JSONDecoder().decode([String: FlowGraph].self,
+            from: loadFixtureData("session_membership_graphs.json"))
+        for session in sessions {
+            if case let .step(_, invocation, step, node?, _, _) = session.flowMembership {
+                let graph = try #require(graphs[invocation])
+                #expect(graph.node(node)?.label == step)
+            }
+        }
         #expect(sessions.last?.titleSource == .unavailable)
         #expect(sessions.map(\.provider) == ["codex", "claude", "claude", "claude", "claude", "claude", nil])
         #expect(sessions[1].flowMembership.label == "feature / implement · iteration (2, 1) / (1) · earlier")
@@ -303,25 +367,17 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
-    @Test("Every Session kind has a required Run reference independent of its boundary ID")
-    func sessionRequiresRun() throws {
+    @Test("Every Session kind retains its identity without a Run field")
+    func sessionIdentityHasNoRun() throws {
         let data = try loadFixtureData("session.json")
-        for kind in ["interactive", "ask", "flow"] {
+        for kind in ["conversation", "ask", "flow"] {
             var value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
             value["kind"] = kind
             let session = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            #expect(session.runId == "run_00000000000000000000000000000001")
-            #expect(session.runId != session.id)
-            var untitled = value
-            untitled.removeValue(forKey: "title_source")
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: untitled))
-            }
-            value.removeValue(forKey: "run_id")
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            }
-            value["run_id"] = NSNull()
+            let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session)) as? [String: Any])
+            #expect(encoded["run_id"] == nil)
+            #expect(encoded["id"] as? String == session.id)
+            value.removeValue(forKey: "title_source")
             #expect(throws: DecodingError.self) {
                 try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
             }
@@ -381,4 +437,19 @@ struct DTOFixtureTests {
             .appendingPathComponent(name)
         return try Data(contentsOf: fixtures)
     }
+}
+
+@Test("Session input history retains distinct native results and unknown Exec")
+func sessionInputHistoryFixture() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/session_history_summary.json")
+    let value = try JSONDecoder().decode(SessionHistory.self, from: Data(contentsOf: url))
+    #expect(value.providers.count == 2)
+    #expect(value.providers[0].outcome == "failed")
+    #expect(value.providers[0].execId == nil)
+    #expect(value.providers[0].usage.inputTokens == nil)
+    #expect(value.providers[1].outcome == "completed")
+    #expect(value.providers[1].usage.inputTokens == 0)
+    #expect(value.status == "failed → completed")
 }

@@ -150,7 +150,7 @@ struct WaveLensTests {
     func everyLensHasReason() throws {
         let lenses = [
             WaveLens.forWave(
-
+                
                 activeTasks: 0
             ),
             WaveLens.forWave(activeTasks: 1),

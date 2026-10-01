@@ -105,7 +105,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
         Ok(FlowOutcome::Completed)
     }
 
-    async fn tick(
+    pub(crate) async fn tick(
         &self,
         items: &[ConcreteStep],
         cursor: &mut ExecutionCursor,
@@ -164,7 +164,7 @@ impl ConcreteXor {
             id: None,
             human: false,
             repeat: None,
-            flow_parents: self.flow_parents.clone(),
+            sources: self.sources.clone(),
         }
     }
 }
@@ -506,7 +506,7 @@ mod tests {
             id: None,
             human: false,
             repeat: None,
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         }
     }
 
@@ -532,7 +532,7 @@ mod tests {
             paths: HashMap::from([(
                 "selected".to_owned(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow(flow, repo).unwrap(),
                         repo,
                     )
@@ -540,7 +540,7 @@ mod tests {
                     description: "selected path".to_owned(),
                 },
             )]),
-            flow_parents: vec!["test".to_owned()],
+            sources: vec!["test".to_owned()],
         })
     }
 
@@ -871,7 +871,7 @@ mod tests {
                     command: "check".to_owned(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             }),
             xor("branch", repo.path()),
             step("decide", Some("work")),
@@ -924,7 +924,7 @@ mod tests {
         let items = vec![
             ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("xor-route"),
-                flow_parents: vec![],
+                sources: vec![],
                 paths: HashMap::from([(
                     "silence".to_owned(),
                     ConcretePath {
@@ -1007,7 +1007,7 @@ mod tests {
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
@@ -1015,7 +1015,7 @@ mod tests {
                     description: "ship it".to_string(),
                 },
             )]),
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");
@@ -1060,7 +1060,7 @@ mod tests {
             paths: HashMap::from([(
                 "ship".to_string(),
                 ConcretePath {
-                    steps: crate::engine::expand_flow(
+                    steps: crate::engine::compile_flow(
                         &crate::engine::load_flow("branch", repo.path()).unwrap(),
                         repo.path(),
                     )
@@ -1068,7 +1068,7 @@ mod tests {
                     description: "ship it".to_string(),
                 },
             )]),
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let mut cursor = ExecutionCursor::default();
@@ -1114,7 +1114,7 @@ mod tests {
                     },
                 )]
                 .into(),
-                flow_parents: vec![],
+                sources: vec![],
             }),
             step("suffix", None),
         ];
@@ -1163,7 +1163,7 @@ mod tests {
                     },
                 )]
                 .into(),
-                flow_parents: vec![],
+                sources: vec![],
             })
         };
         for items in [
@@ -1211,7 +1211,7 @@ mod tests {
                 command: "sync".to_string(),
                 args: vec!["--fast".to_string()],
             },
-            flow_parents: vec!["test".to_string()],
+            sources: vec!["test".to_string()],
         })];
 
         let outcome = engine.run(&items, 0).await.expect("engine run");

@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{load_config, load_config_or_default, LaunchTarget};
+use loopflow::engine::{load_config, load_config_or_default, ExecTarget};
 use support::with_clean_home;
 use tempfile::TempDir;
 
@@ -176,7 +176,7 @@ session:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.session.launch, LaunchTarget::Tui);
+    assert_eq!(config.session.launch, ExecTarget::Tui);
 }
 
 #[test]
@@ -193,7 +193,7 @@ session:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.session.launch, LaunchTarget::Ide);
+    assert_eq!(config.session.launch, ExecTarget::Ide);
 }
 
 // =============================================================================
@@ -244,38 +244,4 @@ fn config_land_defaults_to_gh() {
         .unwrap()
         .unwrap();
     assert_eq!(config.land, "gh");
-}
-
-// =============================================================================
-// Autoprune
-// =============================================================================
-
-#[test]
-fn config_autoprune_bool() {
-    let temp = TempDir::new().unwrap();
-    write_config(temp.path(), "autoprune: true");
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.autoprune.enabled);
-}
-
-#[test]
-fn config_autoprune_object() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-autoprune:
-  enabled: true
-  poll_interval_seconds: 120
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.autoprune.enabled);
-    assert_eq!(config.autoprune.poll_interval_seconds, 120);
 }

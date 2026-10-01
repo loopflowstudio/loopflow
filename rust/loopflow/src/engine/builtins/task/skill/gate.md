@@ -39,11 +39,13 @@ re-derive what these already record.
    - Errors are clear. No silent failures, no cryptic messages.
    - Interactions feel snappy. Slow is a bug.
 
-   Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
+   Exercise changed interactions through automated UI tests or rendered snapshots.
+   Leave subjective experience and manual walkthroughs to demo/review.
 
 4. **Tests and lints**
    Run the affected suites and required formatting/static-analysis checks once
-   for the current tree.
+   for the current tree, including the design's automated acceptance. Plan any
+   relevant before/after measurements and headless UI captures in this same run.
    - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
    - Cross-check CI so formatting and static-analysis commands match what the
      repository enforces.
@@ -53,7 +55,13 @@ re-derive what these already record.
      identical tracked/untracked content and the same plan, enable that reuse.
    - Do not run the full local matrix merely to mirror parallel CI. Run it only
      when release guidance requires it or when reproducing a full-matrix failure.
-   - Record what was selected, reused, or deliberately left to CI.
+   - All required checks must run headless without a person or display session.
+     For Desktop, build the app and run view/interaction tests or offscreen
+     snapshots. Do not require manual clicks or permission dialogs.
+   - If this environment cannot run a check, use a headless equivalent or defer
+     it to capable CI and continue the Flow. Never mark a deferred check passed;
+     CI still owns its result. Do not turn missing display access into an Ask.
+   - Record the command and result in one line; include any CI deferral.
    Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**
@@ -66,15 +74,11 @@ re-derive what these already record.
 
 Make the change easy to review.
 
-1. **Verify the intended outcome**
-   - Check the accepted success conditions. Reuse applicable passing evidence;
-     run missing proof and record its limits in the PR copy or existing plan.
-   - If the work has measurable outcomes (performance, accuracy, latency, size, counts), run before/after comparisons and record the numbers
-   - If the work is a UI or UX change, capture the key states and interactions
-   - Not every PR has metrics — but when they exist, capture them now. The reviewer shouldn't have to reproduce your setup to see the impact.
-   - For substantial UI work, state which production performance signal covers
-     the new path. If none does, capture a concrete metric proposal for the
-     Wave. A local benchmark supports it but is not live coverage by itself.
+1. **Assess the results**
+   Compare the checks above with the accepted outcome. Record meaningful
+   before/after numbers and any CI deferral; leave judgment to demo/review.
+   Do not start a second verification pass. For substantial UI work, identify
+   its production performance signal or propose one for the Wave.
 
 2. **Prepare delivery context**
 
@@ -100,7 +104,7 @@ Make the change easy to review.
 
 Polish only code changed by this branch, within the design intent. Skip unrelated
 improvements and style preferences. If code and docs already meet the contract,
-leave them alone. Report applicable proof and unresolved blockers briefly.
+leave them alone. Report check results and unresolved blockers briefly.
 
 ## Adaptation
 

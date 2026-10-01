@@ -16,7 +16,7 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
-@Suite("Task Comments native proof", .serialized)
+@Suite("Task Comments native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskCommentsProofTests {
     @Test("Collapsed count, thread, failure and a late read stay with their own Task beside a live Session")
@@ -47,7 +47,7 @@ struct TaskCommentsProofTests {
                                 work: .task(id: "ts_review00000000000000000000000000"))
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "interactive", state: "active")
+        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try CommentSource(session: JSONSerialization.data(withJSONObject: [session]))
@@ -212,7 +212,7 @@ private actor CommentSource {
         case ("roadmap", _): return roadmap
         case ("wave", "list"): return "[]"
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return session
+        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return "[]"
         case ("task", "comment"):
             reads.append(args)

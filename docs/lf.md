@@ -1,9 +1,5 @@
 # lf CLI
 
-> Design draft. Discovery (`run`, `help`, `list`, typed definitions, and unique
-> command shorthand) is implemented on this branch. Owner moves and proposed
-> overviews below remain unimplemented.
-
 ## Run a workflow
 
 ```bash
@@ -27,7 +23,8 @@ lf task status EXP-12                # progress, blockers, and delivery state
 lf task wait EXP-12 --until terminal --timeout 15m
 ```
 
-Task execution prepares its worktree and retains its workflow position.
+Task execution prepares its worktree and selects one managed FlowSession.
+Its steps use the same execution path as a direct Flow in that checkout.
 Repeating `run` continues the Task or reports its active worker. Connected
 Task creation requires the Wave's planning service; direct workflows do not.
 
@@ -50,38 +47,35 @@ step decides whether to advance or revise; closing the terminal does neither.
 ## Inspect work
 
 ```bash
-lf monitor                          # proposed overview: waiting, blocked, active, finished
-lf task list                        # repository Tasks and unlinked checkout/PR work
 lf wave status exports              # progress toward a Wave's goals
-lf mon activity --task EXP-12        # recorded changes to the work
-lf mon ps                           # snapshot of live processes and call trees
-lf mon top                          # continuously refresh the live view
-lf mon show RUN_ID --final           # the recorded conclusion of one Run
-lf mon usage --days 30               # reported consumption
+lf activity --task EXP-12           # recorded changes to the work
+lf ps                               # snapshot of live processes and call trees
+lf top                              # continuously refresh the live view
+lf runs INPUT --final                # the recorded conclusion of one captured input
+lf usage --days 30                  # reported consumption
 ```
 
-The proposed overview includes the reason and next action for each item.
-Inspection reads this computer. Live processes, recorded outcomes, and missing
-observations remain distinct. `mon` is short for `monitor`.
-`lf ps` and `lf top` resolve to the same operations through owner shorthand.
+Inspection reads this Home. Live processes, recorded outcomes, and missing
+observations remain distinct. `lf runs` reads AgentSession history; `lf exec list`
+reads actual lf processes and their command results.
 
 Read Wave state as JSON with the supported inspection commands:
 
 ```bash
 lf wave list --json                 # durable Waves and their runtime evidence
-lf wave status <wave> --json         # one Wave's Tasks, Runs, and conditions
+lf wave status <wave> --json         # one Wave's Tasks, Sessions, and conditions
 lf roadmap --json                   # current plans across Waves
 ```
 
 ## Publish and finish
 
 ```bash
-lf task pr publish                  # push and create/update a ready PR
-lf task pr submit                   # prepare for a reviewer's merge click
-lf task pr arm                      # prepare, request auto-merge, and return
-lf task pr land                     # prepare, watch, repair CI, and finish merged
-lf task pr land -c                  # also complete the owning Task
-lf repo release run patch           # verify, prepare notes, tag, and publish a release
+lf task pr EXP-12 publish           # push and create/update a ready PR
+lf task pr EXP-12 submit            # prepare for a reviewer's merge click
+lf task pr EXP-12 arm               # prepare, request auto-merge, and return
+lf task pr EXP-12 land              # prepare, watch, repair CI, and finish merged
+lf task pr EXP-12 land -c           # also complete the owning Task
+lf release run patch                # verify, prepare notes, tag, and publish a release
 ```
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
@@ -91,18 +85,17 @@ on ordinary branches without creating a Task. Bare `land` keeps a Task open.
 ## Accounts and access
 
 ```bash
-lf identity                         # proposed readiness and account overview
-lf id status codex --verify          # refresh supported account observations
-lf id connect codex work@example.com --chrome-profile Work
+lf auth status                      # cached credentials and subscription windows
+lf auth status codex --verify       # refresh supported account observations
+lf auth connect codex work@example.com --chrome-profile Work
 lf --account work@ run code          # prefer an account for this launch
 lf --only-account codex=work@ run code # restrict this launch and its children
-lf id route set codex work@ personal@ # set account selection order
+lf auth route set codex work@ personal@ # set account selection order
 ```
 
-`id` is short for `identity`. Launches check the access their work requires;
-explicit account controls inspect or override selection. Model and account
-selection are independent. An incompatible explicit choice reports an error.
-Readiness inheritance for background and remote children remains under design.
+Launches check the access their work requires; explicit account controls
+inspect or override selection. Model and account selection are independent. An incompatible explicit choice reports an error.
+Background and remote execution require accounts available at their destination.
 
 ## Control individual steps
 
@@ -123,10 +116,11 @@ explicitly. See [Authoring](authoring.md) to define either.
 
 ```bash
 lf task checkout EXP-12              # prepare a Task's worktree without starting it
-lf task worktree create csv-export   # create a worktree without a tracked Task
-lf task commit -m "Add CSV export"  # save local changes
+lf wt create csv-export             # create a worktree without a tracked Task
+lf commit -m "Add CSV export"       # save local changes
 lf sync --plan                       # inspect the integration strategy
-lf task pr checks --watch            # follow the PR's checks
+lf task pr EXP-12 checks --watch     # follow the PR's checks
+lf task sync EXP-12 --plan           # inspect this Task's integration
 ```
 
 These controls operate on the same work as the higher-level workflows.
@@ -136,25 +130,26 @@ setup, remote execution, and release operations.
 ### Flow decisions and recovery
 
 ```bash
-lf flow resume INVOCATION            # continue a direct flow at its saved position
+lf flow resume FLOW_SESSION         # continue a direct flow at its saved position
 lf task run EXP-12                   # continue a Task's saved flow
 lf task restart EXP-12 --flow feature # deliberately replace its workflow
 ```
 
-Invoking a flow by name starts a new invocation. Resuming retains the captured
+Invoking a flow by name starts a new FlowSession. Resuming retains the captured
 definition and feedback. See [decision and retry controls](lf-reference.md#flow-decisions-and-recovery).
 
 ## Discover commands
 
 ```bash
 lf help                             # overview
-lf help task pr land                 # arguments and effects of one operation
+lf help pr land                     # arguments and effects of one operation
 lf help feature                     # inspect a workflow without starting it
 lf list                             # commands, skills, and flows
 lf help --all                       # full command tree
 ```
 
-Omit unambiguous owners: `lf land` resolves to `lf task pr land`. Multiple
+Use `lf pr land` in the checkout or `lf task pr EXP-12 land` from elsewhere.
+Omit unambiguous owners: `lf land` resolves to `lf pr land`. Multiple
 matches list the canonical choices and execute nothing. Exact commands win;
 installed skills do not change command resolution. Use `lf run land` to
 select an authored definition instead.
@@ -165,3 +160,15 @@ and supported `--json` output in scripts.
 
 [Full command reference](lf-reference.md) · [Authoring](authoring.md) ·
 [Configuration](config.md)
+
+### Open a Task in the desktop
+
+```sh
+open 'loopflow://task/LOO-303'
+lf roadmap --task LOO-303 --all --json
+```
+
+Task links open details without starting work, including retained and completed
+Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
+Task destinations open details; selecting a Flow opens its folded template.

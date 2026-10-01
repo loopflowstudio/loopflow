@@ -191,10 +191,28 @@ in the chapter plan. Curate durable decisions in `wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the
 plan in the goal body.
 
-Then offer Linear binding as above. Initialization provisions one internal
-Project for the first chapter. Subsequent chapters replace it through
-`lf wave new-chapter`; the Wave retains purpose, memory, and conversation.
-Tasks belong to the current chapter automatically.
+Then offer Linear binding as above. Connection creates or links the Initiative
+and preserves existing Projects; it does not provision an initial Project.
+Inspect available Linear status/content: one In Progress Project is the current
+plan, Planned Projects hold future plans, and Completed Projects retain history.
+Tasks use the current Project and its required `flow:` default.
+
+If no current Project exists, report that planning gap. Establishing a chapter
+requires accepted repository-wide direction and plan dispositions: preview with
+`lf repo new-chapter <name> --dry-run --json`, then apply with
+`lf repo new-chapter <name> --json` only under that authorization. Every Wave
+participates; do not rotate the repository merely to initialize one Wave. A Wave
+with no Projects receives an empty plan with `flow: feature`, unless an authored
+Planned successor supplies its content. Existing successors and predecessors
+retain identity; rotation completes predecessors rather than deleting them.
+
+Author future content in the Planned Linear Project through an available
+authorized provider interface. For an existing current Project,
+`lf wave update-plan --wave <wave> --plan <plan.json>` replaces its complete
+content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
+There is no future-plan writer or historical chapter selector in these commands.
+Missing access or competing current Projects stays an explicit next action;
+never invent a local chapter store or guess a plan from the newest name.
 
 ### Existing Linear Task
 
@@ -247,7 +265,7 @@ for that invocation and accounts installed on the remote Home. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf home observe` records the
-mutable SSH route for the stable HomeId. Placement is allowed only while no Run
+mutable SSH route for the stable HomeId. Placement is allowed only while no execution
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
 `lf ssh <home-id>` to run on the remote Home. Ask before observing a route,
 changing placement, or starting a Wave; each changes durable execution state.

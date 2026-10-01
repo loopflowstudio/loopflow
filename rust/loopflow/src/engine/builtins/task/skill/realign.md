@@ -27,8 +27,8 @@ Bring the plan and the implementation into agreement with what the work has taug
    Find where the work changed our understanding. Which assumptions failed?
    Which planned mechanisms became unnecessary? What remains unimplemented,
    or works differently than intended? Separate observations from explanations.
-   Reuse applicable proof; run a focused check when it will resolve uncertainty.
-   An unexecuted check is still a gap.
+   Reuse applicable results; run a focused check when it will resolve uncertainty.
+   Do not rerun tests just because reconciliation began.
 
 3. Reconcile at the source. Rewrite stale portions of the plan, delete obsolete
    steps and explanations, and update the remaining work to fit what is now known.
@@ -42,7 +42,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    Reconcile the Wave's memory too. Replace stale guidance, remove duplication,
    and write durable decisions and lessons learned from this work into its
    existing memory. Attribute decisions by name and preserve contrary evidence
-   and proof limits. Keep the live implementation plan in its own artifact;
+   and limits of the observations. Keep the live implementation plan in its own artifact;
    memory carries what future Wave work should know, not a copy of the pass.
    Follow the repository's memory workflow. If identified memory is unavailable
    or cannot be updated within the supplied authority, state that exact gap
@@ -50,29 +50,22 @@ Bring the plan and the implementation into agreement with what the work has taug
 
 4. Check the resulting agreement. The plan must distinguish what exists from
    what remains, and the code must support claims of completed behavior. Verify
-   repairs with the smallest relevant proof. Keep blockers, contrary evidence,
-   and proof limits visible where they affect the next action. Stop dependent
-   work when a required check cannot run; state the command and blocker.
+   repairs with the smallest relevant check. Keep blockers, contrary evidence,
+   and deferred checks visible where they affect the next action. If a check cannot
+   run headless, leave it to gate/CI or replace it with a headless check; do not
+   block the Flow on it. Human judgment belongs to demo/review.
 
-Record named, dated decisions, explicit draft or acceptance status, remaining
-work, and proof. Omit session/step instructions and ambient Home facts. Name
-historical skills without dollar prefixes; keep verbatim transcripts as separate
-reference evidence. Reread the plan as input to another skill in a fresh Run:
-it must not select that reader's skill or claim its execution environment.
+Keep named, dated decisions, draft/accepted status and remaining work in the
+plan. Record one check-result line. Omit session instructions and ambient Home
+facts; the plan must not direct its next reader. Keep transcripts separate and
+historical skill names unprefixed.
 
 If no plan exists, update the supplied working context or write the smallest
 useful plan when continued work needs one.
 
-Finish with a minimal review that makes the next decision easy:
-
-- Where the work stands against the plan: what is implemented and what remains.
-- What worked, with the checks or observations that support it and their limits.
-- What implementation taught us, and how the plan, code, or Wave memory changed.
-- What remains unresolved: contrary evidence, untested claims, blockers, or choices.
-
-Keep it short and link to the current artifacts and proof. Update an existing
-summary when one serves the handoff; otherwise use the caller's output surface.
-Preserve useful evidence without copying the plan or accumulating a pass ledger.
+Finish briefly: what changed, what remains, and any decision needed. Keep the
+check result to one line with its command and result or deferred owner. Update
+the existing plan; do not accumulate reports or repeated untested-claim lists.
 If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-decide to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to

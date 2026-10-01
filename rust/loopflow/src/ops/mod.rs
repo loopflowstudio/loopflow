@@ -27,10 +27,13 @@ pub mod task_actions;
 pub(crate) mod task_destination;
 pub mod task_execution;
 pub mod task_flow;
+#[doc(hidden)]
+pub mod task_input;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
+pub mod wt;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use commit::{checkpoint_task_restart, checkpoint_task_worktree};
@@ -58,11 +61,11 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{launch_task_worker, TaskWorkerLaunch, TASK_ACCOUNT_ID_ENV};
+pub(crate) use run::{exec_task_worker, TaskWorkerExec};
 #[doc(hidden)]
 pub use run::{
-    resolve_checkout_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
-    WorkSelection,
+    resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,
+    resolve_work_selection, WorkBinding, WorkSelection,
 };
 pub(crate) use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{
@@ -72,6 +75,3 @@ pub use sync::{
 };
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;
-
-#[cfg(test)]
-pub(crate) use run::TEST_TASK_LAUNCH;

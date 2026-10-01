@@ -20,8 +20,12 @@ pub struct EnvGuard(Vec<(&'static str, Option<OsString>)>);
 
 impl EnvGuard {
     pub fn new() -> Self {
+        Self::clear(AMBIENT_TASK_ENV)
+    }
+
+    pub fn clear(names: &[&'static str]) -> Self {
         Self(
-            AMBIENT_TASK_ENV
+            names
                 .iter()
                 .map(|&name| {
                     let value = std::env::var_os(name);

@@ -291,8 +291,12 @@ fn run_with_env(
     reject_detached_account_forwarding(account_lease.is_some(), cmd)?;
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
-    let user_name = crate::engine::config::launch_user_name()?.unwrap_or_default();
+    let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
+    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
     let mut extra_env = extra_env.to_vec();
+    if let Some(value) = declaration.as_deref() {
+        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
+    }
     extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
     let preamble = build_preamble(
         &credentials,
@@ -303,12 +307,14 @@ fn run_with_env(
         &extra_env,
     );
     let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
-    // `process::exit` skips destructors. Close the broker and remove its local
-    // socket before preserving a nonzero remote command's exact exit code.
+    // Release the broker before reporting the remote command's result.
     drop(broker);
     match outcome {
         SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
         SshOutcome::ConnectionFailure => {
             unreachable!("run_ssh returns transport failures as errors")
         }

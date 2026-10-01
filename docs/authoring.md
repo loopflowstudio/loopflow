@@ -131,7 +131,7 @@ Loop-decide starts at those paths, then reconciles the current design and other
 relevant scratch evidence. A note recommends work; the deciding occurrence
 records navigation through the Flow protocol. There is no required handoff
 filename or control file. Recursive scratch Markdown is assembled into fresh
-Run context; a running agent can reread files updated since its launch.
+conversation context; a running agent can reread files updated since its launch.
 
 ### Branching (xor)
 
@@ -151,10 +151,10 @@ one path runs:
         description: "No actionable defect in the supplied change"
 ```
 
-The `router:` skill reads the available evidence and records one choice with
-`lf flow route PATH`. Routing instructions and path descriptions are appended
-to its captured prompt. The choice belongs to the active Run and takes effect
-when it succeeds; failed Runs discard their candidates. A path
+The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
+under the schema declared by its captured branch. Routing instructions and path descriptions are appended
+to its captured prompt. The choice belongs to the selected native turn and takes effect
+when it succeeds; a retry must supply its own candidate. A path
 with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
 exit. With no `router:`, a generic routing agent picks from `scratch/` contents.
 
@@ -198,23 +198,24 @@ deciding step stable ids:
 
 One pass runs implement, compress, refresh (sync → realign), and loop-decide.
 The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
-[decision protocol](lf.md#flow-decisions-and-recovery). Iterate returns to `from`
+[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
 with direction; Advance publishes, then reaches the human demo. Complete returns the demo's
 feedback and revised design to the second loop-decide. Its own explicit edge
 also targets implement: the outer loop repeats implementation, refresh,
 the inner decision loop, and demo. Review completion itself chooses no edge.
 
-At the deciding occurrence, use `lf flow decide advance "evidence"` or
-`lf flow decide iterate "next action and proof"`. The current decision Run owns
-that choice; its candidate takes effect only after the Run succeeds. A review's
-final prose or a successful process exit cannot substitute for the decision.
+At the deciding occurrence, return `{"decision":"advance","summary":"evidence"}`
+or `{"decision":"iterate","summary":"next action and proof"}`, or
+`{"decision":"blocked","reason":"question and evidence"}`. The provider receives
+this schema before generation. The Flow validates and consumes the exact selected
+successful completion; invalid output gets at most two corrective turns in the
+same conversation. Failed turns, older results and command exit cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
-execution outcome: report it with
-`lf flow blocked "reason, attempted direction, evidence, and question"`.
-The runtime keys one Ask to the exact invocation, occurrence, and pass. Retries
+decision: return it with a required reason in the final structured result.
+The runtime keys one Ask to that captured event and Flow position. Retries
 join that Ask or recover its saved completion. Its Session runs `unblock`, using
 concept-review with the human by default. Completion returns evidence to
 loop-decide for reassessment without choosing a navigation decision. If the blocker
@@ -268,10 +269,8 @@ measurement lives in reviewed `wave/<wave>/metrics/*.md` contracts, not a
 
 | Field | What it does |
 |-------|-------------|
-| `owner` | Optional OS user allowed to start the Wave automatically |
-| `home` | Optional HomeId, hostname, or IP allowed to start the Wave automatically |
 | `agent` | Preferred agent harness/model |
-| `crons` | Supplementary flow schedules, fired by the wave's resident loop |
+| `crons` | Flow schedules installed through `lf cron sync` |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf wave connect`) |
 
 The repository owns PM provider and Team authority in `.lf/config.yaml`:
@@ -285,12 +284,8 @@ pm:
 Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
 the repository Team and owns only its Initiative.
 
-`owner` and `home` say where automatic startup is wanted. Both are optional and
-independent. They are policy, not authorization or observed runtime state.
-Execution placement remains durable state: use
-`lf wave place <wave-id> <home-id>`. The Home daemon observes both the authored
-policy and recorded placement. Chat connections preserve that placement;
-there is no separate Wave enablement or pause setting.
+Execution placement is durable state: use `lf wave place <wave-id> <home-id>`.
+Placement does not edit the goal, launch work or stop existing conversations.
 
 ### Writing KRs
 

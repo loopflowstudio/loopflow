@@ -1,5 +1,3 @@
-#[path = "support/chapter.rs"]
-mod chapter;
 #[path = "support/installation.rs"]
 mod installation;
 mod support;
@@ -15,7 +13,7 @@ use loopflow::machine_install::{
 use loopflow::ops::task::{task_snapshot, task_status};
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::store::PmSnapshotRow;
-use loopflow::work::task::TaskEventKind;
+use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -37,12 +35,27 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     let child =
         support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut pr = runtime
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    let pr = runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
         .unwrap();
-    pr.parent_pr_id = Some(parent.pr.id.clone());
-    runtime.block_on(parent.store.update_task_pr(&pr)).unwrap();
+    runtime
+        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .unwrap();
 
     let checkout = || {
         loopflow::ops::task::task_checkout(
@@ -433,14 +446,20 @@ fn task_review_completion_consumes_only_installed_readiness() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let position = loopflow::durable::FlowPosition {
-        task_id: task.task.id.clone(),
+    let position = loopflow::durable::FlowSession {
+        task_id: Some(task.task.id.clone()),
+        wave_id: Some(task.task.wave_id.clone()),
+        cwd: task.task.worktree.clone(),
+        message: None,
+        model: None,
+        current_attempt: None,
+        pending_session_id: None,
+        finished: false,
         invocation: loopflow::engine::invocation::QueuedInvocation::load(
             repo.path(),
             "task-design",
         )
         .unwrap(),
-        session_run_id: None,
         ready_summary: None,
         cursor: loopflow::engine::ExecutionCursor {
             index: 1,
@@ -452,9 +471,30 @@ fn task_review_completion_consumes_only_installed_readiness() {
         failure: None,
         updated_at: time::OffsetDateTime::now_utc(),
     };
-    runtime
-        .block_on(task.store.set_flow_position(&task.task.id, position))
+    let position = runtime
+        .block_on(task.store.start_task_flow(&task.task.id, position))
         .unwrap();
+    // This proof consumes an existing review's readiness. Seed its acknowledged
+    // launch, without starting a terminal or provider in the installation fixture.
+    let position = runtime
+        .block_on(
+            task.store
+                .reserve_task_review(position.id(), position.version),
+        )
+        .unwrap();
+    let (_, review) = runtime
+        .block_on(task.store.reserve_review_run(&position))
+        .unwrap();
+    assert_eq!(
+        Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET input_published=1, provider='claude', model='sonnet' WHERE current_capture=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)",
+                [review.artifact_key.as_str()],
+            )
+            .unwrap(),
+        1
+    );
     let installation = installation::Installation::new(home.path());
     let command = |cli: &std::path::Path, selected_home: &std::path::Path, args: &[&str]| {
         let mut command = Command::new(cli);
@@ -495,10 +535,10 @@ fn task_review_completion_consumes_only_installed_readiness() {
             .expect("branch reports its private copy"),
     );
     let position = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
-    assert!(position.session_run_id.is_some());
+    assert!(position.review_artifact_key().is_some());
     let repeated = command(branch, home.path(), &["task", "run", "INF-123", "--json"])
         .output()
         .unwrap();
@@ -508,12 +548,15 @@ fn task_review_completion_consumes_only_installed_readiness() {
         String::from_utf8_lossy(&repeated.stderr)
     );
     let resumed = runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .unwrap();
     assert_eq!(resumed.invocation, position.invocation);
     assert_eq!(resumed.cursor, position.cursor);
-    assert_eq!(resumed.session_run_id, position.session_run_id);
+    assert_eq!(
+        resumed.review_artifact_key(),
+        position.review_artifact_key()
+    );
     for (cli, expected) in [
         (
             installation.cli.as_path(),
@@ -532,20 +575,27 @@ fn task_review_completion_consumes_only_installed_readiness() {
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
         assert_eq!(status["agent"], expected);
     }
-    // The private snapshot has no installed Run bundle or completion authority.
+    // The private snapshot has no installed input bundle or completion authority.
     let branch_store = runtime
         .block_on(loopflow::store::open_store(
             &loopflow::store::StorageConfig::sqlite(branch_data.join("loopflow.db")),
         ))
         .unwrap();
-    let mut copied = runtime
-        .block_on(branch_store.flow_position(&task.task.id))
+    let session_id = position.pending_session_id.as_ref().unwrap();
+    let session = runtime
+        .block_on(task.store.session(session_id))
         .unwrap()
         .unwrap();
-    copied.session_run_id = position.session_run_id.clone();
-    copied.ready_summary = Some("Branch-only feedback must stay private".into());
+    runtime
+        .block_on(branch_store.ready_session(
+            &session.id,
+            session.captured,
+            "Branch-only feedback must stay private",
+        ))
+        .unwrap();
     let copied = runtime
-        .block_on(branch_store.set_flow_position(&task.task.id, copied))
+        .block_on(branch_store.task_flow(&task.task.id))
+        .unwrap()
         .unwrap();
     let branch_events = runtime
         .block_on(branch_store.task_events_after(&task.task.id, 0))
@@ -568,7 +618,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         resumed
@@ -590,14 +640,14 @@ fn task_review_completion_consumes_only_installed_readiness() {
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("has not marked this ready"));
     assert_eq!(
         runtime
-            .block_on(task.store.flow_position(&task.task.id))
+            .block_on(task.store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         position
     );
     assert_eq!(
         runtime
-            .block_on(branch_store.flow_position(&task.task.id))
+            .block_on(branch_store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         copied
@@ -619,7 +669,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
         )
         .env(
             "LF_RUN_ID",
-            position.session_run_id.as_ref().unwrap().as_str(),
+            position.review_artifact_key().unwrap().as_str(),
         )
         .env("LF_HUMAN_SESSION", token.to_string())
         .output()
@@ -627,7 +677,18 @@ fn task_review_completion_consumes_only_installed_readiness() {
     };
     let stale = ready(&token);
     assert!(!stale.status.success());
-    assert!(String::from_utf8_lossy(&stale.stderr).contains("review session is stale"));
+    assert!(
+        String::from_utf8_lossy(&stale.stderr).contains("Session is stale"),
+        "{}",
+        String::from_utf8_lossy(&stale.stderr)
+    );
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_flow(&task.task.id))
+            .unwrap()
+            .unwrap(),
+        position
+    );
     token["token"]["iteration"] = position.cursor.iteration.into();
     let ready = ready(&token);
     assert!(
@@ -636,14 +697,14 @@ fn task_review_completion_consumes_only_installed_readiness() {
         String::from_utf8_lossy(&ready.stderr)
     );
     // Both public selectors must resolve the same installed review boundary.
-    let accepted = complete(position.session_run_id.as_ref().unwrap().as_str());
+    let accepted = complete(position.review_artifact_key().unwrap().as_str());
     assert!(
         accepted.status.success(),
         "{}",
         String::from_utf8_lossy(&accepted.stderr)
     );
     assert!(runtime
-        .block_on(task.store.flow_position(&task.task.id))
+        .block_on(task.store.task_flow(&task.task.id))
         .unwrap()
         .is_none());
     let events = runtime
@@ -666,7 +727,7 @@ fn task_review_completion_consumes_only_installed_readiness() {
     );
     assert_eq!(
         runtime
-            .block_on(branch_store.flow_position(&task.task.id))
+            .block_on(branch_store.task_flow(&task.task.id))
             .unwrap()
             .unwrap(),
         copied
@@ -707,7 +768,7 @@ fn direct_open_preserves_another_installations_development_store() {
 
 #[test]
 fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
-    use loopflow::durable::{FlowPosition, RunId, TaskWorkerClaimOutcome, TaskWorkerOwner};
+    use loopflow::durable::{FlowSession, TaskWorkerClaimOutcome, TaskWorkerOwner};
     use sha2::{Digest, Sha256};
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -720,20 +781,6 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .unwrap()
-        .unwrap();
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .unwrap();
     loopflow::journal::with_runtime(repo.path(), &["live-unblock-proof".into()], || {
         let receipt: serde_json::Value = serde_json::from_slice(
             &std::fs::read(home.path().join(format!(
@@ -754,33 +801,31 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
                     if skill.id.as_deref() == Some("decide"))
             })
             .expect("pursue has an implementation decision boundary");
-        let position = FlowPosition {
-            task_id: task.task.id.clone(),
+        let position = FlowSession {
             invocation,
-            session_run_id: None,
-            ready_summary: None,
             cursor: loopflow::engine::ExecutionCursor {
                 index: decision_index,
                 ..Default::default()
             },
             version: 0,
+            task_id: Some(task.task.id.clone()),
+            wave_id: Some(task.task.wave_id.clone()),
+            cwd: task.task.worktree.clone(),
+            message: None,
+            model: None,
+            current_attempt: None,
+            pending_session_id: None,
+            ready_summary: None,
             worker_generation: 0,
             claim: None,
             failure: None,
+            finished: false,
             updated_at: time::OffsetDateTime::now_utc(),
         };
-        let run = RunId::new();
-        let run_dir = home.path().join("runs").join(&run.as_str()[4..6]).join(run.as_str());
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(run_dir.join("events.jsonl"), format!("{}\n", serde_json::json!({
-            "schema_version": 1, "seq": 0,
-            "observed_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
-            "type": "text", "text": "Fixture decision is active"
-        }))).unwrap();
-        let before = runtime.block_on(async {
+        let (before, run) = runtime.block_on(async {
             let position = task
                 .store
-                .set_flow_position(&task.task.id, position)
+                .start_task_flow(&task.task.id, position)
                 .await
                 .unwrap();
             let TaskWorkerClaimOutcome::Claimed(claim) = task
@@ -797,38 +842,57 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             else {
                 panic!("fixture claim")
             };
-            task.store
-                .bind_task_worker_run(&task.task.id, &claim, &run, &owner)
+            // The step reserves its input after the worker acquires its claim.
+            let reserved = task
+                .store
+                .reserve_attempt(position.id(), position.version, Some(&claim), None)
                 .await
                 .unwrap();
+            let run = reserved.current_attempt.as_ref().unwrap().run_id.clone();
             task.store
-                .flow_position(&task.task.id)
+                .publish_attempt(
+                    &position.invocation.id,
+                    reserved.version,
+                reserved.current_attempt.as_ref().unwrap().captured,
+                    Some(&claim),
+                    "claude",
+                    Some("sonnet"),
+                )
+                .await
+                .unwrap();
+            let before = task
+                .store
+                .task_flow(&task.task.id)
                 .await
                 .unwrap()
-                .unwrap()
+                .unwrap();
+            (before, run)
         });
-        let key = format!(
-            "task:{}:{}:{}",
-            task.task.id,
-            before.invocation.id,
-            before.cursor.boundary_key()
-        );
-        let session = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
-        let record_path = home
-            .path()
-            .join("human-sessions")
-            .join(format!("{session}.json"));
-        std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
-        let mut record = serde_json::json!({
-            "id": session, "parent_run_id": run, "parent_run_dir": null,
-            "work": null, "work_selector": null, "title": "Choose a consumer",
-            "detail": "Fixture decision wait", "prompt": "Choose a consumer",
-            "skill": "unblock", "cwd": repo.path(), "model": "claude:sonnet",
-            "session_run_id": null, "ready_summary": null, "status": "waiting",
-            "retain_completed": true
-        });
-        let write = |record: &serde_json::Value| {
-            std::fs::write(&record_path, serde_json::to_vec(record).unwrap()).unwrap()
+        let run_dir = home.path().join("runs").join(&run.strip_prefix("run_").unwrap_or(&run)[..2]).join(run.as_str());
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(run_dir.join("events.jsonl"), format!("{}\n", serde_json::json!({
+            "schema_version": 1, "seq": 0,
+            "observed_at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
+            "type": "text", "text": "Fixture decision is active"
+        }))).unwrap();
+        // The deciding Run and its recovery share one keyed unblock Session.
+        let keyed = |position: &FlowSession| {
+            format!(
+                "ask_once_{}",
+                hex::encode(Sha256::digest(position.blocker_key().unwrap().as_bytes()))
+            )
+        };
+        let session = keyed(&before);
+        let ask_session = |session: &str, caller: String| loopflow::session::AgentSession {
+            captured: None,
+            id: session.to_string(), artifact_key: uuid::Uuid::new_v4().simple().to_string(), caller_artifact_key: Some(caller),
+            input_published: true, cwd: repo.path().into(), skill: Some("unblock".into()),
+            provider: Some("claude".into()), model: Some("sonnet".into()), node: None, iterations: None,
+            task_id: Some(task.task.id.clone()), wave_id: Some(task.task.wave_id.clone()),
+            flow_session_id: None, work_source: Some(loopflow::session::WorkSource::Inherited), bound_at: None,
+            kind: loopflow::session::SessionKind::Ask, interactive: true, repo: None,
+            title: "Choose a consumer".into(), title_source: loopflow::session::TitleSource::Generated,
+            request: Some("Choose a consumer".into()), ready_summary: None, completed_at: None, created_at: 1,
         };
         let read = |args: &[&str]| {
             let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -845,11 +909,27 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             );
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
         };
-        write(&record);
         let status_args = ["task", "status", "INF-123", "--json"];
+        // A waiting Ask from an earlier Run cannot repaint this worker.
+        let stale = ask_session(&session, uuid::Uuid::new_v4().simple().to_string());
+        let stale = runtime
+            .block_on(task.store.create_session(stale, None))
+            .unwrap();
+        assert_eq!(read(&status_args)["execution"]["state"], "running");
+        // The same Session on the deciding Run blocks it, in the CLI and the desktop alike.
+        let current = runtime
+            .block_on(
+                task.store
+                    .replace_session_input(stale.captured, ask_session(&session, run.clone())),
+            )
+            .unwrap();
         let status = read(&status_args);
         assert_eq!(status["execution"]["state"], "blocked");
-        assert_eq!(status["execution"]["run_id"], run.as_str());
+        assert_eq!(status["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
+        assert!(status["execution"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains(&session));
         let roadmap = read(&["roadmap", "--json"]);
         let snapshot = &roadmap["waves"][0]["tasks"]["items"][0];
         assert_eq!(snapshot["flow"]["record"]["execution"], "blocked");
@@ -864,24 +944,24 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             .unwrap()
             .contains("without Task resume"));
         // Completion changes only observation; it neither releases the claim nor navigates.
-        record["status"] = serde_json::json!({"completed": {"summary": "Switch the reader"}});
-        write(&record);
+        runtime
+            .block_on(
+                task.store
+                    .ready_session(&session, current.captured, "Switch the reader"),
+            )
+            .unwrap();
+        runtime
+            .block_on(task.store.complete_session(&session, current.captured))
+            .unwrap();
         assert_eq!(read(&status_args)["execution"]["state"], "running");
         assert_eq!(
             runtime
-                .block_on(task.store.flow_position(&task.task.id))
+                .block_on(task.store.task_flow(&task.task.id))
                 .unwrap()
                 .unwrap(),
             before
         );
-        // A waiting Ask from an earlier Run cannot repaint this worker.
-        record["status"] = serde_json::json!("waiting");
-        record["parent_run_id"] = serde_json::json!(RunId::new());
-        write(&record);
-        assert_eq!(read(&status_args)["execution"]["state"], "running");
         // Nor can the same Run's Ask from another boundary or invocation.
-        std::fs::remove_file(&record_path).unwrap();
-        record["parent_run_id"] = serde_json::json!(run);
         for invocation_changed in [false, true] {
             let mut historical = before.clone();
             if invocation_changed {
@@ -889,19 +969,10 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
             } else {
                 historical.cursor.iteration += 1;
             }
-            let key = format!(
-                "task:{}:{}:{}",
-                task.task.id,
-                historical.invocation.id,
-                historical.cursor.boundary_key()
-            );
-            let id = format!("ask_once_{}", hex::encode(Sha256::digest(key.as_bytes())));
-            record["id"] = serde_json::json!(id);
-            std::fs::write(
-                record_path.parent().unwrap().join(format!("{id}.json")),
-                serde_json::to_vec(&record).unwrap(),
-            )
-            .unwrap();
+            let other = ask_session(&keyed(&historical), run.clone());
+            runtime
+                .block_on(task.store.create_session(other, None))
+                .unwrap();
             assert_eq!(read(&status_args)["execution"]["state"], "running");
         }
         // The body is real; the five-minute observation history is simulated.
@@ -930,12 +1001,12 @@ fn task_live_unblock_status_and_desktop_share_exact_boundary_and_recovery() {
         let desktop = read(&["roadmap", "--json"]);
         drop(body);
         assert_eq!(stalled["execution"]["state"], "stalled");
-        assert_eq!(stalled["execution"]["run_id"], run.as_str());
+        assert_eq!(stalled["execution"]["captured"], before.current_attempt.as_ref().unwrap().captured);
         let flow = &desktop["waves"][0]["tasks"]["items"][0]["flow"];
         assert_eq!(flow["record"]["execution"], "stalled");
         assert_eq!(flow["record"]["reason"], stalled["execution"]["reason"]);
         assert!(flow["controls"].as_array().unwrap().iter().find(|control| control["kind"] == "resume").unwrap()["unavailable"].as_str().unwrap().contains("Interrupt"));
-        assert_eq!(runtime.block_on(task.store.flow_position(&task.task.id)).unwrap().unwrap(), before);
+        assert_eq!(runtime.block_on(task.store.task_flow(&task.task.id)).unwrap().unwrap(), before);
         Ok(())
     })
     .unwrap();
@@ -974,16 +1045,6 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         .block_on(task.store.get_project(&task.task.project_id))
         .expect("read owning Project")
         .expect("owning Project exists");
-    runtime
-        .block_on(task.store.save_chapter(
-            &chapter::current_chapter(
-                &task.task.wave_id,
-                "task-pr-tests",
-                project.plan.id.as_str(),
-            ),
-            true,
-        ))
-        .expect("bind current chapter");
     let payload = serde_json::json!({
         "projects": [{
             "id": project.plan.id.as_str(),
@@ -991,7 +1052,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
             "name": project.plan.name,
             "summary": project.plan.prompt_context,
             "metric_targets": [],
-            "flows": {"recommended": null},
+            "flow": "feature", "status": "started",
             "krs": [],
             "initiative_ids": ["initialization-initiative"],
             "team_ids": ["initialization-team"]

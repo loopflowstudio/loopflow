@@ -7,6 +7,30 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Session pages return a stable continuation and preserve renamed records")
+    func sessionsReadPages() async throws {
+        let row = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: sessionFixtureURL())) as? [String: Any])
+        var first = row
+        first["id"] = "session-a"
+        var last = row
+        last["id"] = "session-z"
+        last["title"] = "AAA renamed"
+        let firstJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [first], "next": "session-a"]), as: UTF8.self)
+        let lastJSON = String(decoding: try JSONSerialization.data(withJSONObject:
+            ["entries": [last], "next": NSNull()]), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            args.contains("--after") ? lastJSON : firstJSON
+        }
+        let page = try await query.sessionPage(cwd: "/tmp/repo")
+        let final = try await query.sessionPage(after: page.next, cwd: "/tmp/repo")
+        #expect(page.entries.map(\.id) == ["session-a"])
+        #expect(page.next == "session-a")
+        #expect(final.entries.map(\.id) == ["session-z"])
+        #expect(final.entries.first?.title == "AAA renamed")
+        #expect(final.next == nil)
+    }
+
     @Test("lf wave list decodes and scopes to the repo")
     func wavesDecodeAndScope() async throws {
         let json = """
@@ -54,7 +78,6 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status == .ready)
         #expect(waves[0].repo == "/tmp/repo-a")
-
     }
 
     @Test("lf wave list can be decoded once for every repo")
@@ -110,168 +133,150 @@ struct RegistryQueryTests {
     @Test("lf wave status maps the work hierarchy onto the wave")
     func statusMapsWork() async throws {
         let json = """
-        {
-          "wave": {
-            "id": "goals",
-            "name": "goals",
-            "status": "ready",
-            "goal": "g",
-            "repo": "/tmp/repo-a",
-            "active_tasks": 1,
-            "live": false,
-
-            "endpoint": null,
-            "created_at": null,
-            "parent_wave_id": null,
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            }
-          },
-          "loop_state": "turning",
-          "runs": {
-            "state": "ok",
-            "truncated": false,
-            "items": [
-              {
-                "id": "run_00000000000000000000000000000001",
-                "parent_run_id": null,
-                "repo": "/src/loopflow",
-                "worktree": "/src/loopflow.task",
-                "subjects": [
-                  {
-                    "selector": "wave:goals",
-                    "source": "declared"
-                  },
-                  {
-                    "selector": "task:INF-123",
-                    "source": "declared"
-                  }
-                ],
-                "skill": "task/pursue",
-                "outcome": "completed",
-                "started": 100,
-                "ended": 110,
-                "usage": {
-                  "streams": 1,
-                  "final_streams": 1,
-                  "gaps": 0,
-                  "input_tokens": 1000,
-                  "output_tokens": 200,
-                  "total_input_tokens": 1000,
-                  "peak_input_tokens": 900,
-                  "context_window_tokens": 200000,
-                  "reasoning_tokens": null,
-                  "cache_read_tokens": 800,
-                  "cache_write_tokens": null,
-                  "cost_usd": 0.25
-                },
-                "evidence_gaps": 0,
-                "harness": "claude",
-                "model": "opus",
-                "surface": "headless"
-              }
-            ]
-          },
-          "metric_portfolio": {
-            "metrics": [],
-            "contract_issues": []
-          },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "connect",
-              "home_id": "home_00000000000000000000000000000001"
-            }
-          },
-          "chapter": {
-            "id": "current",
-            "source_project_id": "project-1",
-          "source_project_slug": "release-feedback",
-            "metric_targets": [],
-            "flows": {
-              "recommended": "task-design"
-            },
-            "krs": [
-              {
-                "text": "Fast loops",
-                "holds": false
-              }
-            ],
-            "phase": "complete",
-            "error": null
-          },
-          "tasks": {
-            "state": "ok",
-            "items": [
-              {
-                "task": {
-                  "id": "issue-1",
-                  "identifier": "INF-123",
-                  "name": "Wire it",
-                  "description": "",
-                  "rank": 1,
-                  "completed": false,
-                  "assignee": null
-                },
-                "reference": {
-                  "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
-                  "workspace": {
-                    "slug": "wire-it",
-                    "branch": "jack/inf-123",
-                    "worktree": "/task-wt"
-                  }
-                },
-                "runtime": {
-                  "work_id": "issue-1",
-                  "status": "ready",
-                  "reason": "ready",
-                  "updated_at": "2026-07-06T00:00:00Z",
-                  "provider": "codex",
-                  "started": true
-                },
-                "directive": null,
-                "next_move": {
-                  "owner": "task",
-                  "reason": "ready"
-                },
-                "condition": {
-                  "state": "clear",
-                  "reason": "ready",
-                  "observed_at": "2026-07-06T00:01:00Z",
-                  "evidence_age_secs": 60,
-                  "local_progress": {
-                    "state": "observed",
-                    "unsettled": false,
-                    "dirty": false,
-                    "authored_commits": false,
-                    "recovery_required": false,
-                    "reason": null
-                  }
-                },
-                "actions": {
-                  "recommended": "resume",
-                  "reason": "resume the parked Task"
-                },
-                "prs": [],
-                "active_pr": null
-              }
-            ],
-            "truncated": false
-          },
-          "unavailable_tasks": []
-        }
-        """
+{
+  "wave": {
+    "id": "goals",
+    "name": "goals",
+    "status": "ready",
+    "goal": "g",
+    "repo": "/tmp/repo-a",
+    "active_tasks": 1,
+    "created_at": null,
+    "parent_wave_id": null,
+    "home": {
+      "id": "home_00000000000000000000000000000001",
+      "route": "local",
+      "created_at": "1970-01-01T00:00:00Z",
+      "observed_at": "1970-01-01T00:00:00Z"
+    }
+  },
+  "runs": {
+    "state": "ok",
+    "truncated": false,
+    "items": [
+      {
+        "repo": "/src/loopflow",
+        "worktree": "/src/loopflow.task",
+        "skill": "task/pursue",
+        "usage": {
+          "streams": 1,
+          "final_streams": 1,
+          "gaps": 0,
+          "input_tokens": 1000,
+          "output_tokens": 200,
+          "total_input_tokens": 1000,
+          "peak_input_tokens": 900,
+          "context_window_tokens": 200000,
+          "reasoning_tokens": null,
+          "cache_read_tokens": 800,
+          "cache_write_tokens": null,
+          "cost_usd": 0.25
+        },
+        "evidence_gaps": 0,
+        "harness": "claude",
+        "model": "opus",
+        "surface": "headless",
+        "session_id": "run_00000000000000000000000000000001",
+        "captured": 12,
+    "artifact_key": "run_00000000000000000000000000000001",
+        "caller_artifact_key": null,
+        "observed_at": 100,
+        "recorded_outcome": "completed",
+    "recorded_at": 110,
+        "providers": [],
+        "task_id": "task_22222222222222222222222222222222",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "task_identifier": "INF-123",
+        "wave_name": "goals"
+      }
+    ]
+  },
+  "metric_portfolio": {
+    "metrics": [],
+    "contract_issues": []
+  },
+  "projects": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "project-1",
+        "work_id": null,
+        "slug": "release-feedback",
+        "name": "current",
+        "flow": "task-design",
+        "status": "started",
+        "metric_targets": [],
+        "krs": [
+          {
+            "text": "Fast loops",
+            "holds": false
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  },
+  "tasks": {
+    "state": "ok",
+    "items": [
+      {
+        "task": {
+          "id": "issue-1",
+          "identifier": "INF-123",
+          "name": "Wire it",
+          "description": "",
+          "rank": 1,
+          "completed": false,
+          "assignee": null
+        },
+        "reference": {
+          "issue_url": "https://linear.app/loopflow/issue/INF-123/wire-it",
+          "workspace": {
+            "slug": "wire-it",
+            "branch": "jack/inf-123",
+            "worktree": "/task-wt"
+          }
+        },
+        "runtime": {
+          "work_id": "issue-1",
+          "status": "ready",
+          "reason": "ready",
+          "updated_at": "2026-07-06T00:00:00Z",
+          "provider": "codex",
+          "started": true
+        },
+        "directive": null,
+        "next_move": {
+          "owner": "task",
+          "reason": "ready"
+        },
+        "condition": {
+          "state": "clear",
+          "reason": "ready",
+          "observed_at": "2026-07-06T00:01:00Z",
+          "evidence_age_secs": 60,
+          "local_progress": {
+            "state": "observed",
+            "unsettled": false,
+            "dirty": false,
+            "authored_commits": false,
+            "recovery_required": false,
+            "reason": null
+          }
+        },
+        "actions": {
+          "recommended": "resume",
+          "reason": "resume the parked Task"
+        },
+        "prs": [],
+        "active_pr": null
+      }
+    ],
+    "truncated": false
+  },
+  "unavailable_tasks": []
+}
+"""
         let query = RegistryQuery { args, _ in
             #expect(args == ["wave", "status", "goals", "--json"])
             return json
@@ -280,7 +285,10 @@ struct RegistryQueryTests {
         let result = try await query.status(wave: "goals", cwd: nil)
         #expect(result.wave.id == "goals")
         #expect(result.wave.goal == "g")
-        #expect(result.workMap.chapter?.flows.recommended == "task-design")
+
+
+
+        #expect(result.workMap.currentProject?.flow == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
@@ -368,22 +376,10 @@ struct RegistryQueryTests {
             "metrics": [],
             "contract_issues": []
           },
-          "home_runtime": {
-            "home": {
-              "id": "home_00000000000000000000000000000001",
-              "route": "local",
-              "created_at": "1970-01-01T00:00:00Z",
-              "observed_at": "1970-01-01T00:00:00Z"
-            },
-            "state": "stopped",
-            "reason": "no resident is serving",
-            "endpoint": null,
-            "action": {
-              "kind": "connect",
-              "home_id": "home_00000000000000000000000000000001"
-            }
+          "projects": {
+            "state": "unavailable",
+            "reason": "Project planning unavailable"
           },
-          "chapter": null,
           "tasks": {
             "state": "ok",
             "items": [],
@@ -456,8 +452,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(cwd == "/tmp/repo")
             switch args {
-            case ["session", "list", "--json"]:
-                return sessionsJSON
+            case ["session", "list", "--json", "--page", "--limit", "100"]:
+                return #"{"entries":\#(sessionsJSON),"next":null}"#
             case ["session", "open", session.id, "--json"]:
                 return sessionJSON
             default:
@@ -465,7 +461,7 @@ struct RegistryQueryTests {
             }
         }
 
-        let listed = try await query.sessions(cwd: "/tmp/repo")
+        let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
         let opened = try await query.openSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)
@@ -488,66 +484,54 @@ struct RegistryQueryTests {
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
     }
 
-    @Test("lf activity accepts invocation identity from the installed Home")
-    func invocationActivityDecodes() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"run:finished:1","recorded_at":1784606300,"summary":"Run completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"run_finished","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["activity", "--since", "7d", "--limit", "50", "--json"])
-            return json
-        }
-
-        let snapshot = try await query.workActivity()
-
-        if case .runFinished(let identity, let status) = snapshot.items[0].fact {
-            #expect(identity.invocationId == "invocation-1")
-            #expect(identity.traceId == "trace-1")
-            #expect(identity.execId == "exec-1")
-            #expect(status == "ok")
-        } else {
-            Issue.record("expected a Run finish")
-        }
+    @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
+    func invocationActivityIsNotSessionHistory() async throws {
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#
+        let query = RegistryQuery { _, _ in json }
+        await #expect(throws: (any Error).self) { try await query.workActivity() }
     }
 
     @Test("lf usage preserves direct Run evidence through a Work drill")
     func usageDecodes() async throws {
         let json = """
-        [
-          {
-            "id": "run_00000000000000000000000000000001",
-            "parent_run_id": null,
-            "repo": "/src/loopflow",
-            "worktree": null,
-            "subjects": [
-              {
-                "selector": "task:LOO-265",
-                "source": "declared"
-              }
-            ],
-            "skill": "implement",
-            "outcome": "completed",
-            "started": 100,
-            "ended": 110,
-            "usage": {
-              "streams": 2,
-              "final_streams": 1,
-              "gaps": 1,
-              "input_tokens": 120,
-              "output_tokens": null,
-              "total_input_tokens": 120,
-              "peak_input_tokens": 100,
-              "context_window_tokens": 200000,
-              "reasoning_tokens": null,
-              "cache_read_tokens": 80,
-              "cache_write_tokens": null,
-              "cost_usd": 0.25
-            },
-            "evidence_gaps": 1,
-            "harness": "codex",
-            "model": "gpt",
-            "surface": "headless"
-          }
-        ]
-        """
+[
+  {
+    "repo": "/src/loopflow",
+    "worktree": null,
+    "skill": "implement",
+    "usage": {
+      "streams": 2,
+      "final_streams": 1,
+      "gaps": 1,
+      "input_tokens": 120,
+      "output_tokens": null,
+      "total_input_tokens": 120,
+      "peak_input_tokens": 100,
+      "context_window_tokens": 200000,
+      "reasoning_tokens": null,
+      "cache_read_tokens": 80,
+      "cache_write_tokens": null,
+      "cost_usd": 0.25
+    },
+    "evidence_gaps": 1,
+    "harness": "codex",
+    "model": "gpt",
+    "surface": "headless",
+    "session_id": "run_00000000000000000000000000000001",
+    "captured": 12,
+    "artifact_key": "run_00000000000000000000000000000001",
+    "caller_artifact_key": null,
+    "observed_at": 100,
+    "recorded_outcome": "completed",
+    "recorded_at": 110,
+    "providers": [],
+    "task_id": "task_22222222222222222222222222222222",
+    "wave_id": null,
+    "task_identifier": "LOO-265",
+    "wave_name": null
+  }
+]
+"""
         let query = RegistryQuery { args, _ in
             #expect(args == [
                 "usage", "--days", "7", "--json",
@@ -607,7 +591,7 @@ struct RegistryQueryTests {
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Ship it.", cwd: "/tmp/repo", sync: true)
         #expect(plan.objective == "Ship it.")
-        #expect(plan.chapter?.krs.count == 1)
+        #expect(plan.currentProject?.krs.count == 1)
     }
 
     @Test("a failed lf query surfaces as an error")

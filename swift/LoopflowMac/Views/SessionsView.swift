@@ -388,7 +388,12 @@ struct SessionsView: View {
 struct SessionsContentView: View {
     let homeId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: store.repoPath) }
-    private var currentIdentity: WorkspaceIdentity { taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity }
+    private var currentIdentity: WorkspaceIdentity {
+        if navigation.selectedSessionId != nil {
+            return selectedWorkspace?.identity ?? worktreeLayout.focusedPath ?? rootIdentity
+        }
+        return taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity
+    }
     private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
     private var showsFiles: Bool { workspace.showsFiles }
     @Bindable var model: PodiumModel
@@ -397,6 +402,7 @@ struct SessionsContentView: View {
     private let worktreeLayout: WorktreeLayoutStore
     @ObservedObject private var store: SessionsStore
     @State private var layoutRevision = 0
+    @State private var restorePaletteFocus = true
     @State private var launchError: String?
     @State private var completing: String?
     @Environment(\.palette) private var palette
@@ -466,7 +472,7 @@ struct SessionsContentView: View {
                     VStack(spacing: 0) {
                         WorkspaceBreadcrumbBar(
                             model: model,
-                            crumb: model.workspace.breadcrumb(selection: model.selection, sessionId: navigation.selectedSessionId),
+                            crumb: model.breadcrumb,
                             onOpenSession: openSession, onMonitor: showMonitor
                         ) {
                             if taskPath != nil {
@@ -474,7 +480,8 @@ struct SessionsContentView: View {
                                     .buttonStyle(.plain).fixedSize()
                             }
                             if terminalsVisible {
-                                if let taskPath {
+                                if navigation.selectedSessionId != nil { worktreeChip }
+                                else if let taskPath {
                                     Text(URL(fileURLWithPath: taskPath).lastPathComponent)
                                         .font(Typography.code(11)).lineLimit(1)
                                         .foregroundStyle(palette.textSecondary).help(taskPath)
@@ -485,7 +492,7 @@ struct SessionsContentView: View {
                                     Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
                                         .accessibilityIdentifier("workspace-restore")
                                 }
-                                if fileTask == nil || taskPath != nil { completionControls }
+                                if navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil { completionControls }
                             }
                         }
                         if multiplexer.zoomedPaneId == nil, let task = fileTask, let found = model.task(id: task.task.id) {
@@ -513,6 +520,7 @@ struct SessionsContentView: View {
                                         node: worktreeLayout.layout, layout: worktreeLayout,
                                         workspaces: workspaces, isActive: terminalsVisible,
                                         showsStrips: worktreeLayout.layout.isSplit, sessions: store)
+
                                 }
                             }
                             .opacity(terminalsVisible ? 1 : 0)
@@ -564,9 +572,28 @@ struct SessionsContentView: View {
         .tint(palette.accent)
         .environment(model)
         .overlay {
-            if terminalsVisible, fileTask == nil || taskPath != nil {
+            if terminalsVisible, navigation.palette == nil, navigation.selectedSessionId != nil || fileTask == nil || taskPath != nil {
                 SessionsShortcutMonitor { _handle($0) }
                     .allowsHitTesting(false).frame(width: 0, height: 0)
+            }
+        }
+        .background {
+            WorkspacePaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
+                restorePaletteFocus = true
+                navigation.palette = .search
+            }.frame(width: 0, height: 0)
+        }
+        .sheet(isPresented: Binding(
+            get: { navigation.palette != nil },
+            set: { if !$0 { navigation.palette = nil } }
+        )) {
+            switch navigation.palette {
+            case .flow(let name):
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation)
+            case .search:
+                WorkspacePalette(model: model, activate: navigate)
+            case nil:
+                EmptyView()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
@@ -644,17 +671,17 @@ struct SessionsContentView: View {
                             }
                         }
                     }.buttonStyle(.plain)
-                    if let caller = item.record.callerRunId {
-                        Button("Caller · \(TaskRunsView.shortId(caller))") {
-                            if let session = store.sessions.first(where: { $0.record.runId == caller }) {
+                    if let caller = item.record.callerSessionId {
+                        Button("Caller · \(String(caller.prefix(12)))") {
+                            if let session = store.sessions.first(where: { $0.record.id == caller }) {
                                 openSession(session.record)
                             } else if let taskId = item.record.workspace?.taskId {
                                 showMonitor(taskId)
                             }
                         }
                         .buttonStyle(.plain)
-                        .help("Waiting Run: \(caller). Open its conversation or Task activity.")
-                        .disabled(!store.sessions.contains(where: { $0.record.runId == caller }) && item.record.workspace?.taskId == nil)
+                        .help("Waiting conversation: \(caller). Open its conversation or Task activity.")
+                        .disabled(!store.sessions.contains(where: { $0.record.id == caller }) && item.record.workspace?.taskId == nil)
                     }
                     Spacer()
                     if let pane = multiplexer.pane(forSessionId: item.id) {
@@ -712,6 +739,38 @@ struct SessionsContentView: View {
         }
     }
 
+    private func navigate(_ destination: WorkspaceDestination) {
+        // Refreshes can remove an action while the palette is open.
+        guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
+        restorePaletteFocus = false
+        navigation.palette = nil
+        switch destination {
+        case .wave(let id): model.select(.wave(id: id))
+        case .task(let id):
+            Task { await model.openPaletteTask(id) }
+            return
+        case .session(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            openSession(record)
+        case .flow(let name): navigation.palette = .flow(name)
+        case .chooseFlow(let id):
+            guard let found = model.task(id: id) else { return }
+            model.select(.task(id: id))
+            let hasInvocation: Bool
+            if case .pinned = found.task.flow.record { hasInvocation = true } else { hasInvocation = false }
+            navigation.flowDrafts[id, default: TaskFlowDraft()].picker = hasInvocation ? .restart : .preview
+        case .rename(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            openSession(record)
+            model.beginSessionRename(record)
+        case .bind(let id):
+            guard let record = model.sessions.value?.first(where: { $0.id == id }) else { return }
+            model.beginSessionBinding(record)
+        case .monitor(let id): showMonitor(id)
+        }
+        model.remember(destination)
+    }
+
     private func openSession(_ record: SessionRecord) {
         let subject = model.workspace.subject(for: record.id)
         model.select(subject)
@@ -748,7 +807,7 @@ struct SessionsContentView: View {
             return
         }
         guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        let sessions = model.workspace.waves.lazy.flatMap(\.tasks)
+        let sessions = model.visibleWorkspace.waves.lazy.flatMap(\.tasks)
             .first { $0.id.work == work }?.sessions ?? []
         if let session = sessions.first(where: {
             if $0.kind == .flow, case .step(_, _, _, _, _, .current) = $0.flowMembership { return true }
@@ -770,7 +829,7 @@ struct SessionsContentView: View {
         navigation.selectedSessionId = nil
         navigation.content = .terminals
         multiplexer.showMonitor(taskId: taskId)
-        model.observeActiveRuns()
+        model.observeActiveSessions()
     }
 
     private func startConversation() {
@@ -1347,6 +1406,7 @@ private struct SessionPaneView: View {
     private var stateDot: Color {
         guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
         switch state {
+        case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
         case .waiting, .ready: return TerminalPalette.stateDot(.human)
         case .closed: return TerminalPalette.stateDot(.stopped)

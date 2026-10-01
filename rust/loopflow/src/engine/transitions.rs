@@ -13,6 +13,7 @@ pub enum FlowDecision {
     Advance,
     #[serde(alias = "repeat", alias = "continue")]
     Iterate,
+    Blocked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +101,14 @@ pub fn finish_step(
     };
 
     match decision {
+        FlowDecision::Blocked => Ok(FlowTransition::Blocked(
+            progress
+                .verdict
+                .as_ref()
+                .expect("blocked decision has a verdict")
+                .summary
+                .clone(),
+        )),
         FlowDecision::Iterate => {
             let Some((id, target)) = edge else {
                 bail!("repeat decision at step {index} has no declared backward edge");
@@ -147,7 +156,7 @@ mod tests {
             repeat: edge.map(|from| RepeatPolicy {
                 from: from.to_owned(),
             }),
-            flow_parents: vec![],
+            sources: vec![],
         })
     }
 
@@ -167,7 +176,7 @@ mod tests {
                     command: "finish".to_owned(),
                     args: vec![],
                 },
-                flow_parents: vec![],
+                sources: vec![],
             }),
         ];
         let mut progress = FlowProgress {
@@ -359,18 +368,18 @@ mod tests {
     }
 
     #[test]
-    fn navigation_reads_old_names_but_writes_advance_and_iterate_only() {
+    fn decisions_read_old_names_and_write_current_values() {
         for (saved, decision, canonical) in [
             ("continue", FlowDecision::Iterate, "iterate"),
             ("repeat", FlowDecision::Iterate, "iterate"),
             ("complete", FlowDecision::Advance, "advance"),
             ("next", FlowDecision::Advance, "advance"),
+            ("blocked", FlowDecision::Blocked, "blocked"),
         ] {
             let decoded: FlowDecision = serde_json::from_value(saved.into()).unwrap();
             assert_eq!(decoded, decision);
             assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
         }
-        assert!(serde_json::from_value::<FlowDecision>("blocked".into()).is_err());
     }
 
     #[test]

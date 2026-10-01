@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::controller::wave::metrics::{
-    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
-    ObservationAcceptance,
-};
 #[cfg(test)]
 use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
+use crate::work::wave::metrics::{
+    MetricContract, MetricIdentity, MetricObservation, MetricObservationEvidence,
+    ObservationAcceptance,
+};
 
 use super::SqliteStore;
 
@@ -255,8 +255,8 @@ mod tests {
     use tempfile::tempdir;
     use time::Duration;
 
-    use crate::controller::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::id::WaveId;
+    use crate::work::wave::metrics::{MetricContractDefinition, MetricDuration, MetricStage};
     use crate::work::wave::Wave;
 
     use super::*;

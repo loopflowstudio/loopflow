@@ -54,7 +54,8 @@ async fn graphql(
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"",
+            "project":{"id":"project-1","name":"Chapter","description":"","content":"flow: feature",
+                "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation CreateComment") {
         let node = comment(
@@ -277,7 +278,7 @@ async fn task_comments_read_and_publish_without_placement() {
             let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(confirmed.comments.len(), 2);
             assert_eq!(provider.lock().await.posted.len(), 2);
-            std::env::set_var(crate::durable::RUN_ID_ENV, crate::durable::RunId::new().as_str());
+            std::env::set_var(crate::durable::RUN_ID_ENV, crate::session_record::new_artifact_key());
             let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
             let body = &progress.comments.last().unwrap().body;
             assert!(body.contains("<!-- loopflow-progress:"));

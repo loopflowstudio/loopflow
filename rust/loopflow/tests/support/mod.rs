@@ -109,7 +109,7 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
-    r#"#!/bin/sh
+    codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -121,10 +121,28 @@ echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
 echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
 echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
-    .replace("__OUTPUT__", &output)
+    .replace("__OUTPUT__", &output))
+}
+
+#[allow(dead_code)] // Shared provider transport compiled into multiple test crates.
+pub fn codex_socket_script(script: &str) -> String {
+    let bridge = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_socket.py")
+        .replace('\'', r#"'"'"'"#);
+    format!(
+        r#"#!/bin/sh
+if [ -z "$LF_TEST_CODEX_STDIO" ]; then
+    case "$*" in
+        *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
+    esac
+fi
+{script}
+"#,
+        script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
+    )
 }
 
 pub struct EnvGuard {
@@ -277,6 +295,8 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            flow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),
@@ -337,7 +357,8 @@ fn register_task_fixture(
                 "name": project.plan.name.as_str(),
                 "summary": "",
                 "metric_targets": [],
-                "flows": null,
+                "flow": project.plan.flow,
+                "status": project.plan.status,
                 "krs": [],
                 "initiative_ids": ["initiative-task-pr-tests"],
                 "team_ids": ["team-task-pr-tests"]

@@ -418,3 +418,22 @@ fn task_automation_keeps_coverage_distinct_from_held_and_reviewing_work() {
     assert_eq!(status.tasks[1].enabled, Some(false));
     assert_eq!(serde_json::to_value(status).unwrap(), value);
 }
+
+#[test]
+fn context_report_keeps_unknown_sources_distinct_from_zero() {
+    use loopflow::context_usage::{ContextReport, ContextSource};
+    let input = include_str!("../../../tests/fixtures/dto/context_report.json");
+    let report: ContextReport = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+    let steers = &report.steps[0].sources[4];
+    assert_eq!(steers.source, ContextSource::Steers);
+    assert_eq!((steers.count, steers.over_budget), (Some(384), true));
+    assert!(report.steps[1]
+        .sources
+        .iter()
+        .all(|usage| usage.tokens.is_none()));
+    assert_eq!(ContextReport::new(report.steps.clone()), report);
+}

@@ -1,6 +1,7 @@
 pub mod build_info;
 pub mod chat;
 pub mod child;
+pub mod context_usage;
 pub mod controller;
 pub mod durable;
 pub mod engine;

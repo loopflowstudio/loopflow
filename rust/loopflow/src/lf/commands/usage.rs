@@ -15,6 +15,7 @@ const NUM_WIDTH: usize = 12;
 
 /// Print Session input usage without inventing completeness or provider finality.
 pub fn run(
+    context: bool,
     json: bool,
     days: u32,
     wave: Option<&str>,
@@ -32,6 +33,22 @@ pub fn run(
         parent,
         since_days(days),
     )?;
+    if context {
+        // Oldest first: a Task's steps read in the order they ran.
+        let home = crate::store::lf_home_dir();
+        let report = crate::context_usage::ContextReport::new(
+            runs.iter()
+                .rev()
+                .map(|run| crate::context_usage::step_context(&home, run))
+                .collect(),
+        );
+        if json {
+            println!("{}", serde_json::to_string(&report)?);
+        } else {
+            println!("{}", crate::context_usage::render_report(&report));
+        }
+        return Ok(());
+    }
     if json {
         println!("{}", serde_json::to_string(&runs)?);
         return Ok(());

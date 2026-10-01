@@ -113,7 +113,13 @@ pub fn observe_provider_session() -> Result<()> {
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
-pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> Result<()> {
+pub fn inspect(
+    selector: &str,
+    events: bool,
+    final_answer: bool,
+    context: bool,
+    json: bool,
+) -> Result<()> {
     let home = crate::store::lf_home_dir();
     let database = crate::store::database_path_from_env()?;
     let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
@@ -157,6 +163,15 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
             )),
         };
     }
+    if context {
+        let step = crate::context_usage::step_context(&home, &snapshot);
+        if json {
+            println!("{}", serde_json::to_string(&step)?);
+        } else {
+            println!("{}", crate::context_usage::render_step(&step));
+        }
+        return Ok(());
+    }
     if json {
         println!("{}", serde_json::to_string(&snapshot)?);
         return Ok(());
@@ -190,6 +205,10 @@ pub fn inspect(selector: &str, events: bool, final_answer: bool, json: bool) -> 
         }
     );
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
+    println!(
+        "{}",
+        crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
+    );
     Ok(())
 }
 

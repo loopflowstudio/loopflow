@@ -246,11 +246,13 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
+    let output = command(home.path(), cwd.path(), &["task", "sync", "--plan"])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Run lf task sync from a Git repository")
+    );
     let output = command(home.path(), cwd.path(), &["home", "id"])
         .output()
         .unwrap();

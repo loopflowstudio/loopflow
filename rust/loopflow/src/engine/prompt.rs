@@ -2092,13 +2092,13 @@ mod tests {
             assert!(prompt.contains("Checks and Flow boundaries"));
             assert!(prompt.contains("Gate owns\nverification once"));
             assert!(prompt.contains("Checks must run headless"));
-            assert!(prompt.contains("lf pr land"));
+            assert!(prompt.contains("lf land"));
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
             let orchestrates = matches!(name, "loopflow" | "wave/operate");
             assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
-            for procedure in ["lf restart", "lf place", "lf ps --json"] {
+            for procedure in ["lf restart", "lf wave place", "lf ps --json"] {
                 assert_eq!(
                     prompt.contains(procedure),
                     name == "loopflow",

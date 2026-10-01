@@ -151,3 +151,38 @@ After `lf commit`, another continue reported no sync in progress. Both histories
 are retained and the pinned target is an ancestor; no new sync or push was started.
 
 Focused sync proof: `cargo test -p loopflow --test global_commands context_budget_preview_reads_authored_wave_without_registration` (1), `cargo test -p loopflow --test documented_commands --test planning_lookup_tests` (4) — passed; disposable Task-adoption harness remains with gate/CI.
+
+## Gate review · 2026-09-30
+
+Reviewed against pinned main `708d4e94682ba103ba338420588f0a16d8cc6362`.
+Help normalization discarded the selected Task/worktree before looking up a
+definition. It now retains location selectors while keeping Monitor's local
+Task filter local; a public CLI regression reads a skill found only in the
+selected checkout. The owner tree also made bare `sync` ambiguous. Refresh and
+recovery instructions now name `task sync`; deserializing a saved `rebase` or
+`sync` command moves it to that owner without replacing captured arguments or
+the graph. Existing real Git proofs cover both saved spellings and Task parents.
+
+The review also repaired stale Session, Flow, Monitor and delivery callers in
+guides, the demo script and Rust/Python/Swift fixtures. Desktop process discovery
+already used the correct command; its fixture launcher did not. Repository CI
+inspection now asserts the landed model's successful Exec and absence of an
+AgentSession rather than incorrectly requiring no execution database at all.
+No alias, schema change, provider permission or installation change was added.
+
+Checks: `cargo nextest run --all --no-fail-fast --build-jobs 4 --test-threads 4` — 2,014 passed, 39 failed, 20 skipped; focused repair pass — 299/300 passed, with the remaining diagnostic repaired; `uv run pytest python/tests/` — 306 passed, 9 failed, followed by `uv run pytest python/tests/test_checkout_refresh.py python/tests/test_release_automation.py` — 29 passed; `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` — 305 tests with 7 failing, followed by the affected 10-suite filter — 109 passed; `cd website && uv run python dev.py test` — 78 passed, 3 skipped; architecture, Swift boundaries, generated reference comparison and migration history — passed. Exact repair commands and output remain in `/tmp/cli-gate-{rust-repair,python-repair,swift-repair,final}.log`; these are local evidence, not CI receipts.
+
+Twenty-three launch-dependent Rust cases remain unproven across `doctor_tests`,
+`flow_tests`, `land_tests`, `session_cli_tests` and `session_lifecycle_tests`.
+Children select the OS account's older installed executable, which rejects
+`--mode` and `__flow-step`; changing HOME, LF_BIN or PATH does not isolate that
+selection. Some of these fixtures also needed the command repairs above, so
+the earlier failures do not establish their final outcome. CI must run them
+under an uninstalled OS account or disposable installation. The Task-adoption
+and saved-review installation harness could not start: Docker failed its
+10-second availability check, with no container created. Release-materialized
+Rust validation also remains with CI. The changed-aware runner's resource
+preflight timed out before tests, so the affected checks ran directly instead.
+No full-green gate, live remote lifecycle or new live-provider result is claimed.
+
+Final repair check: `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `cargo nextest run -p loopflow --bin lf --test global_commands --test wave_resolution_matrix --no-fail-fast --build-jobs 4 --test-threads 4` (39 passed), and `git diff --check` — passed; the CI deferrals above remain open.

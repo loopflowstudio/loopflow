@@ -142,7 +142,7 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
                 || *clear_paid_through;
             if !lifecycle && !clear_cooldown && chrome_profile.is_empty() && !clear_chrome_profiles
             {
-                return Err(anyhow!("auth set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
+                return Err(anyhow!("account set needs an account setting or --chrome-profile / --clear-chrome-profiles"));
             }
             if lifecycle {
                 set_account_lifecycle(

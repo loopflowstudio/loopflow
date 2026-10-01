@@ -65,12 +65,11 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
-    &["activity"],
-    &["ci"],
-    &["cron", "list"],
-    &["exec", "list"],
-    &["runs"],
-    &["usage"],
+    &["monitor", "activity"],
+    &["repo", "ci"],
+    &["wave", "cron", "list"],
+    &["monitor", "list"],
+    &["monitor", "usage"],
 ];
 
 /// Commands that require a Wave on the command line and therefore never
@@ -78,14 +77,13 @@ const FILTER_ONLY: &[&[&str]] = &[
 /// operations must name the installed Wave whose authority they validate.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
     &["wave", "rename"],
-    &["wave", "rename"],
     &["discord", "serve"],
-    &["cron", "preflight"],
-    &["cron", "sync"],
-    &["cron", "run"],
-    &["cron", "history"],
-    &["cron", "trigger"],
-    &["cron", "remove"],
+    &["wave", "cron", "preflight"],
+    &["wave", "cron", "sync"],
+    &["wave", "cron", "run"],
+    &["wave", "cron", "history"],
+    &["wave", "cron", "trigger"],
+    &["wave", "cron", "remove"],
 ];
 
 const COMMANDS: &[Cmd] = &[
@@ -108,18 +106,18 @@ const COMMANDS: &[Cmd] = &[
     },
     // ── Mutations ────────────────────────────────────────────────────────
     Cmd {
-        id: "wave connect",
+        id: "repo connect",
         path: &["repo", "connect"],
         base_args: &["repo", "connect"],
-        wave_form: WaveForm::Flag,
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
-        id: "wave sync",
+        id: "repo refresh",
         path: &["repo", "refresh"],
         base_args: &["repo", "refresh"],
-        wave_form: WaveForm::Flag,
+        wave_form: WaveForm::Positional,
         kind: Kind::Mutation,
         global_default: true,
     },
@@ -231,10 +229,8 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation and explicit chat connection may register the selected Wave.
-    if env.id == "explicit-unknown"
-        && matches!(cmd.id, "chat post" | "wave connect" | "wave new-chapter")
-    {
+    // Connection may register the selected Wave.
+    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
         return Outcome::Resolved;
     }
 

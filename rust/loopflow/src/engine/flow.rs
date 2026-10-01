@@ -97,25 +97,33 @@ impl Step {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Command {
-    #[serde(deserialize_with = "deserialize_command_name")]
     pub command: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
 }
 
-// Saved invocations outlive CLI spellings. Migrate the stored operation name;
-// preserve captured arguments and topology instead of reloading today's Flow.
-fn deserialize_command_name<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<String, D::Error> {
-    let name = String::deserialize(deserializer)?;
-    Ok(if name == "rebase" {
-        "sync".to_string()
-    } else {
-        name
-    })
+// Saved invocations outlive CLI spellings. Migrate their operation owner while
+// retaining the captured arguments and topology instead of reloading a Flow.
+impl<'de> Deserialize<'de> for Command {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct SavedCommand {
+            command: String,
+            #[serde(default)]
+            args: Vec<String>,
+        }
+        let mut saved = SavedCommand::deserialize(deserializer)?;
+        if matches!(saved.command.as_str(), "rebase" | "sync") {
+            saved.command = "task".into();
+            saved.args.insert(0, "sync".into());
+        }
+        Ok(Self {
+            command: saved.command,
+            args: saved.args,
+        })
+    }
 }
 
 impl Command {
@@ -1405,7 +1413,11 @@ mod tests {
             .to_string()
             .contains("not unique after expansion"));
 
-        fs::write(flows.join("invalid.yaml"), "- cmd: sync\n  human: true\n").unwrap();
+        fs::write(
+            flows.join("invalid.yaml"),
+            "- cmd: task sync\n  human: true\n",
+        )
+        .unwrap();
         assert!(load_flow("invalid", tmp.path())
             .unwrap_err()
             .to_string()

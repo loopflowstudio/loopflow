@@ -121,7 +121,7 @@ lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to the advancer
 lf interrupt INF-123                     # end this turn and re-read direction
 lf session list --json                        # unresolved Sessions
-lf session open <session-id> --json           # recover one exact conversation
+lf session connect <session-id> --json           # recover one exact conversation
 ```
 
 Task steering posts a Linear Task comment; commenting in Linear also steers the

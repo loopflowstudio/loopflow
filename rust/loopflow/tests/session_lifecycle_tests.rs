@@ -354,9 +354,9 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert_eq!(retained[0]["title"], "Parser review");
 
     // Open resumes the same conversation with its captured input.
-    let described = fixture.json(&["session", "open", &id, "--json"]);
+    let described = fixture.json(&["session", "connect", &id, "--json"]);
     assert_eq!(described["id"], id.as_str());
-    let (resumed, resumed_run) = fixture.attach(&["session", "open", &id]);
+    let (resumed, resumed_run) = fixture.attach(&["session", "connect", &id]);
     assert_eq!(resumed_run, first_run);
     assert_eq!(fixture.sessions()[0]["state"], "active");
     fixture.release(resumed);
@@ -379,7 +379,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     let remaining = fixture.sessions();
     assert_eq!(remaining.len(), 1, "{remaining:?}");
     assert_eq!(remaining[0]["id"], second_id.as_str());
-    let reopened = fixture.run(&["session", "open", &id, "--json"]);
+    let reopened = fixture.run(&["session", "connect", &id, "--json"]);
     assert!(!reopened.status.success(), "{reopened:?}");
     assert!(
         String::from_utf8_lossy(&reopened.stderr).contains("already complete"),
@@ -558,10 +558,8 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
             rusqlite::params![session,kind,payload.to_string()]).unwrap();
     }
     let captures = fixture.count("agent_sessions");
-    for command in [
-        vec!["runs", "--json"],
-        vec!["usage", "--days", "0", "--json"],
-    ] {
+    {
+        let command = vec!["usage", "--days", "0", "--json"];
         let rows = fixture.json(&command);
         let recovered = rows
             .as_array()
@@ -625,7 +623,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     };
     let task_runs = |issue: &str| -> Vec<String> {
         fixture
-            .json(&["runs", "--task", issue, "--json"])
+            .json(&["usage", "--days", "0", "--task", issue, "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -918,7 +916,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::create_dir_all(y.join(".lf/flows")).unwrap();
     std::fs::write(
         y.join(".lf/flows/switch-proof.yaml"),
-        "- cmd: sync --plan\n",
+        "- cmd: task sync --plan\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -1137,7 +1135,7 @@ fn ask_returns_feedback_once_and_rejects_a_stale_answer() {
     // A consumed launch without provider history is replaced on the next open.
     // Replacement captures another input in the same conversation.
     std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
-    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    let (opened, second_run) = fixture.attach(&["session", "connect", &id]);
     assert_ne!(second_run, first_run);
     assert_eq!(
         feedback(),
@@ -1472,7 +1470,7 @@ fn review_feedback_survives_replacement_and_resumes_the_flow() {
     // A consumed launch without provider history is replaced on the next open.
     // Title and feedback belong to the Session, so both survive.
     std::fs::remove_file(fixture.run_dir(&first_run).join("prepared")).unwrap();
-    let (opened, second_run) = fixture.attach(&["session", "open", &id]);
+    let (opened, second_run) = fixture.attach(&["session", "connect", &id]);
     assert_ne!(second_run, first_run);
     assert_eq!(
         fixture.feedback(&id),
@@ -1571,8 +1569,8 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let sessions = fixture.json(&["session", "list", "--interactive", "false", "--json"]);
     assert_eq!(sessions.as_array().unwrap().len(), 1);
     let session = &sessions[0]["id"];
-    for command in ["runs", "usage"] {
-        let rows = fixture.json(&[command, "--wave", "task-pr-tests", "--json"]);
+    {
+        let rows = fixture.json(&["usage", "--wave", "task-pr-tests", "--json"]);
         assert_eq!(rows.as_array().unwrap().len(), 1);
         assert_eq!(&rows[0]["session_id"], session);
         assert_eq!(rows[0]["recorded_outcome"], "completed");
@@ -1819,8 +1817,10 @@ raise SystemExit(1 if failed else 0)
         assert_eq!(run.4.as_deref(), Some(task_id.as_str()), "{run:?}");
     }
     let review = runs[2].0.clone();
-    let listed: Vec<Value> =
-        serde_json::from_value(fixture.json(&["runs", "--task", "INF-123", "--json"])).unwrap();
+    let listed: Vec<Value> = serde_json::from_value(
+        fixture.json(&["usage", "--days", "0", "--task", "INF-123", "--json"]),
+    )
+    .unwrap();
     let mut listed: Vec<&str> = listed
         .iter()
         .map(|run| run["artifact_key"].as_str().unwrap())
@@ -2102,7 +2102,14 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         .unwrap();
     assert_eq!(retried["usage"]["input_tokens"], 40);
     assert_eq!(retried["usage"]["output_tokens"], 10);
-    let answer = fixture.run(&["runs", &fixture.launches()[1], "--final"]);
+    let answer = fixture.run(&[
+        "monitor",
+        "show",
+        retried["session_id"].as_str().unwrap(),
+        "--input",
+        &launches[1],
+        "--final",
+    ]);
     assert_eq!(
         serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
         "advance"

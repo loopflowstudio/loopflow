@@ -108,6 +108,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     let mut current = &tree;
     let mut path = Vec::new();
     let mut output = vec![args[0].clone()];
+    let mut location = Vec::new();
     let mut index = 1;
     let mut boundary = false;
     let mut help = false;
@@ -137,6 +138,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             continue;
         }
         if value.starts_with('-') {
+            let output_start = output.len();
+            let selects_location = matches!(value.split('=').next(), Some("--task" | "--wt"))
+                && (path.is_empty() || flag(current, value).is_none());
             output.push(value.clone());
             let argument = flag(current, value)
                 .or_else(|| flag(&tree, value))
@@ -153,6 +157,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             {
                 index += 1;
                 output.push(args[index].clone());
+            }
+            if selects_location {
+                location.extend_from_slice(&output[output_start..]);
             }
             index += 1;
             continue;
@@ -185,7 +192,9 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
         index += 1;
     }
     if help {
-        let mut request = vec![args[0].clone(), "help".to_string()];
+        let mut request = vec![args[0].clone()];
+        request.extend(location);
+        request.push("help".to_string());
         request.extend(path);
         Ok(request)
     } else {

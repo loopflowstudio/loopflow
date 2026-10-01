@@ -923,7 +923,7 @@ struct WorkspaceNavigationProofTests {
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","open","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
         let (completionResponses, completionResponse) = AsyncStream<Void>.makeStream()
         defer { completionResponse.finish() }

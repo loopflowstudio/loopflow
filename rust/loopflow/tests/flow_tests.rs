@@ -51,7 +51,7 @@ fn flow_steps_use_path_and_retain_completed_effects_after_a_child_schema_upgrade
         write_flow(
             repo.path(),
             "path-proof",
-            "- cmd: sync --plan\n- cmd: sync --plan\n",
+            "- cmd: task sync --plan\n- cmd: task sync --plan\n",
         );
         // A replacement executable delegates the actual effect to lf, then
         // simulates a future build committing an additive schema migration.
@@ -159,7 +159,7 @@ fn mechanical_failure_retains_earlier_step_success() {
     write_flow(
         repo.path(),
         "mechanical-failure",
-        "- cmd: sync --plan\n- cmd: __telemetry-scorecard\n",
+        "- cmd: task sync --plan\n- cmd: __telemetry-scorecard\n",
     );
     let output = run_lf(
         repo.path(),
@@ -265,7 +265,7 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
     write_flow(
         repo.path(),
         "survive",
-        "- cmd: __telemetry-scorecard\n- cmd: sync --plan\n",
+        "- cmd: __telemetry-scorecard\n- cmd: task sync --plan\n",
     );
     let mut driver = lf_command(
         repo.path(),
@@ -1732,7 +1732,7 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
     let task =
         support::register_unrun_task(home.path(), repo.path(), "task-claim", &repo.head_sha());
-    write_flow(repo.path(), "claim-proof", "- cmd: sync --plan\n");
+    write_flow(repo.path(), "claim-proof", "- cmd: task sync --plan\n");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let flow = runtime
         .block_on(task.store.start_task_flow(
@@ -2633,7 +2633,7 @@ fn flow_step_executable_falls_back_without_losing_its_store() {
     assert!(!loopflow::machine_install::root().unwrap().exists());
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    write_flow(repo.path(), "fallback-proof", "- cmd: sync --plan\n");
+    write_flow(repo.path(), "fallback-proof", "- cmd: task sync --plan\n");
     let execute = |driver: &Path, path: &str, expected: &Path| {
         let mut command = Command::new(driver);
         for (key, _) in std::env::vars_os() {
@@ -2954,6 +2954,20 @@ fn worktree_selector_uses_the_named_checkout_without_changing_the_caller() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("selected-only"));
     assert!(!repo.path().join("selected-only").exists());
+    write_skill(
+        &selected,
+        "checkout-proof",
+        "Inspect the selected checkout.",
+    );
+    for args in [
+        vec!["--wt", "selected", "help", "skill", "checkout-proof"],
+        vec!["--wt", "selected", "skill", "checkout-proof", "--help"],
+        vec!["skill", "checkout-proof", "--wt=selected", "--help"],
+    ] {
+        let output = run_lf(repo.path(), home.path(), &args, None);
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Inspect the selected checkout."));
+    }
 }
 
 #[test]

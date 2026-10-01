@@ -86,7 +86,19 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
     assert_eq!(report["summary"]["incidents"], 0);
     assert!(report["summary"]["median_detection_seconds"].is_null());
     assert_eq!(report["incidents"], serde_json::json!([]));
-    assert!(!home.path().join(".lf").exists());
+    let db = rusqlite::Connection::open(home.path().join(".lf/store.db")).unwrap();
+    let sessions: i64 = db
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    let completed: i64 = db
+        .query_row(
+            "SELECT count(*) FROM execs WHERE outcome='succeeded'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(sessions, 0);
+    assert_eq!(completed, 1);
 }
 
 #[test]

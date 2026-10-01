@@ -224,7 +224,7 @@ pub fn run_sync(
     abort: bool,
     adopt: bool,
 ) -> Result<()> {
-    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+    let repo_root = crate::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
     run_sync_in(
         &repo_root,
         onto,
@@ -253,7 +253,7 @@ pub(crate) fn run_sync_in(
     }
     if adopt && !(continue_sync || abort) {
         return Err(anyhow!(
-            "--adopt is only valid with `lf sync --continue` or `lf sync --abort`"
+            "--adopt is only valid with `lf task sync --continue` or `lf task sync --abort`"
         ));
     }
     if continue_sync {
@@ -696,16 +696,16 @@ pub fn connect_wave(
         crate::ops::pm::list_local_waves(repo_root)?
     } else {
         let explicit = wave;
-        // Wave connection is a creation flow: an explicit --wave may name a
+        // Wave connection is a creation flow: its positional name may select a
         // wave not yet registered (it links a wave directory to
         // Linear, not a registry row). Normalize-only for explicit;
         // ambient still uses the shared validating resolver.
         let name = if let Some(raw) = explicit {
             crate::ops::normalize_wave_name(raw)
-                .ok_or_else(|| anyhow!("--wave requires a non-empty wave name"))?
+                .ok_or_else(|| anyhow!("repo connect requires a non-empty wave name"))?
         } else {
             ambient_wave(None)?
-                .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?
+                .ok_or_else(|| anyhow!("cannot determine wave; run `lf repo connect <name>`"))?
         };
         vec![name]
     };

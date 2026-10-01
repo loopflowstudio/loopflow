@@ -47,7 +47,7 @@ case "${1:-claude}" in
       echo "usage: scripts/launch-resumable-ux-demo.sh open <SESSION> [--replace|--try]" >&2
       exit 2
     fi
-    run_lf session open "${@:2}"
+    run_lf session connect "${@:2}"
     ;;
   complete)
     if [[ -z "${2:-}" ]]; then

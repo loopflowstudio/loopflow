@@ -30,7 +30,7 @@ struct SessionsStoreTests {
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args.first == "session")
-                #expect(args.dropFirst().first == "open")
+                #expect(args.dropFirst().first == "connect")
                 return session(id: args[2], state: "active")
             }
         )
@@ -50,7 +50,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args == ["session", "open", "native", "--json", "--replace"])
+                #expect(args == ["session", "connect", "native", "--json", "--replace"])
                 return session(id: "native", state: "closed", kind: "conversation")
             }
         )
@@ -124,7 +124,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args.contains("open"))
+                #expect(args.contains("connect"))
                 return "not json"
             }
         )

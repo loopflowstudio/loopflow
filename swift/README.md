@@ -395,7 +395,7 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf runs --active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
+`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
 Verified Exec/process and native-client receipts establish activity independently
 of command outcomes. Input replacement keeps the same row; unresolved engine
 ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness

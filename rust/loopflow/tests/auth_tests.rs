@@ -112,7 +112,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     let fixture = loopflow_test_support::TestRepo::new();
     let repository = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(fixture.path())
-        .args(["sync", "--plan"])
+        .args(["task", "sync", "--plan"])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();

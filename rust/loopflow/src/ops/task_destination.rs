@@ -325,7 +325,7 @@ mod tests {
         )
         .unwrap();
         let cli = root.join("installed-lf");
-        fs::write(&cli, format!("#!/bin/sh\nexport TASK_DESTINATION_CASE=installed\nexport TASK_DESTINATION_OPERATION=\"$2\"\n{} --exact {} --nocapture 1>&2 || exit 99\nif [ -n \"$TASK_DESTINATION_FAIL\" ]; then exit 19; fi\ncat \"$LF_HOME/task.json\"\n", shell_escape(&std::env::current_exe().unwrap().to_string_lossy()), TEST)).unwrap();
+        fs::write(&cli, format!("#!/bin/sh\nexport TASK_DESTINATION_CASE=installed\nif [ \"$1\" = --task ]; then shift 2; fi\nexport TASK_DESTINATION_OPERATION=\"$2\"\n{} --exact {} --nocapture 1>&2 || exit 99\nif [ -n \"$TASK_DESTINATION_FAIL\" ]; then exit 19; fi\ncat \"$LF_HOME/task.json\"\n", shell_escape(&std::env::current_exe().unwrap().to_string_lossy()), TEST)).unwrap();
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
         let artifacts = ArtifactSet {
             id: "fixture".into(),
@@ -397,7 +397,7 @@ mod tests {
                 .iter()
                 .map(|row| row.0.as_str())
                 .collect::<Vec<_>>(),
-            ["run", "create", "restart"]
+            ["start", "create", "restart"]
         );
         for (_, executable, selected_home) in operations {
             assert_eq!(Path::new(&executable), cli);

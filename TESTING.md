@@ -674,7 +674,7 @@ direct-open refusal without changing the owned development database/WAL bytes. R
 completion rejects branch-only feedback and a stale readiness token, resolves
 both Session and captured-input selectors, records the exact installed feedback once,
 and preserves the branch Flow and events. The same review scenario proves agent
-persistence and repeated `task run` retaining its invocation, cursor and prepared
+persistence and repeated `flow start` retaining its invocation, cursor and prepared
 review Session. It also rejects a missing replacement Flow before changing the installed
 review or committing a restart checkpoint. Managed-operation CLI assertions belong
 in this disposable account: overriding `HOME` or `LF_HOME` does not remove the
@@ -734,7 +734,7 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf runs --json`, `lf usage --json`, and
+After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Home with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.

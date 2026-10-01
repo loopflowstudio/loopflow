@@ -1607,7 +1607,8 @@ fn execute_command(
         Some(Commands::Task {
             cmd: cmd @ TaskCommand::Sync(_),
         }) => {
-            let repo = loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf sync")?;
+            let repo =
+                loopflow::repo::require_repo_root(&std::env::current_dir()?, "lf task sync")?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd, cli))
         }
         Some(Commands::Task {
@@ -2239,11 +2240,11 @@ mod tests {
 
     #[test]
     fn reorder_args_moves_flags_to_nested_owners() {
-        let args: Vec<String> = ["lf", "wave", "--wave", "systems", "sync"]
+        let args: Vec<String> = ["lf", "repo", "--all", "refresh"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "repo", "refresh", "systems"]);
+        assert_eq!(reordered, vec!["lf", "repo", "refresh", "--all"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Repo {

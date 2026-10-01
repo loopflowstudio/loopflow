@@ -492,6 +492,27 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
 }
 
 #[test]
+fn help_preserves_location_without_promoting_query_filters() {
+    for (args, task) in [
+        (
+            vec!["lf", "--task", "LOO-123", "skill", "debug", "--help"],
+            Some("LOO-123"),
+        ),
+        (
+            vec!["lf", "monitor", "list", "--task", "LOO-123", "--help"],
+            None,
+        ),
+    ] {
+        let cli = Cli::try_parse_from(
+            normalize_args(args.into_iter().map(String::from).collect()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cli.task.as_deref(), task);
+        assert!(matches!(cli.command, Some(Commands::Help { .. })));
+    }
+}
+
+#[test]
 fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     let tree = clap::Command::new("lf")
         .subcommand(

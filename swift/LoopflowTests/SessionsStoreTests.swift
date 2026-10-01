@@ -7,16 +7,6 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("An Ask keeps its waiting caller separate from its conversation Run")
-    func askCallerFixture() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let record = try JSONDecoder().decode(SessionRecord.self, from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/ask_session.json")))
-        #expect(record.callerSessionId == "session_00000000000000000000000000000002")
-        #expect(record.callerSessionId != record.id)
-        #expect(record.offersParticipation)
-        #expect(record.action(.complete)?.unavailableReason != nil)
-    }
-
     @Test("Shared activity never creates a local terminal; reconciliation removes resolved Sessions")
     func reconcileTracksTheTaskPlayhead() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")

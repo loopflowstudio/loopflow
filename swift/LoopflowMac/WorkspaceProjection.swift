@@ -120,7 +120,10 @@ struct WorkspaceProjection {
                 return task.id.work
             }
         }
-        return unmatchedSessions.first { $0.id == sessionId }?.work
+        guard let session = unmatchedSessions.first(where: { $0.id == sessionId }) else { return nil }
+        if session.scope == .repository { return nil }
+        if session.scope == .wave { return session.waveId.map { .wave(id: $0) } }
+        return session.workspace?.taskId.map { .task(id: $0) } ?? session.work
     }
 }
 
@@ -138,8 +141,11 @@ struct WorkspaceBreadcrumb {
     }
 
     var taskWork: WorkReference? {
+        guard session?.scope == nil else { return nil }
+        if let task { return task.id.work }
+        if let id = session?.workspace?.taskId { return .task(id: id) }
         if let work = session?.work, work.kind == .task { return work }
-        return task?.id.work
+        return nil
     }
 }
 
@@ -273,7 +279,7 @@ extension WorkspaceProjection {
                     title: wave?.roadmap.wave.name ?? "Wave \(waveId)"
                 ))
             }
-            if let work = session.work, work.kind != .wave {
+            if session.scope == nil, let work = session.work, work.kind != .wave {
                 ancestors.append(WorkspaceOutlineSubject(
                     key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: work),
                     title: "\(work.kind == .task ? "Task" : "Project") \(work.id)"

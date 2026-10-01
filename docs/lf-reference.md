@@ -255,6 +255,7 @@ List Sessions
 | `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
 | `--after` | Previous page's next identity; keep the same filters |
 | `--task` | task |
+| `--orphan` | Only Sessions without a Task association Default: false. |
 | `--search` | search |
 | `--help / -h` | Print help |
 

@@ -129,6 +129,11 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
         session.scope = scopes.get(&session.id).copied().or(session.scope);
+        if session.scope.is_some() {
+            session.workspace = None;
+            session.task_ids.clear();
+            continue;
+        }
         if session
             .workspace
             .as_ref()
@@ -139,12 +144,6 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         session.workspace = resolver.resolve(Path::new(&session.cwd), None, session.work.as_ref());
         if let Some(workspace) = &session.workspace {
             session.task_ids = workspace.task_id.iter().cloned().collect();
-        }
-        if session.scope.is_some() {
-            session.task_ids.clear();
-            if let Some(workspace) = &mut session.workspace {
-                workspace.task_id = None;
-            }
         }
     }
     Ok(())

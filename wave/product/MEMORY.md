@@ -5,17 +5,20 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
-## Participation and primary Sessions (2026-09-30)
+## Task workspace and primary Sessions (updated 2026-10-01)
 
 Jack Heart accepted a Task workspace that keeps Sessions, shells and files
 together while background Flows prepare the next interactive stage. Direct
-Flow reviews and Task Asks remain their own conversations. Completing an Ask
-releases its exact caller; closing a pane, provider exit, or a matching checkout
-does not complete a boundary. Conversation availability is distinct from Ready
-to Complete. Task/Wave participation indications remain a review recommendation.
+Flow reviews remain their own conversations. Jack’s October 1 correction makes
+all conversations in a Task checkout Task Sessions, regardless of attention or
+Flow membership. Repo and Wave Sessions retain their explicit scopes and are
+excluded. Any number of Task Sessions is allowed. `session list --orphan` filters
+Sessions without Task association; it provides no creation opt-out. Desktop keeps
+that diagnostic inventory under Debug → Sessions, outside ordinary navigation.
 
-Jack selected eager repo/Wave primary Sessions on desktop discovery and one
-TaskSession when a Task launches. Repo owns onboarding and last-resort help,
+Earlier primary-runtime planning selected eager repo/Wave Sessions and a Task
+conversation on launch. The October 1 correction supersedes any interpretation
+that a Task has only one Session or that it owns every other conversation. Repo owns onboarding and last-resort help,
 including without Waves or PM; Wave combines autonomous operation and emerging
 design; TaskSession operates the existing Task Flow authority. Primary repo/Wave
 Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
@@ -49,20 +52,20 @@ shortcuts so an identical-content replacement disables editing and autosave
 without losing drafts. Comparison failure must leave directory browsing usable.
 
 Home-aware retained panes, collapse/focus, reassociation, participation projection
-and caller-scoped raw Ask keys are implemented on the branch, not shipped.
+are implemented on the branch, not shipped. Jack requested retiring Ask; this
+branch’s raw retry-key API and Ask caller-link additions have been removed.
 The separate Task terminal owner is deleted. Remove only confirmed absent Sessions
 from panes and Undo; a repository-local inventory cannot establish absence in
 another repository, and a membership move must keep the same native surface.
 File visibility derives from retained preference plus zoom, without a second
 focus backup. Interaction edges exclude routes through another interactive visit;
-otherwise repeat work leaks into the exit edge. Raw Ask keys identify questions
-within one caller Run, independently of captured Flow recovery keys.
+otherwise repeat work leaks into the exit edge.
 
 Recorded Rust/Swift proofs, shared fixtures, Clippy and both native build paths
 support the implementation; transport fixtures remain simulated. On October 1,
-Jack Heart approved landing this workspace checkpoint and requested LOO-353 continue.
-This supersedes the earlier instruction to hold this PR for all configured demo
-proof; it does not claim those checks passed. Real provider continuation, remote
+Jack Heart approved a workspace checkpoint and requested LOO-353 continue, then
+stopped merging until the revised Task Session model is implemented. Auto-merge
+is disabled. Earlier approval does not certify the new revision or missing proof. Real provider continuation, remote
 association and measured layout/idle behavior remain explicit LOO-353 work.
 The retained signpost is scheduling evidence, not compositor presentation.
 

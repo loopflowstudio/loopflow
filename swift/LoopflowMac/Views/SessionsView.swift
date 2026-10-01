@@ -737,14 +737,6 @@ struct SessionsContentView: View {
                                         Button("Open alongside") { openSession(item.record, alongside: true) }
                                     }
                                 } else { Button("Open alongside") { openSession(item.record, alongside: true) } }
-                                if let caller = item.record.callerSessionId {
-                                    Button("Open caller") {
-                                        if let session = store.sessions.first(where: { $0.record.id == caller }) {
-                                            openSession(session.record)
-                                        } else if let taskId = item.record.workspace?.taskId { showMonitor(taskId) }
-                                    }
-                                    .disabled(!store.sessions.contains(where: { $0.record.id == caller }) && item.record.workspace?.taskId == nil)
-                                }
                             } label: { Image(systemName: "ellipsis") }
                             .menuStyle(.borderlessButton).fixedSize().help("Conversation actions")
                             .accessibilityLabel("Actions for \(item.record.title)")

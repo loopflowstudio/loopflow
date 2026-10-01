@@ -158,7 +158,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let scope: SessionScope?
     public let taskIds: [String]
     public let id: String
-    public let callerSessionId: String?
     public let kind: SessionKind
     public let interactive: Bool
     public let work: WorkReference?
@@ -200,7 +199,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case callerSessionId = "caller_session_id"
         case id, kind, interactive, work, workspace, title, detail, provider, cwd, state, scope
         case waveId = "wave_id"
         case taskIds = "task_ids"

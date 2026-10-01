@@ -176,9 +176,6 @@ fn summary_query(page: &str, by_id: bool) -> String {
         (s.kind='ask' OR (SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
-        (SELECT caller.session_id FROM session_events current JOIN session_events caller
-         ON caller.receipt_key=json_extract(current.payload,'$.caller_key') AND caller.kind='captured'
-         WHERE current.seq=s.current_capture),
         (SELECT json_group_array(id) FROM ({}))
         FROM page s
         LEFT JOIN flows f ON f.id=s.flow_session_id
@@ -194,8 +191,7 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         Ok(crate::session::SessionSummary {
-            caller_session_id: row.get(32)?,
-            task_ids: serde_json::from_str(&row.get::<_, String>(33)?)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(32)?)?,
             captured: row.get(17)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
@@ -731,7 +727,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT id, CASE WHEN primary_scope='repository' THEN 'repository' ELSE 'wave' END
-             FROM agent_sessions WHERE primary_scope IS NOT NULL OR (wave_id IS NOT NULL AND task_id IS NULL)",
+             FROM agent_sessions WHERE primary_scope IS NOT NULL",
         )?;
         let rows = query.query_map([], |row| {
             let scope: String = row.get(1)?;

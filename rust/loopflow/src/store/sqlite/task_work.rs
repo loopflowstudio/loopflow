@@ -31,7 +31,7 @@ pub(super) fn flow_ids(selector: &str) -> String {
 fn session_membership(session: &str) -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
-         AND (scoped.primary_scope IS NOT NULL OR (scoped.wave_id IS NOT NULL AND scoped.task_id IS NULL)))
+         AND scoped.primary_scope IS NOT NULL)
          AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
          WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
         checkout(&format!("{session}.cwd")),
@@ -202,7 +202,7 @@ mod tests {
                 ("c-repo", repo.path().to_path_buf(), Some("repository")),
                 ("d-orphan", other.path().to_path_buf(), None),
             ] {
-                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,0,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
                 super::super::sessions::test_capture(
                     &conn,
                     id,
@@ -258,10 +258,16 @@ mod tests {
             for (id, scope, wave_id, cwd) in [
                 ("a-task", None, None, "/repo/task/sub"),
                 ("b-repo", Some("repository"), None, "/repo/task"),
-                ("c-wave", None, Some(wave.as_str()), "/repo/task"),
+                ("c-wave", Some("wave"), Some(wave.as_str()), "/repo/task"),
                 ("d-orphan", None, None, "/repo/other"),
+                (
+                    "e-wave-attribution",
+                    None,
+                    Some(wave.as_str()),
+                    "/repo/task",
+                ),
             ] {
-                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,primary_scope,wave_id,interactive) VALUES(?1,?1,'human',1,?2,?3,?4,1)",params![id,cwd,scope,wave_id]).unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,wave_id,interactive) VALUES(?1,?1,'human',1,0,?2,?3,?4,1)",params![id,cwd,scope,wave_id]).unwrap();
                 super::super::sessions::test_capture(
                     &conn,
                     id,
@@ -269,7 +275,14 @@ mod tests {
                 );
             }
         }
-        assert_eq!(store.session_task_ids("a-task").unwrap(), vec![task]);
+        assert_eq!(
+            store.session_task_ids("a-task").unwrap(),
+            vec![task.clone()]
+        );
+        assert_eq!(
+            store.session_task_ids("e-wave-attribution").unwrap(),
+            vec![task]
+        );
         for id in ["b-repo", "c-wave", "d-orphan"] {
             assert!(store.session_task_ids(id).unwrap().is_empty());
         }

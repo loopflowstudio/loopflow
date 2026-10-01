@@ -55,12 +55,12 @@ The final reopened Task had no open Session in the copied inventory. Its empty v
 does not prove populated Session selection. SnapshotService requires a key window;
 “No window to snapshot” alone does not prove a crash or closed window.
 
-Still unmeasured/unexecuted: configured provider Ask/Flow continuation and exact
-caller release, remote owning-Home association, cross-Task focus/draft/process
+Still unmeasured/unexecuted: configured provider Session/Flow continuation, remote owning-Home association, cross-Task focus/draft/process
 retention, full real-file symlink/draft transitions, and at least twenty retained
 layout actions with p95 below the proposed 100 ms target plus idle CPU/process
 counts. The existing signpost ends at a main callback, not compositor presentation.
-Jack approved landing without claiming these results. Carry them into LOO-353.
+Jack previously approved landing without claiming these results, then held merging
+for the revised Task Session model. Carry remaining proof into LOO-353.
 
 ## Remaining ownership
 
@@ -91,3 +91,24 @@ at commit `bc78c27c017bc93099c06fd342b51bc6110beb5d`:
 Read them with `git show bc78c27c017bc93099c06fd342b51bc6110beb5d:scratch/growth-thoughts.md` (or the other exact path).
 [Independent-operation research](independent-operations.md) preserves primary sources
 and ranked follow-up candidates. Public behavior is documented in `swift/README.md`.
+
+## Task Session correction — October 1
+
+Jack Heart clarified that any Session in a Task checkout is a Task Session, with
+arbitrary cardinality. Explicit repository and Wave Sessions remain separate.
+Membership is independent of participation readiness and Flow occurrence. Task rows
+and collapsed Wave counts expose all Task Sessions. Orphans are a diagnostic filter
+for no Task association, available through `lf session list --orphan` and Desktop’s
+Debug → Sessions menu; there is no launch opt-out.
+
+The revision derives Task identity after canonical checkout resolution and applies
+Task/orphan filters before pagination. It carries explicit scope in shared readings
+without adding storage or placement controls. The branch’s new Ask key and caller
+link are removed while the existing upstream lifecycle awaits its separate deletion.
+
+Local proof includes 80 Swift tests, 32 Rust human-session tests, three Task association
+cases, the indexed inventory check, and 21 architecture tests. These are local,
+simulated-transport and fixture-shell results; they do not establish live provider
+continuation or measured presentation latency. The CLI no-opt-out check, prompt golden, Clippy, formatting and both native build
+paths passed. The final navigation refinement passed 29 focused tests. PR #1369
+remains unmerged; these checks do not constitute a configured provider demo.

@@ -23,3 +23,25 @@ run focused Rust/Swift proof and both native build paths, then retry the configu
 demo. Inspect existing CI failures before resuming landing.
 
 The prior review and proof limits are in [the durable review](../docs/reviews/task-workspace.md).
+
+## Implementation and proof
+
+The implementation now records explicit repository/Wave scope in Session readings,
+excludes those Sessions from Task workspace ownership, and derives Task IDs from
+resolved checkout readings. Task/orphan filtering runs after resolution and before
+pagination, so aliases cannot disappear at an SQL path-prefix filter. No placement
+schema or scheduling behavior changed. Scope reads are batched.
+
+Task/Wave indicators include all Task Sessions. Orphan access moved into the nested
+diagnostic menu. The branch’s raw Ask retry key and caller-link expansion are removed;
+existing upstream Ask lifecycle remains for its separate deletion.
+
+Focused proof so far: 80 Swift tests, 32 human-session Rust tests, three Task membership
+Rust tests, indexed metadata inventory test, architecture scan and 21 architecture
+Python tests passed. Native fallback compilation, final CLI/golden checks, formatting and Clippy
+with warnings denied passed. The final navigation refinement passed 29 tests. Configured provider and remote-Home proof remains unexecuted.
+
+Review findings fixed: filtering before root resolution lost symlink Sessions;
+reusing Task checkout identity for scoped Sessions could share their panes; the old
+Ask caller lookup decoded captures during passive listing. Regression tests now
+cover scope exclusions, aliases, stable orphan pages, and attention-independent counts.

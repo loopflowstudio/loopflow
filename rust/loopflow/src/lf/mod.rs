@@ -1586,6 +1586,22 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
+        let cli = Cli::try_parse_from(["lf", "session", "list", "--orphan", "--json"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::List { orphan: true, .. }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["lf", "session", "list", "--orphan", "--task", "LOO-353"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["lf", "--orphan", ":", "Start a conversation"]).is_err());
+    }
+
+    #[test]
     fn consolidated_commands_parse_without_old_namespaces() {
         use clap::CommandFactory;
         let command = Cli::command();

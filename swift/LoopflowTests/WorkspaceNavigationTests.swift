@@ -70,6 +70,8 @@ struct WorkspaceNavigationTests {
             let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [record])
             #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
             #expect(projection.unmatchedSessions.map(\.id) == ["scoped"])
+            #expect(projection.subject(for: "scoped") == nil)
+            #expect(projection.breadcrumb(selection: nil, sessionId: "scoped")?.taskWork == nil)
         }
     }
 

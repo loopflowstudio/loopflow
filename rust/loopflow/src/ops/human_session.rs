@@ -222,7 +222,6 @@ pub struct SessionRecord {
     pub scope: Option<SessionScope>,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
-    pub caller_session_id: Option<String>,
     pub workspace: Option<SessionWorkspace>,
     pub kind: SessionKind,
     pub interactive: bool,
@@ -920,7 +919,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         scope: None,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
-        caller_session_id: session.caller_session_id.clone(),
         workspace: remote.map(|home| SessionWorkspace {
             home_id: home.clone(),
             worktree: session.cwd.clone(),
@@ -1895,13 +1893,6 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         scope: None,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
-        caller_session_id: session
-            .caller_artifact_key
-            .as_deref()
-            .map(|key| store.sqlite.session_for_artifact(key))
-            .transpose()?
-            .flatten()
-            .map(|caller| caller.id),
         workspace: remote.as_ref().map(|home| SessionWorkspace {
             home_id: home.clone(),
             worktree: session.cwd.clone(),
@@ -2630,7 +2621,6 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
-            caller_session_id: None,
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),

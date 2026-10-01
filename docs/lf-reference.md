@@ -227,11 +227,10 @@ are assembled automatically. Direct launches leave edits for an explicit
 commit. Several AgentSessions may concern the same Task; attribution does not grant
 exclusive ownership of its files.
 
-Launch assembly allows 8,000 tokens for the selected Wave's memory and another
-8,000 shared across repository-root `MEMORY.md` and its ancestors' memory,
-16,000 across scratch notes, and
-16,000 for the launch goal/message. Oversized sources become marked excerpts
-with their full local paths; oversized messages are preserved under
+Launch assembly allows 16,000 tokens and 128 KiB each for the shared memory
+collection (repository-root, ancestor, and selected Wave memory), the scratch
+collection, and the launch goal/message. Oversized sources become marked
+excerpts with their full local paths; oversized messages are preserved under
 `.lf/tmp/context/`. Read relevant omitted sections before acting. The complete
 assembled input must fit 64,000 cl100k tokens and 512 KiB, otherwise launch reports
 which explicit sources to reduce before contacting the provider. Native provider

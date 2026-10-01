@@ -41,11 +41,9 @@ impl BudgetKey {
 
     pub fn default_limit(self) -> usize {
         match self {
-            Self::MemoryTokens => 8_000,
-            Self::ScratchTokens | Self::GoalTokens => 16_000,
+            Self::MemoryTokens | Self::ScratchTokens | Self::GoalTokens => 16_000,
             Self::InputTokens => 64_000,
-            Self::MemoryBytes => 64 * 1024,
-            Self::ScratchBytes | Self::GoalBytes => 128 * 1024,
+            Self::MemoryBytes | Self::ScratchBytes | Self::GoalBytes => 128 * 1024,
             Self::InputBytes => 512 * 1024,
         }
     }
@@ -233,7 +231,7 @@ impl ContextBudgetReport {
                 input.submitted_bytes.saturating_sub(input.byte_limit)
             ));
         }
-        lines.push("The next memory- or scratch-writing step must bring over-budget sources under these limits. Preserve live decisions, unresolved work, attribution and evidence limits; merge and summarize, remove obsolete stacked-parent notes, and keep long historical evidence in git. Re-query after writing; never raise a limit just to hide overflow.".into());
+        lines.push("The next memory- or scratch-writing step must bring over-budget sources just under these limits. Curate memory gradually: retire the largest stale sections to git history first, preserving uncommitted evidence before removal; stop once it fits instead of rewriting toward a small target. Preserve live decisions, unresolved work, attribution and evidence limits. Merge duplicate scratch notes and remove obsolete stacked-parent notes. Re-query after writing; never raise a limit just to hide overflow.".into());
         lines.join("\n")
     }
 }
@@ -501,6 +499,34 @@ mod tests {
     use super::{bound_context, check_input, BudgetKey, ContextBudgets};
     use crate::engine::config::{load_config, Config};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+
+    #[test]
+    fn default_memory_budget_keeps_large_memories_and_excerpts_outliers() {
+        let repo = tempfile::tempdir().unwrap();
+        let budgets = ContextBudgets::resolve(&Config::default(), repo.path(), None).unwrap();
+        for (words, excerpted) in [(14_000, false), (16_000, false), (16_001, true)] {
+            let memory = " word".repeat(words);
+            let mut components = PromptComponents {
+                repo_root: repo.path().display().to_string(),
+                wave_memory: Some(Document {
+                    path: "wave/build/MEMORY.md".into(),
+                    content: memory.clone(),
+                    source: DocumentSource::WaveMemory,
+                }),
+                ..Default::default()
+            };
+            let report = bound_context(&mut components, budgets.clone()).unwrap();
+            let submitted = &components.wave_memory.as_ref().unwrap().content;
+            assert_eq!(submitted != &memory, excerpted);
+            assert_eq!(report.usage[0].token_limit, 16_000);
+            assert_eq!(report.usage[0].byte_limit, 128 * 1024);
+            assert!(report.usage[0].submitted_tokens <= 16_000);
+            assert_eq!(components.budget_decisions.len(), usize::from(excerpted));
+        }
+        assert!(check_input("", &" word".repeat(64_000), &budgets).is_ok());
+        assert!(check_input("", &" word".repeat(64_001), &budgets).is_err());
+        assert_eq!(budgets.limit(BudgetKey::InputBytes), 512 * 1024);
+    }
 
     #[test]
     fn budget_overrides_merge_per_field_with_winning_sources() {

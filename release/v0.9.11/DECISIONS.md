@@ -78,7 +78,7 @@ becomes **files on disk + a tiny seed**:
   small. Identical shape headless and interactive; the surface preamble is the
   one thing that varies (headless "never ask, decide and note ambiguity" vs cli
   "ask and wait").
-- **Ambient context moves to AGENTS.md / CLAUDE.md** (vendor auto-loads,
+- **Ambient context moves to AGENTS.md** (vendor auto-loads,
   always-on): repo conventions, **VOICE.md**, orientation ("read `scratch/<branch>.md`
   and `wave/<name>/` first"), and any wave-standing perspective. The agent reads
   scratch/ and wave/ on demand via file tools — we point, we do not dump.
@@ -117,10 +117,10 @@ becomes **files on disk + a tiny seed**:
 - **System prompts are off the table for the Claude harness, by policy** — recorded
   so no one re-discovers the competitor-mention block the hard way.
 - **`lf-prompt` is unfaithful** — it skips `drop_native_instruction_docs`, so its
-  dump overcounts the real prompt (showed CLAUDE/AGENTS/STYLE triple-included when
-  the real launcher already drops them). Fix it to match the launcher, or stop
-  trusting it for size measurements.
-- **Symlinked agent docs** (`CLAUDE.md`/`AGENTS.md` → `STYLE.md`) are already
+  dump overcounts the real prompt (included the guide and both instruction
+  symlinks, which the real launcher already drops). Fix it to match the launcher,
+  or stop trusting it for size measurements.
+- **Symlinked agent docs** (the guide now lives directly in `AGENTS.md`) are already
   deduped by the launcher; the `lf-prompt` discrepancy was the only place the
   triple-count appeared.
 
@@ -149,9 +149,9 @@ built-in commands — skills fire there with `$step`.
   composer); `/` only works in `codex exec`, not the composer. Claude uses `/`
   everywhere.
 - **`LOOPFLOW.md` leaves the product.** The operating manual is no longer injected
-  into any prompt; its content moves into loopflow's own agent doc (`STYLE.md`, which
-  `CLAUDE.md`/`AGENTS.md` symlink to), auto-loaded by the vendor only when working on
-  loopflow. `LOOPFLOW_DOC` and the `loopflow_doc` prompt field are deleted; `RLM`
+  into any prompt; its content moves into loopflow's own agent doc (now `AGENTS.md`),
+  auto-loaded by the vendor only when working on loopflow. `LOOPFLOW_DOC` and
+  the `loopflow_doc` prompt field are deleted; `RLM`
   becomes the unconditional system section.
 - **Orientation embeds into the steps that need it.** The orientation block (read
   `scratch/`, `wave/`, the agent doc) is embedded directly into the body of every

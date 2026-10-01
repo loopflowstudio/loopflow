@@ -139,3 +139,15 @@ landing acceptance covers direct/Flow success, failed CI, blocked repair, queue 
 and merged evidence, without recreating cutover coverage.
 
 Supervisory checks: isolated `cargo test -p loopflow` (land_tests, status_tests, wave_repository_ownership, documented_commands, golden_prompt, and lib ops::pr_landing::tests) — 63 passed after correcting the restored Flow fixture to `--mode batch`; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` — passed.
+
+## Owned sync · 2026-09-30
+
+Merged pinned main `708d4e94682ba103ba338420588f0a16d8cc6362` through the existing
+owned sequencer. Retained normalized planning, Task branch adoption and context
+budget inspection with the CLI owner tree. Main's AGENTS.md consolidation keeps
+the branch's CLI conventions; adoption fixtures now use `--task … flow start`.
+The first continue committed the merge and reported unstaged follow-up edits.
+After `lf commit`, another continue reported no sync in progress. Both histories
+are retained and the pinned target is an ancestor; no new sync or push was started.
+
+Focused sync proof: `cargo test -p loopflow --test global_commands context_budget_preview_reads_authored_wave_without_registration` (1), `cargo test -p loopflow --test documented_commands --test planning_lookup_tests` (4) — passed; disposable Task-adoption harness remains with gate/CI.

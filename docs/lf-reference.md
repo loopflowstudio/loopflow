@@ -1341,11 +1341,11 @@ Show effective context budgets, their sources, and current source usage
 
 | Argument | What it does |
 |---|---|
-| `--json` | json |
+| `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
 | `--task` | Inspect a Task's checkout and locally stored goal |
 | `--skill` | Skill to include in the launch preview Default: realign. |
-| `--help` | Print help |
+| `--help / -h` | Print help |
 
 ## lf __telemetry-scorecard
 

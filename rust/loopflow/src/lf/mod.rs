@@ -600,7 +600,7 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Place a Wave on a Home
+    /// Set the Home for Wave schedules and newly created work
     Place {
         name: String,
         home_id: crate::durable::HomeId,
@@ -1012,6 +1012,25 @@ pub enum PrCommand {
         body: Option<String>,
     },
     /// Prepare a PR, request exact-head auto-merge, and return without watching.
+    Arm {
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        local: bool,
+        #[arg(short = 'c', long)]
+        complete: bool,
+        #[arg(long = "next")]
+        next: Option<String>,
+        #[arg(short = 'w', long = "worktree")]
+        worktree: Option<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "title")]
+        title: Option<String>,
+        #[arg(long = "body")]
+        body: Option<String>,
+    },
+    /// Arm and watch a PR through CI repair and authoritative merge.
     Land {
         #[arg(long)]
         strict: bool,

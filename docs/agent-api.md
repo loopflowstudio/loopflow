@@ -157,7 +157,7 @@ lands it:
 ```bash
 lf pr publish                          # make work visible mid-stream; the agent's default verb
 lf submit                              # done, a person clicks merge
-lf land                                 # request exact-head auto-merge and return
+lf land                                 # watch CI, repair failures, and finish merged
 ```
 
 `lf pr open` is the one presenting verb — it opens a browser. Agents reach for

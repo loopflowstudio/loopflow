@@ -264,8 +264,8 @@ New Project or Task Work inherits its parent's recorded Home once. Readers
 operate on the selected Home; they never silently aggregate other Homes.
 
 ```bash
-lf relocate <wave-id> --name platform
-lf relocate <wave-id> --repo ../moved-repository
+lf wave rename <wave-id> --name platform
+lf wave rename <wave-id> --repo ../moved-repository
 ```
 
 Relocation preserves the Wave UUID, Linear projection, authored files, Work and

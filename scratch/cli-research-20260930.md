@@ -16,8 +16,9 @@ publishes a draft. Monitor preserves distinct process, conversation, accounting
 and planning queries, with one Exec list. Root Task/worktree location and Wave
 context replace `--as`. Authored goals use `list wave`; portfolio planning and
 unplaced issues use roadmap. `flow start [template]` continues the managed Task
-Flow; Session Connect owns conversation continuation. These settle the choices
-below; historical comparison notes do not reintroduce a demo boundary.
+Flow; Session Connect owns conversation continuation. The supervisory correction retains Land watch/ci-fix/re-arm until LOO-332
+provides replacement repository ticks. Arm remains its finite request endpoint.
+These settle the choices below; historical comparison notes do not reintroduce a demo boundary.
 
 ## Fresh comparison
 

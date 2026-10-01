@@ -167,7 +167,7 @@ and Wave goals.
 lf pr open                             # push + create or update a draft, then open its page
 lf pr publish                          # push + create or update PR and mark ready (no browser)
 lf submit                              # prepare the exact head; you click merge
-lf land                                 # arm exact-head auto-merge and return
+lf land                                 # watch CI, repair failures, and finish merged
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the

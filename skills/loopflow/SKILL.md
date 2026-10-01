@@ -39,17 +39,19 @@ authority, and never impersonates the User in chat.
 lf commit -m "message"               # local checkpoint
 lf pr publish --title "..."         # push + create/update PR, print state+URL (no browser)
 lf submit                            # done; the user clicks merge
-lf land                              # request auto-merge; return
-lf land -c                           # request Task completion after merge
+lf arm                               # request auto-merge; return
+lf land                              # watch CI, repair, and finish merged
+lf land -c                           # complete the Task after merge
 lf task sync --plan                  # show strategy; bare `lf task sync` applies it
 lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
-prepares it for the user's merge click; **land** request auto-merge.
+prepares it for the user's merge click; **arm** requests auto-merge, and **land**
+watches CI and repairs failures until merge.
 `lf pr open` creates or updates a draft and opens its page when a person asks
 to see it. Existing ready PRs stay ready; opening a draft does not publish it.
-Publish/submit/land make drafts ready.
+Publish/submit/arm/land make drafts ready.
 
 Stay in the worktree loopflow placed for this run. Never use raw
 `git worktree`; the sibling naming convention (`<repo>.<name>`) is

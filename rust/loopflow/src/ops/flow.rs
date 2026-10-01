@@ -212,6 +212,34 @@ fn persist_metric_observations(
 fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResult<()> {
     let draft = matches!(&cmd, PrCommand::Open { .. });
     match cmd {
+        PrCommand::Arm {
+            strict,
+            local,
+            complete,
+            next,
+            worktree,
+            message,
+            title,
+            body,
+        } => {
+            arm(
+                repo,
+                &LandOptions {
+                    strict,
+                    local,
+                    create_pr: true,
+                    complete,
+                    next_slug: next,
+                    worktree,
+                    commit_message: message,
+                    pr_title: title,
+                    pr_body: body,
+                    agent: None,
+                },
+                progress,
+            )?;
+            Ok(())
+        }
         PrCommand::Land {
             strict,
             local,
@@ -234,7 +262,10 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
                 pr_body: body,
                 agent: None,
             };
-            arm(repo, &options, progress)?;
+            let Some(pr) = arm(repo, &options, progress)? else {
+                return Ok(());
+            };
+            crate::ops::pr_landing::watch_armed_pr(repo, &options, pr, progress)?;
             Ok(())
         }
         PrCommand::Submit {

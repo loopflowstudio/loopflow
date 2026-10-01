@@ -77,7 +77,8 @@ The parent Task does not hold two simultaneously open PRs.
 lf commit -m "parser: accept nested groups" # local checkpoint
 lf pr open                             # prepare a draft and open its page
 lf pr publish                          # ready for review
-lf land                                # request auto-merge and return
+lf arm                                 # request auto-merge and return
+lf land                                # watch CI, repair, and finish merged
 ```
 
 `publish` creates or refreshes the current PR without integration. A completed
@@ -85,10 +86,12 @@ merge, including one made outside `lf`, advances the recorded Task base to the
 actual merge base when the old base is its ancestor. Publication, submit and
 landing share that ancestry check; unrelated or divergent bases still fail.
 
-`land` merges current main, clear merge-time scratch state, verify once,
+`land` merges current main, clears merge-time scratch state, verifies once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `land` requests
-GitHub auto-merge and returns. `submit` performs the
+GitHub auto-merge, watches CI, repairs failures through ci-fix and re-arms until
+GitHub confirms the merge or a blocker requires intervention. `arm` returns after
+the request. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a live
 Task worker or certify that a particular Flow ran.
@@ -221,9 +224,10 @@ partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
 
 Rerun `lf land` after resolving a blocker to renew the exact-head request.
-The release watcher retains supervisor generations and repair conclusions in
-conversation history. `lf mon show SESSION --final` inspects a conclusion;
-the finite landing CLI does not keep a polling process alive.
+The CLI and release watcher retain supervisor generations and repair conclusions
+in conversation history. `lf mon show SESSION --final` inspects a conclusion.
+LOO-332 owns replacing the CLI watcher with finite repository ticks; Land keeps
+watch-and-repair until that replacement exists.
 
 Watched repairs return `published` or `blocked` with a summary in their existing
 final answer. A blocked result names the required action. The watcher observes

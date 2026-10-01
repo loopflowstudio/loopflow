@@ -25,3 +25,10 @@
 - Main's account/installation authority uses the OS account home, not HOME.
   Managed-Task public proofs therefore use the disposable container harness;
   overriding HOME cannot authorize a private Task against an installed store.
+
+- Jack Heart's supervisory correction retains Land watch/ci-fix/re-arm and the
+  separate Arm request. LOO-332 may make Land finite after repository ticks exist.
+- The supervisory deletion list was absent. Main's recorded deletions identify
+  the resurrected Session cutover suite and chapter-rotation e2e; delete both.
+- Retain Wave Status for planning/work evidence and Wave Place for schedule
+  authority/new-work Home inheritance. Neither depends on a served Wave.

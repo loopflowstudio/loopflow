@@ -76,6 +76,30 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             },
             &progress,
         ),
+        Some(PrCommand::Arm {
+            strict,
+            local,
+            complete,
+            next,
+            worktree,
+            message,
+            title,
+            body,
+        }) => arm_current(
+            &LandOptions {
+                strict: *strict,
+                local: *local,
+                create_pr: true,
+                complete: *complete,
+                next_slug: next.clone(),
+                worktree: worktree.clone(),
+                commit_message: message.clone(),
+                pr_title: title.clone(),
+                pr_body: body.clone(),
+                agent: cli_model.map(str::to_string),
+            },
+            &progress,
+        ),
         Some(PrCommand::Land {
             strict,
             local,
@@ -481,7 +505,22 @@ pub(crate) fn land_repo(
     progress: &impl Progress,
 ) -> Result<()> {
     // The wave home stays put on land — no rotation, no cd.
-    with_sync_retry(repo_root, "land", progress, |repo, integrated| {
+    let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
+        if integrated {
+            finish_arm_after_sync(repo, options, progress)
+        } else {
+            arm(repo, options, progress)
+        }
+    })?;
+    if let Some(pr) = pr {
+        crate::ops::pr_landing::watch_armed_pr(repo_root, options, pr, progress)?;
+    }
+    Ok(())
+}
+
+fn arm_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    with_sync_retry(&repo_root, "arm", progress, |repo, integrated| {
         if integrated {
             finish_arm_after_sync(repo, options, progress)
         } else {

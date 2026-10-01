@@ -69,7 +69,8 @@ newline-delimited snapshots. Progress and errors go to stderr.
 ```bash
 lf pr publish                         # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
-lf land                            # prepare and request auto-merge; return
+lf arm                             # prepare and request auto-merge; return
+lf land                            # watch CI, repair failures, and finish merged
 lf --task EXP-12 land -c            # also request completion after merge
 lf task sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
@@ -77,8 +78,10 @@ lf release check                   # inspect release eligibility
 ```
 
 PR operations work on ordinary branches. Publication does not integrate main.
-Land returns after the handoff; requesting auto-merge does not establish a merge
-or complete a Task. Task completion still requires observed merged evidence.
+Arm returns after the request. Land watches GitHub, repairs failed CI through
+ci-fix, and re-arms until merged or blocked. Task completion requires observed
+merged evidence. LOO-332 will make Land finite once repository ticks own this
+watch-and-repair lifecycle.
 
 ## Accounts and children
 

@@ -2,6 +2,7 @@ mod support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
@@ -122,6 +123,98 @@ fi
 exit 0
 "#
     )
+}
+
+fn gh_watched_land_script(log_path: &str, awaiting_queue: bool, merge_race: bool) -> String {
+    let merge_state = if awaiting_queue { "behind" } else { "blocked" };
+    let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
+    let unarmed = support::github_merge_response(1, "$head", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(
+        1,
+        "$head",
+        "OPEN",
+        merge_state,
+        Some(if awaiting_queue {
+            "awaiting_queue"
+        } else {
+            "auto"
+        }),
+    );
+    let merged = support::github_merge_response(1, "$head", "MERGED", "UNKNOWN", None)
+        .replace("\"oid\":\"$head\"", "\"oid\":\"merge-head\"");
+    format!(
+        r#"#!/bin/sh
+auto_state="{log_path}.auto"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
+if [ "$1 $2" = "api graphql" ]; then
+  case "$*" in
+    *LoopflowPrChecks*)
+      head="$(git rev-parse HEAD)"
+      cat <<JSON
+{checks}
+JSON
+      exit 0 ;;
+  esac
+  # A request-only projection discards the server's merged state at this boundary.
+  case "$*" in *--jq*) echo false; exit 0 ;; esac
+  head="$(git rev-parse HEAD)"
+  if [ ! -f "$auto_state" ]; then
+    cat <<JSON
+{unarmed}
+JSON
+  elif [ "{merge_race}" = true ] || [ -z "$LF_TEST_REPAIR_PROOF" ] || [ -f "$LF_TEST_REPAIR_PROOF" ]; then
+    cat <<JSON
+{merged}
+JSON
+  else
+    cat <<JSON
+{armed}
+JSON
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  touch "$auto_state"
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  head="$(git rev-parse HEAD)"
+  if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
+    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    exit 0
+  fi
+  echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn initialize_landing_store(path: &std::path::Path) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    drop(
+        runtime
+            .block_on(loopflow::store::open_ephemeral_store(
+                &loopflow::store::StorageConfig::sqlite(path.to_path_buf()),
+            ))
+            .unwrap(),
+    );
 }
 
 fn gh_existing_pr_script(log_path: &str) -> String {
@@ -1612,7 +1705,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
 }
 
 #[test]
-fn cli_land_requests_merge_and_returns_with_the_checkout_intact() {
+fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let repo = TestRepo::new();
     let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
@@ -1644,7 +1737,7 @@ fn cli_land_requests_merge_and_returns_with_the_checkout_intact() {
         .args([
             "task",
             "pr",
-            "land",
+            "arm",
             "--strict",
             "--title",
             "test title",
@@ -1657,19 +1750,19 @@ fn cli_land_requests_merge_and_returns_with_the_checkout_intact() {
         .env_remove("LF_PROCESS_ID")
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
-        .expect("run lf land");
-    assert!(status.success(), "lf land should succeed");
+        .expect("run lf pr arm");
+    assert!(status.success(), "lf pr arm should succeed");
     assert!(
         remote_branch_exists(&repo, branch),
-        "lf land should push its branch"
+        "lf pr arm should push its branch"
     );
     let gh_log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(
         gh_log.lines().any(|line| line.starts_with("pr create ")),
-        "lf land should create its missing PR, got: {gh_log}"
+        "lf pr arm should create its missing PR, got: {gh_log}"
     );
 
-    // GitHub still reports OPEN: requesting auto-merge does not settle or remove work.
+    // The wave home is permanent: arm never rotates the worktree or cds away.
     assert!(
         worktree.exists(),
         "worktree should stay in place after land"
@@ -1679,4 +1772,275 @@ fn cli_land_requests_merge_and_returns_with_the_checkout_intact() {
         !directive.contains("cd "),
         "land should not emit a cd directive, got: {directive}"
     );
+}
+
+#[test]
+fn lf_pr_land_waits_for_authoritative_merged_observation() {
+    for (repair, blocked, awaiting_queue, merge_race, flow) in [
+        (false, false, false, true, false),
+        (false, false, false, false, false),
+        (true, false, false, false, false),
+        (true, true, false, false, false),
+        (true, false, true, false, false),
+        (true, false, false, false, true),
+    ] {
+        let repo = TestRepo::new();
+        let github_remote = "https://github.com/loopflowstudio/loopflow.git";
+        let local_remote = repo.bare_path().to_string_lossy().to_string();
+        let status = Command::new("git")
+            .args([
+                "config",
+                &format!("url.{local_remote}.insteadOf"),
+                github_remote,
+            ])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["remote", "set-url", "origin", github_remote])
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let log_path = repo.bare_path().join("watched-gh.log");
+        let script = gh_watched_land_script(
+            log_path.to_string_lossy().as_ref(),
+            awaiting_queue,
+            merge_race,
+        );
+        let repair_commands = r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
+  export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
+  echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
+  if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
+  "$LF_TEST_BIN" task sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
+  if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
+    git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
+  fi
+fi"#;
+        let codex = codex_app_server_script(
+            if blocked {
+                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
+            } else {
+                r#"{"status":"published","summary":"Synced the linked worktree; the same head can now merge."}"#
+            },
+            "",
+        )
+        .replace(
+            "read -r turn_start\n",
+            &format!("read -r turn_start\n{repair_commands}\n"),
+        );
+        let _env = EnvGuard::new(&[
+            ("gh", script.as_str()),
+            ("codex", codex.as_str()),
+            ("open", noop_open_script()),
+        ]);
+        let worktree = repo.create_named_worktree("watched-land");
+        fs::write(worktree.join("feature.txt"), "feature").unwrap();
+        fs::create_dir_all(worktree.join(".lf")).unwrap();
+        fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        if flow {
+            fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
+            fs::write(
+                worktree.join(".lf/flows/repair-proof.yaml"),
+                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+            )
+            .unwrap();
+        }
+        let status = Command::new("git")
+            .args(["add", "."])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "-m", "feature work"])
+            .current_dir(&worktree)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let lf_home = repo.path().join("lf-home");
+        let database = lf_home.join("loopflow.db");
+        initialize_landing_store(&database);
+        let repair_proof = repo.path().join(".git/landing-repair-proof");
+        let sync_log = repo.bare_path().join("repair-sync.log");
+        let repair_launches = repo.bare_path().join("repair-launches.log");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        if flow {
+            command.args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"]);
+        } else {
+            command.args([
+                "task",
+                "pr",
+                "land",
+                "--strict",
+                "--title",
+                "watched landing",
+                "--body",
+                "Observe GitHub before returning.",
+            ]);
+        }
+        let output = command
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    Path::new(env!("CARGO_BIN_EXE_lf"))
+                        .parent()
+                        .unwrap()
+                        .display(),
+                    std::env::var("PATH").unwrap()
+                ),
+            )
+            .current_dir(&worktree)
+            .env_remove("LF_GIT_OPERATION_ID")
+            .env_remove("LF_TRACE_ID")
+            .env_remove("LF_PROCESS_ID")
+            .env("LF_HOME", &lf_home)
+            .env("LF_DB_PATH", &database)
+            .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("LF_TEST_SYNC_LOG", &sync_log)
+            .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
+            .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
+            .env(
+                "LF_TEST_REPAIR_PROOF",
+                if repair {
+                    repair_proof.as_os_str()
+                } else {
+                    std::ffi::OsStr::new("")
+                },
+            )
+            .output()
+            .unwrap();
+        if repair {
+            let db = rusqlite::Connection::open(&database).unwrap();
+            let parent: (String, i64) = db
+                .query_row(
+                    "SELECT id,exit_code FROM execs WHERE parent_exec_id IS NULL",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                parent.1,
+                i64::from(blocked),
+                "repair={repair} blocked={blocked} flow={flow}: {}\nNested sync: {}",
+                String::from_utf8_lossy(&output.stderr),
+                fs::read_to_string(&sync_log).unwrap_or_default(),
+            );
+            let owners: Vec<String> = db
+                .prepare("SELECT DISTINCT exec_id FROM session_events WHERE kind='started'")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let caller = if flow {
+                let (id, via_agent): (String, bool) = db
+                    .query_row(
+                        "SELECT id,via_agent FROM execs WHERE parent_exec_id=?1",
+                        [&parent.0],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert!(!via_agent, "the Flow driver directly executes its step");
+                id
+            } else {
+                parent.0.clone()
+            };
+            assert_eq!(
+                owners.as_slice(),
+                std::slice::from_ref(&caller),
+                "repair uses the actual calling lf process"
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM execs", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                if flow { 3 } else { 2 },
+                "only actual lf processes are Execs"
+            );
+            let via_agent: bool = db
+                .query_row(
+                    "SELECT via_agent FROM execs WHERE parent_exec_id=?1",
+                    [&caller],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(via_agent, "the repair agent invokes the nested sync");
+            let completions: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM execs WHERE id=?1 AND completed_at IS NOT NULL",
+                    [&parent.0],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                completions, 1,
+                "the command completes once across worker threads"
+            );
+            if flow {
+                let merged: (String, String) = db
+                    .query_row("SELECT state,merge_commit FROM pr_landings", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
+                    .unwrap();
+                assert_eq!(merged, ("merged".into(), "merge-head".into()));
+                let operations: Vec<(String, String)> = db
+                    .prepare("SELECT kind,exec_id FROM flow_events ORDER BY seq")
+                    .unwrap()
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert_eq!(
+                    operations,
+                    [
+                        ("operation_started".into(), caller.clone()),
+                        ("operation_completed".into(), caller),
+                    ]
+                );
+            }
+        }
+        if blocked {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains("GitHub credential revoked; reconnect it before retrying."));
+            assert!(!repair_proof.exists());
+            assert_eq!(
+                fs::read_to_string(&repair_launches)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+            continue;
+        }
+        assert!(
+            output.status.success(),
+            "lf pr land failed: {}\nNested sync: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(&sync_log).unwrap_or_default(),
+        );
+        assert!(
+            flow || String::from_utf8_lossy(&output.stdout).contains("merged as merge-head"),
+            "land returned without merged evidence: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(!worktree.exists());
+        assert!(!local_branch_exists(&repo, "watched-land"));
+        assert!(!remote_branch_exists(&repo, "watched-land"));
+        if repair {
+            let repaired_head =
+                fs::read_to_string(&repair_proof).expect("repair wrote shared Git metadata");
+            let connection = rusqlite::Connection::open(&database).unwrap();
+            let merged_head: String = connection
+                .query_row("SELECT observed_head_sha FROM pr_landings", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(repaired_head.trim(), merged_head);
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Synced the linked worktree"));
+        }
+    }
 }

@@ -6891,7 +6891,7 @@
     "short_aliases": []
   },
   {
-    "about": "Place a Wave on a Home",
+    "about": "Set the Home for Wave schedules and newly created work",
     "aliases": [],
     "hidden": false,
     "kind": "command",
@@ -7744,6 +7744,204 @@
   },
   {
     "about": "Prepare a PR, request exact-head auto-merge, and return without watching",
+    "aliases": [],
+    "hidden": false,
+    "kind": "command",
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ]
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "strict",
+    "kind": "argument",
+    "long": "strict",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "local",
+    "kind": "argument",
+    "long": "local",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "SetTrue",
+    "defaults": [
+      "false"
+    ],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "complete",
+    "kind": "argument",
+    "long": "complete",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": "c",
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "next",
+    "kind": "argument",
+    "long": "next",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "worktree",
+    "kind": "argument",
+    "long": "worktree",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": "w",
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "message",
+    "kind": "argument",
+    "long": "message",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": "m",
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "title",
+    "kind": "argument",
+    "long": "title",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Set",
+    "defaults": [],
+    "global": false,
+    "help": null,
+    "hidden": false,
+    "id": "body",
+    "kind": "argument",
+    "long": "body",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": null,
+    "short_aliases": []
+  },
+  {
+    "action": "Help",
+    "defaults": [],
+    "global": false,
+    "help": "Print help",
+    "hidden": false,
+    "id": "help",
+    "kind": "argument",
+    "long": "help",
+    "long_aliases": [],
+    "path": [
+      "lf",
+      "task",
+      "pr",
+      "arm"
+    ],
+    "required": false,
+    "short": "h",
+    "short_aliases": []
+  },
+  {
+    "about": "Arm and watch a PR through CI repair and authoritative merge",
     "aliases": [],
     "hidden": false,
     "kind": "command",

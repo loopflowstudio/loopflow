@@ -920,7 +920,7 @@ Show one Wave's current plan, Task details, and execution evidence
 
 ## lf wave place
 
-Place a Wave on a Home
+Set the Home for Wave schedules and newly created work
 
 | Argument | What it does |
 |---|---|
@@ -1025,9 +1025,25 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 | `--body` | body |
 | `--help / -h` | Print help |
 
-## lf task pr land
+## lf task pr arm
 
 Prepare a PR, request exact-head auto-merge, and return without watching
+
+| Argument | What it does |
+|---|---|
+| `--strict` | strict Default: false. |
+| `--local` | local Default: false. |
+| `--complete / -c` | complete Default: false. |
+| `--next` | next |
+| `--worktree / -w` | worktree |
+| `--message / -m` | message |
+| `--title` | title |
+| `--body` | body |
+| `--help / -h` | Print help |
+
+## lf task pr land
+
+Arm and watch a PR through CI repair and authoritative merge
 
 | Argument | What it does |
 |---|---|

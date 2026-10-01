@@ -1,6 +1,6 @@
 # Integrated CLI surface · 2026-09-30
 
-126 commands below root, 419 flags, 84 positionals, 16 hidden commands, 0 registered aliases.
+127 commands below root, 428 flags, 84 positionals, 16 hidden commands, 0 registered aliases.
 
 Compiled after merging main `de074a2eb` and completing the owner/cull changes.
 This inventory includes every new landed-model input. Each current row is kept
@@ -94,8 +94,8 @@ children; it creates no additional stored object. Automatic help is parser disco
 | lf wave cron trigger | Ask launchd to fire an installed job | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
 | lf wave cron remove | Uninstall a scheduled lf invocation | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
 | lf wave list | List authored Waves and retained planning identities without starting work | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
-| lf wave status | Show one Wave's current plan, Task details, and execution evidence | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
-| lf wave place | Place a Wave on a Home | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
+| lf wave status | Show one Wave's current plan, Task details, and execution evidence | keep | rust/loopflow/src/lf/commands/waves.rs::status |
+| lf wave place | Set the Home for Wave schedules and newly created work | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
 | lf wave rename | Rename or relocate an authored Wave and its provider mapping | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
 | lf wave update-plan | Replace the current chapter's KRs, targets, and Flow recommendation | keep | rust/loopflow/src/bin/lf.rs::run_wave_command; rust/loopflow/src/lf/commands/placement.rs |
 | lf task | Concrete work, worktrees, commits, and pull requests | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
@@ -105,7 +105,8 @@ children; it creates no additional stored object. Automatic help is parser disco
 | lf task pr publish | Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr open | Push and create or update a draft PR, then open its GitHub page. Existing ready PRs stay ready; opening a draft does not publish it | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr submit | Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Nothing merges until you click merge on GitHub | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
-| lf task pr land | Prepare a PR, request exact-head auto-merge, and return without watching | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
+| lf task pr arm | Prepare a PR, request exact-head auto-merge, and return without watching | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
+| lf task pr land | Arm and watch a PR through CI repair and authoritative merge | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task pr abandon | Abandon branch: close PR, remove worktree, delete branch | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task wt | Worktree operations | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
 | lf task wt create | Create a low-level sibling worktree | keep | rust/loopflow/src/bin/lf.rs::run_task_command; swift/Loopflow/Services/RegistryQuery.swift |
@@ -497,6 +498,15 @@ restriction remain distinct inputs. Callers inherit the command evidence above.
 | lf task pr submit | --title | title | keep |
 | lf task pr submit | --body | body | keep |
 | lf task pr submit | --help / -h | Print help | keep |
+| lf task pr arm | --strict | strict | keep |
+| lf task pr arm | --local | local | keep |
+| lf task pr arm | --complete / -c | complete | keep |
+| lf task pr arm | --next | next | keep |
+| lf task pr arm | --worktree / -w | worktree | keep |
+| lf task pr arm | --message / -m | message | keep |
+| lf task pr arm | --title | title | keep |
+| lf task pr arm | --body | body | keep |
+| lf task pr arm | --help / -h | Print help | keep |
 | lf task pr land | --strict | strict | keep |
 | lf task pr land | --local | local | keep |
 | lf task pr land | --complete / -c | complete | keep |

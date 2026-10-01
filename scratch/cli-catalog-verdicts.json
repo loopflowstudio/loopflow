@@ -970,11 +970,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land",
-      "concept": "Authorized delivery handoff",
-      "follows": "LOO-332",
+      "overlap": "Arm requests auto-merge and returns; Land watches CI, invokes ci-fix and re-arms until merged or blocked. LOO-332 owns making Land finite after repository ticks replace this supervisor.",
+      "verdict": "rename",
+      "target": "lf task pr arm",
+      "concept": "Exact-head auto-merge request",
+      "follows": "Jack Heart supervisory correction, 2026-09-30; LOO-332 consolidation deferred",
       "decision_state": "implemented; latest landed-model reconciliation supersedes earlier slice notes"
     },
     {
@@ -1002,11 +1002,11 @@
           "runtime/source reference"
         ]
       ],
-      "overlap": "Finite prepare/publish/merge-intent handoff; later scheduled checks own repair and settlement. A successful command means handoff, not merged.",
+      "overlap": "Land retains the current watch-and-repair lifecycle; a merge request alone is not success.",
       "verdict": "rename",
       "target": "lf task pr land",
-      "concept": "Authorized delivery handoff",
-      "follows": "LOO-332",
+      "concept": "Watched delivery through CI repair and authoritative merge",
+      "follows": "Jack Heart supervisory correction, 2026-09-30; LOO-332 consolidation deferred",
       "decision_state": "implemented; latest landed-model reconciliation supersedes earlier slice notes"
     },
     {
@@ -2234,7 +2234,7 @@
           "Desktop"
         ]
       ],
-      "overlap": "Detailed Wave snapshot includes complete Project metadata, metrics and Task conditions; roadmap is a portfolio projection, not an equivalent reader.",
+      "overlap": "Reads current Projects, Task conditions, metrics and Session history without resident health or lifecycle. Retain the focused planning/work view; roadmap owns the portfolio.",
       "verdict": "keep",
       "target": "lf wave status",
       "concept": "Wave-scoped planning and work evidence",
@@ -2379,7 +2379,7 @@
           "documented public use"
         ]
       ],
-      "overlap": "Execution destination for scheduled work can survive without a resident. Coordinate LOO-332 repository schedules and LOO-334 cross-Home discovery before choosing whether place remains a Wave input or folds into cron. Do not infer signal authority from placement.",
+      "overlap": "Retain Home placement for cron authority and inheritance by new Project/Task work. No resident is started, stopped or migrated; existing child placements stay unchanged.",
       "verdict": "keep",
       "target": "lf wave place",
       "concept": "Execution placement of a durable responsibility",
@@ -9285,11 +9285,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --strict",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --strict",
       "concept": "Authorized delivery handoff: strict delivery verification policy.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9334,11 +9334,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --local",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --local",
       "concept": "Authorized delivery handoff: settlement through the invoking process rather than the Home supervisor.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9383,11 +9383,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --complete",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --complete",
       "concept": "Authorized delivery handoff: Task disposition after successful delivery.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9430,11 +9430,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --next",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --next",
       "concept": "Authorized delivery handoff: future serial PR continuation intent.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9477,11 +9477,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --worktree",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --worktree",
       "concept": "Authorized delivery handoff: checkout selected for delivery.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9524,11 +9524,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --message",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --message",
       "concept": "Authorized delivery handoff: commit content or appended discussion text.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9571,11 +9571,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --title",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --title",
       "concept": "Authorized delivery handoff: authored title for the selected planning or review object.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9618,11 +9618,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --body",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --body",
       "concept": "Authorized delivery handoff: authored PR review narrative.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {
@@ -9665,11 +9665,11 @@
           "agent instructions"
         ]
       ],
-      "overlap": "Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.",
-      "verdict": "merge into",
-      "target": "lf task pr land --help",
+      "overlap": "Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.",
+      "verdict": "keep",
+      "target": "lf task pr arm --help",
       "concept": "Shared help protocol applied to authorized delivery handoff.",
-      "follows": "LOO-332",
+      "follows": "Jack Heart supervisory correction, 2026-09-30",
       "decision_state": "implemented; see current integrated surface for exact metadata"
     },
     {

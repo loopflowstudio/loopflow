@@ -39,20 +39,20 @@ including additions from landed work, and all options.
   `wave list` reads durable placement; roadmap includes provider planning work.
   Wave detail is retained for its metrics, Project and Task-condition projection.
   Rename combines local placement/name and optional provider title.
-- Land prepares, requests auto-merge and returns. It does not declare a merge or
-  complete a Task. Scheduled/release observation retains its separate owner.
+- Arm prepares, requests auto-merge and returns. Land watches CI, repairs through
+  ci-fix and re-arms until merged or blocked. Completion requires merged evidence.
+  LOO-332 owns making Land finite once replacement repository ticks exist.
 - A fresh Git project needs provider access, not Linear, for its first result.
   Guides use resolving short forms; generated reference/help retain owner paths.
 
 ## Delete — do not maintain
 
-Removed parser/dispatch owners: root Exec/Runs, Task Run, PR Arm, Wave
+Removed parser/dispatch owners: root Exec/Runs, Task Run, Wave
 Forget/Retire/Relocate, Wave Connect/Sync, duplicate User Name, Account Status,
 Route Show, PR Status, Task Changes, Skill List/Show and Flow Validate.
 Removed root `--as`, mode booleans, browser/diff boolean pairs, unused flags and
 all registered aliases. Main's resident, daemon, chat, webhook, in-turn Flow
-navigation and Chapter-table APIs remain deleted. The CLI's persistent landing
-watch test and its exclusive repair fixtures are deleted with that behavior.
+navigation and Chapter-table APIs remain deleted. Land's persistent watcher and repair fixtures remain until LOO-332 replaces them.
 
 Compression removes the unreferenced `lf/commands/exec.rs` parser/dispatcher,
 `Store::forget_wave` and its SQLite implementation and exclusive deletion checks,
@@ -72,7 +72,8 @@ The main merge exposed selected-Task routing loss and a nested runtime in Wave
 rename. Forwarding now precedes placement; rename awaits the existing async
 provider function. Root selector handling no longer drops Task attribution on
 bare launch. Wave checks happen at the selected Task, including managed startup.
-Land returns on handoff, and its obsolete waiting/repair test was removed.
+The supervisor restored Land
+watch-and-repair and its acceptance test; the finite handoff belongs to Arm.
 SSH nested-call detection now normalizes shorthand before inspecting the owner;
 the moved Home namespace otherwise bypassed the existing transport boundary.
 Repo Connect/Refresh each have one Wave selector; redundant leaf flags are gone.
@@ -91,7 +92,7 @@ release/merge lifecycle. Retained local artifact directory is recorded in
 
 Focused proof: Monitor state/prune preview (2), independent Task Flow contribution
 (1), discovery/documentation (16+3), Account current/cached (1), mixed-provider
-continuation (1), worktree/Wave selectors (2), finite Land (1), lease restrictions
+continuation (1), worktree/Wave selectors (2), earlier finite Land (1, superseded below), lease restrictions
 (8), SSH boundary (16), Swift consumers (9), skill alignment (4), architecture
 coverage and migration history passed. The disposable OS managed-review/start
 proof passed (1), preserving its captured graph, cursor and exact pending review;
@@ -105,17 +106,36 @@ contains the follow-up cull edits. The first continuation named remaining
 tracked edits after recording the merge. After checkpointing, no continuation
 receipt remained; `lf sync --manual de074a2ebd2cb54e6f7dde799400dae36c87bbbe`
 then succeeded against the already-integrated target without changing HEAD.
-The checkout is clean and the pinned main commit is an ancestor. Nothing was
-pushed, published, landed or marked complete; shipment belongs to the supervisor.
+The checkout is clean and the pinned main commit is an ancestor. At that checkpoint nothing was
+pushed, published, landed or marked complete; shipment belonged to the supervisor.
 Gate/CI retain affected-suite and release validation; these focused proofs are
-not a hosted gate receipt. Final compiled counts: 126 commands below root,
-419 flags, 84 positionals, 16 hidden commands and zero registered aliases.
+not a hosted gate receipt. Current compiled counts: 127 commands below root, 428 flags, 84 positionals, 16 hidden commands and zero registered aliases.
 
-Compression review found deleted `arm` and `runs` spellings in landing recovery,
-and duplicate finite/waiting Land guidance. Recovery now requests `lf land`
-with the original completion/rotation disposition and names retained input
-artifacts when no conclusion exists. The Exec paging proof now inspects through
-Monitor instead of its deleted predecessor. Guides describe the finite handoff and
-use the selected mode/diff options. No command-catalog shape changed.
+## Supervisory corrections · 2026-09-30
 
-Compression checks: `cargo test -p loopflow` (focused landing, launch, Wave preservation/placement, PR refusal, Exec paging, documentation and prompt-golden filters) — 37 passed; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` — passed; wider suites remain with gate/CI.
+Jack Heart requested three repairs, focused checks, a commit and a non-force push.
+The message referenced a deletion list but contained no entries. Comparison with
+main's LOO-298 deletion commits identified `rust/loopflow/tests/session_cutover_tests.rs`
+and `tests/e2e/chapter_rotation.py`; both resurrected files are removed. The final
+Session lifecycle suite remains; no replacement cutover test is introduced.
+
+Land retains the automatic watch → ci-fix → re-arm lifecycle in both CLI and typed
+Flow dispatch. Arm remains the finite request endpoint, including `-c` and `--next`,
+so a repair never recursively enters Land. The earlier finite-Land proof above is
+superseded. LOO-332 owns consolidation after finite repository ticks replace the
+watcher; those ticks are not implemented by this Task.
+
+C080 (`wave status`) is retained: current Projects/KRs, Task conditions, metrics
+and Session history require no served Wave. Its stale resident/loop comments are
+removed; the DTO stays intact. C086 (`wave place`) is retained for nonresident
+work: `cron_authority` reads Wave placement and newly created Projects inherit it;
+Tasks inherit their Project's Home. It neither starts a resident nor moves existing
+child work. Help and catalog name these actual consumers. No served-Wave control
+or resident-health field remains in either command.
+
+Review found a second finite-Land dispatch in typed Flow execution and a recursive
+repair instruction; both now use the original watcher/Arm split. Existing final-model
+landing acceptance covers direct/Flow success, failed CI, blocked repair, queue state
+and merged evidence, without recreating cutover coverage.
+
+Supervisory checks: isolated `cargo test -p loopflow` (land_tests, status_tests, wave_repository_ownership, documented_commands, golden_prompt, and lib ops::pr_landing::tests) — 63 passed after correcting the restored Flow fixture to `--mode batch`; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` — passed.

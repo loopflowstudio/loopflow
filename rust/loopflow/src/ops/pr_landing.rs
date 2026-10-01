@@ -235,9 +235,9 @@ fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> Op
         .as_ref()
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
-    let land_command = repair_land_command(landing);
+    let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact watched landing incident below. Start with `lf task sync`. Repair and verify, then run `{land_command}` to publish and enable auto-merge with the requested Task disposition. Return after the request; the landing supervisor only observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact watched landing incident below. Start with `lf task sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf land` or wait for merge; the landing supervisor only observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -335,16 +335,16 @@ fn exec_ci_fix(landing: &PrLanding, incident: &CiIncident, previous: &str) -> Op
     }
 }
 
-fn repair_land_command(landing: &PrLanding) -> String {
+fn repair_arm_command(landing: &PrLanding) -> String {
     if landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask) {
-        "lf land -c".to_string()
+        "lf arm -c".to_string()
     } else if let Some(slug) = &landing.next_slug {
         format!(
-            "lf land --next {}",
+            "lf arm --next {}",
             crate::engine::process::shell_escape(slug)
         )
     } else {
-        "lf land".to_string()
+        "lf arm".to_string()
     }
 }
 
@@ -692,7 +692,7 @@ pub(crate) async fn supervise_pr_landing(
             }
             LandingObservation::Unarmed { .. } => {
                 let reason = format!(
-                    "pull request #{} has no auto-merge request; run lf land to resume landing",
+                    "pull request #{} has no auto-merge request; run lf arm to resume landing",
                     landing.pr_number
                 );
                 return block_landing(&store, &mut landing, reason).await;
@@ -1093,7 +1093,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::{
-        ci_incident, classify_github_observation, repair_land_command, supervise_pr_landing,
+        ci_incident, classify_github_observation, repair_arm_command, supervise_pr_landing,
         LandingDriver, LandingObservation,
     };
     use std::path::PathBuf;
@@ -1682,18 +1682,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ci_fix_land_preserves_task_completion_and_rotation() {
+    async fn ci_fix_arm_preserves_task_completion_and_rotation() {
         let (_directory, store) = store().await;
         let mut landing = claimed(&store, _directory.path()).await;
-        assert_eq!(repair_land_command(&landing), "lf land");
+        assert_eq!(repair_arm_command(&landing), "lf arm");
         landing.after_merge = Some(AfterMerge::CompleteTask);
-        assert_eq!(repair_land_command(&landing), "lf land -c");
+        assert_eq!(repair_arm_command(&landing), "lf arm -c");
         landing.after_merge = Some(AfterMerge::ContinueTask);
         landing.next_slug = Some("parser-proof".to_string());
-        assert_eq!(
-            repair_land_command(&landing),
-            "lf land --next 'parser-proof'"
-        );
+        assert_eq!(repair_arm_command(&landing), "lf arm --next 'parser-proof'");
     }
 
     #[tokio::test]

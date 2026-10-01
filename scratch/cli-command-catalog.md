@@ -9,7 +9,7 @@ Main `de074a2eb` supplies the landed model. Earlier slice audits remain at
 ## Counts and agreement
 
 Baseline `a6b1bc3df`: **141 commands below root, 440 flags, 95 positionals,
-18 hidden commands, 10 extra aliases**. Current compiled surface: **126 commands below root, 419 flags, 84 positionals, 16 hidden commands, 0 registered aliases**.
+18 hidden commands, 10 extra aliases**. Current compiled surface: **127 commands below root, 428 flags, 84 positionals, 16 hidden commands, 0 registered aliases**.
 These are actual Clap counts, including model additions; no estimate subtracts
 retired rows while ignoring new commands. The [integrated inventory](cli-integrated-surface.md)
 records every current command and argument with its concept and source owner.
@@ -40,8 +40,9 @@ with originals retained in `cli-catalog-before.json` and Git history.
   optional provider title. Keep Wave detail for metrics/Project/Task conditions;
   roadmap owns portfolio planning, including work without execution records.
   `list wave` discovers authored goals without creating placement or Task rows.
-- Merge Arm into finite Land: prepare/request auto-merge and return. A request
-  is not merged evidence; scheduled/release observation retains its own owner.
+- Keep Arm as prepare/request/return and Land as watch/ci-fix/re-arm through
+  authoritative merge. LOO-332 makes Land finite only after repository ticks
+  replace that supervision; the CLI Task does not preempt it.
 - Keep draft publication in PR Open, explicit signal-safe Monitor Prune, current
   exit semantics and operation-specific previews. No universal confirmation or
   authentication-code layer earns a place. These settle the earlier demo choices.
@@ -102,8 +103,8 @@ P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstu
 | C030 | lf pr publish | lf task pr | Publication of a ready review without merge intent | Desktop: [E060]; agent instructions: [E061]; agent instructions: [E062]; P:1267 | N030 | rename → lf task pr publish | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
 | C031 | lf pr open | lf task pr | Draft preparation and presentation for browser review | Desktop: [E053]; runtime/source reference: [E055]; runtime/source reference: [E063]; P:1277 | N031 | rename → lf task pr open | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
 | C032 | lf pr submit | lf task pr | Preparation for a reviewer's future merge decision | agent instructions: [E064]; agent instructions: [E065]; agent instructions: [E066]; P:1287 | N032 | rename → lf task pr submit | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
-| C033 | lf pr arm | lf task pr | Authorized delivery handoff | runtime/source reference: [E067]; agent instructions: [E068]; agent instructions: [E069]; P:1306 | N033 | merge into → lf task pr land | LOO-332; implemented; latest landed-model reconciliation supersedes earlier slice notes |
-| C034 | lf pr land | lf task pr | Authorized delivery handoff | runtime/source reference: [E070]; runtime/source reference: [E071]; runtime/source reference: [E072]; P:1325 | N034 | rename → lf task pr land | LOO-332; implemented; latest landed-model reconciliation supersedes earlier slice notes |
+| C033 | lf pr arm | lf task pr | Exact-head auto-merge request | runtime/source reference: [E067]; agent instructions: [E068]; agent instructions: [E069]; P:1306 | N033 | rename → lf task pr arm | Jack Heart supervisory correction, 2026-09-30; LOO-332 consolidation deferred; implemented; latest landed-model reconciliation supersedes earlier slice notes |
+| C034 | lf pr land | lf task pr | Watched delivery through CI repair and authoritative merge | runtime/source reference: [E070]; runtime/source reference: [E071]; runtime/source reference: [E072]; P:1325 | N034 | rename → lf task pr land | Jack Heart supervisory correction, 2026-09-30; LOO-332 consolidation deferred; implemented; latest landed-model reconciliation supersedes earlier slice notes |
 | C035 | lf pr abandon | lf task pr | Discarding branch and PR artifacts without deleting the planning Task | runtime/source reference: [E054]; agent instructions: [E073]; test: [E074]; P:1344 | N035 | rename → lf task pr abandon | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
 | C036 | lf wt | lf task | Physical checkout lifecycle namespace | runtime/source reference: [E075]; runtime/source reference: [E076]; runtime/source reference: [E077]; P:272 | N036 | rename → lf task wt | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
 | C037 | lf wt create | lf task wt | Allocation of an untracked sibling checkout | runtime/source reference: [E077]; test: [E078]; P:1638 | N037 | rename → lf task wt create | LOO-338 catalog and primary-source research; implemented; latest landed-model reconciliation supersedes earlier slice notes |
@@ -209,7 +210,6 @@ P:LINE refers to the [baseline Clap declarations](https://github.com/loopflowstu
 |---|---|---|
 | C002 | lf user name | merge into → lf home user |
 | C028 | lf pr status | merge into → lf task pr |
-| C033 | lf pr arm | merge into → lf task pr land |
 | C045 | lf auth status | merge into → lf account |
 | C051 | lf auth route show | merge into → lf account route |
 | C082 | lf wave connect | merge into → lf repo connect |
@@ -358,15 +358,15 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 | A125 | lf pr submit --title | C032 | Preparation for a reviewer's future merge decision: authored title for the selected planning or review object. | N199; P:1301 | keep → lf task pr submit --title | LOO-338 catalog and primary-source research; implemented; see current integrated surface for exact metadata |
 | A126 | lf pr submit --body | C032 | Preparation for a reviewer's future merge decision: authored PR review narrative. | N200; P:1303 | keep → lf task pr submit --body | LOO-338 catalog and primary-source research; implemented; see current integrated surface for exact metadata |
 | A127 | lf pr submit --help / -h | C032 | Shared help protocol applied to preparation for a reviewer's future merge decision. | N156; P:1287 | keep → lf task pr submit --help | LOO-338 catalog and primary-source research; implemented; see current integrated surface for exact metadata |
-| A128 | lf pr arm --strict | C033 | Authorized delivery handoff: strict delivery verification policy. | N207; P:1308 | merge into → lf task pr land --strict | LOO-332; implemented; see current integrated surface for exact metadata |
-| A129 | lf pr arm --local | C033 | Authorized delivery handoff: settlement through the invoking process rather than the Home supervisor. | N207; P:1310 | merge into → lf task pr land --local | LOO-332; implemented; see current integrated surface for exact metadata |
-| A130 | lf pr arm --complete / -c | C033 | Authorized delivery handoff: Task disposition after successful delivery. | N207; P:1312 | merge into → lf task pr land --complete | LOO-332; implemented; see current integrated surface for exact metadata |
-| A131 | lf pr arm --next | C033 | Authorized delivery handoff: future serial PR continuation intent. | N207; P:1314 | merge into → lf task pr land --next | LOO-332; implemented; see current integrated surface for exact metadata |
-| A132 | lf pr arm --worktree / -w | C033 | Authorized delivery handoff: checkout selected for delivery. | N207; P:1316 | merge into → lf task pr land --worktree | LOO-332; implemented; see current integrated surface for exact metadata |
-| A133 | lf pr arm --message / -m | C033 | Authorized delivery handoff: commit content or appended discussion text. | N207; P:1318 | merge into → lf task pr land --message | LOO-332; implemented; see current integrated surface for exact metadata |
-| A134 | lf pr arm --title | C033 | Authorized delivery handoff: authored title for the selected planning or review object. | N207; P:1320 | merge into → lf task pr land --title | LOO-332; implemented; see current integrated surface for exact metadata |
-| A135 | lf pr arm --body | C033 | Authorized delivery handoff: authored PR review narrative. | N207; P:1322 | merge into → lf task pr land --body | LOO-332; implemented; see current integrated surface for exact metadata |
-| A136 | lf pr arm --help / -h | C033 | Shared help protocol applied to authorized delivery handoff. | N207; P:1306 | merge into → lf task pr land --help | LOO-332; implemented; see current integrated surface for exact metadata |
+| A128 | lf pr arm --strict | C033 | Authorized delivery handoff: strict delivery verification policy. | N207; P:1308 | keep → lf task pr arm --strict | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A129 | lf pr arm --local | C033 | Authorized delivery handoff: settlement through the invoking process rather than the Home supervisor. | N207; P:1310 | keep → lf task pr arm --local | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A130 | lf pr arm --complete / -c | C033 | Authorized delivery handoff: Task disposition after successful delivery. | N207; P:1312 | keep → lf task pr arm --complete | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A131 | lf pr arm --next | C033 | Authorized delivery handoff: future serial PR continuation intent. | N207; P:1314 | keep → lf task pr arm --next | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A132 | lf pr arm --worktree / -w | C033 | Authorized delivery handoff: checkout selected for delivery. | N207; P:1316 | keep → lf task pr arm --worktree | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A133 | lf pr arm --message / -m | C033 | Authorized delivery handoff: commit content or appended discussion text. | N207; P:1318 | keep → lf task pr arm --message | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A134 | lf pr arm --title | C033 | Authorized delivery handoff: authored title for the selected planning or review object. | N207; P:1320 | keep → lf task pr arm --title | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A135 | lf pr arm --body | C033 | Authorized delivery handoff: authored PR review narrative. | N207; P:1322 | keep → lf task pr arm --body | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
+| A136 | lf pr arm --help / -h | C033 | Shared help protocol applied to authorized delivery handoff. | N207; P:1306 | keep → lf task pr arm --help | Jack Heart supervisory correction, 2026-09-30; implemented; see current integrated surface for exact metadata |
 | A137 | lf pr land --strict | C034 | Authorized delivery handoff: strict delivery verification policy. | N201; P:1327 | keep → lf task pr land --strict | LOO-332; implemented; see current integrated surface for exact metadata |
 | A138 | lf pr land --local | C034 | Authorized delivery handoff: settlement through the invoking process rather than the Home supervisor. | N208; P:1329 | keep → lf task pr land --local | LOO-332; implemented; see current integrated surface for exact metadata |
 | A139 | lf pr land --complete / -c | C034 | Authorized delivery handoff: Task disposition after successful delivery. | N203; P:1331 | keep → lf task pr land --complete | LOO-332; implemented; see current integrated surface for exact metadata |
@@ -769,8 +769,8 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 - **N030**: Concept: Publication of a ready review without merge intent. Ready PR publication differs from draft/open and from merge intent.
 - **N031**: Concept: Draft preparation and presentation for browser review. Publishes a draft and opens browser; publish produces ready review. Demo choice R08.
 - **N032**: Concept: Preparation for a reviewer's future merge decision. Prepares review without merge intent; arm/land request merge.
-- **N033**: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.
-- **N034**: Finite prepare/publish/merge-intent handoff; later scheduled checks own repair and settlement. A successful command means handoff, not merged.
+- **N033**: Arm requests auto-merge and returns; Land watches CI, invokes ci-fix and re-arms until merged or blocked. LOO-332 owns making Land finite after repository ticks replace this supervisor.
+- **N034**: Land retains the current watch-and-repair lifecycle; a merge request alone is not success.
 - **N035**: Concept: Discarding branch and PR artifacts without deleting the planning Task. Discards branch/PR artifacts; task delete removes provider planning object.
 - **N036**: Concept: Physical checkout lifecycle namespace. Owns Worktree operations; no equivalent operation identified.
 - **N037**: Concept: Allocation of an untracked sibling checkout. Untracked checkout allocation; task checkout retains tracked ownership.
@@ -813,12 +813,12 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 - **N074**: Concept: Removal of an installed scheduled invocation. Owns Uninstall a scheduled lf invocation; no equivalent operation identified.
 - **N075**: Wave has purpose/files and a plan, no running/stopped lifecycle. Keep the object; remove server-era operations.
 - **N076**: Durable Wave identity inventory; authored, including unconnected and empty goals, is discoverable through the shared definition catalog with list wave. No synthetic registry owner is created.
-- **N077**: Detailed Wave snapshot includes complete Project metadata, metrics and Task conditions; roadmap is a portfolio projection, not an equivalent reader.
+- **N077**: Reads current Projects, Task conditions, metrics and Session history without resident health or lifecycle. Retain the focused planning/work view; roadmap owns the portfolio.
 - **N078**: LOO-334 places provider/Team connection at repository scope. Wave-to-Initiative mapping is an input to that operation, not independent account/setup authority per Wave. Exact connection controls need integration with that work.
 - **N079**: Refresh provider planning observations. Git integration remains task sync; this name distinguishes the two effects.
 - **N080**: Retain the operation, replace Initiative-label-only behavior with LOO-329/334 identity semantics. The sibling plans disagree about identity through rename; do not settle that policy here.
 - **N081**: Wave existence comes from selected repository definitions. Deleting an empty registry row cannot delete a Wave and reads reimport it; remove this store-management operation. Preserve history.
-- **N082**: Execution destination for scheduled work can survive without a resident. Coordinate LOO-332 repository schedules and LOO-334 cross-Home discovery before choosing whether place remains a Wave input or folds into cron. Do not infer signal authority from placement.
+- **N082**: Retain Home placement for cron authority and inheritance by new Project/Task work. No resident is started, stopped or migrated; existing child placements stay unchanged.
 - **N083**: Stopped-resident relocation disappears. Rename owns directory/definition identity; execution placement remains separate under place. No duplicate slug/worktree relocation operation.
 - **N084**: Remove registry retirement as an independent Wave-existence writer. Explicit authored definition removal and provider planning disposition retain their owners; this is not authorization to erase history or provider plans.
 - **N085**: LOO-298 makes the chapter clock repository-wide. Preserve each Wave’s plan and transferred Task identity; do not keep a separate per-Wave boundary writer.
@@ -943,7 +943,7 @@ Primary short and long flags share one row. Hidden and automatic arguments are i
 - **N204**: Controls future serial PR continuation intent. Input to this operation; same spelling elsewhere selects that other object.
 - **N205**: Controls checkout selected for delivery. Input to this operation; same spelling elsewhere selects that other object.
 - **N206**: Controls commit content or appended discussion text. Input to this operation; same spelling elsewhere selects that other object.
-- **N207**: Preserve this distinct input only on the surviving owner: LOO-332 makes land return after recording exact-head merge/settlement intent. Arm becomes the same operation; do not add a watcher flag to preserve the retired supervisor.
+- **N207**: Preserve this distinct input on the finite Arm request; LOO-332 will consolidate only after repository ticks replace Land watch-and-repair.
 - **N208**: Controls settlement through the invoking process rather than the Home supervisor. Input to this operation; same spelling elsewhere selects that other object.
 - **N209**: Controls Git branch selected for discard. Input to this operation; same spelling elsewhere selects that other object.
 - **N210**: Controls explicit override of dirty-state protection. Different authority/override scopes; do not merge confirmation, force and provider permission (R07).

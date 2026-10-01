@@ -57,6 +57,20 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Context report keeps unknown sources distinct from zero")
+    func contextReportFixture() throws {
+        let report = try JSONDecoder().decode(ContextReport.self, from: loadFixtureData("context_report.json"))
+        let steers = report.steps[0].sources[4]
+        #expect(steers.source == "steers")
+        #expect(steers.count == 384)
+        #expect(steers.overBudget)
+        #expect(steers.authors == ["user"])
+        #expect(report.steps[0].overAssembledBudget)
+        #expect(report.steps[1].sources.allSatisfy { $0.tokens == nil })
+        #expect(report.steps[1].gaps == ["this input has no retained capture"])
+        #expect(report.totals.count == 9)
+    }
+
     @Test("Conversation history retains native evidence and unknown driver")
     func sessionHistoryFixture() throws {
         let data = try loadFixtureData("session_history.json")

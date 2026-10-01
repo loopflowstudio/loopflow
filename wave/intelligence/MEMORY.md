@@ -43,6 +43,18 @@ collector is `scripts/context_ablation.py`.
   while the worktree exists; a PR-head approximation made one record block in
   every arm. Recording the launch commit is the cheapest capture repair.
 
+## Context cost instrument (2026-10-01)
+
+Jack Heart requested weekly context cost and turn latency (LOO-348). `lf usage
+--weekly` reads Session history from the store in seven-day weeks from
+2026-09-30 and publishes the latest complete week to the four
+`metrics/context-*.md` contracts; `telemetry-daily` runs it. Baselines and the
+KR/target plan live in `performance/context-cost.md`. The branch could not read
+Jack's Home: installed 0.12.28 predates `session_events`, so the first real
+reading and the chapter targets wait on a release carrying it. The hand
+baseline's silent hours cover 1,349 records, not one week; compare the report's
+own baseline row before treating 215 h as a weekly target.
+
 ## Attribution and feedback evidence (curated 2026-09-25)
 
 - A first-page GraphQL query captured author names while pagination fetched

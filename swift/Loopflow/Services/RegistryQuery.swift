@@ -186,6 +186,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SessionHistory].self, from: stdout)
     }
 
+    /// What each recorded step's submitted input was made of, oldest first,
+    /// with Task totals. Read-only, from retained local captures.
+    public func taskContext(task: String, cwd: String?) async throws -> ContextReport {
+        let stdout = try await run(["usage", "--days", "0", "--task", task, "--context", "--json"], cwd)
+        return try Self.decode(ContextReport.self, from: stdout)
+    }
+
     public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
         _ = try await run([
             "task", "edit", id, "--wave", wave, "--notes=\(text)",
@@ -606,6 +613,54 @@ public struct SessionUsage: Decodable, Sendable, Hashable {
         case cacheWriteTokens = "cache_write_tokens"
         case costUsd = "cost_usd"
     }
+}
+
+/// One source of a step's submitted input. `tokens` is nil when the record
+/// cannot measure it; that is never zero.
+public struct ContextSourceUsage: Decodable, Sendable, Hashable {
+    public let source: String
+    public let tokens: Int?
+    public let count: Int?
+    public let authors: [String]
+    public let budgetTokens: Int?
+    public let overBudget: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case source, tokens, count, authors
+        case budgetTokens = "budget_tokens"
+        case overBudget = "over_budget"
+    }
+}
+
+public struct StepContext: Decodable, Sendable, Hashable {
+    public let input: String
+    public let sessionId: String
+    public let skill: String?
+    public let harness: String
+    public let observedAt: Int
+    public let sources: [ContextSourceUsage]
+    public let assembledTokens: Int?
+    public let assembledBudgetTokens: Int?
+    public let overAssembledBudget: Bool
+    public let firstRequestTokens: Int?
+    public let peakRequestTokens: Int?
+    public let gaps: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case input, skill, harness, sources, gaps
+        case sessionId = "session_id"
+        case observedAt = "observed_at"
+        case assembledTokens = "assembled_tokens"
+        case assembledBudgetTokens = "assembled_budget_tokens"
+        case overAssembledBudget = "over_assembled_budget"
+        case firstRequestTokens = "first_request_tokens"
+        case peakRequestTokens = "peak_request_tokens"
+    }
+}
+
+public struct ContextReport: Decodable, Sendable, Hashable {
+    public let steps: [StepContext]
+    public let totals: [ContextSourceUsage]
 }
 
 public struct DoctorReport: Decodable, Sendable {

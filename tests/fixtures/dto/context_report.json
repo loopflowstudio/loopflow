@@ -1,0 +1,258 @@
+{
+  "steps": [
+    {
+      "input": "run_00000000000000000000000000000001",
+      "session_id": "session_fixture",
+      "skill": "research",
+      "harness": "claude",
+      "observed_at": 1790620000,
+      "sources": [
+        {
+          "source": "instructions",
+          "tokens": 2700,
+          "count": 4,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "memory",
+          "tokens": 20000,
+          "count": 1,
+          "authors": [],
+          "budget_tokens": 16000,
+          "over_budget": true
+        },
+        {
+          "source": "scratch",
+          "tokens": 35000,
+          "count": 14,
+          "authors": [],
+          "budget_tokens": 16000,
+          "over_budget": true
+        },
+        {
+          "source": "goal",
+          "tokens": 1200,
+          "count": 1,
+          "authors": [],
+          "budget_tokens": 16000,
+          "over_budget": false
+        },
+        {
+          "source": "steers",
+          "tokens": 165000,
+          "count": 384,
+          "authors": [
+            "user"
+          ],
+          "budget_tokens": 16000,
+          "over_budget": true
+        },
+        {
+          "source": "other",
+          "tokens": 900,
+          "count": 6,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "carried",
+          "tokens": 44000,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "tool_output",
+          "tokens": 92000,
+          "count": 87,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "compaction",
+          "tokens": 150000,
+          "count": 1,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        }
+      ],
+      "assembled_tokens": 224800,
+      "assembled_budget_tokens": 64000,
+      "over_assembled_budget": true,
+      "first_request_tokens": 268800,
+      "peak_request_tokens": 301000,
+      "gaps": []
+    },
+    {
+      "input": "session_unknown",
+      "session_id": "session_unknown",
+      "skill": null,
+      "harness": "codex",
+      "observed_at": 1790620100,
+      "sources": [
+        {
+          "source": "instructions",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "memory",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "scratch",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "goal",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "steers",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "other",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "carried",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "tool_output",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        },
+        {
+          "source": "compaction",
+          "tokens": null,
+          "count": null,
+          "authors": [],
+          "budget_tokens": null,
+          "over_budget": false
+        }
+      ],
+      "assembled_tokens": null,
+      "assembled_budget_tokens": null,
+      "over_assembled_budget": false,
+      "first_request_tokens": null,
+      "peak_request_tokens": null,
+      "gaps": [
+        "this input has no retained capture"
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "source": "instructions",
+      "tokens": 2700,
+      "count": 4,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    },
+    {
+      "source": "memory",
+      "tokens": 20000,
+      "count": 1,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": true
+    },
+    {
+      "source": "scratch",
+      "tokens": 35000,
+      "count": 14,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": true
+    },
+    {
+      "source": "goal",
+      "tokens": 1200,
+      "count": 1,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    },
+    {
+      "source": "steers",
+      "tokens": 165000,
+      "count": 384,
+      "authors": [
+        "user"
+      ],
+      "budget_tokens": null,
+      "over_budget": true
+    },
+    {
+      "source": "other",
+      "tokens": 900,
+      "count": 6,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    },
+    {
+      "source": "carried",
+      "tokens": 44000,
+      "count": null,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    },
+    {
+      "source": "tool_output",
+      "tokens": 92000,
+      "count": 87,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    },
+    {
+      "source": "compaction",
+      "tokens": 150000,
+      "count": 1,
+      "authors": [],
+      "budget_tokens": null,
+      "over_budget": false
+    }
+  ]
+}

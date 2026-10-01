@@ -105,6 +105,7 @@ Inspect an Exec or Session by identity
 | `--events` | Print a Session's retained raw input events Default: false. |
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
+| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor active
@@ -126,10 +127,12 @@ Show direct provider-authored usage from recorded Session inputs
 |---|---|
 | `--json` | Emit Session usage evidence as JSON Default: false. |
 | `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
 | `--parent` | Inputs issued by this Session or retained capture |
 | `--wave` | Limit to Session inputs attributed to one Wave |
 | `--project` | Limit to Session inputs attributed to one Project |
 | `--task` | Limit to Session inputs attributed to one Task |
+| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor ps

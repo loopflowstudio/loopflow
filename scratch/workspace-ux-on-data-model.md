@@ -39,9 +39,11 @@ palette bind entry. Jack waived demo/review; no installed captures are required
 here. Fixture transport and owned-PTY proofs do not establish configured provider
 acceptance or the Task's multi-day KRs.
 
-The supervisor publishes and lands this PR after LOO-298, then completes the Task.
-No publication or Task mutation belongs to this implementation pass. Parent sync
-uses merge, never rebase; preserve deletion of inherited parent scratch.
+LOO-298 landed as #1296 and this branch merged main. Jack's supervising session
+authorized continuing the ship Flow in Linear comment `ec00735f`. The selected
+gate prepares the local change; later delivery operations own publication,
+landing and Task completion. Parent sync uses merge, never rebase; preserve
+deletion of inherited parent scratch.
 
 ## Verification
 
@@ -108,3 +110,24 @@ delivery, storage and headless-test updates remain intact. `lf sync --continue`
 completed locally; the waiting caller owns the push.
 
 Check: `nice -n 10 cargo test -p loopflow --lib template_resolution_preserves_composition_and_execution --jobs 2` — 1 passed; `nice -n 10 bash scripts/test_desktop.sh --jobs 2 -Xswiftc -gnone --filter 'WorkspaceDestinationTests|TaskFlowTests/(flowFixtures|templateDisclosure)'` — 12 passed with WindowServer denied; `git diff --check` passed. Native terminal proof and broader checks remain with capable gate/CI; no installed acceptance claimed.
+
+## Gate, 2026-09-30
+
+Review found one regression: retaining a selected Task also froze its Wave's
+planning evidence during a chapter transfer. Restored the existing use of the
+current Wave when planning is incomplete, while keeping historical Task lookup
+when it is absent from the current plan. The existing chapter-transfer test
+failed before the repair and passed afterward; no additional abstraction or test
+was needed. Review confirmed inspection starts no work, bind reuses the existing
+permanent picker, and template composition resolves with the execution graph.
+
+Check: `uv run python scripts/test.py --base 61d21f885 --reuse-passing` — architecture, formatting, all-target Clippy, 2,023 Rust tests (17 skipped), 78 website tests (3 skipped), and Desktop build passed; the 304-test Desktop run reported one chapter-transfer failure, repaired above; `nice -n 10 bash scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'PodiumModelTests|WorkspaceDestinationTests|TaskFlowTests|DesktopHeadlessTests'` — all 35 passed after repair; `uv run python scripts/check_swift_multiplatform_boundaries.py`, `uv run pytest python/tests/test_loopflow_skill_alignment.py -q` (4 passed), and `git diff --check` passed. Native Window/Metal/PTY diagnostics remain deferred to a display-capable host; no configured acceptance claimed.
+
+The runner cleared inherited `LF_*`/`LOOPFLOW_*` authority and selected the
+checkout CLI. Resource checks passed at 41.2 GiB before and 32.6 GiB after the
+affected suites. The full Desktop suite was not repeated after the focused
+repair; its original failure remains in `.lf/tmp/gate/run-31212/swift/swift.log`.
+Navigation retains the production `task_workspace_ready` signal. Palette filter
+latency and configured navigation measurements remain LOO-300's scenarios;
+the display-dependent performance harness did not run here. Jack's demo waiver
+remains in effect; LOO-353 owns configured workspace acceptance.

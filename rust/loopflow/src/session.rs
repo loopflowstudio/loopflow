@@ -241,11 +241,3 @@ pub(crate) struct HistoryCapture {
     pub model: Option<String>,
     pub interactive: bool,
 }
-
-/// Explicit repository/Wave ownership takes precedence over checkout grouping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionScope {
-    Repository,
-    Wave,
-}

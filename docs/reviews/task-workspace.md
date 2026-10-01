@@ -120,3 +120,15 @@ No provider was opened, and explicit primary-scope exclusions were tested locall
 because this copy had no such rows. The main Home was untouched. The capture also
 exposed the lowercase-name rule missing from the new outline; it now shares the
 existing display-name implementation with the Wave view model.
+
+During final integration, main introduced attention metadata and a “Needs me” filter.
+Jack’s Task Session direction takes precedence for normal navigation: all Task
+Sessions stay visible independently of attention and provider mode. The filter is
+not part of the main UI. Existing optional attention API/metadata is retained.
+Main’s `primary_scope` reading replaces this branch’s duplicate scope field and
+batch lookup; no placement work was added. The pre-sync demo capture above proves
+that earlier matching app/CLI pair, not the new integrated wire contract.
+
+The reconciled contract passed 62 Swift navigation/store/DTO tests, three Rust Task
+association tests, 32 Rust human-session tests, formatting and Clippy with warnings
+denied. This includes a headless Task Session with no attention marker staying visible.

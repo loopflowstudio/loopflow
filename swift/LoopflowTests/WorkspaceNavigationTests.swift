@@ -75,6 +75,21 @@ struct WorkspaceNavigationTests {
         }
     }
 
+    @Test("Task Sessions stay visible without attention or an interactive provider")
+    func taskVisibilityDoesNotRequireAttention() async throws {
+        let original = try session("background", work: .task(id: "ts_review00000000000000000000000000"))
+        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        value["interactive"] = false
+        value["attention"] = NSNull()
+        let source = try ReadingSource(roadmap: roadmapJSON(),
+            sessions: String(decoding: JSONSerialization.data(withJSONObject: [value]), as: UTF8.self))
+        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        #expect(model.visibleWorkspace.waves.flatMap(\.tasks).flatMap(\.sessions).map(\.id) == ["background"])
+        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Needs me") }
+    }
+
     @Test("Repository path spellings share one outline root")
     func repositoryAliasesShareRoot() async throws {
         let source = try ReadingSource(

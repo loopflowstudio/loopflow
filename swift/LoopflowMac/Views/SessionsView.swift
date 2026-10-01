@@ -711,7 +711,7 @@ struct SessionsContentView: View {
                 .padding(.horizontal, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(store.sessions.filter { $0.record.scope == nil && $0.record.workspace?.identity == taskIdentity }) { item in
+                    ForEach(store.sessions.filter { $0.record.primaryScope == nil && $0.record.workspace?.identity == taskIdentity }) { item in
                         HStack(alignment: .top, spacing: 6) {
                             Button {
                                 if NSEvent.modifierFlags.contains(.command) { toggleSessionVisibility(item.record) }
@@ -912,7 +912,7 @@ struct SessionsContentView: View {
         guard let identity = taskIdentity else { return }
         let taskWorkspace = workspaces.workspace(for: identity)
         let panes = taskWorkspace.multiplexer
-        let sessions = store.sessions.map(\.record).filter { $0.scope == nil && $0.workspace?.identity == identity }
+        let sessions = store.sessions.map(\.record).filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
         if model.sessions.errorMessage == nil { taskWorkspace.initializeMaterials(sessionCount: sessions.count) }
         if let session = focusedPaneSessions.first {
             navigation.selectedSessionId = session.id

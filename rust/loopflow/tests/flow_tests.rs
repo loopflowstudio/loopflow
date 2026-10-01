@@ -1658,7 +1658,15 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // A branch no Task owns stays unbound; nothing is inferred from the path.
     repo.create_branch("unregistered");
     let unbound = launch(&["--mode", "tui", "binding-work", "--no-loopflow"]);
-    assert_eq!(session(&unbound)["work"], serde_json::Value::Null);
+    let history = json(&["session", "list", "--all", "--history", "--json"]);
+    let retired = history
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == session_id_for_capture(home.path(), &unbound))
+        .unwrap();
+    assert_eq!(retired["work"], serde_json::Value::Null);
+    assert_eq!(retired["state"], "closed");
     assert_eq!(task_runs("INF-123"), vec![bound.clone()]);
 
     // Explicit selection wins over the checkout.

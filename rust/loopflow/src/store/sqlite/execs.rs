@@ -549,6 +549,51 @@ impl SqliteStore {
         Ok(current)
     }
 
+    /// Record the exact driver's exit without settling a Flow or releasing an Ask.
+    pub(crate) fn finish_session_driver(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        outcome: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let payload = serde_json::json!({
+            "type": "driver_exit", "outcome": outcome, "generation": expected.generation
+        });
+        tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, format!("driver:{}:exit", expected.generation), expected.exec_id,
+                now, payload.to_string()],
+        )?;
+        // Ordinary disposable conversations retire on an observed exit. Primary
+        // conversations, Task work and all Flow/Ask boundaries keep their identity.
+        tx.execute(
+            &format!(
+                "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
+             AND s.completed_at IS NULL AND s.kind='conversation' AND s.primary_scope IS NULL
+             AND s.wave_id IS NULL AND s.flow_session_id IS NULL
+             AND s.driver_exec_id=s.provider_exec_id
+             AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
+                super::task_work::session_tasks("s")
+            ),
+            params![session, now, outcome],
+        )?;
+        tx.execute(
+            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1 WHERE id=?1",
+            [session],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Stale providers retain their historical caller, never the new driver.
     pub fn agent_parent(&self, caller: &AgentCaller) -> StoreResult<Option<(ExecId, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

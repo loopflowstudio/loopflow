@@ -179,9 +179,18 @@ final class PodiumModel {
     /// Visibility never changes the inventory used by panes and selection.
     var visibleWorkspace: WorkspaceProjection {
         WorkspaceProjection(roadmaps: visibleRoadmaps, sessions: (sessions.value ?? []).filter {
-            navigation.showsHeadlessSessions || $0.interactive
+            $0.state != .closed && (navigation.showsNeedsMe
+                ? $0.attention != nil
+                : navigation.showsHeadlessSessions || $0.interactive || $0.attention != nil)
         })
     }
+    /// Count the same searched destinations the attention view will display.
+    /// A failed read has no trustworthy count, even when last-good rows remain.
+    var needsMeCount: Int? {
+        guard sessions.value != nil, sessions.errorMessage == nil else { return nil }
+        return workspace.attentionRows(search: navigation.search).count
+    }
+
     private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading {
         didSet {
             // Retain the latest observed Task across temporary chapter membership

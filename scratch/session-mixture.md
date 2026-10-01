@@ -1,6 +1,6 @@
 # Session navigation and retirement
 
-Draft — 2026-10-01. Jack Heart's stated direction is accepted; mechanisms below remain proposed.
+Implementation authorized by Jack Heart on 2026-10-01, including publication and landing.
 
 ## What to build
 
@@ -24,7 +24,7 @@ Unresolved. No exact Wave was supplied; do not infer placement from the screensh
 
 The repository and its Waves provide navigation to their primary conversations and Wave planning pages. Started Task conversations appear beneath their scope. Unstarted Tasks appear on the Wave page only. A visible “Needs me” filter reveals matching Sessions directly with enough ancestry to distinguish them. Selecting a result opens that exact conversation.
 
-Exit a disposable CLI conversation through Ctrl-C: it disappears from current navigation and counts after refresh. Interrupt a Flow review: it remains reachable and its Flow does not advance. Stop only a response: proposed behavior keeps the still-open conversation available. This last distinction needs Jack's answer.
+Exit a disposable CLI conversation through Ctrl-C: it disappears from current navigation and counts after refresh. Interrupt a Flow review: it remains reachable and its Flow does not advance. Stop only a response: proposed behavior keeps the still-open conversation available. Exit-only is the implementation choice: stopping a response preserves the conversation.
 
 ## Current system and evidence
 
@@ -42,11 +42,11 @@ Exit a disposable CLI conversation through Ctrl-C: it disappears from current na
 
 Reuse AgentSession identity, Session events, current driver/provider generations, Flow membership, and primary scope. Add durable interruption evidence tied to the exact Session and driver; retain whether interruption ended a turn or exited the driver. Do not invent a second inventory or derive lifecycle from missing processes.
 
-Proposed Rust projections:
+Rust projections:
 
-- `session_attention(session, evidence) -> Option<AttentionReason>`: pending question/permission, unfinished human review, or ready-for-review; unknown liveness alone is not attention.
-- `session_visibility(session, evidence) -> SessionVisibility`: current, history, or unresolved. Primary scope and blocked callers participate explicitly.
-- `record_session_interruption(session_id, driver, evidence) -> Result<()>`: idempotent, generation-fenced evidence; retirement never fabricates successful completion or releases a Flow/Ask.
+- `session_attention(session, evidence) -> Option<AttentionReason>`: unfinished Ask/Flow review, explicit ready-for-review, or a recorded completed interactive turn awaiting reply; unknown liveness alone is not attention. Native provider questions without a recorded boundary remain unknown rather than inferred from idle CPU.
+- `list_attention(store, filter) -> Result<Vec<SessionRecord>>`: bounded metadata pages filtered through the same attention projection before pagination.
+- `finish_session_driver(session_id, driver, outcome) -> StoreResult<()>`: generation-fenced evidence; stale/repeated drivers cannot write; retirement never fabricates successful completion or releases a Flow/Ask.
 
 Expose the projections through SessionRecord with matching Rust/Swift DTO fixtures. Reuse the same Rust state derivation for list and detail. Swift projects one filtered Session set into rows, badges and section counts. Search intersects with attention; required human interaction remains discoverable even for a headless-origin Session.
 
@@ -66,7 +66,7 @@ Replace the conflicting state branches in `human_session::summary_surface` and `
 
 One coherent PR, implemented in internal slices: lifecycle, visibility and counts must agree at shipment.
 
-1. **This slice:** reconcile state and retirement authority; durable interruption evidence, shared projection, minimal migration if needed, lifecycle and DTO proofs.
+1. Reconcile state and retirement authority; durable interruption evidence, shared projection, minimal migration if needed, lifecycle and DTO proofs.
 2. Session destinations for repository/Wave/started Task scopes; separate disposable orphans; remove backlog rows.
 3. Needs-me filtering and matching counts, including search, collapsed ancestors, empty results, and retained selection.
 
@@ -76,4 +76,6 @@ Gate runs `uv run python scripts/test.py --reuse-passing`: affected Rust and hea
 
 Include regression cases for an abandoned Task with a retained human-review cursor, an unresolved unassociated Ask, and failed inventory loading. CLI and Desktop must agree on attention when pointed at the same runtime and store.
 
-Check: 2026-10-01 source inspection and installed `lf session list --json` completed; no code changed or build required.
+Current work: all three slices implemented and reviewed; landing remains. Review repaired closed-as-disconnected fixtures and a macOS canonical-path planning fixture.
+
+Check: affected gate passed architecture/website; Rust fmt/clippy pass, materialized Rust matrix 2,063 passed with two fixture failures repaired and Flow/PR rerun 53/53 passed; headless Swift 314/314 and multiplatform boundaries pass.

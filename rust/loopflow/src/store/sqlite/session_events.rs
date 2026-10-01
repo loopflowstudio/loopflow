@@ -768,6 +768,135 @@ mod tests {
     }
 
     #[test]
+    fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        for (id, kind, primary, retired) in [
+            ("orphan", "conversation", None, true),
+            ("primary", "conversation", Some("repository"), false),
+            ("ask", "ask", None, false),
+            ("review", "flow_review", None, false),
+        ] {
+            let session = store.test_session(id, &crate::session_record::new_artifact_key());
+            let exec = crate::id::ExecId::new();
+            {
+                let conn = store.conn.lock().unwrap();
+                conn.execute(
+                    "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [exec.as_str()],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE agent_sessions SET kind=?2,primary_scope=?3 WHERE id=?1",
+                    rusqlite::params![id, kind, primary],
+                )
+                .unwrap();
+            }
+            let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+            store
+                .finish_session_driver(id, &driver, "interrupted")
+                .unwrap();
+            let saved = store.session(id).unwrap().unwrap();
+            assert_eq!(saved.completed_at.is_some(), retired);
+            assert_eq!(saved.captured, session.captured);
+            let summary = store.session_summary(id).unwrap().unwrap();
+            assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
+            let history = store.session_history(id, 0, 100).unwrap();
+            assert!(history
+                .iter()
+                .any(|event| event.payload["type"] == "driver_exit"
+                    && event.payload["outcome"] == "interrupted"));
+            assert!(!history
+                .iter()
+                .any(|event| event.kind == SessionEventKind::Completed));
+        }
+        assert!(!store
+            .session_summaries(&crate::session::SessionFilter::default())
+            .unwrap()
+            .iter()
+            .any(|session| session.id == "orphan"));
+    }
+
+    #[test]
+    fn stopped_turn_and_stale_driver_cannot_retire_a_resumed_conversation() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let first = crate::id::ExecId::new();
+        let second = crate::id::ExecId::new();
+        for exec in [&first, &second] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    [exec.as_str()],
+                )
+                .unwrap();
+        }
+        let original = store
+            .claim_session_driver(&session.id, None, &first, true)
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        store
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                SessionEventKind::Completed,
+                &json!({"status":"interrupted"}),
+            )
+            .unwrap();
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        assert_eq!(
+            store
+                .session_summary(&session.id)
+                .unwrap()
+                .unwrap()
+                .latest_turn
+                .as_deref(),
+            Some("interrupted")
+        );
+        let resumed = store
+            .claim_session_driver(&session.id, Some(&original), &second, true)
+            .unwrap();
+        assert!(store
+            .finish_session_driver(&session.id, &original, "interrupted")
+            .is_err());
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_none());
+        assert_eq!(store.session_driver(&session.id).unwrap().unwrap(), resumed);
+        store
+            .finish_session_driver(&session.id, &resumed, "completed")
+            .unwrap();
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
+    }
+
+    #[test]
     fn native_usage_survives_driver_and_input_replacement_without_double_counting() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

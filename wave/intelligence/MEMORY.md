@@ -29,6 +29,16 @@ reading and the chapter targets wait on a release carrying it. The hand
 baseline's silent hours cover 1,349 records, not one week; compare the report's
 own baseline row before treating 215 h as a weekly target.
 
+## Bind attribution comparison (2026-10-01)
+
+Jack Heart requested re-evaluating prospective usage attribution (LOO-336).
+`lf usage --binds` reads Session history and shows each bound Session's usage
+before, during and after its bind, with Task and Wave totals under both rules.
+The 2026-10-01 reading is empty: installed 0.12.28 has neither `lf session bind`
+nor Session tables, so no bind exists to measure. Prospective stays; the
+recommendation and the reports post-hoc would move are in
+`performance/bind-attribution.md`. The choice is Jack's once real binds appear.
+
 ## Attribution and feedback evidence (curated 2026-09-25)
 
 - A first-page GraphQL query captured author names while pagination fetched

@@ -92,6 +92,16 @@ pub struct AgentSession {
     pub created_at: i64,
 }
 
+/// A Session assigned to a Task after it began.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionBind {
+    pub session_id: String,
+    pub at: i64,
+    /// The Task's issue identifier.
+    pub task: String,
+    pub wave: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {

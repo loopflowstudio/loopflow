@@ -212,8 +212,7 @@ Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
 decision: return it with a required reason in the final structured result.
-Blocked records the reason and stops at the current Flow position. Existing logs
-and outcomes provide the evidence. The Wave operator resolves authorized
+Existing logs and outcomes provide the evidence. The Wave operator resolves authorized
 impediments or discusses missing judgment in its ongoing chat. Explicit retry
 retains the position and pass; unchanged failures do not automatically retry.
 

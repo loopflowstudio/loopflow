@@ -47,9 +47,9 @@ async fn drive_task(
             .transpose()?
             .unwrap_or_default();
     let cli = crate::lf::Cli::try_parse_from(std::iter::once("lf".to_string()).chain(options))?;
-    let result =
-        crate::lf::commands::flow::drive(store.clone(), flow, Some(launch_claim), &cli).await;
-    result.map(|_| ())
+    crate::lf::commands::flow::drive(store, flow, Some(launch_claim), &cli)
+        .await
+        .map(|_| ())
 }
 
 pub async fn run_worker(task_id: TaskId) -> Result<()> {

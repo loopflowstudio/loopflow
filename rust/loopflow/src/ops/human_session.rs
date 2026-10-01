@@ -910,8 +910,8 @@ pub(crate) async fn serve_conversation(store: &SharedStore, run_id: &String) -> 
 }
 
 /// What a waiting Session's agent carries to act on its own Session.
-fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
-    Ok(match session.kind {
+fn session_token(session: &AgentSession) -> HumanSessionToken {
+    match session.kind {
         crate::session::SessionKind::FlowReview => HumanSessionToken::StandaloneFlow {
             id: session.id.clone(),
         },
@@ -919,7 +919,7 @@ fn session_token(session: &AgentSession) -> Result<HumanSessionToken> {
         crate::session::SessionKind::Conversation => HumanSessionToken::Primary {
             id: session.id.clone(),
         },
-    })
+    }
 }
 
 /// Launch the prepared Run of a conversation or of a saved Flow's review.
@@ -930,7 +930,7 @@ async fn serve_locked(
 ) -> Result<()> {
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
-    let token = session_token(session)?;
+    let token = session_token(session);
     command
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
@@ -1268,7 +1268,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<String> {
             continue;
         }
         let mut launch_lock = Some(launch_lock);
-        let token = session_token(&session)?;
+        let token = session_token(&session);
         if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
             return Ok(session.artifact_key);
         }
@@ -1899,7 +1899,7 @@ async fn launch_flow(task: &Task, position: &FlowSession) -> Result<()> {
         step.step,
         position.cursor.iteration.to_string(),
     ];
-    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv, &[]).await
+    start_durable_session(&flow_background_name(position)?, &task.worktree, &argv).await
 }
 
 #[cfg(not(test))]
@@ -1931,22 +1931,12 @@ async fn conversation_exec_is_running(id: &str) -> Result<bool> {
 }
 
 #[cfg(not(test))]
-async fn start_durable_session(
-    name: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-) -> Result<()> {
-    crate::engine::process::start_home_session_with_env(name, cwd, argv, env).await
+async fn start_durable_session(name: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    crate::engine::process::start_home_session(name, cwd, argv).await
 }
 
 #[cfg(test)]
-async fn start_durable_session(
-    name: &str,
-    _cwd: &Path,
-    argv: &[String],
-    _env: &[(&str, &str)],
-) -> Result<()> {
+async fn start_durable_session(name: &str, _cwd: &Path, argv: &[String]) -> Result<()> {
     if !argv.iter().any(|arg| arg == "serve-conversation") {
         return Ok(());
     }
@@ -2210,7 +2200,6 @@ mod tests {
     };
     use crate::durable::FlowSession;
     use crate::session::AgentSession;
-    use crate::session_record::SessionCaptureManifest;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
 
@@ -2241,34 +2230,6 @@ mod tests {
                 .collect();
             std::env::set_var("LF_HOME", home.path());
             std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-            let manifest = SessionCaptureManifest {
-                schema_version: 1,
-                artifact_key: crate::session_record::new_artifact_key(),
-                caller_artifact_key: None,
-                created_at: time::OffsetDateTime::now_utc(),
-                harness: "codex".to_string(),
-                model: Some("test".to_string()),
-                surface: "headless".to_string(),
-                cwd: std::env::current_dir().unwrap(),
-                repo: None,
-                worktree: None,
-                skill: Some("loop-decide".to_string()),
-                subjects: Vec::new(),
-                flow: None,
-                exec: None,
-                context: None,
-                runtime_path: None,
-                runtime_digest: None,
-                host: "test".to_string(),
-                boot_id: None,
-            };
-            std::fs::write(
-                home.path().join("manifest.json"),
-                serde_json::to_vec(&manifest).unwrap(),
-            )
-            .unwrap();
-            std::env::set_var("LF_RUN_DIR", home.path());
-            std::env::set_var("LF_RUN_ID", manifest.artifact_key.as_str());
             Self {
                 home,
                 previous,
@@ -2793,9 +2754,12 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv(None, None, "ask_123").unwrap();
+        let argv = human_open_argv(None, None, "session_123").unwrap();
 
-        assert_eq!(&argv[argv.len() - 3..], ["session", "connect", "ask_123"]);
+        assert_eq!(
+            &argv[argv.len() - 3..],
+            ["session", "connect", "session_123"]
+        );
         assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
     }

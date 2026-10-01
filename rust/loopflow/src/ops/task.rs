@@ -5158,11 +5158,11 @@ pub(crate) async fn continue_task_async(
         crate::controller::task::ensure_flow_position(&store, &task.id, selected_flow.as_deref())
             .await
             .map_err(task_error)?;
-    if retry
-        || reason
-            .as_deref()
-            .is_some_and(|reason| !reason.trim().is_empty())
-    {
+    let reason = reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    if retry || reason.is_some() {
         position = crate::lf::commands::flow::prepare_native_retry(&store, position)
             .await
             .map_err(task_error)?;
@@ -5179,10 +5179,6 @@ pub(crate) async fn continue_task_async(
                 failure.reason, task.plan.identifier
             )));
         }
-        let reason = reason
-            .as_deref()
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty());
         if let Some(reason) = reason {
             super::linear_observe::publish_task_steer(&store, &task, reason).await?;
         } else if !retry {

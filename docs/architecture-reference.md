@@ -499,7 +499,7 @@ detaching.
 
 The heading remains an inbound documentation anchor; Run is historical vocabulary.
 The execution cutover uses one AgentSession admission and capture path for Task,
-Wave, Task, helper and direct callers.
+Wave, helper and direct callers.
 
 1. Admit the actual lf Exec; resolve typed work without granting Flow authority.
 2. Reserve the AgentSession and its initial history/capture reference before

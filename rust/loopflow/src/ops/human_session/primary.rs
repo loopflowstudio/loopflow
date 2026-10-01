@@ -155,7 +155,6 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
             &conversation_background_name(&session.id),
             &session.cwd,
             &argv,
-            &[],
         )
         .await
         .with_context(|| {

@@ -71,6 +71,15 @@ Deleting only the CLI would leave automatic Ask creation in controllers. Replaci
 - Ask kinds/actions in Swift Session models and fixtures; Ask-only tests in `human_session.rs`, controller tests, `session_cli_tests.rs`, `session_lifecycle_tests.rs`, and `SessionsStoreTests.swift`. Preserve shared conversation, history, claim, and review coverage.
 - Ask exceptions in `store/sqlite/sessions.rs::summary_query` and `ready_session`; retain independent membership evidence and review readiness. Delete `store/sqlite/flows.rs::blocked_feedback_retains_conversation_and_pass_and_consumes_once`; replace it with failure/retry behavior coverage, not a new feedback mechanism. Update shared DTO fixtures under `tests/fixtures/dto/` and their Rust/Swift readers together.
 - Ask-only `unblock` skill and all automatic callers. Remove Ask instructions from builtin surfaces, skills, docs, and generated goldens; preserve useful diagnostic guidance in the Wave operator skills.
+- Ask-only launcher environment injection (`start_home_session_with_env`) and
+  fake caller manifests in the shared Session fixture. Ordinary launches retain
+  their Home execution context without an extra environment override path.
+
+Compression review found no remaining runtime Ask authority. The shared launcher
+now uses ordinary Home launch directly, Session-token conversion is infallible,
+and Task recovery trims its direction once for both retry preparation and use.
+The Session fixture no longer invents a calling Run. The deletion targets above
+are complete; retained migration history and Task review paths remain intentional.
 
 ## Forbidden outcomes
 
@@ -112,4 +121,4 @@ On 2026-10-01, Jack clarified: “no, Task sessions stay”. Preserve Task sessi
 
 Jack values Task conversations as a private room that takes load off the Wave thread. Persistent versus one-off Task sessions remains open and is excluded from this removal. No new operator scheduler, notification channel, or delivery authority is included. Missing logs or failed status reads remain missing evidence, not proof that work succeeded or permission to retry.
 
-Check: 2026-10-01 — filtered `cargo test -p loopflow` lifecycle, reconciliation, conversation, migration, membership, builtin and golden suites passed; `scripts/test_desktop.sh --filter 'DTOFixtureTests|SessionsStoreTests'` passed (31 tests); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; full materialized Rust/architecture/Desktop acceptance remains with gate.
+Check: 2026-10-01 — compress: `cargo test -p loopflow --lib ops::human_session` passed (21 tests); `cargo test -p loopflow --test session_lifecycle_tests failure_without_ask_provider_retry_retains_task_conversation_and_review` passed; `cargo build -p loopflow --bin lf`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; full materialized Rust/architecture/Desktop acceptance remains with gate.

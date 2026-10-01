@@ -91,14 +91,25 @@ that order or directs routine progress into Task comments.
 Merged upstream change 16f03bb37 reduces scratch context to 12,000 tokens / 96 KiB.
 Its context-ablation findings and `wave/intelligence/MEMORY.md` support keeping
 working notes focused; they do not establish conversational quality. Duplicate,
-stale prompt snapshots are replaced with links to the current source. This work
+stale prompt snapshots are reconciled with the current source. This work
 has no identified Wave, so no Wave memory is assigned or changed.
 
 ## Remaining work
 
-Full affected suites and clippy remain for gate. Conversational responsiveness
-and operational triage still need demo/review judgment; stub-provider checks
-prove prompt delivery, not model behavior. No product decision is pending.
+Conversational responsiveness and operational triage still need demo/review
+judgment; stub-provider checks prove prompt delivery, not model behavior.
+CI owns the full matrix. No product decision is pending.
+
+Gate review found one stale instruction in the consolidated operational skill:
+`flow start` accepts a positional template, not `--flow`. The skill and review
+snapshot now describe selecting the template without teaching that invalid flag.
+No code repairs were needed.
+
+The changed-aware runner stopped before product checks because its resource
+scan exceeded 60 seconds. Direct inspection found 33 GiB free and a 3.6 GiB
+local target. A bounded affected Rust selection, architecture checks, and the
+website suite ran directly instead. Tests cleared inherited `LF_*` and
+`LOOPFLOW_*` authority and pinned `LF_BIN` to this checkout's compiled CLI.
 
 ## The demo
 
@@ -121,4 +132,4 @@ canonical overrides, while `wave/operate` remains distinct; run `cargo test -p l
 Conversational responsiveness is judged in demo/review, not by brittle prose
 assertions or a live-provider gate.
 
-Check: `git diff --check` passed (realign, prose only); prior focused prompt/default/discovery checks and formatting passes retained as earlier evidence, not rerun after upstream integration; affected suites and clippy deferred to gate.
+Check (gate): `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `uv run python scripts/check_architecture.py` passed; `cd website && uv run python dev.py test` passed (78 passed, 3 skipped); `cargo nextest run -p loopflow --lib --bin lf --test default_conversation_tests --test context_tests --test discovery_tests --test cli_discovery --test flow_discovery_tests --test golden_prompt --test documented_commands --build-jobs 4 --test-threads 4 --no-fail-fast -E 'binary(default_conversation_tests) | binary(context_tests) | binary(discovery_tests) | binary(cli_discovery) | binary(flow_discovery_tests) | binary(golden_prompt) | binary(documented_commands) | binary(lf) | test(engine::builtins::) | test(engine::prompt::) | test(lf::discovery::) | test(lf::commands::run::) | test(skill_launch) | test(context_delivery) | test(engine::flow_graph::tests)'` passed (220 tests); after the prose repair, `cargo nextest run -p loopflow --lib --test documented_commands --build-jobs 4 --test-threads 4 -E 'test(engine::builtins::) | test(assembled_prompts_deliver_procedures_to_the_owning_skill) | binary(documented_commands)'` passed (17 tests); `git diff --check` passed; `uv run python scripts/test.py --reuse-passing` failed resource preflight before suites; full matrix remains with CI.

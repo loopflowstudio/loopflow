@@ -128,7 +128,7 @@ lf --task <existing-issue> flow start <chosen-flow>
 Stdin becomes the durable Task description; `--directive` supplies worker
 direction and does not replace that brief.
 
-Use an explicit `--flow` the user selected; otherwise use the current Linear
+Use the Flow template the user selected; otherwise use the current Linear
 Project's required `flow:` default. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.

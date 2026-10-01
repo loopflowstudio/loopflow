@@ -78,6 +78,9 @@ pub enum MonitorCommand {
         /// Report context cost and turn time by week since 2026-09-30
         #[arg(long, conflicts_with_all = ["days", "parent"])]
         weekly: bool,
+        /// Compare Task and Wave usage under prospective and post-hoc bind attribution
+        #[arg(long, conflicts_with_all = ["days", "parent", "weekly", "context", "wave", "project", "task"])]
+        binds: bool,
         /// Inputs issued by this Session or retained capture
         #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
         parent: Option<String>,
@@ -151,6 +154,9 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Top { json } => super::top::run_top(*json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
         MonitorCommand::Usage {
+            json, binds: true, ..
+        } => super::bind_attribution::run(*json),
+        MonitorCommand::Usage {
             json,
             weekly: true,
             wave,
@@ -173,6 +179,7 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             project,
             task,
             weekly: false,
+            binds: false,
             context,
         } => super::usage::run(
             *context,

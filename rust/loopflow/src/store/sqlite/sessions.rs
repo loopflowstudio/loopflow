@@ -887,6 +887,25 @@ impl SqliteStore {
         Ok(bound)
     }
 
+    /// Sessions assigned to a Task after they began, oldest bind first.
+    pub(crate) fn bound_sessions(&self) -> StoreResult<Vec<crate::session::SessionBind>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT s.id,s.bound_at,t.issue_identifier,(SELECT slug FROM wave_addresses WHERE id=s.wave_id)
+             FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
+             WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok(crate::session::SessionBind {
+                session_id: row.get(0)?,
+                at: row.get(1)?,
+                task: row.get(2)?,
+                wave: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Every open Session. A review is open while its invocation waits on it.
     pub fn sessions(
         &self,

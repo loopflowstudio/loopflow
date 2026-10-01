@@ -1586,6 +1586,10 @@ mod durable_store_tests {
         assert_eq!(bound.task_id, Some(task_id.clone()));
         assert_eq!(bound.wave_id, Some(task.wave_id.clone()));
         assert!(bound.bound_at.is_some());
+        let binds = store.bound_sessions().unwrap();
+        assert_eq!(binds.len(), 1);
+        assert_eq!(binds[0].session_id, "orphan");
+        assert_eq!(Some(binds[0].at), bound.bound_at);
         assert_eq!(store.session_inputs("orphan").unwrap(), old_runs);
         assert_eq!(store.session_history("orphan", 0, 0).unwrap(), earlier);
         assert_eq!(

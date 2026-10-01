@@ -50,14 +50,23 @@ pub(crate) async fn inject_live_steers(
         if steer.id <= *cursor {
             continue;
         }
-        // Token count cannot exceed byte count, so small inputs need no lookup.
-        if steer.text.len() > crate::engine::context_budget::GOAL_TOKENS {
+        {
             let result = async {
                 let task = store
                     .get_task(task_id)
                     .await?
                     .ok_or(crate::store::StoreError::NotFound)?;
-                crate::engine::context_budget::bound_message(&steer.text, &task.worktree)
+                let wave = store.get_wave(&task.wave_id).await?;
+                let config = crate::engine::config::load_config(Some(&task.worktree))
+                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?
+                    .unwrap_or_default();
+                let budgets = crate::engine::context_budget::ContextBudgets::resolve(
+                    &config,
+                    &task.worktree,
+                    wave.as_ref().map(|wave| wave.name()),
+                )
+                .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
+                crate::engine::context_budget::bound_message(&steer.text, &task.worktree, &budgets)
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
             }
             .await;

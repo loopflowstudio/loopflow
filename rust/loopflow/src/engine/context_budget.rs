@@ -8,11 +8,232 @@ use crate::engine::error::CoreError;
 use crate::engine::prompt::{count_tokens, Document, DocumentSource, PromptComponents};
 use crate::trace::{ContextAssetKind, ContextDecision, ContextDecisionKind, ContextScope};
 
-pub(crate) const MEMORY_TOKENS: usize = 8_000;
-pub(crate) const SCRATCH_TOKENS: usize = 16_000;
-pub(crate) const GOAL_TOKENS: usize = 16_000;
-pub(crate) const INPUT_TOKENS: usize = 64_000;
-pub(crate) const INPUT_BYTES: usize = 512 * 1024;
+/// Keys in the existing `context_budgets` configuration block.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BudgetKey {
+    MemoryTokens,
+    MemoryBytes,
+    ScratchTokens,
+    ScratchBytes,
+    GoalTokens,
+    GoalBytes,
+    InputTokens,
+    InputBytes,
+}
+
+impl BudgetKey {
+    pub const ALL: [Self; 8] = [
+        Self::MemoryTokens,
+        Self::MemoryBytes,
+        Self::ScratchTokens,
+        Self::ScratchBytes,
+        Self::GoalTokens,
+        Self::GoalBytes,
+        Self::InputTokens,
+        Self::InputBytes,
+    ];
+
+    pub fn default_limit(self) -> usize {
+        match self {
+            Self::MemoryTokens => 8_000,
+            Self::ScratchTokens | Self::GoalTokens => 16_000,
+            Self::InputTokens => 64_000,
+            Self::MemoryBytes => 64 * 1024,
+            Self::ScratchBytes | Self::GoalBytes => 128 * 1024,
+            Self::InputBytes => 512 * 1024,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::MemoryTokens => "memory_tokens",
+            Self::MemoryBytes => "memory_bytes",
+            Self::ScratchTokens => "scratch_tokens",
+            Self::ScratchBytes => "scratch_bytes",
+            Self::GoalTokens => "goal_tokens",
+            Self::GoalBytes => "goal_bytes",
+            Self::InputTokens => "input_tokens",
+            Self::InputBytes => "input_bytes",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BudgetLimit {
+    pub value: usize,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextBudgets(std::collections::BTreeMap<BudgetKey, BudgetLimit>);
+
+impl ContextBudgets {
+    pub fn resolve(
+        config: &crate::engine::config::Config,
+        repo: &Path,
+        wave: Option<&str>,
+    ) -> Result<Self, CoreError> {
+        let mut limits: std::collections::BTreeMap<_, _> = BudgetKey::ALL
+            .into_iter()
+            .map(|key| {
+                let value = config
+                    .context_budgets
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(key.default_limit());
+                let source = config
+                    .context_budget_sources
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        if config.context_budgets.contains_key(&key) {
+                            "provided config"
+                        } else {
+                            "default"
+                        }
+                        .into()
+                    });
+                (key, BudgetLimit { value, source })
+            })
+            .collect();
+        if let Some(wave) = wave {
+            let wave_config = crate::work::wave::config::try_read_wave_config(repo, wave)
+                .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
+            if let Some(config) = wave_config {
+                for (key, value) in config.context_budgets {
+                    limits.insert(
+                        key,
+                        BudgetLimit {
+                            value,
+                            source: repo
+                                .join(format!("wave/{wave}/GOAL.md"))
+                                .display()
+                                .to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        for (key, limit) in &limits {
+            if limit.value == 0 {
+                return Err(CoreError::ExecutionFailed(format!(
+                    "context_budgets.{} must be positive ({})",
+                    key.name(),
+                    limit.source
+                )));
+            }
+        }
+        Ok(Self(limits))
+    }
+
+    pub fn limit(&self, key: BudgetKey) -> usize {
+        self.0[&key].value
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextUsage {
+    pub source: String,
+    pub original_tokens: usize,
+    pub original_bytes: usize,
+    pub submitted_tokens: usize,
+    pub submitted_bytes: usize,
+    pub token_limit: usize,
+    pub byte_limit: usize,
+}
+
+impl ContextUsage {
+    fn measure(
+        source: &str,
+        original: &str,
+        submitted: &str,
+        budgets: &ContextBudgets,
+        tokens: BudgetKey,
+        bytes: BudgetKey,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            original_tokens: tokens_in(original),
+            original_bytes: original.len(),
+            submitted_tokens: tokens_in(submitted),
+            submitted_bytes: submitted.len(),
+            token_limit: budgets.limit(tokens),
+            byte_limit: budgets.limit(bytes),
+        }
+    }
+}
+
+fn tokens_in(text: &str) -> usize {
+    if text.is_empty() {
+        0
+    } else {
+        count_tokens(text)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextBudgetReport {
+    pub budgets: ContextBudgets,
+    pub usage: Vec<ContextUsage>,
+}
+
+impl ContextBudgetReport {
+    pub(crate) fn measure_input(
+        &mut self,
+        original_system: &str,
+        original_task: &str,
+        system: &str,
+        task: &str,
+    ) {
+        self.usage
+            .retain(|usage| usage.source != "total assembled input");
+        self.usage.push(ContextUsage {
+            source: "total assembled input".into(),
+            original_tokens: tokens_in(original_system) + tokens_in(original_task),
+            original_bytes: original_system.len() + original_task.len(),
+            submitted_tokens: tokens_in(system) + tokens_in(task),
+            submitted_bytes: system.len() + task.len(),
+            token_limit: self.budgets.limit(BudgetKey::InputTokens),
+            byte_limit: self.budgets.limit(BudgetKey::InputBytes),
+        });
+    }
+
+    pub fn render(&self) -> String {
+        let mut lines = vec!["Context budgets (cl100k_base tokens; UTF-8 bytes). Query again after edits: `lf context`.".into()];
+        for (key, limit) in &self.budgets.0 {
+            lines.push(format!(
+                "{}: {} ({})",
+                key.name(),
+                limit.value,
+                limit.source
+            ));
+        }
+        for usage in &self.usage {
+            lines.push(format!("{}: original {}/{} tokens, {}/{} bytes; submitted {} tokens, {} bytes; over by {} tokens, {} bytes{}",
+                usage.source, usage.original_tokens, usage.token_limit, usage.original_bytes, usage.byte_limit,
+                usage.submitted_tokens, usage.submitted_bytes,
+                usage.original_tokens.saturating_sub(usage.token_limit), usage.original_bytes.saturating_sub(usage.byte_limit),
+                if usage.source != "total assembled input" && usage.original_bytes != usage.submitted_bytes { "; excerpt only: read the complete source before curating" } else { "" }));
+        }
+        if let Some(input) = self
+            .usage
+            .iter()
+            .find(|usage| usage.source == "total assembled input")
+        {
+            lines.push(format!(
+                "Total submitted input over by {} tokens, {} bytes.",
+                input.submitted_tokens.saturating_sub(input.token_limit),
+                input.submitted_bytes.saturating_sub(input.byte_limit)
+            ));
+        }
+        lines.push("The next memory- or scratch-writing step must bring over-budget sources under these limits. Preserve live decisions, unresolved work, attribution and evidence limits; merge and summarize, remove obsolete stacked-parent notes, and keep long historical evidence in git. Re-query after writing; never raise a limit just to hide overflow.".into());
+        lines.join("\n")
+    }
+}
 
 fn bound_source(
     text: &str,
@@ -25,8 +246,8 @@ fn bound_source(
     }
     let source = preserve_source(text, repo_root)?;
     let notice = format!(
-        "\n\n[Context budget: excerpt only. Full text: {}. Read the relevant omitted sections before acting; this excerpt is not the complete instruction.]\n\n",
-        source.display(),
+        "\n\n[Context budget: excerpt only. Original: {}/{} tokens, {}/{} bytes. Full text: {}. Read the relevant omitted sections before acting; this excerpt is not the complete instruction.]\n\n",
+        count_tokens(text), tokens, text.len(), bytes, source.display(),
     );
     // Include both ends: definitions usually lead, recent direction usually trails.
     let mut keep = bytes.saturating_sub(notice.len()).min(text.len()) / 2;
@@ -40,19 +261,31 @@ fn bound_source(
             tail += 1;
         }
         let result = format!("{}{notice}{}", &text[..head], &text[tail..]);
-        if keep == 0 || (result.len() <= bytes && count_tokens(&result) <= tokens) {
+        if result.len() <= bytes && count_tokens(&result) <= tokens {
             return Ok(result);
+        }
+        if keep == 0 {
+            return Err(CoreError::ExecutionFailed(format!("context budget {tokens} tokens / {bytes} bytes cannot fit the source pointer to {}; increase the limit", source.display())));
         }
         keep = keep * 3 / 4;
     }
 }
 
-pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), CoreError> {
+pub(crate) fn bound_context(
+    components: &mut PromptComponents,
+    budgets: ContextBudgets,
+) -> Result<ContextBudgetReport, CoreError> {
+    let mut usage = Vec::new();
     let repo_root = Path::new(&components.repo_root);
     if let Some(memory) = &mut components.wave_memory {
         // Memory can combine ancestor Waves from another checkout. Retain the
         // exact gathered text rather than pointing at a different local file.
-        let bounded = bound_source(&memory.content, MEMORY_TOKENS, 64 * 1024, repo_root)?;
+        let bounded = bound_source(
+            &memory.content,
+            budgets.limit(BudgetKey::MemoryTokens),
+            budgets.limit(BudgetKey::MemoryBytes),
+            repo_root,
+        )?;
         record_reduction(
             &mut components.budget_decisions,
             &memory.content,
@@ -61,7 +294,24 @@ pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), Cor
             ContextScope::Wave,
             &memory.path,
         );
+        usage.push(ContextUsage::measure(
+            &memory.path,
+            &memory.content,
+            &bounded,
+            &budgets,
+            BudgetKey::MemoryTokens,
+            BudgetKey::MemoryBytes,
+        ));
         memory.content = bounded;
+    } else {
+        usage.push(ContextUsage::measure(
+            "Wave memory (absent)",
+            "",
+            "",
+            &budgets,
+            BudgetKey::MemoryTokens,
+            BudgetKey::MemoryBytes,
+        ));
     }
     let scratch_docs: Vec<_> = components
         .docs
@@ -78,10 +328,27 @@ pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), Cor
         .map(|doc| format!("# {}\n\n{}", doc.path, doc.content))
         .collect::<Vec<_>>()
         .join("\n\n");
-    let scratch = format!("{scratch_index}\n\n{scratch}");
+    let scratch = if scratch_docs.is_empty() {
+        String::new()
+    } else {
+        format!("{scratch_index}\n\n{scratch}")
+    };
     // Bound the collection, including its index: per-file notices alone
     // can exhaust a budget when a checkout has hundreds of scratch files.
-    let bounded = bound_source(&scratch, SCRATCH_TOKENS, 128 * 1024, repo_root)?;
+    let bounded = bound_source(
+        &scratch,
+        budgets.limit(BudgetKey::ScratchTokens),
+        budgets.limit(BudgetKey::ScratchBytes),
+        repo_root,
+    )?;
+    usage.push(ContextUsage::measure(
+        "scratch/",
+        &scratch,
+        &bounded,
+        &budgets,
+        BudgetKey::ScratchTokens,
+        BudgetKey::ScratchBytes,
+    ));
     if bounded != scratch {
         record_reduction(
             &mut components.budget_decisions,
@@ -109,7 +376,7 @@ pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), Cor
         );
     }
     if let Some(message) = &mut components.message {
-        let bounded = bound_message(message, repo_root)?;
+        let bounded = bound_message(message, repo_root, &budgets)?;
         record_reduction(
             &mut components.budget_decisions,
             message,
@@ -118,9 +385,26 @@ pub(crate) fn bound_context(components: &mut PromptComponents) -> Result<(), Cor
             ContextScope::User,
             "launch message",
         );
+        usage.push(ContextUsage::measure(
+            "goal (launch message)",
+            message,
+            &bounded,
+            &budgets,
+            BudgetKey::GoalTokens,
+            BudgetKey::GoalBytes,
+        ));
         *message = bounded;
+    } else {
+        usage.push(ContextUsage::measure(
+            "goal (no launch message)",
+            "",
+            "",
+            &budgets,
+            BudgetKey::GoalTokens,
+            BudgetKey::GoalBytes,
+        ));
     }
-    Ok(())
+    Ok(ContextBudgetReport { budgets, usage })
 }
 
 fn record_reduction(
@@ -148,8 +432,17 @@ fn record_reduction(
     });
 }
 
-pub(crate) fn bound_message(message: &str, repo_root: &Path) -> Result<String, CoreError> {
-    bound_source(message, GOAL_TOKENS, 128 * 1024, repo_root)
+pub(crate) fn bound_message(
+    message: &str,
+    repo_root: &Path,
+    budgets: &ContextBudgets,
+) -> Result<String, CoreError> {
+    bound_source(
+        message,
+        budgets.limit(BudgetKey::GoalTokens),
+        budgets.limit(BudgetKey::GoalBytes),
+        repo_root,
+    )
 }
 
 fn preserve_source(text: &str, repo_root: &Path) -> Result<PathBuf, CoreError> {
@@ -162,15 +455,152 @@ fn preserve_source(text: &str, repo_root: &Path) -> Result<PathBuf, CoreError> {
     Ok(path)
 }
 
-pub(crate) fn check_input(system: &str, task: &str) -> Result<(), CoreError> {
+pub(crate) fn check_input(
+    system: &str,
+    task: &str,
+    budgets: &ContextBudgets,
+) -> Result<(), CoreError> {
+    let input_tokens = budgets.limit(BudgetKey::InputTokens);
+    let input_bytes = budgets.limit(BudgetKey::InputBytes);
     let bytes = system.len() + task.len();
-    let tokens = count_tokens(system) + count_tokens(task);
-    if bytes > INPUT_BYTES || tokens > INPUT_TOKENS {
+    let tokens = tokens_in(system) + tokens_in(task);
+    if bytes > input_bytes || tokens > input_tokens {
         return Err(CoreError::ExecutionFailed(format!(
-            "launch context exceeds the input budget: {tokens}/{INPUT_TOKENS} tokens, \
-             {bytes}/{INPUT_BYTES} bytes. Reduce explicit docs, skill instructions, \
+            "launch context exceeds the input budget: {tokens}/{input_tokens} tokens, \
+             {bytes}/{input_bytes} bytes. Reduce explicit docs, skill instructions, \
              clipboard or diff context; full memory, scratch and goal sources remain on disk"
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::{bound_context, check_input, BudgetKey, ContextBudgets};
+    use crate::engine::config::{load_config, Config};
+    use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+
+    #[test]
+    fn budget_overrides_merge_per_field_with_winning_sources() {
+        let home = crate::journal::TestLedgerGuard::new();
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join(".lf")).unwrap();
+        fs::create_dir_all(repo.path().join("wave/build")).unwrap();
+        fs::write(home.home().join("config.yaml"), "context_budgets:\n  memory_tokens: 4000\n  scratch_tokens: 9000\n  input_bytes: 900000\n").unwrap();
+        let repo_config = repo.path().join(".lf/config.yaml");
+        fs::write(
+            &repo_config,
+            "context_budgets:\n  memory_tokens: 5000\n  goal_tokens: 7000\n",
+        )
+        .unwrap();
+        let wave_config = repo.path().join("wave/build/GOAL.md");
+        fs::write(
+            &wave_config,
+            "---\ncontext_budgets:\n  memory_tokens: 6000\n---\nBuild.\n",
+        )
+        .unwrap();
+        let config = load_config(Some(repo.path())).unwrap().unwrap();
+        let budgets = ContextBudgets::resolve(&config, repo.path(), Some("build")).unwrap();
+        for (key, value, source) in [
+            (
+                BudgetKey::MemoryTokens,
+                6000,
+                wave_config.display().to_string(),
+            ),
+            (
+                BudgetKey::ScratchTokens,
+                9000,
+                home.home().join("config.yaml").display().to_string(),
+            ),
+            (
+                BudgetKey::GoalTokens,
+                7000,
+                repo_config.display().to_string(),
+            ),
+            (BudgetKey::InputTokens, 64000, "default".into()),
+        ] {
+            assert_eq!(budgets.limit(key), value);
+            assert_eq!(budgets.0[&key].source, source);
+        }
+        assert_eq!(budgets.limit(BudgetKey::InputBytes), 900000);
+    }
+
+    #[test]
+    fn source_feedback_preserves_original_usage_and_clears_after_curation() {
+        let repo = tempfile::tempdir().unwrap();
+        let config = Config {
+            context_budgets: [
+                (BudgetKey::MemoryTokens, 400),
+                (BudgetKey::ScratchBytes, 1800),
+            ]
+            .into(),
+            ..Default::default()
+        };
+        let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
+        let mut components = PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            wave_memory: Some(Document {
+                path: "wave/build/MEMORY.md".into(),
+                content: "Live decision and evidence. ".repeat(400),
+                source: DocumentSource::WaveMemory,
+            }),
+            docs: vec![Document {
+                path: "scratch/plan.md".into(),
+                content: "Remain unresolved. ".repeat(600),
+                source: DocumentSource::Scratch,
+            }],
+            ..Default::default()
+        };
+        let report = bound_context(&mut components, budgets.clone()).unwrap();
+        assert!(report.usage[0].original_tokens > 400);
+        assert!(report.usage[0].submitted_tokens <= 400);
+        assert!(report.usage[1].original_bytes > 1800);
+        assert!(report.usage[1].submitted_bytes <= 1800);
+        assert!(report
+            .render()
+            .contains("next memory- or scratch-writing step"));
+        assert_eq!(components.budget_decisions.len(), 2);
+        assert_eq!(
+            fs::read_dir(repo.path().join(".lf/tmp/context"))
+                .unwrap()
+                .count(),
+            2
+        );
+
+        components.wave_memory.as_mut().unwrap().content =
+            "Live decision retained; old evidence in git.".into();
+        components.docs[0].content = "Unresolved work retained.".into();
+        let report = bound_context(&mut components, budgets).unwrap();
+        assert!(report
+            .usage
+            .iter()
+            .all(|usage| usage.original_tokens <= usage.token_limit
+                && usage.original_bytes <= usage.byte_limit));
+        assert!(!report.render().contains("excerpt only"));
+    }
+
+    #[test]
+    fn configured_input_limit_replaces_the_default() {
+        let repo = tempfile::tempdir().unwrap();
+        let config = Config {
+            context_budgets: [(BudgetKey::InputTokens, 100)].into(),
+            ..Default::default()
+        };
+        let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
+        assert!(check_input("small", "message", &budgets).is_ok());
+        assert!(check_input("", &" word".repeat(101), &budgets)
+            .unwrap_err()
+            .to_string()
+            .contains("/100 tokens"));
+        let config = Config {
+            context_budgets: [(BudgetKey::InputBytes, 0)].into(),
+            ..Default::default()
+        };
+        assert!(ContextBudgets::resolve(&config, repo.path(), None)
+            .unwrap_err()
+            .to_string()
+            .contains("input_bytes must be positive"));
+    }
 }

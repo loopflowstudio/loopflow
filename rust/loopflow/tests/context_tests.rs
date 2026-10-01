@@ -677,7 +677,7 @@ fn run_outside_any_wave_assembles_no_memory_section() {
 }
 
 #[test]
-fn worktree_reads_the_origin_repos_wave_memory() {
+fn worktree_reads_its_curated_wave_memory() {
     let temp = TempDir::new().unwrap();
     let origin = temp.path().join("repo");
     fs::create_dir_all(&origin).unwrap();
@@ -685,7 +685,7 @@ fn worktree_reads_the_origin_repos_wave_memory() {
     fs::create_dir_all(origin.join("wave/goals")).unwrap();
     fs::write(
         origin.join("wave/goals/MEMORY.md"),
-        "- origin memory is the truth",
+        "- previous committed memory",
     )
     .unwrap();
     make_commit(&origin, "initial");
@@ -703,10 +703,10 @@ fn worktree_reads_the_origin_repos_wave_memory() {
         .current_dir(&origin)
         .output()
         .expect("git worktree add");
-    // The worktree's committed copy lags the origin: the origin must win.
+    // Curation in this checkout must reach its next launch.
     fs::write(
         worktree.join("wave/goals/MEMORY.md"),
-        "- stale worktree copy",
+        "- live decision curated in this checkout",
     )
     .unwrap();
     let wave_memory = loopflow::work::wave::context::gather_wave_memory(&worktree, "goals");
@@ -720,6 +720,8 @@ fn worktree_reads_the_origin_repos_wave_memory() {
     .unwrap();
 
     let memory = components.wave_memory.as_ref().expect("memory resolved");
-    assert!(memory.content.contains("origin memory is the truth"));
-    assert!(!memory.content.contains("stale worktree copy"));
+    assert!(memory
+        .content
+        .contains("live decision curated in this checkout"));
+    assert!(!memory.content.contains("previous committed memory"));
 }

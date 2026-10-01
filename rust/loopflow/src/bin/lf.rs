@@ -1718,6 +1718,12 @@ fn execute_command(
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd, cli))
         }
+        Some(Commands::Context {
+            json,
+            wave,
+            task,
+            skill,
+        }) => loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref(), skill),
         Some(Commands::Tokens { json, days }) => loopflow::lf::commands::tokens::run(*json, *days),
         Some(Commands::Usage {
             json,

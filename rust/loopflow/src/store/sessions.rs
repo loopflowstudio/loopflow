@@ -47,6 +47,21 @@ impl Store {
         .await
     }
 
+    pub async fn ensure_primary_session(
+        &self,
+        scope: &crate::session::PrimaryScope,
+        replacing: Option<&str>,
+        session: AgentSession,
+    ) -> StoreResult<AgentSession> {
+        let scope = scope.clone();
+        let replacing = replacing.map(str::to_string);
+        let caller = crate::journal::current_exec_id();
+        run_sqlite(&self.sqlite, move |store| {
+            store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
+        })
+        .await
+    }
+
     pub async fn replace_session_input(
         &self,
         expected_capture: Option<i64>,

@@ -429,6 +429,11 @@ Wave consumers in the focused check:
 cargo test -p loopflow --test wave_resolution_tests --test wave_resolution_matrix --test global_commands
 ```
 
+When adding a command with `--wave`, classify its selection in
+`wave_resolution_matrix` and run that suite alongside the command's own tests.
+Cover repository defaults and explicit Wave selection separately from ambient
+Wave resolution.
+
 Preserve fixtures for registered Wave directories without Git metadata. Adding
 Git would hide the cached-PM context regression; global-command tests alone do
 not cover it.

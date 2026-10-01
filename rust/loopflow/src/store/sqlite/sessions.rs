@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 
 use crate::durable::{FlowSession, TaskId};
 use crate::engine::ExecutionCursor;
-use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -662,6 +662,80 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(session)
+    }
+
+    /// Find the scope's uncompleted primary, or admit `session` as it. When the
+    /// current primary is `replacing`, complete it and admit its successor in
+    /// the same transaction; a repeat naming a replaced predecessor finds the
+    /// successor already admitted.
+    pub fn ensure_primary_session(
+        &self,
+        scope: &PrimaryScope,
+        replacing: Option<&str>,
+        session: AgentSession,
+        caller_exec: Option<&crate::id::ExecId>,
+    ) -> StoreResult<AgentSession> {
+        let (kind, column, id) = match scope {
+            PrimaryScope::Repository(repo) => ("repository", "repo", repo.to_string()),
+            PrimaryScope::Wave(wave) => ("wave", "wave_id", wave.to_string()),
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = tx
+            .query_row(
+                &format!(
+                    "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
+                     AND s.completed_at IS NULL"
+                ),
+                params![kind, id],
+                read_session,
+            )
+            .optional()?
+            .transpose()?;
+        match current {
+            Some(current) if Some(current.id.as_str()) == replacing => {
+                tx.execute(
+                    "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
+                    params![current.id, crate::store::rows::now_unix()],
+                )?;
+            }
+            Some(current) => return Ok(current),
+            None => {}
+        }
+        let session = reserve_session_in(&tx, session, caller_exec)?;
+        tx.execute(
+            "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
+            params![session.id, kind],
+        )?;
+        tx.commit()?;
+        Ok(session)
+    }
+
+    /// The scope a Session is or was primary for.
+    pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        match row {
+            Some((Some(kind), Some(wave), _)) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
+                crate::id::WaveId::parse(&wave).map_err(invalid)?,
+            ))),
+            Some((Some(kind), _, Some(repo))) if kind == "repository" => {
+                Ok(Some(PrimaryScope::Repository(
+                    crate::repository::CanonicalRepo::discover(std::path::Path::new(&repo))
+                        .map_err(invalid)?,
+                )))
+            }
+            Some((Some(kind), _, _)) => Err(invalid(format!(
+                "Session {id} has unsupported primary scope {kind:?}"
+            ))),
+            _ => Ok(None),
+        }
     }
 
     pub(crate) fn publish_capture(&self, id: &str, captured: Option<i64>) -> StoreResult<()> {

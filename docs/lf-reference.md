@@ -267,6 +267,26 @@ Connect to the live conversation, or resume its saved history
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
 | `--help / -h` | Print help |
 
+## lf session ensure
+
+Find or start the one ongoing conversation of this repository or a Wave
+
+| Argument | What it does |
+|---|---|
+| `--wave / -w` | The Wave's conversation instead of the repository's |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf session replace
+
+Give a primary Session's scope a fresh conversation
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf session complete
 
 Complete a review, blocked Ask, or interactive session

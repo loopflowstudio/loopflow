@@ -1,7 +1,3 @@
--- name: scheduled_task_operation
--- id: d93246181f80c9de0969627da1c23da0
--- depends_on: 
-
 ALTER TABLE tasks ADD COLUMN automation_enabled INTEGER CHECK (automation_enabled IN (0,1));
 ALTER TABLE tasks ADD COLUMN automation_exec_id TEXT REFERENCES execs(id);
 ALTER TABLE tasks ADD COLUMN automation_retry_key TEXT;

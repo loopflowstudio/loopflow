@@ -29,12 +29,10 @@ MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
-# A draft file is `<name>__<id>.sql`; the readable name never contains `__`, and
-# the id is an immutable 128-bit token (32 hex chars).
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
+# A draft file is `<name>.sql`; the filename is the draft's identity.
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
-DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
@@ -316,9 +314,9 @@ def _draft_cycle(drafts: dict[str, list[str]]) -> list[str] | None:
 
 
 def _check_drafts(released_names: set[str]) -> None:
-    """Draft migrations carry a stable name and no ordinal, so parallel branches
-    never contend for one. The release cut is what assigns canonical ids; this
-    only proves the drafts are well-formed and orderable before then."""
+    """Each Task keeps one draft, named by its file and carrying no ordinal. The
+    release cut assigns canonical ids; this only proves the drafts are
+    well-formed and orderable before then."""
     if not DRAFTS_DIR.is_dir():
         return
 
@@ -329,22 +327,14 @@ def _check_drafts(released_names: set[str]) -> None:
         match = DRAFT_FILE.match(path.name)
         if not match:
             _fail(
-                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
-                "— run scripts/new_migration.py"
+                f"draft {path.name} is not `<snake_case_name>.sql` — run scripts/new_migration.py"
             )
         name = match.group(1)
         text = path.read_text()
         if DRAFT_MARKER.search(text):
             _fail(f"draft {path.name} uses reserved `-- draft:` release provenance")
-        header = DRAFT_HEADER_NAME.search(text)
-        if not header:
-            _fail(f"draft {path.name} has no `-- name:` header")
-        if header.group(1) != name:
-            _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
         if name in released_names:
             _fail(f"draft {name} collides with a released migration of the same name")
-        if name in drafts:
-            _fail(f"two drafts share the readable name {name!r} — rename one before releasing")
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
         if depends:

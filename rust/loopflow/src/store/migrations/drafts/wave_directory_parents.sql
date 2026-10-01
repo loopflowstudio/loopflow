@@ -1,5 +1,3 @@
--- name: wave_directory_parents
--- id: 0fc2ccbc9281442080b26eedf05f4891
 -- depends_on: session_ownership
 
 DROP INDEX idx_waves_active_locator;

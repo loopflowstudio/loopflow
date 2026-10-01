@@ -754,10 +754,7 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
-        let database = crate::store::database_path_from_env()?;
-        let database = crate::store::canonicalize_with_missing_tail(&database)?;
         std::env::set_var("LF_HOME", home);
-        std::env::set_var("LF_DB_PATH", database);
         return Ok(());
     }
     let current = fs::canonicalize(std::env::current_exe()?)?;
@@ -783,11 +780,7 @@ pub fn dispatch_default_cli() -> Result<()> {
     command
         .args(std::env::args_os().skip(1))
         .env("LF_HOME", &main_home)
-        .env("LF_DB_PATH", main_home.join("loopflow.db"))
-        .env("LF_BIN", &destination)
-        .env_remove(crate::store::CONTROL_HOME_ENV)
-        .env_remove(crate::store::CONTROL_DB_PATH_ENV)
-        .env_remove(crate::store::CONTROL_BIN_ENV);
+        .env("LF_BIN", &destination);
     #[cfg(unix)]
     {
         Err(command.exec()).context("run installed lf")

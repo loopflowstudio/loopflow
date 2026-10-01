@@ -37,8 +37,7 @@ MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
 MIGRATION_INCLUDE = re.compile(r'include_str!\("migrations/([^\"]+)"\)')
 COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
-HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
-DRAFT_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
+HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 FLOW_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
@@ -215,7 +214,6 @@ def _discover_binaries(root: Path) -> set[str]:
     return binaries
 
 
-
 def _discover_providers(root: Path) -> set[str]:
     source = (root / PROVIDERS).read_text()
     implementation = _extract_braced(source, "pub fn as_str")
@@ -268,10 +266,7 @@ def _ordered_draft_sql(root: Path) -> list[str]:
     drafts: dict[str, tuple[set[str], str]] = {}
     for path in sorted(drafts_dir.glob("*.sql")):
         text = path.read_text()
-        name_match = DRAFT_NAME.search(text)
-        if name_match is None:
-            raise ValueError(f"draft {path.name} has no name")
-        name = name_match.group(1)
+        name = path.stem
         depends_match = DRAFT_DEPENDS.search(text)
         dependencies = set()
         if depends_match:

@@ -105,6 +105,7 @@ Inspect an Exec or Session by identity
 | `--events` | Print a Session's retained raw input events Default: false. |
 | `--final` | Print a Session's last recorded provider conclusion Default: false. |
 | `--input` | Inspect an exact retained input belonging to this Session |
+| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor active
@@ -126,10 +127,12 @@ Show direct provider-authored usage from recorded Session inputs
 |---|---|
 | `--json` | Emit Session usage evidence as JSON Default: false. |
 | `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
 | `--parent` | Inputs issued by this Session or retained capture |
 | `--wave` | Limit to Session inputs attributed to one Wave |
 | `--project` | Limit to Session inputs attributed to one Project |
 | `--task` | Limit to Session inputs attributed to one Task |
+| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor ps
@@ -347,7 +350,7 @@ Internal command; invoked by the owning operation.
 
 ## lf session serve-ask
 
-Run one ad-hoc request in its durable terminal
+Run one prepared Ask or primary conversation in its durable terminal
 
 Internal command; invoked by the owning operation.
 
@@ -598,6 +601,20 @@ Show how failed CI is detected, repaired, and landed across this Home
 | `--wave` | Scope to one Wave |
 | `--repo` | Scope to one GitHub owner/repo |
 | `--json` | Emit the complete incident report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo ci watch
+
+Watch this repository's PR checks and start a ci-fix when a recorded landing fails
+
+| Argument | What it does |
+|---|---|
+| `--once` | Check every open PR once and exit Default: false. |
+| `--install` | Keep the watcher running in the background as a launchd service Default: false. |
+| `--uninstall` | Remove the background service Default: false. |
+| `--status` | Show whether a watcher is live, its last poll, and what it started Default: false. |
+| `--json` | Emit the status as JSON Default: false. |
+| `--parent-pid` | Stop when this process exits Internal. |
 | `--help / -h` | Print help |
 
 ## lf repo reteam
@@ -1016,7 +1033,7 @@ Pull request lifecycle
 
 ## lf task pr reconcile
 
-Check recorded repository landings once, repair CI, and settle verified merges
+Check recorded repository landings once, record CI failures, and settle verified merges
 
 | Argument | What it does |
 |---|---|

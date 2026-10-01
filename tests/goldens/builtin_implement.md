@@ -26,7 +26,7 @@ lf pr publish --title "..."          # push and create/update PR
 lf submit                         # prepare for the user's merge click
 lf arm                            # prepare and request auto-merge; return
 lf land                           # record delivery and return
-lf pr reconcile                      # check delivery once; repair or settle merge
+lf pr reconcile                      # check delivery once; settle a verified merge
 ```
 
 Publish makes a PR ready for review; it does not sync. Submit is
@@ -199,6 +199,11 @@ plan in the conversation; do not require a document template or a prior skill.
      the deletion cut. Temporary compile/test breakage within the cut is no
      reason to repair the predecessor; finish the cut before checking the result.
      New capabilities need no invented predecessor or deletion quota.
+   - Keep one unreleased schema migration per Task and edit it in place. When
+     the schema changes again, rewrite that migration to the final shape; never
+     stack a second one that alters or drops what the first created. Test the
+     upgrade from the last released schema to the finished migration, not the
+     steps between.
    - Functions one at a time, following the signatures
    - Match existing patterns in the codebase
    - Reshape the existing owner instead of adding a parallel representation

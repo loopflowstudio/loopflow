@@ -53,6 +53,9 @@ pub enum MonitorCommand {
         /// Inspect an exact retained input belonging to this Session
         #[arg(long)]
         input: Option<String>,
+        /// Print only what the step's submitted input was made of, by source
+        #[arg(long, conflicts_with_all = ["events", "final_answer"])]
+        context: bool,
     },
     /// Observe active conversations and missing process evidence
     Active {
@@ -72,6 +75,9 @@ pub enum MonitorCommand {
         /// Observation window, in days (zero means all time)
         #[arg(long, default_value_t = 30)]
         days: u32,
+        /// Report context cost and turn time by week since 2026-09-30
+        #[arg(long, conflicts_with_all = ["days", "parent"])]
+        weekly: bool,
         /// Inputs issued by this Session or retained capture
         #[arg(long, conflicts_with_all = ["wave", "project", "task"])]
         parent: Option<String>,
@@ -84,6 +90,9 @@ pub enum MonitorCommand {
         /// Limit to Session inputs attributed to one Task
         #[arg(long)]
         task: Option<String>,
+        /// Break each step's submitted input down by source, flagged against budgets
+        #[arg(long)]
+        context: bool,
     },
     /// Print one parseable snapshot of live Loopflow call trees
     Ps {
@@ -143,12 +152,30 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
         MonitorCommand::Usage {
             json,
+            weekly: true,
+            wave,
+            project,
+            task,
+            ..
+        } => super::context_cost::run(
+            *json,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+        ),
+        MonitorCommand::Usage {
+            json,
             days,
             parent,
             wave,
             project,
             task,
+            weekly: false,
+            context,
         } => super::usage::run(
+            *context,
             *json,
             *days,
             wave.as_deref(),
@@ -177,7 +204,15 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
             events,
             final_answer,
             input,
-        } => show(id, *json, *events, *final_answer, input.as_deref()),
+            context,
+        } => show(
+            id,
+            *json,
+            *events,
+            *final_answer,
+            input.as_deref(),
+            *context,
+        ),
         MonitorCommand::List {
             json,
             all,
@@ -273,6 +308,7 @@ fn show(
     events: bool,
     final_answer: bool,
     input: Option<&str>,
+    context: bool,
 ) -> anyhow::Result<()> {
     let exec = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
@@ -299,8 +335,8 @@ fn show(
     match exec {
         Some(exec) => {
             anyhow::ensure!(
-                !events && !final_answer,
-                "--events and --final inspect Session evidence; Execs record command outcomes"
+                !events && !final_answer && !context,
+                "--events, --final and --context inspect Session evidence; Execs record command outcomes"
             );
             if json {
                 println!("{}", serde_json::to_string_pretty(&exec)?);
@@ -310,7 +346,7 @@ fn show(
             }
             Ok(())
         }
-        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, json),
+        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, context, json),
     }
 }
 

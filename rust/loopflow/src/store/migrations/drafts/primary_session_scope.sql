@@ -1,7 +1,3 @@
--- name: primary_session_scope
--- id: 855df32026f646aabca6782da858211c
--- depends_on: 
-
 -- A primary Session is an ordinary conversation that is the one ongoing
 -- conversation of its scope. The scope's identity stays in the row's own
 -- columns; completed predecessors remain history.

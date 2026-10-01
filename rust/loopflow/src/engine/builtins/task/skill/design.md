@@ -55,6 +55,8 @@ passes never repair code scheduled for removal. Name required behavior, data,
 and tests that must survive. If removal needs a consumer cutover or migration,
 include that minimum work in the same cut; do not first modernize the old path.
 Additive work needs no invented deletion.
+Plan one schema migration per Task, written against the last released schema
+and edited in place until landing; a design never schedules intermediate schemas.
 
 ### 3. Size-check
 

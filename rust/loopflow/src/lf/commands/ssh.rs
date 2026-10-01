@@ -141,7 +141,7 @@ pub fn run(
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    let mut extra_env = vec![(crate::engine::process::SSH_TARGET_ENV, target.dest.as_str())];
+    let mut extra_env = Vec::new();
     if let Some(home_id) = target.home_id.as_ref().map(HomeId::as_str) {
         extra_env.push((EXPECTED_HOME_ID_ENV, home_id));
     }
@@ -897,11 +897,10 @@ mod tests {
             "mini-heart",
             "src/loopflow",
             &cmd,
-            &[(crate::engine::process::SSH_TARGET_ENV, "mini-heart")],
+            &[],
         );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
-        assert!(preamble.contains("export LF_SSH_TARGET="));
         assert!(preamble.contains("export OPENCODE_API_KEY='opencode-secret'"));
         assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
         assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));

@@ -322,9 +322,8 @@ struct ActiveSessionsObservationTests {
         var environment = (process.environment ?? [:]).filter {
             !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_")
         }
-        for key in ["LF_BIN", "LF_CONTROL_BIN"] { environment[key] = binary }
-        for key in ["LF_HOME", "LF_CONTROL_HOME"] { environment[key] = home.path }
-        for key in ["LF_DB_PATH", "LF_CONTROL_DB_PATH"] { environment[key] = home.appendingPathComponent("loopflow.db").path }
+        environment["LF_BIN"] = binary
+        environment["LF_HOME"] = home.path
         process.environment = environment
         return process
     }

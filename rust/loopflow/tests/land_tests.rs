@@ -191,6 +191,30 @@ if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
 fi
+if [ "$1 $2" = "api --include" ]; then
+  # The CI watcher's REST reads: one open PR whose required check failed.
+  for path do :; done
+  head="$(git rev-parse watched-land 2>/dev/null || git rev-parse HEAD)"
+  case "$path" in
+    */pulls\?*)
+      if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
+        body="[{{\"number\":1,\"head\":{{\"ref\":\"watched-land\",\"sha\":\"$head\"}},\"base\":{{\"ref\":\"main\",\"sha\":\"base\"}}}}]"
+      else
+        body='[]'
+      fi ;;
+    */rules/branches/*)
+      body='[{{"type":"required_status_checks","parameters":{{"required_status_checks":[{{"context":"fixture-check"}}]}}}}]' ;;
+    */check-runs*)
+      body='{{"total_count":1,"check_runs":[{{"name":"fixture-check","status":"completed","conclusion":"failure","details_url":null,"started_at":"2026-08-21T00:00:00Z","completed_at":"2026-08-21T00:05:00Z","check_suite":{{"id":1}}}}]}}' ;;
+    */status*)
+      body='{{"statuses":[]}}' ;;
+    *)
+      printf 'HTTP/2.0 404 Not Found\r\n\r\n{{}}'
+      exit 1 ;;
+  esac
+  printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Reset: 0\r\n\r\n%s' "$body"
+  exit 0
+fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
   if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
@@ -1876,7 +1900,6 @@ fi"#;
                 .env_remove("LF_TRACE_ID")
                 .env_remove("LF_PROCESS_ID")
                 .env("LF_HOME", &lf_home)
-                .env("LF_DB_PATH", &database)
                 .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_TEST_SYNC_LOG", &sync_log)
                 .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
@@ -1935,7 +1958,32 @@ fi"#;
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "watching");
-        let mut output = command().args(["pr", "reconcile"]).output().unwrap();
+        // The scheduled check observes delivery; the watcher starts repairs.
+        let check: &[&str] = if repair {
+            &["repo", "ci", "watch", "--once"]
+        } else {
+            &["pr", "reconcile"]
+        };
+        if repair {
+            let observed = command().args(["pr", "reconcile"]).output().unwrap();
+            assert!(
+                observed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&observed.stderr)
+            );
+            let repairs: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ci_incidents WHERE repair_exec_id IS NOT NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                repairs, 0,
+                "a delivery check records failures without repairing"
+            );
+        }
+        let mut output = command().args(check).output().unwrap();
         if fail_start {
             let reserved: String = conn
                 .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
@@ -1946,7 +1994,7 @@ fi"#;
                 !repair_launches.exists(),
                 "failed launch performed no repair"
             );
-            output = command().args(["pr", "reconcile"]).output().unwrap();
+            output = command().args(check).output().unwrap();
             let recovered: (String, i64) = conn
                 .query_row(
                     "SELECT repair_session_id,repair_retries FROM ci_incidents",
@@ -1971,7 +2019,7 @@ fi"#;
                 !finished,
                 "check must return before the provider turn finishes"
             );
-            let overlap = command().args(["pr", "reconcile"]).output().unwrap();
+            let overlap = command().args(check).output().unwrap();
             assert!(
                 overlap.status.success(),
                 "{}",
@@ -1991,6 +2039,14 @@ fi"#;
                 );
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
+            let detected: bool = conn
+                .query_row(
+                    "SELECT provider_completed_at IS NOT NULL FROM ci_incidents",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(detected, "the watcher records when the provider finished");
             let owner: String = conn
                 .query_row(
                     "SELECT DISTINCT exec_id FROM session_events WHERE kind='started'",
@@ -2060,7 +2116,7 @@ fi"#;
                 .unwrap();
             assert!(error.contains("GitHub credential revoked; reconnect it before retrying."));
             assert!(!repair_proof.exists());
-            let repeated = command().args(["pr", "reconcile"]).output().unwrap();
+            let repeated = command().args(check).output().unwrap();
             assert!(
                 repeated.status.success(),
                 "a useful blocked check is not a failed observation"

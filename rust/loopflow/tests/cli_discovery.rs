@@ -35,7 +35,6 @@ fn run(repo: &Path, home: &Path, args: &[&str]) -> Output {
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home.join(".lf"))
-        .env("LF_DB_PATH", home.join(".lf/store.db"))
         .env("NO_COLOR", "1")
         // Inspection must work without git, providers, npx, or credentials.
         .env("PATH", home.join("no-tools"))
@@ -167,7 +166,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
     assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
-    let db = rusqlite::Connection::open(home.path().join(".lf/store.db")).unwrap();
+    let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
             .get::<_, i64>(0))

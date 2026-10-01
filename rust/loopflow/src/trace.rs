@@ -66,6 +66,7 @@ pub enum ContextAssetKind {
     /// Historical persisted context assets; no longer emitted by prompt assembly.
     Direction,
     Goal,
+    Steer,
     Memory,
     Chat,
     Summary,
@@ -87,6 +88,7 @@ impl ContextAssetKind {
             Self::SkillInstructions => "skill_instructions",
             Self::Direction => "direction",
             Self::Goal => "goal",
+            Self::Steer => "steer",
             Self::Memory => "memory",
             Self::Chat => "chat",
             Self::Summary => "summary",
@@ -108,6 +110,7 @@ impl ContextAssetKind {
             "skill_instructions" => Ok(Self::SkillInstructions),
             "direction" => Ok(Self::Direction),
             "goal" => Ok(Self::Goal),
+            "steer" => Ok(Self::Steer),
             "memory" => Ok(Self::Memory),
             "chat" => Ok(Self::Chat),
             "summary" => Ok(Self::Summary),

@@ -52,7 +52,6 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("LF_TEST_WORKER_LOG", home.join("worker.log"));
     command

@@ -113,7 +113,9 @@ forward there before opening a store. Task workers, Flow steps, sessions and
 agent tools inherit the same Home; no source-specific or installed-development
 Home exists.
 
-`LF_HOME` explicitly selects an empty, disposable experiment. Its schema is
+`LF_HOME` explicitly selects an empty, disposable experiment. Its database is
+always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable
+Loopflow sets or reads is listed in [Environment](environment.md). Its schema is
 initialized once and must match on subsequent opens. A schema mismatch requires
 a new experiment. Loopflow neither copies main data into it nor upgrades,
 repairs, restores or promotes its contents.

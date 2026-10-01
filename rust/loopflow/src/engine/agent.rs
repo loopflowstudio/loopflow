@@ -148,13 +148,7 @@ pub(crate) fn checkout_execution_boundary(
             "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
         ))
     })?;
-    let control_store = control.db_path.parent().ok_or_else(|| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: Loopflow control database {} has no writable parent",
-            control.db_path.display()
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control_store.to_path_buf()];
+    let mut writable_roots = vec![common_dir, control.lf_home];
     writable_roots.sort();
     writable_roots.dedup();
     Ok(AgentExecutionBoundary { writable_roots })
@@ -1661,10 +1655,6 @@ fn _exec_harness_once(
         crate::ops::git_operation::prepare_agent_exec(cwd, &config.env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    config
-        .env
-        .remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
-
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -1875,7 +1865,7 @@ fn _exec_agent_once(
         cmd.current_dir(cwd);
     }
 
-    let mut scoped_env = launch.env.clone();
+    let scoped_env = launch.env.clone();
     let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
         crate::ops::git_operation::prepare_agent_exec(cwd, &scoped_env)
@@ -1884,10 +1874,8 @@ fn _exec_agent_once(
     for name in EXECUTION_IDENTITY_ENV {
         cmd.env_remove(name);
     }
-    scoped_env.remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
     cmd.envs(&scoped_env);
     cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
-    cmd.env_remove(crate::ops::git_operation::LEGACY_WORKTREE_WRITER_ID_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
     // can request parent-shell actions (for example auto-cd after `lf task wt switch`).

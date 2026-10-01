@@ -9,6 +9,18 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
+## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
+
+Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
+`drafts/<name>.sql`, and edits it in place until landing; unreleased drafts on
+main are edited rather than undone by a later draft. Draft ids, `-- name:`/`-- id:`
+headers and the `development_migrations` receipt ledger are removed, so the
+applied-draft names, IDs and checksums in the LOO-321 diagnostics below no longer
+exist. Custom Homes keep exact-schema validation and stay disposable.
+`-- depends_on:` still orders drafts across Tasks at the release cut. Mechanics
+live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
+evidence only; not shipped.
+
 ## One main Home (LOO-342, branch evidence 2026-09-30)
 
 Jack Heart approved shipping the one-Home cutover. Ordinary CLI commands, Task
@@ -30,6 +42,18 @@ because they had live file handles: `installed/local-04115a69e0c34b198bf110976b3
 `worktrees/loopflow-growth-thoughts-1c80b40d4504`. These are dated observations;
 reinspect live ownership before cleanup. Older running builds can recreate side
 stores until the published cutover. No active database was removed or process killed.
+
+## Environment variables (LOO-341, branch evidence 2026-10-01)
+
+Jack Heart requested an audit of every `LF_*` variable against the policy it
+implements. The inventory is [Environment](../../docs/architecture/environment.md).
+`LF_HOME` is the only Home selector and its database is always
+`$LF_HOME/loopflow.db`; `LF_DB_PATH` and the `LF_CONTROL_*` trio are removed, with
+the other names nothing read. One list of Exec-context names drives both the
+session shell's `unset` and the tmux client's environment, because a tmux server
+copies its first client's environment into every later session. Fixtures open
+their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
+`LF_RUN_ID` presence still decides three behaviours without validating the Run.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

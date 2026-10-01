@@ -621,12 +621,10 @@ mod tests {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let _storage =
-            crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DB_PATH", "LF_BIN", "PATH"]);
+        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN", "PATH"]);
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("loopflow.db");
         std::env::set_var("LF_HOME", home.path());
-        std::env::set_var("LF_DB_PATH", &database);
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
         let exec = crate::id::ExecId::new();

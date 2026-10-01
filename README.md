@@ -104,7 +104,8 @@ lf task restart INF-123 "reconcile all scratch first" # checkpoint and begin a n
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf arm -c                                          # request exact-head auto-merge and return
 lf land -c                                         # hand off delivery; complete the Task after verified merge
-lf pr reconcile                                      # check recorded deliveries once, repair or settle
+lf pr reconcile                                      # check recorded deliveries once and settle merges
+lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Task comments in Linear also reach the advancing worker. Steering never starts
@@ -130,6 +131,7 @@ lf session list --json # conversations on this Home
 lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
+lf usage --task LOO-265 --context # each step's input by source, flagged over budget
 lf ps                  # one OS-live Loopflow process snapshot
 lf top                 # refresh elapsed time, process state, and call trees
 lf mon prune --dry-run     # inspect dead receipts and registered orphan providers

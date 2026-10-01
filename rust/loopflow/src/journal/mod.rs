@@ -43,9 +43,6 @@ thread_local! {
 pub(crate) struct TestLedgerGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_lf_home: Option<std::ffi::OsString>,
-    previous_db_path: Option<std::ffi::OsString>,
-    previous_control_home: Option<std::ffi::OsString>,
-    previous_control_db_path: Option<std::ffi::OsString>,
     previous_test_path: Option<PathBuf>,
     home: tempfile::TempDir,
 }
@@ -56,22 +53,13 @@ impl TestLedgerGuard {
         let lock = test_env_lock();
         let home = tempfile::TempDir::new().expect("test ledger home");
         let previous_lf_home = std::env::var_os("LF_HOME");
-        let previous_db_path = std::env::var_os("LF_DB_PATH");
-        let previous_control_home = std::env::var_os(crate::store::CONTROL_HOME_ENV);
-        let previous_control_db_path = std::env::var_os(crate::store::CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_HOME");
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
         std::env::set_var("LF_HOME", home.path());
         let previous_test_path =
             TEST_LEDGER_DB_PATH.with(|path| path.replace(Some(home.path().join("loopflow.db"))));
         Self {
             _lock: lock,
             previous_lf_home,
-            previous_db_path,
-            previous_control_home,
-            previous_control_db_path,
             previous_test_path,
             home,
         }
@@ -93,18 +81,6 @@ impl Drop for TestLedgerGuard {
         match &self.previous_lf_home {
             Some(value) => std::env::set_var("LF_HOME", value),
             None => std::env::remove_var("LF_HOME"),
-        }
-        match &self.previous_db_path {
-            Some(value) => std::env::set_var("LF_DB_PATH", value),
-            None => std::env::remove_var("LF_DB_PATH"),
-        }
-        match &self.previous_control_home {
-            Some(value) => std::env::set_var(crate::store::CONTROL_HOME_ENV, value),
-            None => std::env::remove_var(crate::store::CONTROL_HOME_ENV),
-        }
-        match &self.previous_control_db_path {
-            Some(value) => std::env::set_var(crate::store::CONTROL_DB_PATH_ENV, value),
-            None => std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV),
         }
     }
 }
@@ -1166,20 +1142,16 @@ mod tests {
     struct AmbientStorage {
         _lock: std::sync::MutexGuard<'static, ()>,
         previous_lf_home: Option<std::ffi::OsString>,
-        previous_db_path: Option<std::ffi::OsString>,
     }
 
     impl AmbientStorage {
-        fn seed(home: &std::path::Path, db_path: &std::path::Path) -> Self {
+        fn seed(home: &std::path::Path) -> Self {
             let lock = super::test_env_lock();
             let previous_lf_home = std::env::var_os("LF_HOME");
-            let previous_db_path = std::env::var_os("LF_DB_PATH");
             std::env::set_var("LF_HOME", home);
-            std::env::set_var("LF_DB_PATH", db_path);
             Self {
                 _lock: lock,
                 previous_lf_home,
-                previous_db_path,
             }
         }
     }
@@ -1189,10 +1161,6 @@ mod tests {
             match &self.previous_lf_home {
                 Some(value) => std::env::set_var("LF_HOME", value),
                 None => std::env::remove_var("LF_HOME"),
-            }
-            match &self.previous_db_path {
-                Some(value) => std::env::set_var("LF_DB_PATH", value),
-                None => std::env::remove_var("LF_DB_PATH"),
             }
         }
     }
@@ -1316,16 +1284,12 @@ mod tests {
     #[test]
     fn unit_test_ledger_ignores_ambient_storage_paths() {
         let ambient_home = tempfile::tempdir().expect("ambient home");
-        let ambient_db_dir = tempfile::tempdir().expect("ambient db dir");
-        let ambient_db = ambient_db_dir.path().join("production.db");
-        let _ambient = AmbientStorage::seed(ambient_home.path(), &ambient_db);
+        let _ambient = AmbientStorage::seed(ambient_home.path());
 
         let resolved = super::ledger_db_path().expect("test ledger path");
         super::open_ledger().expect("open test ledger");
 
-        assert_ne!(resolved, ambient_db);
         assert_ne!(resolved, ambient_home.path().join("loopflow.db"));
-        assert!(!ambient_db.exists());
         assert!(!ambient_home.path().join("loopflow.db").exists());
     }
 

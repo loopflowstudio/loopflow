@@ -169,7 +169,8 @@ lf pr publish   # push + create or update PR and mark ready (no browser)
 lf submit    # prepare the exact head; you click merge
 lf arm       # arm exact-head auto-merge and return
 lf land      # request auto-merge, record delivery, and return
-lf pr reconcile # check recorded landings once: repair CI, settle merges
+lf pr reconcile # check recorded landings once and settle merges
+lf ci watch     # watch PR checks; start a ci-fix when a landing fails
 ```
 
 Use the same delivery verbs for Task and non-Task branches. They act on the
@@ -189,7 +190,8 @@ Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
 `wave/operate` invocation reviews the plan and takes a bounded next action.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
-`lf pr reconcile` repairs CI and settles verified merges.
+`lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
+while it runs.
 
 Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 `lf session list` finds conversations, Asks and Flow reviews; open one with

@@ -1003,7 +1003,7 @@ pub enum InstallCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PrCommand {
-    /// Check recorded repository landings once, repair CI, and settle verified merges.
+    /// Check recorded repository landings once, record CI failures, and settle verified merges.
     Reconcile,
     /// Show CI status for current branch
     Checks {
@@ -1207,6 +1207,31 @@ pub enum CronCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum CiCommand {
+    /// Watch this repository's PR checks and start a ci-fix when a recorded landing fails
+    Watch {
+        /// Check every open PR once and exit
+        #[arg(long)]
+        once: bool,
+        /// Keep the watcher running in the background as a launchd service
+        #[arg(long, conflicts_with_all = ["once", "uninstall", "status"])]
+        install: bool,
+        /// Remove the background service
+        #[arg(long, conflicts_with_all = ["once", "status"])]
+        uninstall: bool,
+        /// Show whether a watcher is live, its last poll, and what it started
+        #[arg(long, conflicts_with = "once")]
+        status: bool,
+        /// Emit the status as JSON
+        #[arg(long, requires = "status")]
+        json: bool,
+        /// Stop when this process exits
+        #[arg(long = "parent-pid", hide = true)]
+        parent_pid: Option<u32>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RepoCommand {
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
@@ -1253,6 +1278,8 @@ pub enum RepoCommand {
     },
     /// Show how failed CI is detected, repaired, and landed across this Home
     Ci {
+        #[command(subcommand)]
+        cmd: Option<CiCommand>,
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long, default_value = "7d")]
         since: String,
@@ -1785,6 +1812,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Repo { cmd: RepoCommand::Ci {
+                cmd: None,
                 since,
                 wave: Some(wave),
                 repo: Some(repo),

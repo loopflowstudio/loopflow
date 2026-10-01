@@ -100,6 +100,7 @@ lf usage --task INF-123 # the same evidence drilled to one Task
 lf usage --json    # current usage wire, newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
+lf ci watch --status # the CI watcher: live or not, last poll, what it started
 lf doctor          # audit the ledger: continuity, attribution, lineage
 ```
 

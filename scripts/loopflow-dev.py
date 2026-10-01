@@ -59,9 +59,8 @@ GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
 
 def _app_environment(repo: Path) -> dict[str, str]:
     env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
-    for key in ("LF_HOME", "LF_DB_PATH"):
-        if value := os.environ.get(key):
-            env[key] = value
+    if value := os.environ.get("LF_HOME"):
+        env["LF_HOME"] = value
     return env
 
 

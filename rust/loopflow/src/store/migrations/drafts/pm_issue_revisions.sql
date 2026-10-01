@@ -1,5 +1,3 @@
--- name: pm_issue_revisions
--- id: bdb7accd9f894beebd79223f5ba26f5f
 -- depends_on: normalize_pm_planning
 
 -- Signed Linear issue events fence delayed reads, even before an issue is cached.

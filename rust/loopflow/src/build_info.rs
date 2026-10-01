@@ -360,8 +360,6 @@ mod tests {
             .iter()
             .all(|name| !name.is_empty()));
         for draft in migration_draft_manifest() {
-            assert_eq!(draft.id.len(), 32);
-            assert_eq!(draft.checksum.len(), 64);
             assert!(draft.sql.is_empty() || draft.sql.ends_with('\n'));
         }
         assert!(!source_revision().is_empty());

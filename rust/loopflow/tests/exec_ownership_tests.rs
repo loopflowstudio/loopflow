@@ -388,7 +388,6 @@ fn remote_command_status_is_the_local_exec_status() {
     .env_clear()
     .env("HOME", home.path())
     .env("LF_HOME", home.path())
-    .env("LF_DB_PATH", home.path().join("loopflow.db"))
     .env(
         "PATH",
         format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
@@ -517,11 +516,7 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
             command.env_remove(key);
         }
     }
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env("LF_HOME", home)
-        .env("LF_DB_PATH", home.join("loopflow.db"));
+    command.args(args).current_dir(cwd).env("LF_HOME", home);
     command
 }
 
@@ -1097,7 +1092,6 @@ async fn inspection_records_one_completed_exec_without_starting_work() {
         .args(["session", "list", "--all", "--json"])
         .current_dir(home.path())
         .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", &database)
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");

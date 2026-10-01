@@ -20,7 +20,6 @@ const RECEIPT_STALE_AFTER: i64 = 6 * 60 * 60;
 pub struct CronHost {
     pub home_id: HomeId,
     pub lf_home: PathBuf,
-    pub db_path: PathBuf,
     pub path_env: String,
 }
 
@@ -711,7 +710,6 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
             home_id: HomeId::parse(&required("LoopflowHomeId")?)
                 .map_err(|error| OpsError::Parse(error.to_string()))?,
             lf_home: PathBuf::from(required("LoopflowLfHome")?),
-            db_path: PathBuf::from(required("LoopflowDbPath")?),
             path_env: required("LoopflowPath")?,
         },
     })
@@ -816,7 +814,6 @@ fn spawn_cron_target(spec: &CronSpec) -> std::io::Result<std::process::ExitStatu
         .env_clear()
         .env("PATH", &spec.host.path_env)
         .env("LF_HOME", &spec.host.lf_home)
-        .env("LF_DB_PATH", &spec.host.db_path)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
     if let Some(home) = dirs::home_dir() {
@@ -957,7 +954,7 @@ fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     Ok(())
 }
 
-fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> OpsResult<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -1046,10 +1043,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
             "LoopflowLfHome",
             spec.host.lf_home.to_string_lossy().to_string(),
         ),
-        (
-            "LoopflowDbPath",
-            spec.host.db_path.to_string_lossy().to_string(),
-        ),
         ("LoopflowPath", spec.host.path_env.clone()),
         (
             "LoopflowLogPath",
@@ -1084,8 +1077,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         <string>{path_env}</string>
         <key>LF_HOME</key>
         <string>{lf_home}</string>
-        <key>LF_DB_PATH</key>
-        <string>{db_path}</string>
     </dict>
 {interval}
     <key>WorkingDirectory</key>
@@ -1100,7 +1091,6 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         label = xml_escape(&label(&spec.wave, &spec.flow)),
         path_env = xml_escape(&spec.host.path_env),
         lf_home = xml_escape(&spec.host.lf_home.to_string_lossy()),
-        db_path = xml_escape(&spec.host.db_path.to_string_lossy()),
         working_directory = xml_escape(&spec.working_directory.to_string_lossy()),
         log_path = xml_escape(&spec.log_path().to_string_lossy()),
     )
@@ -1114,7 +1104,7 @@ fn plist_string(content: &str, key: &str) -> Option<String> {
     Some(xml_unescape(value))
 }
 
-fn xml_escape(value: &str) -> String {
+pub(crate) fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1168,7 +1158,7 @@ fn run_launchctl_path(action: &str, path: &Path) -> OpsResult<()> {
     })
 }
 
-fn process_alive(pid: u32) -> bool {
+pub(crate) fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
     };
@@ -1239,7 +1229,6 @@ mod tests {
         CronHost {
             home_id: HomeId::new(),
             lf_home: root.join("home"),
-            db_path: root.join("home/loopflow.db"),
             path_env: "/usr/bin:/bin".to_string(),
         }
     }
@@ -1307,7 +1296,6 @@ mod tests {
         assert!(content.contains("<key>EnvironmentVariables</key>"));
         assert!(content.contains("<key>PATH</key>"));
         assert!(content.contains("<key>LF_HOME</key>"));
-        assert!(content.contains("<key>LF_DB_PATH</key>"));
         assert!(content.contains("<key>LoopflowActivatedAt</key>"));
         assert!(!content.contains("DOPPLER_TOKEN"));
         assert!(!content.contains("LF_RUN_ID"));

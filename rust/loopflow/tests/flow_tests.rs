@@ -61,11 +61,6 @@ with sqlite3.connect(os.path.join(os.environ["LF_HOME"], "loopflow.db")) as conn
     connection.executescript("""
 BEGIN IMMEDIATE;
 CREATE TABLE future_flow_feature (id INTEGER PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS development_migrations (
- position INTEGER NOT NULL UNIQUE, id TEXT PRIMARY KEY,
- name TEXT NOT NULL UNIQUE, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL);
-INSERT INTO development_migrations
- SELECT COUNT(*), 'future', 'future_flow_feature', 'fixture', 1 FROM development_migrations;
 COMMIT;
 """)
 PYTHON
@@ -573,8 +568,6 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
             ],
             None,
         )
-        .env_remove("LF_CONTROL_DB_PATH")
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .output()
         .unwrap();
         assert!(
@@ -622,7 +615,6 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
         ],
         None,
     )
-    .env("LF_DB_PATH", home.path().join("loopflow.db"))
     .output()
     .unwrap();
     assert!(!failed.status.success());
@@ -1831,7 +1823,6 @@ fn task_operation_starts_with_durable_history_after_claim_only_failure() {
         .current_dir(repo.path())
         .env("HOME", home.path())
         .env("LF_HOME", home.path())
-        .env("LF_DB_PATH", home.path().join("loopflow.db"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env(
             loopflow::durable::TASK_WORKER_CLAIM_ENV,

@@ -1191,10 +1191,6 @@ fn isolate_candidate_command(command: &mut Command) {
         crate::durable::RUN_ID_ENV,
         "LF_BIN",
         "LF_HOME",
-        "LF_DB_PATH",
-        crate::store::CONTROL_BIN_ENV,
-        crate::store::CONTROL_HOME_ENV,
-        crate::store::CONTROL_DB_PATH_ENV,
     ] {
         command.env_remove(name);
     }

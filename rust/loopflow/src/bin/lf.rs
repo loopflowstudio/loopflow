@@ -1615,6 +1615,24 @@ fn execute_command(
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
+            // The watcher admits repairs, which needs a recorded Exec.
+            loopflow::lf::RepoCommand::Ci {
+                cmd:
+                    Some(loopflow::lf::CiCommand::Watch {
+                        uninstall: false,
+                        status: false,
+                        ..
+                    }),
+                ..
+            } => {
+                // It runs from the main checkout so its long-lived Exec never
+                // counts as live work in a Task's worktree.
+                let root = loopflow::engine::worktrees::main_repo_root(
+                    &loopflow::lf::commands::util::find_repo_root()?,
+                )?;
+                let _cwd = CwdGuard::enter(&root)?;
+                with_runtime(&root, args, || loopflow::lf::commands::ops::run_repo(cmd))
+            }
             loopflow::lf::RepoCommand::Tokens { .. } | loopflow::lf::RepoCommand::Ci { .. } => {
                 loopflow::lf::commands::ops::run_repo(cmd)
             }
@@ -1878,9 +1896,8 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
-        let registry_blocker = directory.path().join("unreadable-registry");
-        std::fs::create_dir(&registry_blocker).unwrap();
-        let _db = EnvGuard::set("LF_DB_PATH", registry_blocker.display().to_string());
+        std::fs::create_dir(directory.path().join("loopflow.db")).unwrap();
+        let _home = EnvGuard::set("LF_HOME", directory.path().display().to_string());
 
         let error = super::prepare_work_binding("task:LOO-265", directory.path())
             .expect_err("--as must not degrade to raw attribution");

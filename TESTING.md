@@ -515,8 +515,8 @@ uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
 `LF_BIN` to the compiled test CLI. Clear inherited `LF_*` execution authority.
 Without an explicit experiment a source CLI forwards to the installed CLI and
-main Home. Children use the same Home and executable; PATH and retired
-`LF_CONTROL_*` pins cannot choose a second store.
+main Home. Children use the same Home and executable; PATH cannot choose a
+second store. A Home's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-decide after work and review so navigation
@@ -578,7 +578,10 @@ execution overrides; they are not exported by `sync-skills`.
 cargo test -p loopflow --lib engine::skills::tests
 ```
 
-Prompt parity and golden prompt tests live in Rust.
+After editing embedded skills, directions, surfaces, or prompt assembly, run
+the Rust golden prompt check even for Markdown-only changes. If the mismatch
+reflects the intended prompt change, regenerate the snapshots, review their
+diff, and rerun the check before gate.
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -607,9 +610,11 @@ test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task controller consumers: durable work reservation retains Started
 after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Experimental Homes record
-the exact draft checksums: use a fresh Home after changing the schema. Preserve
-populated historical fixtures for published migration coverage.
+changes; an ordinary draft build may omit the trigger. Experimental Homes hold
+this build's exact schema: use a fresh Home after changing it. Preserve
+populated historical fixtures for published migration coverage. A Task's draft is
+edited in place, so test the released frontier against the finished draft and
+write no test for a schema that existed only between two edits.
 
 For manual migration check in a shared checkout, materialize only in a disposable
 source copy that includes the current tracked and untracked inputs. Materialization
@@ -904,9 +909,8 @@ usage and account-event assertions in the recorder tests, rather than racing
 its queue in subprocess-launch tests. Reproduce suspected races with a temporary
 recorder delay beyond that drain window; remove the delay before publication.
 
-Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME` or
-`LF_DB_PATH`. Provider fixtures read `LF_HOME`; retired `LF_CONTROL_*` variables
-are removed before provider launch.
+Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME`.
+Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 
 When changing Home selection, run the affected fixtures with `LF_HOME` unset in
 the test runner; the materialization wrapper's shared test Home can mask missing

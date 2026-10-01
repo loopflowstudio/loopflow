@@ -222,6 +222,7 @@ final class PodiumModel {
     private(set) var taskWork = TaskReadings<TaskWork>()
     /// Conversation history, read only on disclosure.
     private(set) var recentRuns = TaskReadings<[SessionHistory]>()
+    private(set) var taskContext = TaskReadings<ContextReport>()
     private(set) var workActivityScope = WorkActivityScope(
         wave: nil,
         project: nil,
@@ -635,6 +636,12 @@ final class PodiumModel {
     func loadRecentRuns(task: RoadmapTask, wave: WaveSnapshot) async {
         await loadTaskReading(\.recentRuns, task: task.id) { [query] in
             try await query.taskRuns(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
+    func loadTaskContext(task: RoadmapTask, wave: WaveSnapshot) async {
+        await loadTaskReading(\.taskContext, task: task.id) { [query] in
+            try await query.taskContext(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
         }
     }
 

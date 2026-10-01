@@ -30,15 +30,13 @@ if [ "$local_home" != "$placed_home" ]; then
 fi
 printf 'Wave %s is placed on this Home\n' "$wave"
 
-lf_home="${LF_CONTROL_HOME:-${LF_HOME:-$HOME/.lf}}"
-lf_db_path="${LF_CONTROL_DB_PATH:-${LF_DB_PATH:-$lf_home/loopflow.db}}"
+lf_home="${LF_HOME:-$HOME/.lf}"
 minimal_env=(
   env -i
   "HOME=$HOME"
   "USER=${USER:-}"
   "PATH=$PATH"
   "LF_HOME=$lf_home"
-  "LF_DB_PATH=$lf_db_path"
   "TMPDIR=${TMPDIR:-/tmp}"
   "LANG=${LANG:-C}"
 )

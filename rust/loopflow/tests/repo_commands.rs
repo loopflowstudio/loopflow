@@ -15,7 +15,6 @@ fn run(repo: &Path, home: &Path, args: &[&str]) -> Output {
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home.join(".lf"))
-        .env("LF_DB_PATH", home.join(".lf/store.db"))
         .env("PATH", "/usr/bin:/bin")
         .env("NO_COLOR", "1")
         .current_dir(repo)
@@ -86,7 +85,7 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
     assert_eq!(report["summary"]["incidents"], 0);
     assert!(report["summary"]["median_detection_seconds"].is_null());
     assert_eq!(report["incidents"], serde_json::json!([]));
-    let db = rusqlite::Connection::open(home.path().join(".lf/store.db")).unwrap();
+    let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let sessions: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();

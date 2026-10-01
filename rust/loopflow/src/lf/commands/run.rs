@@ -365,6 +365,10 @@ fn build_prompt_at(
         .as_ref()
         .map(|(_, seed)| format!("{}\n\n{}", seed.message, message.unwrap_or_default()));
     let message = task_message.as_deref().or(message);
+    let steers = task_input
+        .as_ref()
+        .map(|(_, seed)| seed.steers.clone())
+        .unwrap_or_default();
     let config_start = Instant::now();
     let config = crate::engine::config::load_config(Some(&repo_root))?.unwrap_or_default();
     debug!(
@@ -530,6 +534,7 @@ fn build_prompt_at(
 
     let mut components = prepared.components;
     components.message_context = message_context;
+    components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
@@ -939,6 +944,7 @@ pub(crate) fn attributed_context(
                 crate::engine::prompt::escape_reference(content)
             }
             "message" => crate::engine::prompt::render_message(content),
+            "steers" => crate::engine::prompt::render_reference(content),
             _ => content.to_string(),
         };
         for channel in [ContextChannel::System, ContextChannel::Task]
@@ -956,7 +962,10 @@ pub(crate) fn attributed_context(
                 source_path: source_path.clone(),
                 included_by: included_by.to_string(),
                 content: content.to_string(),
-                match_all_occurrences: !matches!(included_by, "message" | "vendor_skill"),
+                match_all_occurrences: !matches!(
+                    included_by,
+                    "message" | "steers" | "vendor_skill"
+                ),
             });
         }
     };
@@ -1097,6 +1106,17 @@ pub(crate) fn attributed_context(
         }
     }
     if let Some(message) = &components.message {
+        // Steers ride inside the launch message; claim them before it does.
+        if let Some(steers) = tagged_block(message, "<lf:steers>", "</lf:steers>") {
+            push(
+                steers,
+                Kind::Steer,
+                Scope::Task,
+                "steers".to_string(),
+                None,
+                "steers",
+            );
+        }
         let (kind, scope) = components
             .message_context
             .unwrap_or((Kind::UserMessage, Scope::User));
@@ -1115,6 +1135,20 @@ pub(crate) fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
+    for steer in &components.steers {
+        decisions.push(ContextDecision {
+            position: decisions.len() as u32,
+            kind: Kind::Steer,
+            scope: Scope::Task,
+            label: steer.author.to_string(),
+            source_path: Some(format!("steer:{}", steer.id)),
+            decision: ContextDecisionKind::Included,
+            reason: "rendered in the launch goal".to_string(),
+            original_bytes: Some(steer.text.len() as u64),
+            original_tokens: Some(crate::engine::prompt::count_tokens(&steer.text) as u64),
+            asset_position: None,
+        });
+    }
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,
@@ -1444,13 +1478,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "PATH",
             "LF_BIN",
             "LF_HOME",
-            "LF_DB_PATH",
             crate::journal::LF_TRACE_ID_ENV,
             crate::journal::LF_PROCESS_ID_ENV,
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            crate::store::CONTROL_HOME_ENV,
-            crate::store::CONTROL_DB_PATH_ENV,
         ];
         let _environment = EnvironmentRestore::capture(&keys);
         let path = format!(
@@ -1462,7 +1493,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
-        std::env::set_var("LF_DB_PATH", &registry);
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
         std::env::set_var(
@@ -1473,8 +1503,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::session_record::RUN_DIR_ENV,
             home.path().join("stale-run"),
         );
-        std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
 
         let task = "prove the generic Run launch";
         let context = crate::trace::PreparedTurnContext::from_prompts("", task);
@@ -1652,8 +1680,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let ambient_identity = [
             crate::durable::RUN_ID_ENV,
             crate::session_record::RUN_DIR_ENV,
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
             "LF_WAVE_ID",
             "LF_ACCOUNT_LEASE",
         ];
@@ -2139,6 +2165,64 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 "missing attribution for {kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn attributed_context_records_each_steer_and_its_author() {
+        let steers = vec![
+            crate::durable::Steer {
+                id: 7,
+                author: crate::durable::Author::User,
+                text: "keep the API stable".into(),
+            },
+            crate::durable::Steer {
+                id: 9,
+                author: crate::durable::Author::Captured(3),
+                text: "price it in $ first".into(),
+            },
+        ];
+        let components = PromptComponents {
+            message: Some(format!(
+                "Linear Task LOO-1: goal\n\n{}\n\nWave: demo",
+                crate::durable::render_steers(&steers)
+            )),
+            message_context: Some((ContextAssetKind::Goal, ContextScope::Task)),
+            steers,
+            ..Default::default()
+        };
+        let task = crate::engine::format_claude_task_prompt(&components);
+        let prepared = attributed_context(&components, "", &task, &[]);
+
+        let block = prepared
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::Steer)
+            .expect("steers are their own asset");
+        let text = &task[block.byte_start as usize..block.byte_end as usize];
+        assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
+        assert!(prepared
+            .task
+            .assets
+            .iter()
+            .filter(|asset| asset.kind == ContextAssetKind::Goal)
+            .all(
+                |asset| !task[asset.byte_start as usize..asset.byte_end as usize]
+                    .contains("keep the API stable")
+            ));
+        let recorded = prepared
+            .decisions
+            .iter()
+            .filter(|decision| decision.asset_position.is_none())
+            .map(|decision| (decision.source_path.as_deref(), decision.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            recorded,
+            [
+                (Some("steer:7"), "user"),
+                (Some("steer:9"), "session input 3")
+            ]
+        );
     }
 
     #[test]

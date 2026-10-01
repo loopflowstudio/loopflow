@@ -1221,18 +1221,7 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
             continue;
         }
         attempts.push(attempt);
-        let bucket = match state.as_str() {
-            "SUCCESS" => "pass",
-            "SKIPPED" | "NEUTRAL" => "skipping",
-            "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => "fail",
-            "CANCELLED" => "cancel",
-            _ => "pending",
-        };
-        let check = GhCheck {
-            name,
-            bucket: bucket.to_string(),
-            link,
-        };
+        let check = GhCheck::new(name, &state, link);
         if is_required {
             required.push(check.clone());
         }
@@ -1257,7 +1246,7 @@ pub struct MergeGateReading {
 }
 
 impl MergeGateReading {
-    fn from_checks(required: Vec<GhCheck>, full: Vec<GhCheck>) -> Self {
+    pub(crate) fn from_checks(required: Vec<GhCheck>, full: Vec<GhCheck>) -> Self {
         let gate = RequiredChecks::from_checks(required);
         let required_names: std::collections::HashSet<&str> = gate
             .failing_checks
@@ -1343,10 +1332,32 @@ impl RequiredChecks {
 }
 
 #[derive(Debug, Clone)]
-struct GhCheck {
+pub(crate) struct GhCheck {
     name: String,
     bucket: String,
     link: Option<String>,
+}
+
+impl GhCheck {
+    /// Classify one check from GitHub's upper-case state or conclusion.
+    pub(crate) fn new(name: String, state: &str, link: Option<String>) -> Self {
+        let bucket = match state {
+            "SUCCESS" => "pass",
+            "SKIPPED" | "NEUTRAL" => "skipping",
+            "ERROR" | "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" => "fail",
+            "CANCELLED" => "cancel",
+            _ => "pending",
+        };
+        Self {
+            name,
+            bucket: bucket.to_string(),
+            link,
+        }
+    }
+
+    pub(crate) fn failed(&self) -> bool {
+        matches!(self.bucket.as_str(), "fail" | "cancel")
+    }
 }
 
 fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {

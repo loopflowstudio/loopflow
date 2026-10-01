@@ -1527,7 +1527,7 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
         ),
         RegistryUnavailable::Unresolved { error } => format!(
             "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_DB_PATH/LF_HOME or run `lf doctor`."
+             Fix LF_HOME or run `lf doctor`."
         ),
         RegistryUnavailable::Incompatible { path, error } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is present but \
@@ -5633,9 +5633,12 @@ mod tests {
     }
 
     async fn assert_task_stop_waits_for_selected_step(released: bool) {
-        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ledger = crate::journal::TestLedgerGuard::new();
         let repo = loopflow_test_support::TestRepo::new();
         let fixture = task_fixture_at("STOP-STEP", repo.path().to_owned()).await;
+        // The step is a separate process: it finds the Flow through its Home.
+        let home = fixture._database.path();
+        std::env::set_var("LF_HOME", home);
         repo.create_file(
             "scripts/lifecycle_scorecard.py",
             r#"import os, pathlib, time
@@ -5664,7 +5667,7 @@ time.sleep(30)
         )
         .unwrap();
         let position = claim_stop_fixture_for(&fixture, driver.id().unwrap(), invocation).await;
-        record_stop_process(ledger.home(), &position);
+        record_stop_process(home, &position);
         // Use the Cargo-built CLI, never an installed lf or an inherited pin.
         // `cargo build --bin lf` precedes a focused library-only invocation.
         let binary = std::env::current_exe()
@@ -5707,8 +5710,7 @@ time.sleep(30)
         let mut step = command
             .args(["__flow-step", position.id(), &position.version.to_string()])
             .current_dir(repo.path())
-            .env("LF_HOME", ledger.home())
-            .env("LF_DB_PATH", &fixture.database_path)
+            .env("LF_HOME", home)
             .env(
                 crate::durable::TASK_WORKER_CLAIM_ENV,
                 serde_json::to_string(position.claim.as_ref().unwrap()).unwrap(),
@@ -6147,7 +6149,7 @@ time.sleep(30)
 
     async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> TaskFixture {
         let database = tempfile::tempdir().unwrap();
-        let database_path = database.path().join("registry.db");
+        let database_path = database.path().join("loopflow.db");
         let store = std::sync::Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(database_path.clone()))
                 .await
@@ -6363,8 +6365,8 @@ time.sleep(30)
         assert!(!checkout.exists());
         assert!(git(repo.path(), &["branch", "--list", &pr.branch]).is_empty());
         assert!(git(repo.path(), &["ls-remote", "--heads", "origin", &pr.branch]).is_empty());
-        let _env = EnvRestore::capture(&["LF_DB_PATH"]);
-        std::env::set_var("LF_DB_PATH", &fixture.database_path);
+        let _env = EnvRestore::capture(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", fixture._database.path());
         let caller = directory.path().to_path_buf();
         let identifier = fixture.task.plan.identifier.clone();
         let snapshot = tokio::task::spawn_blocking(move || {
@@ -6955,7 +6957,8 @@ time.sleep(30)
     fn deleted_task_status_requires_explicit_history_lookup() {
         const CHILD: &str = "LOOPFLOW_DELETED_STATUS_CHILD";
         if std::env::var_os(CHILD).is_some() {
-            let path = std::path::PathBuf::from(std::env::var_os("LF_DB_PATH").unwrap());
+            let path =
+                std::path::PathBuf::from(std::env::var_os("LF_HOME").unwrap()).join("loopflow.db");
             let runtime = tokio::runtime::Runtime::new().unwrap();
             let store = std::sync::Arc::new(
                 runtime
@@ -7034,7 +7037,6 @@ time.sleep(30)
             .envs(std::env::vars().filter(|(name, _)| !name.starts_with("LF_")))
             .env(CHILD, "1")
             .env("LF_HOME", fixture._database.path())
-            .env("LF_DB_PATH", &fixture.database_path)
             .current_dir(repo.path())
             .output()
             .unwrap();
@@ -7454,14 +7456,7 @@ time.sleep(30)
     #[allow(clippy::await_holding_lock)] // Serializes the isolated registry environment.
     async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
         let _lock = crate::journal::test_env_lock();
-        let names = [
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-            "LF_RUN_CONTEXT",
-            "LF_ACCOUNT_LEASE",
-        ];
+        let names = ["LF_HOME", "LF_ACCOUNT_LEASE"];
         let _restore = EnvRestore::capture(&names);
         for name in names {
             std::env::remove_var(name);
@@ -7469,7 +7464,6 @@ time.sleep(30)
         let repo = loopflow_test_support::TestRepo::new();
         let fixture = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
         std::env::set_var("LF_HOME", fixture._database.path());
-        std::env::set_var("LF_DB_PATH", &fixture.database_path);
         let result = super::prepare_new_task(
             repo.path(),
             "Child",
@@ -7609,13 +7603,7 @@ time.sleep(30)
     #[test]
     fn execution_boundary_resolves_linked_git_and_control_roots() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-        ]);
+        let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME"]);
         let directory = tempfile::tempdir().unwrap();
         let main = directory.path().join("repo");
         let worktree = directory.path().join("repo.task");
@@ -7649,12 +7637,8 @@ time.sleep(30)
             .success());
         let control = directory.path().join("control");
         std::fs::create_dir(&control).unwrap();
-        let database = control.join("registry.db");
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", &control);
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::set_var("LF_CONTROL_HOME", &control);
-        std::env::set_var("LF_CONTROL_DB_PATH", &database);
 
         let boundary = checkout_execution_boundary(&worktree, "codex").unwrap();
 
@@ -7670,14 +7654,7 @@ time.sleep(30)
     #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
     async fn task_preflight_refuses_account_id_null_without_allocating_a_sql_run() {
         let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_CONTROL_HOME",
-            "LF_CONTROL_DB_PATH",
-            "LF_ACCOUNT_LEASE",
-        ]);
+        let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME", "LF_ACCOUNT_LEASE"]);
         let directory = tempfile::tempdir().unwrap();
         let repo = directory.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
@@ -7689,12 +7666,9 @@ time.sleep(30)
         assert!(output.status.success());
         let home = directory.path().join("lf-home");
         std::fs::create_dir(&home).unwrap();
-        let database = home.join("missing.db");
+        let database = home.join("loopflow.db");
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", &home);
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::set_var("LF_CONTROL_HOME", &home);
-        std::env::set_var("LF_CONTROL_DB_PATH", &database);
         std::env::remove_var("LF_ACCOUNT_LEASE");
 
         let error = preflight_task_execution(&repo, "codex")

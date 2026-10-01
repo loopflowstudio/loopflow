@@ -2,13 +2,10 @@ use std::ffi::OsString;
 
 /// Execution authority and Run identity inherited by tests launched inside lf.
 pub const AMBIENT_TASK_ENV: &[&str] = &[
-    "LF_CONTROL_HOME",
-    "LF_CONTROL_DB_PATH",
     "LF_RUN_ID",
     "LF_RUN_DIR",
-    "LF_RUN_CONTEXT",
+    "LF_FLOW_STEP",
     "LF_WORK_ADVANCE_CLAIM",
-    "LF_TASK_ORIGIN",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
     "LF_HUMAN_SESSION",

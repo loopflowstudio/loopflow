@@ -185,15 +185,7 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let keys = [
-            "PATH",
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_TEST_REPLAY_EVIDENCE",
-            crate::store::CONTROL_HOME_ENV,
-            crate::store::CONTROL_DB_PATH_ENV,
-        ];
+        let keys = ["PATH", "LF_BIN", "LF_HOME", "LF_TEST_REPLAY_EVIDENCE"];
         let _environment = EnvironmentRestore::capture(&keys);
         std::env::set_var(
             "PATH",
@@ -208,10 +200,7 @@ mod tests {
         std::env::set_var("LF_TEST_REPLAY_EVIDENCE", &evidence);
         let decoy_home = home.path().join("decoy-home");
         std::fs::create_dir(&decoy_home).unwrap();
-        std::env::set_var(crate::store::CONTROL_HOME_ENV, &decoy_home);
-        std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
         let registry = home.path().join("loopflow.db");
-        std::env::set_var("LF_DB_PATH", &registry);
 
         let request = AgentExecRequest {
             system_prompt: "recorded system".to_string(),

@@ -25,7 +25,22 @@ difficulty. Existing provider errors and structured blocked outcomes establish
 failure; ordinary output remains evidence. Missing logs or failed status reads
 remain unknown. Reading evidence grants no process or delivery authority.
 
+## Delete — do not maintain
+
+Removed: `lf/commands/ask.rs`, the builtin `task/skill/unblock.md`, Ask kinds
+and tokens, `reserve_ask`, `ask_once`, `task_unblock`, `flow_unblock`,
+`answer_flow_blocker`, and their exclusive tests/fixtures. No remaining Ask
+runtime deletion targets were found. Retain historical migrations and exchange
+tables, and the shared conversation launch and Task review paths.
+
 ## Implemented behavior and findings
+
+The follow-up compression removes `open_waiting`'s pre-lock read and retry
+loop: one read under the launch lock already selects the latest input and
+rejects concurrent completion. Its unused artifact-key return is removed too.
+The review keeps native resume, input publication and completion checks intact;
+a focused race test proves that completion while opening waits cannot relaunch
+the conversation or append an input.
 
 - Driver and controllers no longer open Ask or consume its feedback. Blocked
   verdicts reach `fail_flow`, retain their cursor and logs, and return failure.
@@ -118,3 +133,5 @@ conversation migration and Task review boundaries. Fixed TESTING.md's stale
 AskHome fixture reference. This is a checkpoint PR with scratch retained; prior
 focused checks are recorded above, and full post-integration acceptance remains
 with gate. No live-provider or native UI proof is claimed.
+
+Check: 2026-10-01 — follow-up compress: `cargo test -p loopflow --lib ops::human_session` passed (22 tests); `cargo build -p loopflow --bin lf`, `cargo fmt --all -- --check` and `git diff --check` passed; full Rust/Desktop acceptance remains with gate.

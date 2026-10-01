@@ -1247,59 +1247,49 @@ pub(crate) async fn complete(store: &SharedStore, session_id: &str) -> Result<Se
 
 /// Open a conversation or a saved Flow's review: resume its native history, else
 /// launch its prepared Run, else append another attempt to the Session.
-async fn open_waiting(store: &SharedStore, id: &str) -> Result<String> {
-    loop {
-        let observed = store
-            .session(id)
-            .await?
-            .ok_or_else(|| session_not_found(id))?;
-        let lock_id = id.to_string();
-        let launch_lock =
-            tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
-        let session = store
-            .session(id)
-            .await?
-            .ok_or_else(|| session_not_found(id))?;
-        if session.completed_at.is_some() {
-            bail!("session {id:?} is already complete");
-        }
-        if session.artifact_key != observed.artifact_key {
-            drop(launch_lock);
-            continue;
-        }
-        let mut launch_lock = Some(launch_lock);
-        let token = session_token(&session);
-        if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
-            return Ok(session.artifact_key);
-        }
-        // A consumed launch without native history gets another attempt under
-        // the same Session; its title and feedback never leave the row.
-        let session = if capture_is_prepared(&session.artifact_key)? {
-            session
-        } else {
-            let flow = match &token {
-                HumanSessionToken::StandaloneFlow { id } => {
-                    crate::ops::flow_session::membership(store, id).await?
-                }
-                _ => crate::session_record::SessionFlowMembership::Independent,
-            };
-            let replaced = session.captured;
-            let mut next = session;
-            if next.input_published {
-                next.artifact_key = crate::session_record::new_artifact_key();
-                next.input_published = false;
-                next = store.replace_session_input(replaced, next).await?;
-            }
-            publish_prepared_input(store, &next, flow)?
-        };
-        serve_locked(
-            store,
-            &session,
-            launch_lock.expect("an unresumed Session retains its launch lock"),
-        )
-        .await?;
-        return Ok(session.artifact_key);
+async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+    let lock_id = id.to_string();
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
+    // Resolve the current input under the launch lock, including completion
+    // or replacement that happened while this opener waited.
+    let session = store
+        .session(id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    if session.completed_at.is_some() {
+        bail!("session {id:?} is already complete");
     }
+    let mut launch_lock = Some(launch_lock);
+    let token = session_token(&session);
+    if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
+        return Ok(());
+    }
+    // A consumed launch without native history gets another attempt under
+    // the same Session; its title and feedback never leave the row.
+    let session = if capture_is_prepared(&session.artifact_key)? {
+        session
+    } else {
+        let flow = match &token {
+            HumanSessionToken::StandaloneFlow { id } => {
+                crate::ops::flow_session::membership(store, id).await?
+            }
+            _ => crate::session_record::SessionFlowMembership::Independent,
+        };
+        let replaced = session.captured;
+        let mut next = session;
+        if next.input_published {
+            next.artifact_key = crate::session_record::new_artifact_key();
+            next.input_published = false;
+            next = store.replace_session_input(replaced, next).await?;
+        }
+        publish_prepared_input(store, &next, flow)?
+    };
+    serve_locked(
+        store,
+        &session,
+        launch_lock.expect("an unresumed Session retains its launch lock"),
+    )
+    .await
 }
 
 async fn open_flow_locked(

@@ -241,6 +241,35 @@ mod tests {
     }
 
     #[test]
+    fn opening_waits_for_completion_under_the_launch_lock() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let store = home.store().await;
+            let repo = loopflow_test_support::TestRepo::new();
+            let record = ensure(&store, repo.path(), None).await.unwrap();
+            let session = store.session(&record.id).await.unwrap().unwrap();
+            let lock = super::lock_session_exec(&session.id).unwrap();
+            let opening = super::super::open_waiting(&store, &session.id);
+            tokio::pin!(opening);
+            tokio::select! {
+                biased;
+                result = &mut opening => panic!("opened while locked: {result:?}"),
+                () = async {
+                    store.complete_session(&session.id, session.captured).await.unwrap();
+                    drop(lock);
+                } => {}
+            }
+            assert!(opening
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("already complete"));
+            assert_eq!(store.session_inputs(&session.id).await.unwrap().len(), 1);
+        });
+    }
+
+    #[test]
     fn failed_start_keeps_the_session_for_the_next_ensure() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();

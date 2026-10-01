@@ -335,9 +335,8 @@ async fn reconcile_task(
         }
     }
     let key = format!(
-        "{}:{}:{}",
+        "{}:{}",
         flow.id(),
-        flow.current().step,
         serde_json::to_string(&flow.cursor).map_err(error)?
     );
     if state.retry_key.as_ref() != Some(&key) {

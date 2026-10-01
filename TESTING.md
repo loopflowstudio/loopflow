@@ -632,10 +632,18 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+The default container tracks stable Rust, matching the other CI Rust jobs, and
+logs its compiler version. When adopting a newer standard-library API or Clippy
+fix, verify the installation harness uses the same toolchain policy; a host lint
+pass does not verify the container build. Use `--image` to reproduce an older
+toolchain explicitly.
 
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
+Task status and automation must also handle the saved cursor past the last step
+while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
+for that boundary; a fast mechanical Flow can finish while its start command reads status.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 

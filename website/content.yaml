@@ -19,25 +19,39 @@ homepage:
         image_alt: "A Wave with its objective, projects, tasks, and live conversation"
         caption: "A Wave: its goal, its work, and a conversation you can steer."
 
-  pillars:
-    heading: "One task at a time"
-    diagram_alt: >-
-      You ask, and you make the plan together. It builds and checks, then
-      you review the demo. If the result is not right yet, it
-      builds again and shows you another demo. Otherwise the work is done.
+  getting_started:
+    heading: "Start with a workflow. Make it yours."
+    introduction: >-
+      A workflow defines the steps agents take and the conversations you
+      have along the way.
     items:
-      - title: "Make the plan"
+      - title: "Start with the defaults"
         description: >-
-          You say what you want. You work out the plan together and it
-          writes it down.
-      - title: "Let it build"
+          Use a ready-made workflow to take a task from an idea to working
+          software. You can start building before deciding how to
+          customize the process.
+      - title: "Capture your tasks"
         description: >-
-          It works in small steps and checks each one. Watch, or go do
-          something else.
-      - title: "See the result"
+          Write down the features, fixes, and questions you want to work
+          on. Tasks live in Linear, organized into projects. Choose a
+          task to start when you're ready.
+      - title: "Come back for design and demo"
         description: >-
-          It shows you what it made, working. Not right yet? It goes back
-          and builds again.
+          The default workflow gives you follow-up conversations to shape
+          the design and review a working demo. Agents build and check
+          the work in between. Your feedback guides the next pass.
+      - title: "Choose where you join in"
+        description: >-
+          Add, move, or remove conversations to choose when you're involved
+          and what you work through together. Select a workflow for each
+          task, or set a default for a project. For projects you want to
+          run autonomously, remove the planned conversations while keeping
+          automated checks in place.
+    links:
+      - label: "Start your first task"
+        href: "/docs/getting-started#build-features"
+      - label: "Customize a workflow"
+        href: "/docs/authoring#flows"
 
   independence:
     heading: "Choose your models. Own your process."
@@ -93,7 +107,7 @@ homepage:
         summary: "Write down how you work. Change any step."
         description: >-
           A skill is a text file containing instructions. A workflow
-          connects skills, commands, and review stops—including loops for
+          connects skills, commands, and conversations—including loops for
           another attempt. Loopflow supplies a library for designing,
           building, debugging, reviewing, and shipping. Those files are
           yours to edit.
@@ -112,27 +126,11 @@ homepage:
       heading: "The connections are part of the product, too."
       text: >-
         A Task in your plan gets a working copy. Its workflow brings in
-        the relevant instructions and memory, builds the change, and stops
-        for review. Feedback can send it through another pass. When the
+        the relevant instructions and memory, builds the change, and brings
+        you in at the steps you've chosen. Feedback can send it through
+        another pass. When the
         pull request is handed off for landing, CI repair returns to that
         Task's checkout. Lessons can be saved for the next task.
-
-  definition:
-    heading: "What is a loopflow?"
-    diagram_alt: >-
-      The default flow, step by step: kickoff, review plan, implement,
-      compress, review, decide, review demo, decide, done. Review plan and
-      review demo need a person. Each decide step can return to implement.
-    paragraphs:
-      - >-
-        A flow is a directed graph of steps. Each step gives an agent one
-        bounded job. In a pipeline, steps run in order and the graph has no
-        cycles.
-      - >-
-        A loopflow is a flow with at least one backward edge. A deciding
-        step looks at the work so far and either continues forward or
-        returns to an earlier step. The steps in between form the loop
-        body, and they repeat until the deciding step moves on.
 
   scale:
     heading: "Develop your company's way of working with agents."

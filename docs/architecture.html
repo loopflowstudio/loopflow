@@ -199,10 +199,10 @@ nav .container {
     margin-bottom: 32px;
 }
 .hero-logo-large {
-    width: 220px;
-    height: 220px;
-    border-radius: 36px;
-    margin-bottom: 40px;
+    width: 96px;
+    height: 96px;
+    border-radius: 16px;
+    margin-bottom: 32px;
 }
 .hero h1 {
     font-family: var(--font-serif);
@@ -231,9 +231,9 @@ nav .container {
 }
 @media (max-width: 768px) {
     .hero-logo-large {
-        width: 160px;
-        height: 160px;
-        border-radius: 28px;
+        width: 80px;
+        height: 80px;
+        border-radius: 12px;
         margin-bottom: 28px;
     }
 }
@@ -402,47 +402,195 @@ a:focus-visible,
     background: #000;
 }
 
-/* Capabilities */
-.capabilities-section,
-.problems-section,
-.definition-section {
-    max-width: 980px;
-    margin: 0 auto;
-    padding: 60px 24px;
+/* Getting started */
+.getting-started-section {
+    padding: 60px 0 72px;
 }
-.capabilities-section h2,
-.problems-section h2,
-.definition-section h2 {
+.getting-started-section h2 {
     font-family: var(--font-serif);
-    font-size: 28px;
+    font-size: clamp(30px, 3.5vw, 40px);
     font-weight: 400;
-    margin-bottom: 28px;
+    line-height: 1.15;
+    margin-bottom: 16px;
     color: var(--burgundy);
 }
-.capabilities-grid,
-.problems-grid {
+.getting-started-introduction {
+    max-width: 640px;
+    color: var(--text-secondary);
+    font-size: 18px;
+    margin-bottom: 36px;
+}
+.getting-started-steps {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 32px 40px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 32px 64px;
+    padding-left: 24px;
+    margin: 0;
+}
+.getting-started-steps li {
+    padding-left: 8px;
+    margin: 0;
+}
+.getting-started-steps li::marker {
+    color: var(--burgundy);
+    font-family: var(--font-mono);
+    font-size: 14px;
 }
 @media (max-width: 768px) {
-    .capabilities-grid,
-    .problems-grid {
+    .getting-started-steps {
         grid-template-columns: 1fr;
     }
 }
-.capability-item h3,
-.problem-item h3 {
+.getting-started-steps h3 {
     font-family: var(--font-serif);
-    font-size: 20px;
+    font-size: 24px;
+    font-weight: 400;
+    line-height: 1.25;
     color: var(--burgundy);
-    margin-bottom: 4px;
+    margin-bottom: 12px;
 }
-.capability-item p,
-.problem-item p {
+.getting-started-steps p {
     font-size: 15px;
     color: var(--text-secondary);
-    line-height: 1.6;
+    line-height: 1.75;
+}
+.getting-started-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 32px;
+    margin-top: 24px;
+}
+
+/* Features and shared practice */
+.hero-description {
+    max-width: 580px;
+    margin: 0 auto 28px;
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+.independence-section,
+.company-section {
+    padding: 72px 0;
+    background: #faf8f5;
+    border-block: 1px solid #e3ddd5;
+}
+.independence-section .container,
+.company-section .container {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 56px;
+    align-items: start;
+}
+.independence-section h2,
+.company-section h2,
+.features-section h2,
+.features-connection h3 {
+    font-family: var(--font-serif);
+    font-size: clamp(30px, 3.5vw, 40px);
+    font-weight: 400;
+    line-height: 1.15;
+}
+.independence-section p,
+.company-section p {
+    color: var(--text-secondary);
+    line-height: 1.8;
+}
+.features-section {
+    padding: 80px 0;
+    scroll-margin-top: 100px;
+}
+.features-introduction {
+    margin: 16px 0 40px;
+    color: var(--text-secondary);
+    font-size: 18px;
+}
+.feature-item {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 56px;
+    margin: 0;
+    padding: 32px 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.feature-title {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+}
+.feature-number {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--burgundy);
+}
+.feature-title h3 {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 26px;
+    line-height: 1.2;
+}
+.feature-summary {
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+.feature-description {
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+.feature-detail a,
+.getting-started-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 8px;
+    color: var(--burgundy);
+    font-size: 14px;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+}
+.features-connection {
+    margin-top: 32px;
+    padding: 32px;
+    border-left: 3px solid var(--burgundy);
+    background: #faf8f5;
+}
+.features-connection h3 {
+    margin-bottom: 16px;
+    font-size: 30px;
+}
+.features-connection p {
+    max-width: 72ch;
+    line-height: 1.8;
+}
+@media (max-width: 768px) {
+    .independence-section .container,
+    .company-section .container,
+    .feature-item {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    .independence-section,
+    .company-section,
+    .features-section {
+        padding: 48px 0;
+    }
+    .features-connection {
+        padding: 24px;
+    }
+}
+@media (max-width: 480px) {
+    .nav-links {
+        gap: 4px;
+    }
+    .nav-links a {
+        padding-inline: 4px;
+        font-size: 12px;
+    }
+    .nav-links .btn {
+        padding-inline: 12px;
+    }
 }
 
 /* Building blocks */
@@ -1840,8 +1988,7 @@ h3:hover .anchor-link,
     margin: 1rem auto 0.25rem;
 }
 
-/* Inline code outside docs pages (pillars, hero, install notes) */
-.capability-item code,
+/* Inline code outside docs pages (hero, install notes) */
 .hero-subline code,
 .install-note code {
     background: var(--bg-subtle);
@@ -1853,80 +2000,6 @@ h3:hover .anchor-link,
     color: var(--text);
 }
 
-/* Flow diagrams (homepage) */
-.visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-}
-.flow-figure {
-    margin: 0 0 32px;
-    overflow-x: auto;
-}
-.flow-diagram {
-    display: block;
-    width: 100%;
-    min-width: 640px;
-    height: auto;
-    font-family: var(--font-sans);
-}
-.flow-person {
-    fill: var(--bg);
-    stroke: var(--burgundy);
-    stroke-width: 2;
-}
-.flow-auto {
-    fill: var(--bg-subtle);
-    stroke: var(--border);
-    stroke-width: 1.5;
-}
-.flow-edge {
-    fill: none;
-    stroke: var(--text-secondary);
-    stroke-width: 1.5;
-}
-.flow-back {
-    stroke-dasharray: 5 4;
-}
-.flow-arrowhead {
-    fill: var(--text-secondary);
-}
-.flow-node-label {
-    font-size: 16px;
-    fill: var(--burgundy);
-}
-.flow-node-small {
-    font-size: 12.5px;
-    fill: var(--text);
-}
-.flow-plain {
-    font-size: 16px;
-    fill: var(--text);
-}
-.flow-edge-label {
-    font-size: 12.5px;
-    fill: var(--text-secondary);
-}
-.problems-section {
-    padding-top: 20px;
-}
-.problem-item .problem {
-    margin-bottom: 6px;
-}
-.problem-item .solve {
-    color: var(--text);
-}
-.definition-section p {
-    max-width: 720px;
-    margin-bottom: 14px;
-    color: var(--text-secondary);
-}
-.definition-section .scale-heading {
-    margin-top: 48px;
-}
 .install-facts {
     margin-top: 18px;
     font-size: 14px;
@@ -1980,6 +2053,8 @@ h3:hover .anchor-link,
     <div class="nav-brand-group">
 <a href="https://loopflow.studio/" class="nav-logo"><img src="https://loopflow.studio/static/logo.svg" alt="Loopflow"></a><a href="https://loopflow.studio/" class="nav-title">Loopflow</a>    </div>
     <ul class="nav-links">
+      <li>
+<a href="https://loopflow.studio/#features">Features</a>      </li>
       <li>
 <a href="https://loopflow.studio/docs">Docs</a>      </li>
       <li>

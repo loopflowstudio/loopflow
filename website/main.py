@@ -128,10 +128,6 @@ def CodeBlock(filename: str, content: str):
     )
 
 
-def CapabilityItem(title: str, description: str):
-    return Div(H3(title), P(render_inline(description)), cls="capability-item")
-
-
 # Load content from YAML (edit content.yaml, not this file)
 CONTENT_FILE = Path(__file__).parent / "content.yaml"
 _content = yaml.safe_load(CONTENT_FILE.read_text())
@@ -149,10 +145,9 @@ def _require_content_path(path: str) -> object:
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
-PILLARS_CONTENT = _require_content_path("homepage.pillars")
+GETTING_STARTED_CONTENT = _require_content_path("homepage.getting_started")
 INDEPENDENCE_CONTENT = _require_content_path("homepage.independence")
 FEATURES_CONTENT = _require_content_path("homepage.features")
-DEFINITION_CONTENT = _require_content_path("homepage.definition")
 SCALE_CONTENT = _require_content_path("homepage.scale")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
 INSTALL_CONTENT = _require_content_path("homepage.install")
@@ -163,13 +158,12 @@ for required_key in (
     "homepage.hero.description",
     "homepage.hero.loopflow_download_url",
     "homepage.showcase.items",
-    "homepage.pillars.items",
-    "homepage.pillars.diagram_alt",
+    "homepage.getting_started.introduction",
+    "homepage.getting_started.items",
+    "homepage.getting_started.links",
     "homepage.independence.text",
     "homepage.features.items",
     "homepage.features.connection.text",
-    "homepage.definition.paragraphs",
-    "homepage.definition.diagram_alt",
     "homepage.scale.text",
     "homepage.install.facts",
     "homepage.building_blocks.items",
@@ -507,35 +501,6 @@ def _doc_outline(content: str) -> list[tuple[str, str]]:
         title = re.sub(r"[`*_]", "", line[3:]).strip()
         headings.append((title, slugify(title)))
     return headings
-
-
-def render_inline(text: str) -> NotStr:
-    # Handle images - convert relative paths to /static/
-    def fix_image(m):
-        alt, src = m.group(1), m.group(2)
-        if not src.startswith(("http", "/")):
-            src = "/static/" + src
-        return f'<img src="{src}" alt="{alt}">'
-
-    text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", fix_image, text)
-
-    # Handle links - convert relative .md links to absolute /docs/ paths
-    def fix_link(m):
-        label, href = m.group(1), m.group(2)
-        if href.endswith(".md") and not href.startswith(("http", "/")):
-            href = "/docs/" + href
-        elif ".md#" in href and not href.startswith(("http", "/")):
-            href = "/docs/" + href.replace(".md#", "#")
-        return f'<a href="{href}">{label}</a>'
-
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", fix_link, text)
-    # Handle inline code
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
-    # Handle bold
-    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
-    # Handle italic
-    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
-    return NotStr(text)
 
 
 def DocsNav(current: str = "index"):
@@ -881,16 +846,6 @@ def _capture_figure(item):
     )
 
 
-def _flow_diagram(name: str, description: str):
-    """Inline a static flow diagram so it takes the page's fonts and colors."""
-    svg = (STATIC_DIR / name).read_text()
-    return Figure(
-        NotStr(svg),
-        Figcaption(description, cls="visually-hidden"),
-        cls="flow-figure",
-    )
-
-
 def _screenshot_section():
     """One product shot under the hero; a missing capture never renders."""
     for item in SHOWCASE_CONTENT["items"]:
@@ -947,7 +902,6 @@ def build_homepage():
     loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
     install_display = INSTALL_CONTENT["command_display"].strip()
     install_copy = INSTALL_CONTENT["command_copy"]
-    pillar_items = PILLARS_CONTENT["items"]
     building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
     return (
@@ -971,20 +925,29 @@ def build_homepage():
                 ),
                 cls="hero",
             ),
-            # One task at a time — the people-only diagram and its three steps
+            # Start with defaults, then choose how to participate
             Section(
                 Div(
-                    H2(PILLARS_CONTENT["heading"]),
-                    _flow_diagram("loopflow-steps.svg", PILLARS_CONTENT["diagram_alt"]),
+                    H2(GETTING_STARTED_CONTENT["heading"], id="getting-started-heading"),
+                    P(GETTING_STARTED_CONTENT["introduction"], cls="getting-started-introduction"),
+                    Ol(
+                        *[
+                            Li(H3(item["title"]), P(item["description"]))
+                            for item in GETTING_STARTED_CONTENT["items"]
+                        ],
+                        cls="getting-started-steps",
+                    ),
                     Div(
                         *[
-                            CapabilityItem(item["title"], item["description"])
-                            for item in pillar_items
+                            A(item["label"], href=item["href"])
+                            for item in GETTING_STARTED_CONTENT["links"]
                         ],
-                        cls="capabilities-grid",
+                        cls="getting-started-links",
                     ),
+                    cls="container",
                 ),
-                cls="capabilities-section",
+                cls="getting-started-section",
+                aria_labelledby="getting-started-heading",
             ),
             # Model independence and ownership
             Section(
@@ -1025,15 +988,6 @@ def build_homepage():
                     cls="container",
                 ),
                 cls="quick-install",
-            ),
-            # The technical definition, beside the full flow
-            Section(
-                Div(
-                    H2(DEFINITION_CONTENT["heading"]),
-                    _flow_diagram("loopflow-full.svg", DEFINITION_CONTENT["diagram_alt"]),
-                    *[P(paragraph) for paragraph in DEFINITION_CONTENT["paragraphs"]],
-                ),
-                cls="definition-section",
             ),
             # Building blocks — skill → flow → task → wave
             Section(

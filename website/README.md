@@ -7,7 +7,8 @@ uv run python dev.py test
 
 Run from `website/`. Preview at `http://localhost:5001`.
 
-Edit homepage copy in `content.yaml`: the opening, model independence,
+Edit homepage copy in `content.yaml`: the opening, getting started with
+workflows and choosing where to participate, model independence,
 feature explanations and documentation links, and shared company practice.
 `main.py` renders the sections; `static/style.css` controls their layout.
 Features navigation points to `/#features` from every page.

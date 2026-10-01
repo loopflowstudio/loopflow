@@ -42,6 +42,16 @@ Give people a shared language and toolset for trying ideas, comparing approaches
 
 The features below explain what makes those promises concrete.
 
+### Getting started and choosing participation
+
+Jack requested an explicit path from default workflows to task capture, follow-up design/demo sessions, and task/project-specific participation, including autonomous workflows. Jack refined the workflow explanation to include what kinds of conversations take place, as well as when.
+
+Current definition: **A workflow defines the steps agents take and the conversations you have along the way.**
+
+The section immediately after the hero introduces that definition, then gives four steps: start with defaults; capture Tasks in Linear; return for design and demo conversations; customize when and how to participate. “Conversations” is the primary term, grounded by design and demo examples. Removing planned conversations enables an unattended path while automated checks remain. This does not promise that failures never require a decision, or that changing a template rewrites an already-running Flow.
+
+“Software instrument” remains the product framing. The competing “What is a loopflow?” graph definition and its diagrams are removed from the homepage; graph semantics remain in the authoring docs. The workflow and Task guide links provide the next action.
+
 ### Meaning and evidence
 
 “One workflow” means one coherent way to organize and operate work, customizable into many actual workflows. Avoid implying a mandatory sequence or forcing organization onto a single conversation. “Reliable” points to retained work, recorded progress, explicit reviews, and recoverable handoffs; it does not guarantee model output.
@@ -120,19 +130,19 @@ Later product demonstration: follow one real Task from Linear through checkout, 
 
 ## Current system and proposed cut
 
-`website/content.yaml` owns copy. `website/main.py::build_homepage()` currently renders the hero, three-step overview, problem/solution grid, install, technical definition, and file examples. `Navbar()` has no Features link. CSS and browser/accessibility tests already exist.
+`website/content.yaml` owns copy. `website/main.py::build_homepage()` renders the sections and `Navbar()` links to Features. The former three-step overview, problem grid, generic company paragraph, and graph definition have been replaced.
 
-Proposed order: instrument hero and individual promise → three-step example → model independence and ownership → Features and connecting example → company practice → install → technical definition and editable examples. Replace the overlapping problem/solution grid with Features and the generic company-scale paragraph with the shared-practice pitch. Add `/#features` to navigation, including from docs. Use readable headings and links with visible mobile text and the existing typography. No new page or interactive catalog is needed for this increment.
+Current order: instrument hero → four-step getting-started path and workflow definition → model independence → Features and connecting example → company practice → install → editable examples. Navigation uses `/#features`, including from docs. Numbered steps and feature entries stack on mobile. No new page or interactive catalog is needed for this increment.
 
 ## Data structures and key functions
 
-Use the existing hero and scale copy owners for the individual and company promises; move the scale renderer to the proposed position. Add `homepage.independence` for model choice and ownership. `homepage.features` holds heading, introduction, items, and connecting example. Each item has `title`, `summary`, `description`, `href`, and `link_label`. These are authored site content, not runtime DTOs.
+The existing hero and scale copy owners hold individual and company promises. `homepage.getting_started` holds the definition, four steps, and guide links. `homepage.independence` covers model choice and ownership. `homepage.features` holds heading, introduction, items, and connecting example. Each feature has `title`, `summary`, `description`, `href`, and `link_label`. These are authored site content, not runtime DTOs.
 
 Add `FeaturesSection()` beside existing FastHTML components; `build_homepage()` places it and `Navbar()` links to its stable ID. Keep copy in YAML and use existing content validation. No feature registry, CMS, database, or runtime dependency.
 
 ## Delete — do not maintain
 
-If this replacement is accepted: remove `homepage.problems`, `PROBLEMS_CONTENT`, the problem-grid renderer, and exclusively used `.problems-*` / `.problem-item` CSS in the same cut. Replace the old `homepage.scale` wording and remove its old placement inside the technical definition. Replace exclusive test expectations. Preserve the three-step overview and its tests.
+Removed: the old problems and pillars copy/renderers, technical definition section, `CapabilityItem`, its unused `render_inline` helper, `_flow_diagram`, `loopflow-steps.svg`, `loopflow-full.svg`, and exclusive CSS. The old pillars test is replaced by coverage of the four-step path and both guide destinations. Preserve authoring documentation, existing feature links, mobile navigation, and accessibility behavior. No further deletion is planned.
 
 ## Constraints and forbidden outcomes
 
@@ -148,4 +158,4 @@ Independent follow-ups: a broader features page covering Sessions, account routi
 
 Gate: `cd website && uv run python dev.py test` passes, including Features navigation from home/docs, six accessible entries with resolving links, and mobile layout. Test behavior and structure, not exact prose. Review judges whether the approach to each subsystem is understandable and the connecting example earns its claim.
 
-Check: 2026-10-01 — `cd website && uv run python dev.py test -k 'homepage or navigation or Mobile or Accessibility'`: 54 passed, 3 expected mobile hidden-title skips; revised hero: 4 focused checks passed; Ruff lint passed; desktop/mobile captures inspected. Full gate remains deferred; existing main.py formatting differs from the formatter.
+Check: 2026-10-01 — `uv run pytest tests/e2e/test_homepage.py tests/e2e/test_mobile.py tests/test_accessibility.py -k 'getting_started or Mobile or test_axe_accessibility' -q` (website): 27 passed, 3 expected hidden-title skips; homepage + portable architecture: 15 passed; Ruff lint and diff checks passed; desktop/mobile captures inspected. Full gate remains deferred; existing main.py formatting differs from the formatter.

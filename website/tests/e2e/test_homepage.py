@@ -26,13 +26,17 @@ def test_hero_ctas(homepage: Page):
     assert any(h.endswith(".dmg") for h in hrefs), "hero must offer the Mac app"
 
 
-def test_pillars_section(homepage: Page):
-    section = homepage.locator(".capabilities-section")
-    assert section.is_visible()
-    items = section.locator(".capability-item")
-    assert items.count() >= 3
-    for i in range(items.count()):
-        assert items.nth(i).locator("h3").text_content().strip()
+def test_getting_started_links_reach_guides(homepage: Page, base_url: str) -> None:
+    section = homepage.locator(".getting-started-section")
+    expect(section.get_by_role("listitem")).to_have_count(4)
+    links = section.get_by_role("link")
+    destinations = [link.get_attribute("href") for link in links.all()]
+    assert len(destinations) == 2
+    for destination in destinations:
+        response = homepage.goto(f"{base_url}{destination}")
+        assert response is not None and response.ok
+        fragment = urlsplit(destination).fragment
+        expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
 def test_building_blocks(homepage: Page):

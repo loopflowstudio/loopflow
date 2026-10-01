@@ -1,235 +1,96 @@
 # Context allocation and subwave memory composition (LOO-331)
 
-Status: **reviewed direction approved, including labelled budget excerpts.** Jack Heart
-approved the decisions below on September 30. This design was rewritten after
-`lf sync --manual main` moved this scratch-only branch to `de074a2eb`, preserving
-its notes. No production implementation has been made in this review.
+Status: approved implementation, narrowed by Jack Heart's September 30 steer.
+Original review: [Child memory discovery](child-memory-discovery.md).
+Historical audit and its limitations remain below; they are not current measurements.
 
-Feedback and exact approval boundaries: [Child memory discovery](child-memory-discovery.md).
-Remaining integration and evidence gaps: [questions](questions.md). Historical audit and limitations are
-preserved below; they are not measurements of the current system.
+## Accepted scope and ownership
 
-## Intended experience and accepted decisions
+Jack approved implementation and waived another review. LOO-331 now owns:
 
-A release conversation inherits infrastructure's memory and its own release
-memory without requiring the registry to reconstruct file ancestry. Increasing
-hierarchy depth must not increase automatic memory context without a bound.
+- `realign` reading immediate-child memories before curating a selected parent,
+  promoting shared lessons and retaining local detail in the child.
+- One delivery of `GOAL.md`, no redundant Objective excerpt, and no repeated
+  operating instructions. Equal memory text in different scopes remains distinct.
 
-Jack approved:
+LOO-354 / PR #1375 owns address-derived ancestry and memory-only scopes. Jack
+identified repository `MEMORY.md` as the root of that chain. LOO-356 owns the
+combined memory budget and excerpt attribution. LOO-362 owns the planned 16,000
+memory-token default and gradual curation. LOO-329 owns operational identity;
+LOO-330 owns address/navigation presentation. These boundaries supersede the
+broader implementation list from the original review. No ancestry, budget,
+registry, or Session storage changes belong in this patch.
 
-- Derive memory ancestry from `wave/<address>/`, root first and leaf last.
-  More specific guidance takes precedence among memory scopes. Budget the
-  combined chain, including the leaf, rather than granting each ancestor a
-  separate allowance. Existing higher-priority instructions still govern.
-- A memory-only scope is valid without a `GOAL.md` or registry row. Reading
-  a scope does not create an operational Wave or assign Task/Session ownership.
-- Discover child memories through ordinary filesystem tools. No child index
-  is injected, and `lf` is not a required discovery interface.
-- `realign` instructs the agent to read immediate-child memories before
-  curating the selected parent. Explore deeper descendants when relevant.
-  Promote broadly useful lessons into the parent; retain local detail in the
-  child's memory. This is a skill procedure, not special prompt assembly.
-- Remove known duplicate delivery: one `GOAL.md`, no redundant Objective
-  excerpt, and no accidental repeat of operating instructions. Distinct memory
-  scopes remain distinct even when their text matches.
-- Retain main's scratch behavior and interface with the existing budgeting
-  work. Do not add this draft's proposed scratch-indexing policy.
-- Respect context budgets. Jack did not choose values or a budget shape and
-  reported concern about 100k total context; this is not an agreed limit or
-  evidence of a universal model-quality cutoff.
-- Redesign against current AgentSession ownership. Do not restore Run records.
+On September 30, `gh pr view 1375 --json state,mergeCommit` reported OPEN with
+no merge commit. `lf sync --manual origin/main` fetched main at `de074a2eb`;
+Loopflow selected its scratch-only reset strategy and restored all design/audit
+files. No production changes existed to merge. The scoped implementation remains
+independent of PR #1375. No current cross-design agreement beyond Jack's explicit
+ownership split is claimed.
 
-## Current system after syncing main
+## Implementation
 
-Source inspection at `de074a2eb`; no live acceptance claims.
+`realign` discovers immediate-child `MEMORY.md` files using ordinary filesystem
+tools, including memory-only directories. It reads relevant sections of large
+files within the available context budget, explores deeper descendants when
+relevant, and states unread or unavailable coverage. Shared lessons move into the
+selected parent; local details stay in the child. Inherited memory guides work
+without changing the ordinary curation target. The existing operating guidance
+teaches the nested file convention without injecting a directory index.
 
-| Concern | Current implementation | Consequence |
-|---|---|---|
-| Execution ownership | `agent_sessions` and immutable Session history own conversations and captured inputs; `execs` own actual processes; FlowSession owns progression. | Context evidence belongs to a specific captured Session input, not a generic Run. |
-| Capture payload | `session_record.rs` retains `PreparedTurnContext` in `context.json` as a subordinate payload referenced by Session history. | The filename still exists; its presence does not restore Run ownership. Use the current capture path. |
-| Context decisions | `trace.rs` already defines `Included`, `Excluded`, `Summarized`, `StatOnly`, `Truncated`, and `Deduplicated`. | Do not add a parallel omission schema. |
-| Memory gathering | `work/wave/context.rs` still follows registry `parent_wave_id`, then renders a combined string; lookup failure falls back to the leaf. | Replace the memory chain lookup with address ancestry. Keep registry identity and execution authority separate. |
-| Checkout selection | Ordinary memory gathering resolves the origin checkout; `gather_wave_memory_from` can read the execution checkout. | Preserve explicit content checkout selection and report actual source paths. Do not silently switch which version is read. |
-| Wave documents | `engine/prompt.rs` gathers immediate Markdown files, excluding `MEMORY.md`. | Ancestor memory does not imply automatic ancestor docs or goals. |
-| Prompt preparation | `engine/exec.rs::prepare_exec_prompt` gathers, removes native instruction duplicates, bounds components, renders, then checks total input. | Memory composition must pass through this existing budget path. |
-| Reread instruction | The header already says to use supplied memory and read relevant omitted sections. | The approved header correction is already upstream; preserve it. |
-| Readers | `lf runs` reads retained AgentSession input/provider history selected through SQLite. | Reuse this surface and exact captured-input identity; do not scan old manifest folders as the authoritative population. |
+Wave binding leaves the authored goal body to the gathered document instead of
+also embedding it in the launch seed. Builtin goals without an authored file
+retain their existing seed path. IDE skill launches with Wave documents use
+the assembled prompt because short native-skill seeds carry no documents.
+Main already removed the Objective excerpt;
+prepared-prompt tests preserve that behavior.
 
-The merged budgeting change is `da31960c7` (#1362), implemented in
-`engine/context_budget.rs` and documented in `docs/lf-reference.md`.
+The existing native-document deduplication pass now also removes repeated
+sources across automatic docs, explicit docs, and full changed-file context.
+Canonical path plus exact contents identifies a repeated source; equal contents
+at different paths survive. A `LOOPFLOW.md` document equal to the builtin text
+is omitted only when the system channel supplies operating guidance. Customized
+instructions and explicitly requested guidance with operate disabled survive.
+Diff patches remain evidence of changes, including deliberate quoted duplicates.
 
-## Budget integration
+Existing `ContextDecisionKind::Deduplicated` records retain source paths, reasons,
+and original sizes through `PreparedTurnContext`. The generated Wave header no
+longer claims to be sourced from `GOAL.md`; its full document owns that path.
+No new schema, record store, or content-hash deduplication policy is introduced.
 
-Reuse one budget owner: `engine/context_budget.rs`. Current values are starting
-values inherited from main, not newly approved thresholds or tuning results.
+## Delete — do not maintain
 
-| Layer | Token ceiling (`cl100k_base`) | Byte ceiling |
-|---|---:|---:|
-| Combined ancestor and owned memory | 8,000 | 64 KiB |
-| All scratch context | 16,000 | 128 KiB |
-| Launch goal/message | 16,000 | 128 KiB |
-| Rendered assembled input | 64,000 | 512 KiB |
+- Remove the full authored goal from `ops/run.rs::render_wave_context` seeds;
+  preserve the complete gathered GOAL document, flow list, memory, metrics and
+  executive instructions. Keep builtin-goal fallback behavior.
+- Replace `drop_native_instruction_docs` and its returned removed-document list
+  with `drop_duplicate_docs` returning existing context decisions. Preserve native
+  file/symlink ownership; migrate preparation, capture, and `lf-prompt` consumers.
+- Remove the misleading GOAL source path on generated Wave framing.
+- Do not rebuild the already-removed Objective excerpt, retired Run ownership,
+  automatic child index, or per-skill memory loading infrastructure.
 
-Memory is bounded as a collection. Adding another ancestor never allocates
-another 8,000 tokens. Count the rendered memory content, with scope labels and
-any excerpt notice, under the existing memory ceiling; retain the total-input
-check after rendering. Do not introduce per-Wave limits, another config system,
-or a second budget engine in this work.
+## Proof and remaining work
 
-Main's current overflow behavior keeps a head-and-tail excerpt, inserts a
-visible notice, and preserves the exact full gathered source at a content-hashed
-path under `.lf/tmp/context/`. `ContextDecisionKind::Truncated` records the
-reduction and original size. Remaining explicit content exceeding the total
-limit causes a launch error before contacting the provider.
+Focused prepared-prompt tests cover direct and Wave launches, complete goal
+content once, captured source/decision attribution, native and symlink duplicate
+sources, equal text in distinct memory files, customized guidance, and guidance
+with operate disabled. Golden fixtures carry the authored `realign` procedure.
 
-**Approved by Jack:** retain main's labelled-excerpt behavior for the memory
-chain, preserving the complete source on disk and accurate scope attribution.
-Reuse existing budget defaults; no new whole-file selection policy is needed.
-The original draft's blanket prohibition on all truncation is withdrawn; the
-accepted requirement forbids silent truncation.
+Gate owns broader affected suites and acceptance checks. Demo/review owns observing
+an agent discover a relevant child lesson and curate a useful parent entry; prompt
+presence does not prove that behavior. A current Session-history allocation audit,
+provider pressure, omitted reads and delivered-outcome measurements remain unrun.
+The old scripts still read retired Run records and cannot establish current results.
 
-A chain-wide excerpt can cut through a scope block or remove intermediate
-scope headers. The implementation must preserve honest source attribution and
-must not label all surviving text as leaf-owned. Preserve the complete gathered
-source and use original source/range evidence when mapping an excerpt. Do not
-claim an ancestor was fully supplied when only some of its text survived.
+Review: source inspection found that the generated Wave header was attributed to
+GOAL.md although it contains no file bytes; removing that attribution lets the
+full document explain its actual source. The same review found that the IDE
+short-seed path would lose the now document-owned goal; Wave-document launches
+therefore retain the assembled prompt. Deduplication is limited to source identity
+and the known operating document so identical memory scopes retain meaning.
 
-The 64k ceiling counts Loopflow's assembled system/task input. Native provider
-instructions, tool schemas, existing conversation history, subsequent file
-reads, and responses are outside it. Thus it does not guarantee a conversation
-stays below 100k. Report observed provider context pressure separately where
-available; unavailable measurements stay unknown. Do not substitute cumulative
-input usage for current context occupancy. Curation instructions should ask for
-relevant sections of large child files rather than automatically ingesting every
-full archive after launch.
-
-## Composition and discovery
-
-For `infrastructure/release`, enumerate `infrastructure`, then
-`infrastructure/release`. For deeper addresses, include each path prefix once.
-No fixed depth limit; the combined memory budget remains fixed. Missing files
-are explicit gaps in the selected chain; absent and unreadable are different
-outcomes. A missing intermediate file does not prevent finding deeper memory.
-
-Under budget, render complete memory bodies root first and leaf last, labelled
-with address, source path, and inherited/owned relation. When over budget, apply
-the agreed shared overflow policy. No sibling or child bodies are automatically
-added. An unbound conversation gains no implicit Wave memory.
-
-A memory-only scope is discoverable by its `MEMORY.md` path. Operational Wave
-creation, explicit CLI Work selection and Task attribution remain Infrastructure's
-responsibility. No registry row is required to read an ancestor or child file.
-
-Proposed self-contained addition to builtin `realign`:
-
-> Before curating the selected Wave's memory, inspect `wave/<address>/` for
-> immediate child directories containing `MEMORY.md`. Read the child memories
-> for lessons that apply across the parent scope; for large files, inspect
-> headings and read relevant sections within the available context budget.
-> Explore deeper descendants when the work calls for them. Promote broadly
-> useful lessons into the selected parent's memory and keep child-specific
-> detail in its owning file. State unread or unavailable coverage honestly.
-
-Ordinary work follows the same file-location convention when child knowledge
-is relevant. Teach the convention once in the existing memory guidance; do not
-inject a generated directory listing into every prompt. Inherited memory guides
-work; ordinary curation edits the selected scope, not its ancestors.
-
-## Explain selection through existing Session evidence
-
-The Session and its immutable captured input are the attribution boundary.
-Preserve exact rendered channels through `PreparedTurnContext` and the existing
-Session capture path. Use existing assets/decisions for source paths, labels,
-hashes, token attribution, and reduction reasons. Add only information needed
-to identify the selected chain and distinguish owned/inherited source content;
-do not create a new record store or a replacement attempt object.
-
-At gathering time, retain each selected memory address, actual source path,
-relation and content until rendering/budgeting have attributed the final bytes.
-The current single combined string labelled with the leaf path cannot explain
-multiple source files by itself. An internal list of source blocks is sufficient;
-keep it within the existing prompt/capture pipeline.
-
-Missing expected ancestor files can use `Excluded` decisions with an honest
-reason and unknown size/hash. Included hashes describe the actual included
-bytes; full-source identity must not be confused with an excerpt hash. Preserve
-existing `Truncated` and `Deduplicated` decisions. No enumeration of unrelated
-siblings or all descendant candidates is required by this redesign.
-
-Child reads during curation belong to tool/provider history, not launch assets.
-A later file read cannot retroactively become automatic launch context. The
-reader should distinguish full inclusion, excerpted inclusion, missing source,
-and later reads; missing tool evidence must remain unavailable.
-
-## Examples
-
-| Work | Automatic memory | Additional reading |
-|---|---|---|
-| Release scope, combined chain below budget | Infrastructure, then release, both complete | Children only when relevant |
-| Release scope, combined chain above budget | Shared memory budget applies; visible reduction and source access required | Relevant omitted sections |
-| Infrastructure scope | Infrastructure memory within the same budget; no child list | Discover release via the filesystem when relevant |
-| Infrastructure curation | Same ordinary memory composition plus `realign` instructions | Immediate-child memories, with deeper exploration when useful |
-| No selected Wave scope | No automatic Wave memory | Explicitly requested files only |
-
-## Remaining implementation and boundaries
-
-1. Replace registry-derived context ancestry with path-derived source blocks,
-   preserving caller-selected checkout and clear missing/unreadable outcomes.
-2. Feed the complete chain through existing memory and total-input budgets.
-   Retain labelled excerpts; preserve address attribution
-   through any reduction. Exercise paths where memory is already embedded in
-   a Wave seed so it cannot bypass the shared memory allowance.
-3. Keep existing Session capture ownership. Attribute source blocks and explain
-   reductions using the existing decision model and retained input reader.
-4. Add child-reading/curation instructions to `realign` and the compact memory
-   location convention to existing guidance. No automatic child union.
-5. Verify known duplicate delivery against current assembly; remove remaining
-   duplicate source delivery. The reread header is already fixed upstream.
-
-LOO-329 owns durable Wave identity, creation, relocation, and selecting an
-operational subwave for work. LOO-330 owns address/navigation presentation.
-LOO-331 owns memory composition, budget integration, and explaining actual
-context through Session evidence. The earlier Product agreement to an injected
-child index is superseded by Jack's review. Related designs have not been
-rechecked after this sync; do not claim current cross-design alignment.
-
-Excluded: new memory storage, relevance search, memory-only scopes gaining
-execution authority, per-skill loading infrastructure, new scratch allocation,
-provider resume injection, and changing the current budget values without
-measurement. No implementation has begun in this review.
-
-## Proof and evaluation
-
-- A focused prepared-prompt proof covers nested memory-only ancestors with no
-  registry, ordering, ownership, absent/unreadable files, and no sibling/child
-  injection. Address and file source must match actual rendered bytes.
-- A deep/oversized chain stays within the aggregate memory and total-input
-  ceilings, including labels and notices, while the complete source remains
-  accessible. Confirm embedded-memory launch paths cannot evade the limit.
-- Session-capture evidence explains full, excerpted and missing memory using
-  the existing reader path and immutable captured-input identity.
-- Duplicate proof checks source delivery: a goal excerpt and its full file
-  overlap despite having different hashes. Two scopes with identical memory
-  text retain their distinct meaning. Reuse the current native-doc dedup path.
-- Observe parent work finding a relevant release lesson via ordinary tools,
-  and curation promoting an appropriate lesson. Record misses and unread scope;
-  instruction presence alone does not establish behavior.
-
-Use matched skill/provider/Flow cohorts from current Session history. Measure
-launch tokens by source, aggregate memory before/after reduction, omitted reads,
-provider context pressure when available, steering and delivered outcome. Report
-cost only where observed. Do not reuse the old four-day population as a current
-baseline or infer quality from token reductions. The historical audit scripts
-need adaptation before they can select current Session-owned inputs.
-
-Review findings addressed: the old plan proposed an obsolete evidence owner,
-duplicated an existing budget mechanism, and imposed an unnecessary child index.
-The redesign removes all three. A remaining risk is losing scope labels inside
-chain-wide excerpts; acceptance above requires truthful attribution.
-
-Check: `git diff --check` passed before sync; sync completed without conflicts;
-current redesign is documentation only, with source inspection rather than a
-new behavioral test run.
+Check: `cargo test -p loopflow --lib context_delivery_` (3 tests), `cargo test -p loopflow --test golden_prompt`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed; broader acceptance belongs to gate and observed curation to demo/review.
 
 ## Historical evidence limits
 

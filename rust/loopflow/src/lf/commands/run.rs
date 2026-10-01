@@ -493,6 +493,13 @@ fn build_prompt_at(
             && exec_target == ExecTarget::Ide
             && use_native_skill_exec
             && should_exec_via_skill(skill_name)
+            // Wave seeds refer to assembled documents, including GOAL.md.
+            // The short vendor seed carries no document section.
+            && !prepared
+                .components
+                .docs
+                .iter()
+                .any(|doc| doc.source == crate::engine::DocumentSource::Wave)
         {
             let sync_start = Instant::now();
             crate::engine::sync_skills(&SkillSyncOptions::default())?;
@@ -516,14 +523,14 @@ fn build_prompt_at(
         } else if is_interactive && exec_target == ExecTarget::Ide && use_native_skill_exec {
             warn!(
                 skill = skill_name,
-                "external skill uses assembled prompt fallback"
+                "skill launch requires assembled prompt context"
             );
         }
     }
 
     let mut components = prepared.components;
     components.message_context = message_context;
-    let deduplicated_docs = prepared.deduplicated_docs;
+    let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     crate::engine::context_budget::check_input(&effective_system, &agent_config.task_prompt)?;
@@ -531,7 +538,7 @@ fn build_prompt_at(
         &components,
         &effective_system,
         &agent_config.task_prompt,
-        &deduplicated_docs,
+        &deduplication_decisions,
     );
     Ok(PromptBuild {
         repo_root,
@@ -902,7 +909,7 @@ pub(crate) fn attributed_context(
     components: &PromptComponents,
     system_prompt: &str,
     task_prompt: &str,
-    deduplicated_docs: &[crate::engine::Document],
+    deduplication_decisions: &[crate::trace::ContextDecision],
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -988,14 +995,7 @@ pub(crate) fn attributed_context(
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
         let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
-        push(
-            goal,
-            Kind::Goal,
-            Scope::Wave,
-            wave.clone(),
-            Some(format!("wave/{wave}/GOAL.md")),
-            "wave",
-        );
+        push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     if let Some(memory) = &components.wave_memory {
         push(
@@ -1107,22 +1107,7 @@ pub(crate) fn attributed_context(
         );
     }
 
-    let mut decisions = Vec::new();
-    for (position, document) in deduplicated_docs.iter().enumerate() {
-        decisions.push(ContextDecision {
-            position: position as u32,
-            kind: Kind::RepoInstructions,
-            scope: Scope::Repo,
-            label: document.path.clone(),
-            source_path: Some(document.path.clone()),
-            decision: ContextDecisionKind::Deduplicated,
-            reason: "provider-native instruction discovery owns this file or its symlink target"
-                .to_string(),
-            original_bytes: Some(document.content.len() as u64),
-            original_tokens: Some(crate::engine::prompt::count_tokens(&document.content) as u64),
-            asset_position: None,
-        });
-    }
+    let mut decisions = deduplication_decisions.to_vec();
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {
             position: decisions.len() as u32,

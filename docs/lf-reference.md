@@ -227,6 +227,11 @@ are assembled automatically. Direct launches leave edits for an explicit
 commit. Several AgentSessions may concern the same Task; attribution does not grant
 exclusive ownership of its files.
 
+Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
+requests for the same document do not repeat its contents; distinct memory files
+remain separate even when their text matches. IDE launches with Wave documents
+use the assembled prompt so those references reach the provider.
+
 Launch assembly allows 8,000 tokens of Wave memory, 16,000 across scratch notes,
 and 16,000 for the launch goal/message. Oversized sources become marked excerpts
 with their full local paths; oversized messages are preserved under
@@ -289,7 +294,10 @@ Implement builds the intended behavior and updates the working plan with what
 remains. When replacing a path, move its consumer and delete the predecessor.
 Compress simplifies code related to the change. Refresh syncs, then runs
 realign. Realign edits the plan, corrects clear code mismatches, and reads and
-updates the identified Wave's memory using what the work has taught us. Accepted
+updates the identified Wave's memory using what the work has taught us. Before
+curating a parent, it discovers immediate-child `MEMORY.md` files with filesystem
+tools, reads relevant sections, and promotes shared lessons while keeping local
+detail in the child. Unread coverage stays explicit. Accepted
 requirements and unresolved evidence stay visible; no per-pass report or
 replacement count is required. Loop-decide reads the current work and evidence
 to decide whether to continue. Pursue publishes after convergence, before demo.

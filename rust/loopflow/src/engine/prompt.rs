@@ -1403,45 +1403,84 @@ fn glob_to_regex(pattern: &str) -> String {
 /// avoid duplication — whichever agent runs will pick up its own file.
 const AGENT_NATIVE_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md"];
 
-/// Remove docs that duplicate any agent's natively-loaded instruction file.
-///
-/// Skips all known native files (CLAUDE.md and AGENTS.md) and any
-/// files they symlink to (e.g. CLAUDE.md -> STYLE.md also drops STYLE.md).
-pub fn drop_native_instruction_docs(
+/// Keep one delivery of a document source or the builtin operating guidance.
+/// Native instructions remain owned by provider discovery. Equal text at
+/// different paths remains distinct, including separate memory scopes.
+pub fn drop_duplicate_docs(
     components: &mut PromptComponents,
     repo_root: &Path,
-) -> Vec<Document> {
+) -> Vec<crate::trace::ContextDecision> {
+    use crate::trace::{
+        ContextAssetKind as Kind, ContextDecision, ContextDecisionKind, ContextScope,
+    };
+
     // Collect canonical paths of all native files (resolves symlinks)
     let canonical_paths: Vec<_> = AGENT_NATIVE_FILES
         .iter()
         .filter_map(|f| fs::canonicalize(repo_root.join(f)).ok())
         .collect();
 
-    let mut removed = Vec::new();
-    components.docs.retain(|doc| {
-        let name = Path::new(&doc.path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+    let mut decisions = Vec::new();
+    let mut seen = HashSet::new();
+    let operate = components.operate;
+    let mut retain =
+        |doc: &Document| {
+            let name = Path::new(&doc.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
 
-        // Drop the native files themselves
-        if AGENT_NATIVE_FILES.contains(&name) {
-            removed.push(doc.clone());
-            return false;
-        }
-
-        // Drop symlink partners (CLAUDE.md -> STYLE.md or STYLE.md -> CLAUDE.md)
-        let doc_path = repo_root.join(&doc.path);
-        if let Ok(doc_canon) = fs::canonicalize(&doc_path) {
-            if canonical_paths.contains(&doc_canon) {
-                removed.push(doc.clone());
-                return false;
-            }
-        }
-
-        true
-    });
-    removed
+            let doc_path = repo_root.join(&doc.path);
+            let source_path = fs::canonicalize(&doc_path).unwrap_or(doc_path);
+            let (kind, scope, reason) =
+                if AGENT_NATIVE_FILES.contains(&name) || canonical_paths.contains(&source_path) {
+                    (Kind::RepoInstructions, ContextScope::Repo,
+                     "provider-native discovery owns this instruction file or its symlink target")
+                } else if operate
+                    && name == "LOOPFLOW.md"
+                    && doc.content.trim() == crate::engine::builtins::LOOPFLOW_DOC.trim()
+                {
+                    (
+                        Kind::OperatingInstructions,
+                        ContextScope::Global,
+                        "the system channel already supplies the builtin operating instructions",
+                    )
+                } else if !seen.insert((source_path, doc.content.clone())) {
+                    let kind = if doc.source == DocumentSource::Scratch {
+                        Kind::Scratch
+                    } else {
+                        Kind::Document
+                    };
+                    let scope = if doc.source == DocumentSource::Wave {
+                        ContextScope::Wave
+                    } else {
+                        ContextScope::Repo
+                    };
+                    (
+                        kind,
+                        scope,
+                        "this document source is already supplied in the assembled input",
+                    )
+                } else {
+                    return true;
+                };
+            decisions.push(ContextDecision {
+                position: decisions.len() as u32,
+                kind,
+                scope,
+                label: doc.path.clone(),
+                source_path: Some(doc.path.clone()),
+                decision: ContextDecisionKind::Deduplicated,
+                reason: reason.to_string(),
+                original_bytes: Some(doc.content.len() as u64),
+                original_tokens: Some(count_tokens(&doc.content) as u64),
+                asset_position: None,
+            });
+            false
+        };
+    components.docs.retain(&mut retain);
+    components.diff_files.retain(retain);
+    decisions
 }
 
 fn read_text_file(path: &Path) -> Option<String> {

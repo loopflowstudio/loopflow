@@ -1070,7 +1070,9 @@ fn release_single(
             minor.as_deref_mut(),
             progress,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, None, progress);
+        if prepared.is_err() {
+            cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, None, progress);
+        }
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
@@ -1657,7 +1659,26 @@ fn finish_release_pr(
 ) -> OpsResult<String> {
     loop {
         match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
-            ReleasePrWait::Merged(commit) => return Ok(commit),
+            ReleasePrWait::Merged(commit) => {
+                if let Some((path, _)) = list_porcelain(main_repo)?
+                    .into_iter()
+                    .find(|(_, branch)| branch.as_deref() == Some(release_branch))
+                {
+                    let pr = current_pr(&path)?.ok_or_else(|| {
+                        OpsError::Message(format!(
+                            "release PR #{} is unavailable",
+                            prepared.pr_number
+                        ))
+                    })?;
+                    crate::ops::pr_landing::reconcile_armed_pr(
+                        &path,
+                        &release_land_options(None),
+                        &pr,
+                    )?;
+                    cleanup_release_worktree(main_repo, &path, release_branch, None, progress);
+                }
+                return Ok(commit);
+            }
             ReleasePrWait::NeedsIntegration(state) => {
                 progress.status(&format!(
                     "Release PR #{} is {state}; rebuilding on current main...",
@@ -1674,11 +1695,10 @@ fn finish_release_pr(
                     progress,
                 );
                 prepared = refreshed?;
-                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
             }
             ReleasePrWait::NeedsRepair => {
                 progress.status(&format!(
-                    "Release PR #{} has failed required checks; entering watched CI repair...",
+                    "Release PR #{} has failed required checks; reconciling CI repair...",
                     prepared.pr_number
                 ));
                 fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
@@ -1688,17 +1708,21 @@ fn finish_release_pr(
                 })?;
                 let options = release_land_options(None);
                 let _context = ReleaseWorktreeContext::enter();
-                match crate::ops::pr_landing::watch_armed_pr(&wt.path, &options, pr, progress) {
+                match crate::ops::pr_landing::reconcile_armed_pr(&wt.path, &options, &pr) {
                     Ok(landing) => {
-                        let commit = landing.merge_commit.ok_or_else(|| {
-                            OpsError::Message("release landing has no merge commit".to_string())
-                        })?;
-                        cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
-                        return Ok(commit);
+                        if let Some(commit) = landing.merge_commit {
+                            cleanup_release_worktree(
+                                main_repo, &wt.path, &wt.branch, None, progress,
+                            );
+                            return Ok(commit);
+                        }
+                        if let Some(head) = current_pr(&wt.path)?.and_then(|pr| pr.head_sha) {
+                            prepared.head_sha = head;
+                        }
                     }
                     Err(error) => {
                         // Main can advance during repair. Release preparation owns
-                        // rebuilding version metadata; the shared watcher owns CI.
+                        // rebuilding version metadata; the finite reconciler owns CI repair.
                         let view =
                             crate::ops::pr::observe_pr_merge(main_repo, prepared.pr_number)?.pr;
                         if matches!(view.merge_state.as_deref(), Some("behind" | "dirty")) {

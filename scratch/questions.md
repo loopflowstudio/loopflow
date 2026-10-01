@@ -808,3 +808,14 @@ does not own the engine or claim a Session for passive display. Public launch,
 connect and Session-row mutation consumers are still pending; the actual-engine
 fixture alone does not complete that cutover. Evidence is in
 `scratch/cutover/exec-ownership.md`.
+
+## Scheduled Task operation sync — 2026-09-30
+
+The existing owned merge targets main `6c7335607` (the conflict comparison
+tree was `bd1f93cff`). Preserve finite landing and
+main's Session/Exec ownership, command syntax, queue evidence and cleanup.
+Mechanical landing bindings move from the removed `runs` table to the exact
+`flow_events` operation start. A taskless saved Flow retains its checkout after
+merge so it can resume its remaining authored steps; standalone landings without
+a pending Flow use main's cleanup. This is merge integration, not authorization
+to install, activate scheduling, or complete the remaining automation slices.

@@ -145,7 +145,9 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     match outcome {
         FlowOutcome::Completed => Ok(()),
         FlowOutcome::Waiting => {
-            anyhow::bail!("Flow is waiting for human input; open its Flow Session")
+            anyhow::bail!(
+                "Flow is waiting for human input or delivery; inspect its saved Flow Session"
+            )
         }
         FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
     }
@@ -1021,7 +1023,7 @@ mod tests {
     #[tokio::test]
     async fn handed_off_landing_keeps_the_saved_flow_before_its_next_review() {
         use crate::durable::FlowSession;
-        use crate::engine::execution::{FlowEngine, StepExecutor};
+        use crate::engine::execution::{FlowEngine, SkillExecutor};
         use crate::engine::flow::Command;
         use crate::engine::invocation::QueuedInvocation;
         use crate::engine::{ConcreteCommand, ConcreteSkill, ExecutionCursor, FlowOutcome, Skill};

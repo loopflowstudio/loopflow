@@ -330,3 +330,23 @@ until LOO-298 integrates main. Next cut: needs-rebase evidence and the durable
 CI deadline in the reconciler, with an interrupted-settlement test, then Task
 admission. Proof: reconciler tests for each row of the evidence table, and one
 CLI test where `land -c` on a Task exits and a separate `reconcile` closes it.
+
+### 2026-09-30 — integrate main through the owned sync
+
+Merged pinned main `6c7335607`, resolving against Loopflow's stack comparison
+tree. Finite landing now binds the exact mechanical `flow_events` start instead
+of the removed Run table. Main's Session/Exec attribution, `cmd`/`sync` syntax,
+merge-queue evidence, published-head reuse, and standalone cleanup are retained.
+A pending taskless Flow keeps its checkout and resumes after reconciliation;
+its successful operation is not replayed. Release calls the finite reconciler
+and retains its preparation checkout until merge settlement, while its existing
+release lifecycle owns waiting. Removed two watcher-only async history readers.
+
+Review found and fixed the release caller of the deleted watcher, the telemetry
+caller's changed return type, and the Flow wait message that assumed all waiting
+was human review. The first continuation committed conflict paths but reported
+unstaged integration edits; those require a follow-up checkpoint before owned
+continuation completes. No push, installation, live provider or schedule action.
+The remaining automation slices and installed demonstration above remain open.
+
+Checks: `cargo test -p loopflow --lib -- ops::pr_landing::tests handed_off_landing --test-threads=4` (15 passed); `cargo test -p loopflow --test land_tests lf_pr_land_returns_before_later_checks_repair_and_observe_merge -- --test-threads=1` (1 passed, six scenarios); `cargo test -p loopflow --test release_tests release_run_repairs_failed_checks_before_tagging -- --test-threads=1` (1 passed, two queue states); private Homes/provider fixtures, format and diff checks passed; broader verification remains Gate/CI-owned.

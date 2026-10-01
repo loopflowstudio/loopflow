@@ -213,7 +213,6 @@ queue membership in one GitHub response. A merge therefore takes precedence
 over its removed request without combining an earlier open state with a later
 request read. Missing or partial responses cannot settle a landing.
 
-
 `PrLanding` owns the generation. `LandingSupervisor` names the process,
 placement, and heartbeat of the check currently holding the claim. Incidents
 retain response provenance and timing across generations.
@@ -223,7 +222,6 @@ the observed PR head. Every page must still name that head. A moved head leaves
 checks unknown until the caller reobserves; an unreadable page cannot supply a
 partial success. Repeated jobs retain their newest result within each workflow
 and event, while legacy status contexts keep their own identities.
-
 
 A blocked landing stays observable: later checks still settle its merge, and
 checks that stop failing clear the block. Rerun `lf pr arm` or `lf pr land`

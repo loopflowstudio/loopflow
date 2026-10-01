@@ -913,6 +913,22 @@ pub(crate) fn record_armed_pr(
     })
 }
 
+pub(crate) fn reconcile_armed_pr(
+    repo: &Path,
+    options: &LandOptions,
+    pr: &PrInfo,
+) -> OpsResult<PrLanding> {
+    let landing = record_armed_pr(repo, options, pr)?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        reconcile_pr_landing(
+            landing_store().await?,
+            landing,
+            Arc::new(GithubLandingDriver),
+        )
+        .await
+    })
+}
+
 pub fn reconcile_repository(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     let repo = crate::repository::RepoId::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;

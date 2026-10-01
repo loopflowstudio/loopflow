@@ -2,7 +2,6 @@ mod support;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
@@ -1907,11 +1906,16 @@ fi"#;
                 .output()
                 .unwrap()
         };
-        assert!(
+        assert_eq!(
             handed_off.status.success(),
+            !flow,
             "{}",
             String::from_utf8_lossy(&handed_off.stderr)
         );
+        if flow {
+            assert!(String::from_utf8_lossy(&handed_off.stderr)
+                .contains("waiting for human input or delivery"));
+        }
         assert!(!repair_launches.exists());
         let conn = rusqlite::Connection::open(&database).unwrap();
         let initial: (String, i64) = conn
@@ -1921,7 +1925,7 @@ fi"#;
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(initial.1, 0);
+        assert_eq!(initial.1, i64::from(flow));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();

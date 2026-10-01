@@ -531,7 +531,7 @@ operations; a source checkout cannot transfer private Task identity implicitly.
 | Open review | `task pr ISSUE open` | Push + draft PR + browser; ready PR stays ready |
 | Submit | `task pr ISSUE submit` | Prepare + user merge request; no automatic merge |
 | Arm | `task pr ISSUE arm` | Prepare + head-specific auto-merge request |
-| Land | `task pr ISSUE land` | Arm + watch/repair + record authoritative merge; keep Task open |
+| Land | `task pr ISSUE land` | Arm + record delivery for later checks; keep Task open |
 | Land and complete | `task pr ISSUE land -c` | Land + store Done + Linear completed + cleanup after worker settlement |
 | Record success | `task complete ISSUE --summary TEXT` | Complete settled delivery + cleanup; retry incomplete cleanup by issue ID |
 | Continue serial delivery | `task pr ISSUE next [SLUG]` | Retain prior PR + rotate to next branch, carry follow-up |
@@ -543,7 +543,8 @@ operations; a source checkout cannot transfer private Task identity implicitly.
 `pr abandon BRANCH` owns closing GitHub and settling its Task PR record, then
 uses the same checkout deletion as `wt delete`. `wt remove` and `wt rm` are
 removed. Prune remains a separate selection policy for eligible clean checkouts.
-`pr land` removes a merged standalone PR's checkout and branches. Task landing
+After verified merge, `pr reconcile` removes a standalone PR's checkout and
+branches unless a saved Flow still needs it. Task landing
 keeps the Task open and explicitly retains its checkout for the saved Flow or
 next PR; `-c` also completes the Task and cleans up. A running Task worker keeps
 its checkout until its provider stops and its exact claim settles. Cleanup never
@@ -655,7 +656,8 @@ lf pr publish                       # push and mark ready, without opening a bro
 lf pr checks --watch
 lf pr submit                        # prepare for a reviewer's merge click
 lf pr arm                           # request auto-merge and return
-lf pr land                          # watch, repair CI, and finish merged
+lf pr land                          # record delivery and return
+lf pr reconcile                     # check delivery once; repair or settle merge
 ```
 
 These operations use the selected Task or checkout. An unbound branch uses
@@ -671,7 +673,8 @@ as an unbound branch.
 | `publish` | Push, create/update a ready PR, and print its URL |
 | `submit` | Integrate, prepare, assign, and stop for manual merge |
 | `arm` | Prepare the head, request auto-merge, and return |
-| `land` | Prepare, request auto-merge, watch, repair CI, and finish merged |
+| `land` | Prepare, request auto-merge, record settlement intent, and return |
+| `reconcile` | Check recorded repository landings once; repair CI or settle verified merge |
 | `next` | Continue a Task on its next PR after an out-of-band merge |
 | `abandon` | Close the PR and remove its branch and worktree |
 

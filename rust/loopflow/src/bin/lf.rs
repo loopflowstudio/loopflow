@@ -1781,6 +1781,7 @@ fn execute_command(
                 },
             };
             loopflow::ops::execute_flow_command(repo, &item, &loopflow::ops::NullProgress)
+                .map(|_| ())
                 .map_err(Into::into)
         }),
         Some(Commands::Ci {

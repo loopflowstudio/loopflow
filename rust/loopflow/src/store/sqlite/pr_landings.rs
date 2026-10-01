@@ -113,13 +113,13 @@ impl super::SqliteStore {
 
     pub fn bind_operation_landing(
         &self,
-        run_id: &crate::durable::RunId,
+        operation_start: i64,
         landing: &PrLandingId,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
-            "UPDATE runs SET landing_id=?2 WHERE id=?1 AND (landing_id IS NULL OR landing_id=?2)",
-            params![run_id.as_str(), landing.as_str()],
+            "UPDATE flow_events SET landing_id=?2 WHERE seq=?1 AND kind='operation_started' AND (landing_id IS NULL OR landing_id=?2)",
+            params![operation_start, landing.as_str()],
         )? != 1
         {
             return Err(StoreError::InvalidData(
@@ -129,14 +129,20 @@ impl super::SqliteStore {
         Ok(())
     }
 
-    pub fn operation_landing(
-        &self,
-        run_id: &crate::durable::RunId,
-    ) -> StoreResult<Option<PrLanding>> {
+    pub(crate) fn landing_has_pending_flow(&self, landing: &PrLandingId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM flow_events event JOIN flow_sessions flow ON flow.id=event.flow_id
+             WHERE event.landing_id=?1 AND flow.state='current')",
+            [landing.as_str()], |row| row.get(0),
+        )?)
+    }
+
+    pub fn operation_landing(&self, flow_id: &str) -> StoreResult<Option<PrLanding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=(SELECT landing_id FROM runs WHERE id=?1)"),
-            [run_id.as_str()], map_landing,
+            &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=(SELECT event.landing_id FROM flow_sessions flow JOIN flow_events event ON event.seq=flow.operation_start WHERE flow.id=?1)"),
+            [flow_id], map_landing,
         ).optional().map_err(StoreError::from)
     }
 

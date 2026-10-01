@@ -34,10 +34,11 @@ then Release's, from the executing checkout; sibling Waves stay out.
 Repository-root `MEMORY.md`, when present, comes before Wave files and is also
 included when no Wave is selected. Read all files from the executing checkout.
 
-The selected Wave's memory has an 8,000-token allowance. Repository memory and
-all ancestor memory share a separate 8,000-token allowance, so they cannot consume the
-selected Wave's space. Each allowance also has a 64-KiB byte limit. Oversized
-files become excerpts with links to their complete local snapshots.
+Repository, ancestor and selected Wave memory share one budget, defaulting to
+8,000 tokens and 64 KiB. Files receive proportional shares of that budget.
+`context_budgets.memory_tokens` and `memory_bytes` configure the shared limits;
+`lf context` reports each file's share and usage. Oversized files become excerpts
+with links to their complete local snapshots.
 
 Registration records the Wave UUID in `GOAL.md` frontmatter as `id:`. Commit
 that field with the Wave files and retain it when moving a directory. Discovery

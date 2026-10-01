@@ -345,8 +345,10 @@ release lifecycle owns waiting. Removed two watcher-only async history readers.
 Review found and fixed the release caller of the deleted watcher, the telemetry
 caller's changed return type, and the Flow wait message that assumed all waiting
 was human review. The first continuation committed conflict paths but reported
-unstaged integration edits; those require a follow-up checkpoint before owned
-continuation completes. No push, installation, live provider or schedule action.
+unstaged integration edits; those were checkpointed as `136e1de63`. A final
+`lf sync --continue` reports no sync in progress. The checkout is clean, has no
+unmerged paths or MERGE_HEAD, and contains the pinned target as an ancestor.
+No push, installation, live provider or schedule action.
 The remaining automation slices and installed demonstration above remain open.
 
 Checks: `cargo test -p loopflow --lib -- ops::pr_landing::tests handed_off_landing --test-threads=4` (15 passed); `cargo test -p loopflow --test land_tests lf_pr_land_returns_before_later_checks_repair_and_observe_merge -- --test-threads=1` (1 passed, six scenarios); `cargo test -p loopflow --test release_tests release_run_repairs_failed_checks_before_tagging -- --test-threads=1` (1 passed, two queue states); private Homes/provider fixtures, format and diff checks passed; broader verification remains Gate/CI-owned.

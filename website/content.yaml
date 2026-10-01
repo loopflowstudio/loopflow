@@ -3,9 +3,14 @@
 
 homepage:
   hero:
-    tagline: "A software instrument."
+    tagline: "Loopflow is a software instrument."
     subline: >-
-      It doesn't make the software for you. You make the software through it.
+      Make software through agents, your way.
+    description: >-
+      Work closely with an agent, hand off a task, or coordinate several
+      streams of work. Shape the workflow around how you want to build.
+      Loopflow takes care of the branches, context, checks, and handoffs
+      that keep it moving.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
   showcase:
@@ -34,45 +39,83 @@ homepage:
           It shows you what it made, working. Not right yet? It goes back
           and builds again.
 
-  problems:
-    heading: "What it helps with"
+  independence:
+    heading: "Choose your models. Own your process."
+    text: >-
+      Loopflow's job is to make your way of working dependable. We have
+      no stake in which model you choose. Use your own agent accounts,
+      run on your own machines, and keep your skills, workflows, and
+      memory in files you can read, change, and version. Loopflow is
+      open source.
+
+  features:
+    heading: "Features"
+    introduction: "The pieces of your agent workflow, working together."
     items:
-      - title: "It goes in circles"
-        problem: >-
-          AI can build a lot of software fast. It can also spend all day
-          going in circles, and it's hard to tell which is happening.
-        solve: >-
-          Loopflow keeps track, so you can see what got done and what still
-          needs you.
-      - title: "It says it's done"
-        problem: >-
-          Finished and working are not the same thing.
-        solve: >-
-          Loopflow shows you the result running before anything counts as
-          done.
-      - title: "You lose the thread"
-        problem: >-
-          The more you hand off, the more there is to catch up on.
-        solve: >-
-          Loopflow checks in at the plan and at the demo. Step in closer
-          whenever you like.
-      - title: "It forgets"
-        problem: >-
-          Every new session starts from zero.
-        solve: >-
-          Loopflow writes down what it learned and brings it to the next
-          task.
-      - title: "Tasks trip over each other"
-        problem: >-
-          Two things in progress at once can undo each other.
-        solve: >-
-          Each task gets its own copy of your project, so work in progress
-          never collides.
-      - title: "It's not how you'd do it"
-        problem: >-
-          Everyone works differently.
-        solve: >-
-          Every step is a plain text file. Change any of them.
+      - title: "Worktree & Git management"
+        summary: "Give each task its own place to work."
+        description: >-
+          A worktree is a separate working copy of your project. Loopflow
+          creates or reuses one for each Task and keeps track of its branch
+          and pull requests. Several tasks can move forward at once. When
+          it's time to bring changes together, Loopflow handles syncing,
+          delivery, and cleanup.
+        href: "/architecture/delivery"
+        link_label: "Worktrees and delivery"
+      - title: "CI & PR review"
+        summary: "Check the work. Give it another pass."
+        description: >-
+          Loopflow prepares changes for review and can walk you through
+          the result. Review feedback feeds another round of implementation.
+          Once a Task's pull request is handed off for landing, the CI
+          watcher can start a repair when required checks fail.
+        href: "/docs/authoring#loopflows"
+        link_label: "Review workflows"
+      - title: "Project management"
+        summary: "Keep the plan connected to the work."
+        description: >-
+          Projects and Tasks live in Linear. Loopflow connects each Task
+          to its working copy, conversations, workflow, and pull requests.
+          See what's moving, what's waiting, and what needs a decision.
+          Waves hold longer-running goals and memory as plans change.
+        href: "/docs/waves"
+        link_label: "Tasks and Waves"
+      - title: "Credential forwarding"
+        summary: "Your accounts, on another machine."
+        description: >-
+          Start work over SSH using accounts from your laptop. For Claude
+          and Codex, Loopflow supplies a short-lived access token when
+          needed, without copying your saved login. Background work that
+          continues after disconnecting uses credentials installed remotely.
+        href: "/docs/security#understand-account-authority-over-ssh"
+        link_label: "Remote access"
+      - title: "Customizable skills & workflows"
+        summary: "Write down how you work. Change any step."
+        description: >-
+          A skill is a text file containing instructions. A workflow
+          connects skills, commands, and review stops—including loops for
+          another attempt. Loopflow supplies a library for designing,
+          building, debugging, reviewing, and shipping. Those files are
+          yours to edit.
+        href: "/docs/authoring"
+        link_label: "Skills and workflows"
+      - title: "Memory & context"
+        summary: "Leave useful notes for the next round."
+        description: >-
+          Working notes stay with the current change. Longer-lived goals
+          and lessons live in readable, editable files. Loopflow brings
+          the relevant material into later work, with controls for
+          inspecting and budgeting the context it sends to the agent.
+        href: "/docs/waves#nested-waves"
+        link_label: "Memory and context"
+    connection:
+      heading: "The connections are part of the product, too."
+      text: >-
+        A Task in your plan gets a working copy. Its workflow brings in
+        the relevant instructions and memory, builds the change, and stops
+        for review. Feedback can send it through another pass. When the
+        pull request is handed off for landing, CI repair returns to that
+        Task's checkout. Lessons can be saved for the next task.
 
   definition:
     heading: "What is a loopflow?"
@@ -92,11 +135,13 @@ homepage:
         body, and they repeat until the deciding step moves on.
 
   scale:
-    heading: "Works for one person or a whole company"
+    heading: "Develop your company's way of working with agents."
     text: >-
-      Everyone runs it on their own computer, set up their own way. Nobody
-      has to buy it or get it approved. A team can start with one person
-      who already uses it.
+      Give people a shared language and toolset for trying ideas,
+      comparing approaches, and keeping what works. A useful instruction
+      becomes a shared skill. A successful sequence becomes a workflow.
+      Teams can review and improve those files together, choosing the
+      agents and level of involvement that suit the work.
 
   building_blocks:
     heading: "Every step is a file you can change"

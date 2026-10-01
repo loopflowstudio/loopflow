@@ -59,6 +59,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
+                Li(A("Features", href="/#features")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -149,7 +150,8 @@ def _require_content_path(path: str) -> object:
 HERO_CONTENT = _require_content_path("homepage.hero")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
 PILLARS_CONTENT = _require_content_path("homepage.pillars")
-PROBLEMS_CONTENT = _require_content_path("homepage.problems")
+INDEPENDENCE_CONTENT = _require_content_path("homepage.independence")
+FEATURES_CONTENT = _require_content_path("homepage.features")
 DEFINITION_CONTENT = _require_content_path("homepage.definition")
 SCALE_CONTENT = _require_content_path("homepage.scale")
 BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
@@ -158,11 +160,14 @@ INSTALL_CONTENT = _require_content_path("homepage.install")
 for required_key in (
     "homepage.hero.tagline",
     "homepage.hero.subline",
+    "homepage.hero.description",
     "homepage.hero.loopflow_download_url",
     "homepage.showcase.items",
     "homepage.pillars.items",
     "homepage.pillars.diagram_alt",
-    "homepage.problems.items",
+    "homepage.independence.text",
+    "homepage.features.items",
+    "homepage.features.connection.text",
     "homepage.definition.paragraphs",
     "homepage.definition.diagram_alt",
     "homepage.scale.text",
@@ -895,6 +900,49 @@ def _screenshot_section():
     return None
 
 
+def FeaturesSection() -> FT:
+    connection = FEATURES_CONTENT["connection"]
+    return Section(
+        Div(
+            H2(FEATURES_CONTENT["heading"], id="features-heading"),
+            P(FEATURES_CONTENT["introduction"], cls="features-introduction"),
+            Div(
+                *[
+                    Article(
+                        Div(
+                            Span(f"{index:02}", cls="feature-number", aria_hidden="true"),
+                            H3(item["title"]),
+                            cls="feature-title",
+                        ),
+                        Div(
+                            P(item["summary"], cls="feature-summary"),
+                            P(item["description"], cls="feature-description"),
+                            A(
+                                item["link_label"],
+                                Span(" →", aria_hidden="true"),
+                                href=item["href"],
+                            ),
+                            cls="feature-detail",
+                        ),
+                        cls="feature-item",
+                    )
+                    for index, item in enumerate(FEATURES_CONTENT["items"], start=1)
+                ],
+                cls="features-list",
+            ),
+            Div(
+                H3(connection["heading"]),
+                P(connection["text"]),
+                cls="features-connection",
+            ),
+            cls="container",
+        ),
+        id="features",
+        cls="features-section",
+        aria_labelledby="features-heading",
+    )
+
+
 def build_homepage():
     loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
     install_display = INSTALL_CONTENT["command_display"].strip()
@@ -911,9 +959,9 @@ def build_homepage():
             Section(
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo-large"),
-                    H1("Loopflow"),
-                    P(HERO_CONTENT["tagline"], cls="tagline"),
-                    P(HERO_CONTENT["subline"], cls="hero-subline"),
+                    H1(HERO_CONTENT["tagline"]),
+                    P(HERO_CONTENT["subline"], cls="tagline hero-subline"),
+                    P(HERO_CONTENT["description"], cls="hero-description"),
                     Div(
                         A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
                         A("Read the docs", href="/docs", cls="btn btn-secondary"),
@@ -938,24 +986,24 @@ def build_homepage():
                 ),
                 cls="capabilities-section",
             ),
-            # What it helps with — each problem beside what Loopflow does about it
+            # Model independence and ownership
             Section(
                 Div(
-                    H2(PROBLEMS_CONTENT["heading"]),
-                    Div(
-                        *[
-                            Div(
-                                H3(item["title"]),
-                                P(item["problem"], cls="problem"),
-                                P(item["solve"], cls="solve"),
-                                cls="problem-item",
-                            )
-                            for item in PROBLEMS_CONTENT["items"]
-                        ],
-                        cls="problems-grid",
-                    ),
+                    H2(INDEPENDENCE_CONTENT["heading"]),
+                    P(INDEPENDENCE_CONTENT["text"]),
+                    cls="container",
                 ),
-                cls="problems-section",
+                cls="independence-section",
+            ),
+            FeaturesSection(),
+            # Shared practice grows out of editable skills and workflows
+            Section(
+                Div(
+                    H2(SCALE_CONTENT["heading"]),
+                    P(SCALE_CONTENT["text"]),
+                    cls="container",
+                ),
+                cls="company-section",
             ),
             # Install — the app first; the command line tool rides along
             Section(
@@ -984,8 +1032,6 @@ def build_homepage():
                     H2(DEFINITION_CONTENT["heading"]),
                     _flow_diagram("loopflow-full.svg", DEFINITION_CONTENT["diagram_alt"]),
                     *[P(paragraph) for paragraph in DEFINITION_CONTENT["paragraphs"]],
-                    H2(SCALE_CONTENT["heading"], cls="scale-heading"),
-                    P(SCALE_CONTENT["text"]),
                 ),
                 cls="definition-section",
             ),

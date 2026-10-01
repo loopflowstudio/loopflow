@@ -188,10 +188,10 @@ nav .container {
     margin-bottom: 32px;
 }
 .hero-logo-large {
-    width: 220px;
-    height: 220px;
-    border-radius: 36px;
-    margin-bottom: 40px;
+    width: 96px;
+    height: 96px;
+    border-radius: 16px;
+    margin-bottom: 32px;
 }
 .hero h1 {
     font-family: var(--font-serif);
@@ -220,9 +220,9 @@ nav .container {
 }
 @media (max-width: 768px) {
     .hero-logo-large {
-        width: 160px;
-        height: 160px;
-        border-radius: 28px;
+        width: 80px;
+        height: 80px;
+        border-radius: 12px;
         margin-bottom: 28px;
     }
 }
@@ -393,14 +393,12 @@ a:focus-visible,
 
 /* Capabilities */
 .capabilities-section,
-.problems-section,
 .definition-section {
     max-width: 980px;
     margin: 0 auto;
     padding: 60px 24px;
 }
 .capabilities-section h2,
-.problems-section h2,
 .definition-section h2 {
     font-family: var(--font-serif);
     font-size: 28px;
@@ -408,30 +406,157 @@ a:focus-visible,
     margin-bottom: 28px;
     color: var(--burgundy);
 }
-.capabilities-grid,
-.problems-grid {
+.capabilities-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap: 32px 40px;
 }
 @media (max-width: 768px) {
-    .capabilities-grid,
-    .problems-grid {
+    .capabilities-grid {
         grid-template-columns: 1fr;
     }
 }
-.capability-item h3,
-.problem-item h3 {
+.capability-item h3 {
     font-family: var(--font-serif);
     font-size: 20px;
     color: var(--burgundy);
     margin-bottom: 4px;
 }
-.capability-item p,
-.problem-item p {
+.capability-item p {
     font-size: 15px;
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+/* Features and shared practice */
+.hero-description {
+    max-width: 580px;
+    margin: 0 auto 28px;
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+.independence-section,
+.company-section {
+    padding: 72px 0;
+    background: #faf8f5;
+    border-block: 1px solid #e3ddd5;
+}
+.independence-section .container,
+.company-section .container {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 56px;
+    align-items: start;
+}
+.independence-section h2,
+.company-section h2,
+.features-section h2,
+.features-connection h3 {
+    font-family: var(--font-serif);
+    font-size: clamp(30px, 3.5vw, 40px);
+    font-weight: 400;
+    line-height: 1.15;
+}
+.independence-section p,
+.company-section p {
+    color: var(--text-secondary);
+    line-height: 1.8;
+}
+.features-section {
+    padding: 80px 0;
+    scroll-margin-top: 100px;
+}
+.features-introduction {
+    margin: 16px 0 40px;
+    color: var(--text-secondary);
+    font-size: 18px;
+}
+.feature-item {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 56px;
+    margin: 0;
+    padding: 32px 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.feature-title {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+}
+.feature-number {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--burgundy);
+}
+.feature-title h3 {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 26px;
+    line-height: 1.2;
+}
+.feature-summary {
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+.feature-description {
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+.feature-detail a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 8px;
+    color: var(--burgundy);
+    font-size: 14px;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+}
+.features-connection {
+    margin-top: 32px;
+    padding: 32px;
+    border-left: 3px solid var(--burgundy);
+    background: #faf8f5;
+}
+.features-connection h3 {
+    margin-bottom: 16px;
+    font-size: 30px;
+}
+.features-connection p {
+    max-width: 72ch;
+    line-height: 1.8;
+}
+@media (max-width: 768px) {
+    .independence-section .container,
+    .company-section .container,
+    .feature-item {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    .independence-section,
+    .company-section,
+    .features-section {
+        padding: 48px 0;
+    }
+    .features-connection {
+        padding: 24px;
+    }
+}
+@media (max-width: 480px) {
+    .nav-links {
+        gap: 4px;
+    }
+    .nav-links a {
+        padding-inline: 4px;
+        font-size: 12px;
+    }
+    .nav-links .btn {
+        padding-inline: 12px;
+    }
 }
 
 /* Building blocks */
@@ -1899,22 +2024,10 @@ h3:hover .anchor-link,
     font-size: 12.5px;
     fill: var(--text-secondary);
 }
-.problems-section {
-    padding-top: 20px;
-}
-.problem-item .problem {
-    margin-bottom: 6px;
-}
-.problem-item .solve {
-    color: var(--text);
-}
 .definition-section p {
     max-width: 720px;
     margin-bottom: 14px;
     color: var(--text-secondary);
-}
-.definition-section .scale-heading {
-    margin-top: 48px;
 }
 .install-facts {
     margin-top: 18px;

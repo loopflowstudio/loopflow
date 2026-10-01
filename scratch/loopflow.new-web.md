@@ -1,6 +1,6 @@
 # Loopflow: an instrument for individual and shared practice
 
-Draft · 2026-10-01 · Direction from Jack Heart; wording and layout proposed for discussion.
+Local website draft · 2026-10-01 · Direction from Jack Heart; final wording and layout remain under review. Current rendered copy lives in `website/content.yaml`.
 
 ## What to build
 
@@ -24,9 +24,11 @@ Placement unresolved; no Wave was supplied. This is one coherent website increme
 
 ## Positioning and pitch — draft
 
-**A software instrument.**
+**Loopflow is a software instrument.**
 
-**Your way of working with coding agents.**
+**Make software through agents, your way.**
+
+Jack reaffirmed the instrument opening and explored “through agents,” “in your own way,” and “your own unique timbre.” The plain second line above is the current local proposal, not a final wording decision.
 
 Work closely with an agent, hand off a task, or coordinate several streams of work. Shape the workflow around how you want to build. Loopflow takes care of the branches, context, checks, and handoffs that keep it moving.
 
@@ -62,7 +64,7 @@ Worktrees, code review, project plans, credentials, workflows, and memory. Loopf
 
 A worktree is a separate working copy of your project. Loopflow creates or reuses one for each Task and keeps track of its branch and pull requests. Several tasks can move forward at once. When it's time to bring changes together, Loopflow handles syncing, delivery, and cleanup.
 
-[Read about delivery →](/docs/architecture/delivery)
+[Read about delivery →](/architecture/delivery)
 
 #### CI & PR review
 
@@ -138,7 +140,7 @@ Claims must match the published version at implementation time. Current-head evi
 
 ## Internal slices and follow-ups
 
-**This slice:** settle the pitch, subsystem explanations, and connecting example; implement their placement and navigation with focused website checks in one PR. Design completion does not launch implementation.
+**This slice:** review the local website draft's pitch, subsystem explanations, and layout. Jack's “lets continue” authorized the local draft; publication remains outstanding. The renderer, navigation, responsive layout, and focused checks are in place. The old problem grid and generic company paragraph have been replaced; no further deletion is planned for this slice.
 
 Independent follow-ups: a broader features page covering Sessions, account routing, Desktop/CLI, monitoring, and scheduled work; a recorded Task walkthrough; a credential-forwarding walkthrough. Each gets its own design when requested.
 
@@ -146,4 +148,4 @@ Independent follow-ups: a broader features page covering Sessions, account routi
 
 Gate: `cd website && uv run python dev.py test` passes, including Features navigation from home/docs, six accessible entries with resolving links, and mobile layout. Test behavior and structure, not exact prose. Review judges whether the approach to each subsystem is understandable and the connecting example earns its claim.
 
-Check: 2026-10-01 — local source/history inspection complete; prose-only draft, website tests not run.
+Check: 2026-10-01 — `cd website && uv run python dev.py test -k 'homepage or navigation or Mobile or Accessibility'`: 54 passed, 3 expected mobile hidden-title skips; revised hero: 4 focused checks passed; Ruff lint passed; desktop/mobile captures inspected. Full gate remains deferred; existing main.py formatting differs from the formatter.

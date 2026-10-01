@@ -4,7 +4,9 @@ These pin structure — sections exist, links resolve, assets load — not copy.
 Copy lives in content.yaml and should be editable without touching tests.
 """
 
-from playwright.sync_api import Page
+from urllib.parse import urlsplit
+
+from playwright.sync_api import Page, expect
 
 
 def test_hero_elements_visible(homepage: Page):
@@ -37,6 +39,24 @@ def test_building_blocks(homepage: Page):
     section = homepage.locator(".building-blocks-section")
     assert section.is_visible()
     assert section.locator(".code-block").count() >= 1
+
+
+def test_features_explain_subsystems_and_link_to_guides(homepage: Page, base_url: str) -> None:
+    features = homepage.locator("#features article")
+    assert features.count() == 6
+    destinations = []
+    for feature in features.all():
+        expect(feature.locator("h3")).not_to_be_empty()
+        expect(feature.locator(".feature-summary")).not_to_be_empty()
+        expect(feature.locator(".feature-description")).not_to_be_empty()
+        destinations.append(feature.get_by_role("link").get_attribute("href"))
+
+    for destination in destinations:
+        response = homepage.goto(f"{base_url}{destination}")
+        assert response is not None and response.ok
+        fragment = urlsplit(destination).fragment
+        if fragment:
+            expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
 def test_wave_building_block_does_not_define_measures(homepage: Page):

@@ -21,7 +21,8 @@ Jack Heart is not reviewing this Task; these were decided without him on 2026-10
   breakdown cannot name them.
 - **Budgets use the existing keys.** Memory, scratch, goal and steers (goal
   budget) and the assembled total are flagged, resolved from the checkout's
-  current config rather than the config at launch. Instructions, carried, tool
+  current config rather than the config at launch. A checkout that is gone gets
+  default budgets; an unreadable Wave config leaves the step unflagged. Instructions, carried, tool
   output and compaction have no budget; LOO-346 owns stating them.
 - **Earlier captures stay as recorded.** LOO-298's existing steps show steers
   inside `goal`, because their captures predate steer attribution. Its tool
@@ -35,3 +36,7 @@ Jack Heart is not reviewing this Task; these were decided without him on 2026-10
 - `docs/lf-reference.md` rows were added by hand; the generator needs a catalog
   file whose producer was not found.
 - Wave memory's code map still names `run_record.rs`, which no longer exists.
+- **Steer decisions follow the launch, not a prompt search.** Every steer the
+  Task seed rendered is recorded; the earlier check that the rendered block was
+  found in the prompt was removed, since the seed renders them into the message.
+- LOO-347 has no Linear comments as of 2026-10-01; the issue body is the brief.

@@ -115,6 +115,19 @@ pub struct SourceUsage {
     pub over_budget: bool,
 }
 
+impl SourceUsage {
+    fn unmeasured(source: ContextSource) -> Self {
+        Self {
+            source,
+            tokens: None,
+            count: None,
+            authors: Vec::new(),
+            budget_tokens: None,
+            over_budget: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StepContext {
     pub input: String,
@@ -144,20 +157,13 @@ impl ContextReport {
         let totals = ContextSource::ALL
             .into_iter()
             .map(|source| {
-                let rows = steps
+                let mut total = SourceUsage::unmeasured(source);
+                let mut authors = BTreeSet::new();
+                for row in steps
                     .iter()
                     .flat_map(|step| &step.sources)
-                    .filter(|usage| usage.source == source);
-                let mut total = SourceUsage {
-                    source,
-                    tokens: None,
-                    count: None,
-                    authors: Vec::new(),
-                    budget_tokens: None,
-                    over_budget: false,
-                };
-                let mut authors = BTreeSet::new();
-                for row in rows {
+                    .filter(|usage| usage.source == source)
+                {
                     total.tokens = sum(total.tokens, row.tokens);
                     total.count = sum(total.count, row.count);
                     total.over_budget |= row.over_budget;
@@ -198,6 +204,7 @@ pub fn step_context(home: &Path, history: &SessionHistory) -> StepContext {
     step
 }
 
+/// Current budgets of the step's checkout; defaults when it is gone.
 fn budgets(history: &SessionHistory) -> Option<ContextBudgets> {
     let checkout = [history.worktree.as_deref(), history.repo.as_deref()]
         .into_iter()
@@ -211,11 +218,11 @@ fn budgets(history: &SessionHistory) -> Option<ContextBudgets> {
                 .flatten()
         })
         .unwrap_or_default();
-    match checkout {
-        Some(path) => ContextBudgets::resolve(&config, path, history.wave_name.as_deref())
-            .or_else(|_| ContextBudgets::resolve(&config, path, None)),
-        None => ContextBudgets::resolve(&config, Path::new("."), None),
-    }
+    ContextBudgets::resolve(
+        &config,
+        checkout.unwrap_or(Path::new("")),
+        checkout.and(history.wave_name.as_deref()),
+    )
     .ok()
 }
 
@@ -439,43 +446,35 @@ impl Measured {
             .first_request
             .zip(assembled_tokens)
             .map(|(first, assembled)| first.saturating_sub(assembled));
+        let events = self.events_read;
         let sources = ContextSource::ALL
             .into_iter()
             .map(|source| {
-                let (tokens, count) = match source {
-                    ContextSource::Carried => (carried, None),
-                    ContextSource::ToolOutput => self
-                        .events_read
-                        .then_some((self.tool_tokens, self.tool_results))
-                        .unzip(),
-                    ContextSource::Compaction => (
-                        self.compaction_tokens,
-                        self.events_read.then_some(self.compactions),
-                    ),
-                    ContextSource::Steers => (
-                        self.assembled
-                            .as_ref()
-                            .map(|sources| sources.get(&source).map_or(0, |entry| entry.0)),
-                        self.steers,
-                    ),
-                    _ => self
-                        .assembled
-                        .as_ref()
-                        .map(|sources| sources.get(&source).copied().unwrap_or_default())
-                        .unzip(),
-                };
-                SourceUsage {
-                    source,
-                    tokens,
-                    count,
-                    authors: if source == ContextSource::Steers {
-                        self.authors.iter().cloned().collect()
-                    } else {
-                        Vec::new()
-                    },
-                    budget_tokens: None,
-                    over_budget: false,
+                let mut usage = SourceUsage::unmeasured(source);
+                match source {
+                    ContextSource::Carried => usage.tokens = carried,
+                    ContextSource::ToolOutput => {
+                        usage.tokens = events.then_some(self.tool_tokens);
+                        usage.count = events.then_some(self.tool_results);
+                    }
+                    ContextSource::Compaction => {
+                        usage.tokens = self.compaction_tokens;
+                        usage.count = events.then_some(self.compactions);
+                    }
+                    _ => {
+                        if let Some(assembled) = &self.assembled {
+                            let (tokens, assets) =
+                                assembled.get(&source).copied().unwrap_or_default();
+                            usage.tokens = Some(tokens);
+                            usage.count = Some(assets);
+                        }
+                        if source == ContextSource::Steers {
+                            usage.count = self.steers;
+                            usage.authors = self.authors.iter().cloned().collect();
+                        }
+                    }
                 }
+                usage
             })
             .collect();
         StepContext {
@@ -520,13 +519,7 @@ pub fn render_step(step: &StepContext) -> String {
             }
             _ => {}
         }
-        if let Some(budget) = usage.budget_tokens {
-            detail.push(if usage.over_budget {
-                format!("OVER budget {}", crate::lf::output::format_int(budget))
-            } else {
-                format!("budget {}", crate::lf::output::format_int(budget))
-            });
-        }
+        detail.extend(budget_note(usage.budget_tokens, usage.over_budget));
         lines.push(format!(
             "  {:<14} {:>10}  {}",
             usage.source.name(),
@@ -534,13 +527,8 @@ pub fn render_step(step: &StepContext) -> String {
             detail.join("; ")
         ));
     }
-    let budget = match step.assembled_budget_tokens {
-        Some(budget) if step.over_assembled_budget => {
-            format!("OVER budget {}", crate::lf::output::format_int(budget))
-        }
-        Some(budget) => format!("budget {}", crate::lf::output::format_int(budget)),
-        None => String::new(),
-    };
+    let budget =
+        budget_note(step.assembled_budget_tokens, step.over_assembled_budget).unwrap_or_default();
     lines.push(format!(
         "  {:<14} {:>10}  {budget}",
         "assembled",
@@ -631,6 +619,15 @@ pub fn render_report(report: &ContextReport) -> String {
         ));
     }
     lines.join("\n")
+}
+
+fn budget_note(budget: Option<u64>, over: bool) -> Option<String> {
+    let budget = crate::lf::output::format_int(budget?);
+    Some(if over {
+        format!("OVER budget {budget}")
+    } else {
+        format!("budget {budget}")
+    })
 }
 
 fn cell(tokens: Option<u64>) -> String {

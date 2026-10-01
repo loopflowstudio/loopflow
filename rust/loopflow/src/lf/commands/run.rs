@@ -1105,13 +1105,9 @@ pub(crate) fn attributed_context(
             );
         }
     }
-    let mut steers_attributed = false;
     if let Some(message) = &components.message {
         // Steers ride inside the launch message; claim them before it does.
         if let Some(steers) = tagged_block(message, "<lf:steers>", "</lf:steers>") {
-            let rendered = crate::engine::prompt::render_reference(steers);
-            steers_attributed =
-                system_prompt.contains(&rendered) || task_prompt.contains(&rendered);
             push(
                 steers,
                 Kind::Steer,
@@ -1139,21 +1135,19 @@ pub(crate) fn attributed_context(
     }
 
     let mut decisions = deduplication_decisions.to_vec();
-    if steers_attributed {
-        for steer in &components.steers {
-            decisions.push(ContextDecision {
-                position: decisions.len() as u32,
-                kind: Kind::Steer,
-                scope: Scope::Task,
-                label: steer.author.to_string(),
-                source_path: Some(format!("steer:{}", steer.id)),
-                decision: ContextDecisionKind::Included,
-                reason: "rendered in the launch goal".to_string(),
-                original_bytes: Some(steer.text.len() as u64),
-                original_tokens: Some(crate::engine::prompt::count_tokens(&steer.text) as u64),
-                asset_position: None,
-            });
-        }
+    for steer in &components.steers {
+        decisions.push(ContextDecision {
+            position: decisions.len() as u32,
+            kind: Kind::Steer,
+            scope: Scope::Task,
+            label: steer.author.to_string(),
+            source_path: Some(format!("steer:{}", steer.id)),
+            decision: ContextDecisionKind::Included,
+            reason: "rendered in the launch goal".to_string(),
+            original_bytes: Some(steer.text.len() as u64),
+            original_tokens: Some(crate::engine::prompt::count_tokens(&steer.text) as u64),
+            asset_position: None,
+        });
     }
     if components.diff_tier == DiffTier::StatOnly {
         decisions.push(ContextDecision {

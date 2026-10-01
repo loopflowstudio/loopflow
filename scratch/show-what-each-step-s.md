@@ -66,4 +66,4 @@ without a configured budget show none. LOO-346 states the rest.
 
 ## Checks
 
-- `cargo test -p loopflow --lib context_usage attributed_context`, `--test dto_fixtures context_report`, `swift test --filter DTOFixtureTests`, `cargo clippy --all-targets -- -D warnings`: pass. Affected suites: gate.
+- After merging main and the compress pass: `cargo test -p loopflow --lib context_usage`, `--lib attributed_context`, `--test dto_fixtures context_report`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`: pass. Swift unchanged since its last pass. Affected suites: gate.

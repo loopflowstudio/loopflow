@@ -340,48 +340,57 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert!(!blank.status.success());
 
     fixture.release(first);
-    let retained = fixture.sessions();
-    assert_eq!(
-        retained.len(),
-        1,
-        "provider exit does not complete a Session"
+    assert!(
+        fixture.sessions().is_empty(),
+        "exited orphans leave the working set"
     );
-    // Passive inventory no longer opens native history to infer closure.
-    assert_eq!(retained[0]["state"], "unknown");
-    assert_eq!(retained[0]["title"], "Parser review");
+    let (_, _, saved_title, saved_source, completed) = fixture.session_row(&first_run);
+    assert!(completed);
+    assert_eq!(
+        (saved_title.as_str(), saved_source.as_str()),
+        ("Parser review", "human")
+    );
+    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(history[0]["id"], id);
+    assert_eq!(history[0]["state"], "closed");
 
-    // Open resumes the same conversation with its captured input.
-    let described = fixture.json(&["session", "connect", &id, "--json"]);
-    assert_eq!(described["id"], id.as_str());
-    let (resumed, resumed_run) = fixture.attach(&["session", "connect", &id]);
-    assert_eq!(resumed_run, first_run);
-    assert_eq!(fixture.sessions()[0]["state"], "active");
-    fixture.release(resumed);
-    assert_eq!(fixture.sessions().len(), 1);
-
-    // Another launch in the same checkout is another conversation.
     let (second, second_run) = fixture.attach(&LAUNCH);
-    fixture.release(second);
     let (second_id, ..) = fixture.session_row(&second_run);
     assert_ne!(second_id, id);
-    assert_eq!(fixture.sessions().len(), 2);
-    assert_eq!(fixture.sessions().len(), 2);
+    assert_eq!(fixture.sessions().len(), 1);
+    fixture.release(second);
+    assert!(fixture.sessions().is_empty());
+}
 
-    let completed = fixture.run(&["session", "complete", &id]);
-    assert!(completed.status.success(), "{completed:?}");
-    assert!(
-        fixture.session_row(&first_run).4,
-        "completion is a row update"
-    );
-    let remaining = fixture.sessions();
-    assert_eq!(remaining.len(), 1, "{remaining:?}");
-    assert_eq!(remaining[0]["id"], second_id.as_str());
-    let reopened = fixture.run(&["session", "connect", &id, "--json"]);
-    assert!(!reopened.status.success(), "{reopened:?}");
-    assert!(
-        String::from_utf8_lossy(&reopened.stderr).contains("already complete"),
-        "{reopened:?}"
-    );
+#[test]
+fn sigint_records_session_interruption_and_retires_the_orphan() {
+    let fixture = Fixture::new(true);
+    let (mut child, input) = fixture.attach(&LAUNCH);
+    let (id, ..) = fixture.session_row(&input);
+    // SAFETY: child is the live process this test spawned and has not reaped.
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(130));
+            break;
+        }
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("interrupt did not finish");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(fixture.sessions().is_empty());
+    assert!(fixture.session_row(&input).4);
+    let history = fixture.json(&["session", "history", &id, "--json"]);
+    assert!(history
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["payload"]["type"] == "driver_exit"
+            && event["payload"]["outcome"] == "interrupted"));
 }
 
 #[test]
@@ -450,6 +459,33 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .block_on(task.store.create_session(session, None))
             .unwrap();
     }
+    fixture.db().execute("UPDATE agent_sessions SET ready_summary='Review this',interactive=0 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
+    let attention = fixture.json(&[
+        "session",
+        "list",
+        "--needs-me",
+        "--json",
+        "--page",
+        "--limit",
+        "1",
+    ]);
+    assert_eq!(attention["entries"][0]["id"], "inventory-111");
+    assert_eq!(attention["entries"][0]["attention"], "review");
+    assert_eq!(attention["next"], "inventory-111");
+    let next = fixture.json(&[
+        "session",
+        "list",
+        "--needs-me",
+        "--json",
+        "--page",
+        "--limit",
+        "1",
+        "--after",
+        "inventory-111",
+    ]);
+    assert_eq!(next["entries"][0]["id"], "inventory-112");
+    assert!(next["next"].is_null());
+    fixture.db().execute("UPDATE agent_sessions SET ready_summary=NULL,interactive=1 WHERE id IN ('inventory-111','inventory-112')", []).unwrap();
     let list = ["session", "list", "--json", "--limit", "2"];
     let page = fixture.json(&list);
     assert_eq!(
@@ -583,9 +619,10 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 #[test]
 fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let fixture = Fixture::new(false);
+    let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_unrun_task(
         fixture.home.path(),
-        fixture.repo.path(),
+        &task_path,
         "task-binding",
         &fixture.repo.head_sha(),
     );
@@ -647,7 +684,9 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(preview["task_id"], task.task.id.as_str());
     assert_eq!(preview["identifier"], "INF-123");
     assert_eq!(started(task.task.id.as_str()), None);
-    assert_eq!(fixture.sessions()[0]["work"], Value::Null);
+    assert!(fixture.sessions().is_empty());
+    let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(history[0]["work"], Value::Null);
     assert_eq!(fixture.launches().len(), 1);
 
     // The bind happens measurably after the conversation was created.
@@ -679,8 +718,12 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert!((before..=after).contains(&bound_at));
     assert_eq!(started(task.task.id.as_str()), Some(bound_at));
     assert!(task_runs("INF-123").is_empty());
-    let listed = fixture.sessions();
-    assert_eq!(listed.len(), 1);
+    assert!(
+        fixture.sessions().is_empty(),
+        "binding preserves completion"
+    );
+    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(
         listed[0]["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -1081,7 +1124,8 @@ fn ask_returns_feedback_once_and_rejects_a_stale_answer() {
     assert_eq!(listed["kind"], "ask");
     assert_eq!(listed["title"], "Which release target?");
     assert_eq!(listed["title_source"], "generated");
-    assert_eq!(listed["state"], "unknown");
+    assert_eq!(listed["state"], "waiting");
+    assert_eq!(listed["attention"], "review");
     assert_eq!(
         listed["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})

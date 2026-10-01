@@ -29,7 +29,8 @@ struct WorkspaceNavigator: View {
         model.visibleWorkspace.outline(
             presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
             search: model.navigation.search,
-            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
+            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil,
+            needsMe: model.navigation.showsNeedsMe
         )
     }
 
@@ -43,13 +44,15 @@ struct WorkspaceNavigator: View {
         let rows = rows
         VStack(spacing: 0) {
             header
+            attentionFilter
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
                     ForEach(rows) { row in outlineRow(row) }
                     if model.repoPath != nil, rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
                        model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
-                        Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
+                        Text(navigation.showsNeedsMe ? "No Sessions need you."
+                             : navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
                     }
                 }
@@ -60,7 +63,7 @@ struct WorkspaceNavigator: View {
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.listScrollOffset = offset }
-            orphanSection
+            if !navigation.showsNeedsMe { orphanSection }
             // Search sits below the data so the repository heads its outline.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
@@ -91,6 +94,26 @@ struct WorkspaceNavigator: View {
         .onChange(of: rows.map(\.id)) { _, _ in
             Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
         }
+    }
+
+    private var attentionFilter: some View {
+        Button {
+            model.navigation.showsNeedsMe.toggle()
+        } label: {
+            HStack {
+                Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
+                Text("Needs me")
+                Spacer()
+                Text(model.needsMeCount.map(String.init) ?? "—").monospacedDigit()
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(model.navigation.showsNeedsMe ? palette.selectionTint : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+        }
+        .accessibilityIdentifier("workspace-needs-me")
+        .accessibilityValue(model.navigation.showsNeedsMe ? "On" : "Off")
+        .help("Show conversations waiting for your review or reply")
+        .padding(.horizontal, 10).padding(.bottom, 4)
     }
 
     /// The repository heads its own outline: one scope, switched in place.
@@ -170,10 +193,10 @@ struct WorkspaceNavigator: View {
                 .accessibilityIdentifier("workspace-planning-loading")
         }
         if let error = model.roadmap.errorMessage {
-            warning("Planning unavailable: \(error)").accessibilityIdentifier("workspace-planning-unavailable")
+            readError("Planning unavailable", details: error).accessibilityIdentifier("workspace-planning-unavailable")
         }
         if model.sessions.isLoading { Text("Reading Sessions…").foregroundStyle(palette.textSecondary) }
-        if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
+        if let error = model.sessions.errorMessage { readError("Sessions unavailable", details: error) }
         ForEach(model.workspace.waves) { wave in
             if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
             if case .available(_, let truncated) = wave.roadmap.tasks, truncated {
@@ -201,8 +224,8 @@ struct WorkspaceNavigator: View {
                 }
                 .accessibilityLabel("Toggle \(row.title)")
                 .accessibilityIdentifier("workspace-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
-            } else if row.session != nil {
-                Image(systemName: "terminal").font(.system(size: 11))
+            } else if let session = row.session {
+                Image(systemName: session.attention == nil ? "bubble.left" : "bubble.left.fill").font(.system(size: 11))
                     .foregroundStyle(palette.textTertiary).frame(width: 14)
             } else {
                 // The slot stays so titles align whether or not a Task has a dot.
@@ -441,6 +464,15 @@ struct WorkspaceNavigator: View {
               case .pinned(let pinned) = found.task.flow.record else { return nil }
         let state = pinned.execution.presentation
         return state.label == nil ? nil : state.tone
+    }
+
+    private func readError(_ title: String, details: String) -> some View {
+        DisclosureGroup {
+            Text(details).font(Typography.meta).textSelection(.enabled)
+        } label: {
+            Label(title, systemImage: "exclamationmark.triangle")
+        }
+        .foregroundStyle(Color.statusWarning).padding(4)
     }
 
     private func warning(_ text: String) -> some View {

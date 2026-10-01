@@ -1522,7 +1522,7 @@ private struct SessionPaneView: View {
         case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
         case .waiting, .ready: return TerminalPalette.stateDot(.human)
-        case .closed: return TerminalPalette.stateDot(.stopped)
+        case .closed, .interrupted: return TerminalPalette.stateDot(.stopped)
         }
     }
 

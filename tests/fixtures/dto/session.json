@@ -56,5 +56,6 @@
     "unavailable": null
   },
   "interactive": true,
-  "scope": null
+  "primary_scope": null,
+  "attention": "review"
 }

@@ -57,7 +57,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": "review"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -123,7 +124,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -181,7 +183,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -234,7 +237,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -297,7 +301,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -355,7 +360,8 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -420,6 +426,7 @@
       "unavailable": null
     },
     "interactive": true,
-    "scope": null
+    "primary_scope": null,
+    "attention": "review"
   }
 ]

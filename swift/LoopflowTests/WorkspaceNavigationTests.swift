@@ -65,7 +65,7 @@ struct WorkspaceNavigationTests {
         let original = try session("scoped", work: .task(id: "ts_review00000000000000000000000000"))
         for scope in ["repository", "wave"] {
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-            value["scope"] = scope
+            value["primary_scope"] = scope
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
             let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [record])
             #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })

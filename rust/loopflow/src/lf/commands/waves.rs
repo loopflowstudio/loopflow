@@ -1387,11 +1387,6 @@ fn derive_task_condition(
             TaskExecutionState::Idle => unreachable!("idle execution uses local progress"),
         };
         (state, execution.reason.clone())
-    } else if execution.is_some_and(|execution| execution.state == TaskExecutionState::Human) {
-        (
-            TaskConditionState::Waiting,
-            "Waiting for your review".to_string(),
-        )
     } else if launch_blocked {
         (TaskConditionState::Blocked, next_move.reason.clone())
     } else if local_progress.state == LocalProgressEvidenceState::Missing
@@ -2694,8 +2689,8 @@ mod tests {
                         }),
                         OffsetDateTime::now_utc(),
                     );
-                    assert_eq!(terminal.state, TaskConditionState::Waiting);
-                    assert_eq!(terminal.reason, "Waiting for your review");
+                    assert_eq!(terminal.state, TaskConditionState::Blocked);
+                    assert_eq!(terminal.reason, "Task is terminal");
                 }
             }
         }

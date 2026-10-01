@@ -45,7 +45,7 @@ struct WorkspaceProjection {
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
         func attached(to taskId: String?) -> [SessionRecord] {
             guard let taskId else { return [] }
-            let records = sessions.filter { $0.scope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
+            let records = sessions.filter { $0.primaryScope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -121,8 +121,8 @@ struct WorkspaceProjection {
             }
         }
         guard let session = unmatchedSessions.first(where: { $0.id == sessionId }) else { return nil }
-        if session.scope == .repository { return nil }
-        if session.scope == .wave { return session.waveId.map { .wave(id: $0) } }
+        if session.primaryScope == "repository" { return nil }
+        if session.primaryScope == "wave" { return session.waveId.map { .wave(id: $0) } }
         return session.workspace?.taskId.map { .task(id: $0) } ?? session.work
     }
 }
@@ -141,7 +141,7 @@ struct WorkspaceBreadcrumb {
     }
 
     var taskWork: WorkReference? {
-        guard session?.scope == nil else { return nil }
+        guard session?.primaryScope == nil else { return nil }
         if let task { return task.id.work }
         if let id = session?.workspace?.taskId { return .task(id: id) }
         if let work = session?.work, work.kind == .task { return work }
@@ -269,7 +269,7 @@ extension WorkspaceProjection {
         }
         // Known Work stays visible when its planning row is unavailable.
         // Only genuinely unbound Sessions belong in the orphan section.
-        for session in unmatchedSessions where session.work != nil || session.waveId != nil || session.scope != nil || session.workspace?.taskId != nil || !session.taskIds.isEmpty {
+        for session in unmatchedSessions where session.work != nil || session.waveId != nil || session.primaryScope != nil || session.workspace?.taskId != nil || !session.taskIds.isEmpty {
             let waveId = session.waveId ?? (session.work?.kind == .wave ? session.work?.id : nil)
             let wave = waves.first { $0.roadmap.wave.id == waveId }
             var ancestors: [WorkspaceOutlineSubject] = []
@@ -279,7 +279,7 @@ extension WorkspaceProjection {
                     title: wave?.roadmap.wave.displayName ?? "Wave \(waveId)"
                 ))
             }
-            if session.scope == nil, let work = session.work, work.kind != .wave {
+            if session.primaryScope == nil, let work = session.work, work.kind != .wave {
                 ancestors.append(WorkspaceOutlineSubject(
                     key: WorkspaceNodeKey(repo: wave?.id.repo ?? "", work: work),
                     title: "\(work.kind == .task ? "Task" : "Project") \(work.id)"

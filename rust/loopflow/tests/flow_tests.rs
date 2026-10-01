@@ -2927,6 +2927,7 @@ fn flow_start_preserves_the_selected_review_from_another_checkout() {
     use loopflow::engine::invocation::QueuedInvocation;
     use loopflow_test_support::TestRepo;
     let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
     repo.create_branch("managed-review");
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();

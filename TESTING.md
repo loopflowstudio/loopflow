@@ -619,6 +619,12 @@ uv run python scripts/test_task_installation.py --test task_operation_starts_wit
 
 Pass several names after `--test` to share one disposable build across related proofs.
 
+CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
+to verify builtin operation labels, plus the affected proofs above. The regular
+Rust suite skips those installation proofs; a skipped case is not verification.
+Managed Task fixtures must bind the checkout's Team and Initiative before
+creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
+
 When changing Task planning lookup or provider response shapes, run the affected
 installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
 the deletion test, and the regular Rust suite skips installation proofs. Keep

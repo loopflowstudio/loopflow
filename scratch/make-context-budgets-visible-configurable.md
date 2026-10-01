@@ -21,6 +21,9 @@ live decisions and unresolved evidence; prune obsolete stacked-parent notes.
 
 - Replace standalone context ceiling constants and call-site assumptions with
   the shared resolved limits; retain exact source preservation and trace decisions.
+- Remove separate source-measurement bookkeeping and repeated per-comment budget
+  resolution. The report owns source measurement; each pending steer batch shares
+  one resolved configuration. These cuts are complete.
 - Do not restore retired record-learnings; realign owns memory curation.
 
 ## Implemented and reviewed
@@ -37,6 +40,12 @@ its execution authority. Source excerpts still retain complete local copies.
 Totals in the prompt explicitly precede the feedback notice; CLI totals include
 that notice and structured reply guidance. Native instruction files delivered by
 the provider remain outside Loopflow's assembled-input measurement.
+
+Compression review consolidated bounding and reporting for present and absent
+sources, reused the checkout-aware memory reader in the query, and removed
+repeated Task/config reads within live steer batches. Budget-resolution failures
+now have a distinct log message from source-preservation failures; either leaves
+undelivered direction available for retry.
 
 Local query evidence: the current Task resolves to intelligence. Infrastructure
 memory in this checkout measures 22,272 tokens / 104,980 bytes against 8,000 /
@@ -55,4 +64,4 @@ LOO-303 query could not read the stored Task checkout: `git diff --name-only -z
 directory (os error 2)`. Demo needs an available copy of that evidence; no other
 Task checkout was repaired or modified.
 
-Checks: `cargo build -p loopflow --bin lf`; focused `cargo test -p loopflow --lib budget` (8), checkout-memory test (1), prompt goldens (1); `cargo clippy --all-targets -- -D warnings`; `cargo fmt --check`; branch `lf context` current/infrastructure queries — passed; live realign curation remains demo/review acceptance.
+Checks: compression `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --lib budget` (8), `cargo test -p loopflow --lib live_steers_inject_new_comments_and_defer_when_not_steerable` (1), `cargo fmt`, `git diff --check`, and `target/debug/lf context --skill compress --json` — passed; earlier checkout-memory and prompt-golden checks remain applicable, Clippy passed before compression; remaining suites belong to gate and live curation to demo/review.

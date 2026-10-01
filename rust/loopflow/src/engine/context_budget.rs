@@ -1,9 +1,11 @@
 //! Bound implicit launch context while retaining the complete source on disk.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::engine::config::Config;
 use crate::engine::error::CoreError;
 use crate::engine::prompt::{count_tokens, Document, DocumentSource, PromptComponents};
 use crate::trace::{ContextAssetKind, ContextDecision, ContextDecisionKind, ContextScope};
@@ -69,15 +71,11 @@ pub struct BudgetLimit {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ContextBudgets(std::collections::BTreeMap<BudgetKey, BudgetLimit>);
+pub struct ContextBudgets(BTreeMap<BudgetKey, BudgetLimit>);
 
 impl ContextBudgets {
-    pub fn resolve(
-        config: &crate::engine::config::Config,
-        repo: &Path,
-        wave: Option<&str>,
-    ) -> Result<Self, CoreError> {
-        let mut limits: std::collections::BTreeMap<_, _> = BudgetKey::ALL
+    pub fn resolve(config: &Config, repo: &Path, wave: Option<&str>) -> Result<Self, CoreError> {
+        let mut limits: BTreeMap<_, _> = BudgetKey::ALL
             .into_iter()
             .map(|key| {
                 let value = config
@@ -146,27 +144,6 @@ pub struct ContextUsage {
     pub byte_limit: usize,
 }
 
-impl ContextUsage {
-    fn measure(
-        source: &str,
-        original: &str,
-        submitted: &str,
-        budgets: &ContextBudgets,
-        tokens: BudgetKey,
-        bytes: BudgetKey,
-    ) -> Self {
-        Self {
-            source: source.into(),
-            original_tokens: tokens_in(original),
-            original_bytes: original.len(),
-            submitted_tokens: tokens_in(submitted),
-            submitted_bytes: submitted.len(),
-            token_limit: budgets.limit(tokens),
-            byte_limit: budgets.limit(bytes),
-        }
-    }
-}
-
 fn tokens_in(text: &str) -> usize {
     if text.is_empty() {
         0
@@ -182,6 +159,32 @@ pub struct ContextBudgetReport {
 }
 
 impl ContextBudgetReport {
+    fn bound_source(
+        &mut self,
+        source: &str,
+        original: &str,
+        tokens: BudgetKey,
+        bytes: BudgetKey,
+        repo_root: &Path,
+    ) -> Result<String, CoreError> {
+        let bounded = bound_source(
+            original,
+            self.budgets.limit(tokens),
+            self.budgets.limit(bytes),
+            repo_root,
+        )?;
+        self.usage.push(ContextUsage {
+            source: source.into(),
+            original_tokens: tokens_in(original),
+            original_bytes: original.len(),
+            submitted_tokens: tokens_in(&bounded),
+            submitted_bytes: bounded.len(),
+            token_limit: self.budgets.limit(tokens),
+            byte_limit: self.budgets.limit(bytes),
+        });
+        Ok(bounded)
+    }
+
     pub(crate) fn measure_input(
         &mut self,
         original_system: &str,
@@ -275,17 +278,25 @@ pub(crate) fn bound_context(
     components: &mut PromptComponents,
     budgets: ContextBudgets,
 ) -> Result<ContextBudgetReport, CoreError> {
-    let mut usage = Vec::new();
+    let mut report = ContextBudgetReport {
+        budgets,
+        usage: Vec::new(),
+    };
     let repo_root = Path::new(&components.repo_root);
+    let (memory_path, memory_text) = components
+        .wave_memory
+        .as_ref()
+        .map(|memory| (memory.path.as_str(), memory.content.as_str()))
+        .unwrap_or(("Wave memory (absent)", ""));
+    // Preserve the exact gathered text, including any ancestor Wave memories.
+    let bounded = report.bound_source(
+        memory_path,
+        memory_text,
+        BudgetKey::MemoryTokens,
+        BudgetKey::MemoryBytes,
+        repo_root,
+    )?;
     if let Some(memory) = &mut components.wave_memory {
-        // Memory can combine ancestor Waves from another checkout. Retain the
-        // exact gathered text rather than pointing at a different local file.
-        let bounded = bound_source(
-            &memory.content,
-            budgets.limit(BudgetKey::MemoryTokens),
-            budgets.limit(BudgetKey::MemoryBytes),
-            repo_root,
-        )?;
         record_reduction(
             &mut components.budget_decisions,
             &memory.content,
@@ -294,24 +305,7 @@ pub(crate) fn bound_context(
             ContextScope::Wave,
             &memory.path,
         );
-        usage.push(ContextUsage::measure(
-            &memory.path,
-            &memory.content,
-            &bounded,
-            &budgets,
-            BudgetKey::MemoryTokens,
-            BudgetKey::MemoryBytes,
-        ));
         memory.content = bounded;
-    } else {
-        usage.push(ContextUsage::measure(
-            "Wave memory (absent)",
-            "",
-            "",
-            &budgets,
-            BudgetKey::MemoryTokens,
-            BudgetKey::MemoryBytes,
-        ));
     }
     let scratch_docs: Vec<_> = components
         .docs
@@ -335,20 +329,13 @@ pub(crate) fn bound_context(
     };
     // Bound the collection, including its index: per-file notices alone
     // can exhaust a budget when a checkout has hundreds of scratch files.
-    let bounded = bound_source(
-        &scratch,
-        budgets.limit(BudgetKey::ScratchTokens),
-        budgets.limit(BudgetKey::ScratchBytes),
-        repo_root,
-    )?;
-    usage.push(ContextUsage::measure(
+    let bounded = report.bound_source(
         "scratch/",
         &scratch,
-        &bounded,
-        &budgets,
         BudgetKey::ScratchTokens,
         BudgetKey::ScratchBytes,
-    ));
+        repo_root,
+    )?;
     if bounded != scratch {
         record_reduction(
             &mut components.budget_decisions,
@@ -375,8 +362,19 @@ pub(crate) fn bound_context(
             },
         );
     }
+    let goal_source = if components.message.is_some() {
+        "goal (launch message)"
+    } else {
+        "goal (no launch message)"
+    };
+    let bounded = report.bound_source(
+        goal_source,
+        components.message.as_deref().unwrap_or_default(),
+        BudgetKey::GoalTokens,
+        BudgetKey::GoalBytes,
+        repo_root,
+    )?;
     if let Some(message) = &mut components.message {
-        let bounded = bound_message(message, repo_root, &budgets)?;
         record_reduction(
             &mut components.budget_decisions,
             message,
@@ -385,26 +383,9 @@ pub(crate) fn bound_context(
             ContextScope::User,
             "launch message",
         );
-        usage.push(ContextUsage::measure(
-            "goal (launch message)",
-            message,
-            &bounded,
-            &budgets,
-            BudgetKey::GoalTokens,
-            BudgetKey::GoalBytes,
-        ));
         *message = bounded;
-    } else {
-        usage.push(ContextUsage::measure(
-            "goal (no launch message)",
-            "",
-            "",
-            &budgets,
-            BudgetKey::GoalTokens,
-            BudgetKey::GoalBytes,
-        ));
     }
-    Ok(ContextBudgetReport { budgets, usage })
+    Ok(report)
 }
 
 fn record_reduction(

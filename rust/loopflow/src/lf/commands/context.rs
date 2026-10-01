@@ -70,10 +70,9 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
         "no Work seed selected; arbitrary launch messages are not included"
     }
     .to_string();
-    let origin = crate::work::wave::context::wave_origin(&repo);
     let wave_memory = wave
         .as_deref()
-        .and_then(|name| crate::work::wave::context::gather_wave_memory_from(&origin, &repo, name));
+        .and_then(|name| crate::work::wave::context::gather_wave_memory(&repo, name));
     let config = load_config(Some(&repo))?.unwrap_or_default();
     let prepared = preview_exec_prompt(
         &config,
